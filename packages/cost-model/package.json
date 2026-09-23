@@ -1,0 +1,10 @@
+{
+  "name": "@maya/cost-model",
+  "version": "0.1.0",
+  "description": "Pure typed cost model and budget verification harness for Maya AI English Speaking Coach",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "node --test test/*.spec.js"
+  }
+}

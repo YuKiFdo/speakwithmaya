@@ -1,0 +1,48 @@
+# Phase 0 Gate Report
+
+- **Date / commit SHA:** September 21, 2026 / Phase 0 Scaffolding
+- **Scope delivered:**
+  - Complete facts verification recorded in `docs/facts.md` (Gemini Live API model `gemini-3.1-flash-live-preview`, pricing, token rates, ephemeral token architecture, Expo SDK 57, and Web vs Native Audio Comparison Matrix).
+  - Architectural Decision Records:
+    - [ADR 0001: Universal Client Platform & Multi-Project Workspace Architecture](file:///d:/outsource/Maya%20Ai/docs/adr/0001-universal-platform-and-workspace.md)
+    - [ADR 0002: Direct Browser Connection to Gemini Live via Ephemeral Tokens](file:///d:/outsource/Maya%20Ai/docs/adr/0002-direct-browser-gemini-live-connection.md)
+    - [ADR 0003: Authentication Architecture using Supabase Auth](file:///d:/outsource/Maya%20Ai/docs/adr/0003-authentication-supabase.md)
+    - [ADR 0004: Styling Strategy with NativeWind v4 and Shared Design Tokens](file:///d:/outsource/Maya%20Ai/docs/adr/0004-styling-nativewind-and-tokens.md)
+    - [ADR 0005: Real-Time Audio Engine Architecture & Client-Side VAD](file:///d:/outsource/Maya%20Ai/docs/adr/0005-audio-architecture-and-vad.md)
+  - Security & Architecture:
+    - [docs/threat-model.md](file:///d:/outsource/Maya%20Ai/docs/threat-model.md) (STRIDE threat model, web vulnerabilities, Sri Lanka PDPA compliance).
+    - [docs/architecture.md](file:///d:/outsource/Maya%20Ai/docs/architecture.md) (System architecture & real-time sequence diagrams in Mermaid).
+  - Design Intake Ledger:
+    - [design/manifest.md](file:///d:/outsource/Maya%20Ai/design/manifest.md) initialized with screens 1, 2, and 3 intaked in `design/inbox/`.
+  - Backend Scaffolding:
+    - Health module (`GET /v1/health`) implemented with liveness and readiness status in `maya-backend/src/health/`.
+  - Frontend Universal Scaffolding:
+    - Design tokens (`src/theme/tokens.ts`).
+    - Responsive breakpoint hook (`src/hooks/useBreakpoint.ts`).
+    - Responsive shell (`src/components/responsive-shell.tsx`).
+    - Root layout (`src/app/_layout.tsx`) mounting the universal responsive home screen.
+- **Acceptance criteria → evidence:**
+  - Facts verified from official Google Gemini API docs: Model `gemini-3.1-flash-live-preview`, input $3.00/1M tokens ($0.005/min), output $12.00/1M tokens ($0.018/min).
+  - Ephemeral token authentication verified: `POST /v1beta/auth_tokens` mints token; browser connects directly to `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token={token}`.
+  - Zero secrets in client verified: automated scan confirmed zero API keys in public bundles.
+  - Dev server online: `http://localhost:8081` returning HTTP 200.
+- **Screens (Phase 6 onward):**
+  - `01-onboarding-welcome`: mobile reference provided (`design/inbox/01-onboarding-welcome-mobile.png`) $\rightarrow$ status: `mobile-only`
+  - `02-onboarding-name`: mobile reference provided (`design/inbox/02-onboarding-name-mobile.png`) $\rightarrow$ status: `mobile-only`
+  - `03-onboarding-phone`: mobile reference provided (`design/inbox/03-onboarding-phone-mobile.png`) $\rightarrow$ status: `mobile-only`
+- **Cost impact (USD & LKR per min vs. LKR 1.50 target):**
+  - Baseline Gemini Live model `gemini-3.1-flash-live-preview` pricing:
+    - Input audio: $0.005/min
+    - Output audio: $0.018/min
+  - Formal sensitivity analysis and budget compliance test scheduled for Phase 1 (`docs/cost-report.md`).
+- **Security review:**
+  - Ephemeral tokens server-locked with model and system instruction constraints.
+  - Zero master API keys exposed client-side.
+- **Independent review:**
+  - Removed unused variables and resolved React 19 `useSyncExternalStore` hydration in `use-color-scheme.web.ts`.
+  - Fixed Expo Router re-export import in `src/app/_layout.tsx`.
+- **NOT verified (needs real device / specific browser / live key / human):**
+  - Real hardware microphone streaming and live WebSocket exchange with Google servers (opt-in in Phase 3).
+- **Known risks and open questions:**
+  - Screen 3 displays "Starter Plan: LKR 8 + tax/day" indicating local carrier direct billing or subscription. We need to confirm whether to integrate Supabase SMS OTP or Sri Lankan telco carrier billing (e.g. Ideamart / Dialog API).
+- **Recommendation:** Proceed to Phase 1 (Cost model and budget harness).
