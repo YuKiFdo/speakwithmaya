@@ -81,6 +81,8 @@ export default function RootLayout() {
         <Stack.Screen name="dashboard" />
         <Stack.Screen name="explore" />
         <Stack.Screen name="roadmap" />
+        <Stack.Screen name="history" />
+        <Stack.Screen name="account" />
         <Stack.Screen name="upgrade" />
       </Stack>
     </ThemeProvider>

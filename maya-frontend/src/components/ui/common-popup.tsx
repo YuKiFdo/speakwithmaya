@@ -5,11 +5,14 @@ import {
   Text,
   Image,
   Pressable,
+  ScrollView,
   StyleSheet,
   ImageSourcePropType,
   Platform,
   ViewStyle,
+  useWindowDimensions,
 } from 'react-native';
+import { router } from 'expo-router';
 import Svg, {
   Path,
   Polygon,
@@ -18,6 +21,7 @@ import Svg, {
   RadialGradient,
   Stop,
   Rect,
+  Circle,
 } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 
@@ -26,6 +30,7 @@ export type PopupPreset =
   | 'daily-limit'
   | 'practice-complete'
   | 'level-up'
+  | 'get-extra-time'
   | 'custom';
 
 export interface CommonPopupProps {
@@ -68,6 +73,7 @@ export interface CommonPopupProps {
   closeOnBackdropPress?: boolean;
   showImageFade?: boolean;
   containerStyle?: ViewStyle;
+  onSelectPackage?: (pkg: { id: string; minutes: number; price: string }) => void;
 }
 
 // Default images for presets
@@ -193,6 +199,7 @@ export function CommonPopup({
   closeOnBackdropPress = true,
   showImageFade = true,
   containerStyle,
+  onSelectPackage,
 }: CommonPopupProps) {
   // Preset defaults resolution
   const resolvedPreset = preset;
@@ -270,6 +277,13 @@ export function CommonPopup({
     if (!finalBtnText) finalBtnText = 'Awesome!';
     if (finalBtnIcon === undefined) finalBtnIcon = 'none';
     if (finalShowArrow === undefined) finalShowArrow = false;
+  } else if (resolvedPreset === 'get-extra-time') {
+    if (!finalTitle) finalTitle = 'Keep the conversation going!';
+    if (!finalHighlight) finalHighlight = 'going!';
+    if (!finalSubtitle) {
+      finalSubtitle = `You've used ${minutesUsed ?? 320} of ${minutesTotal ?? 600} minutes this month. Get extra minutes and continue practicing with Maya.`;
+    }
+    if (finalShowClose === undefined) finalShowClose = true;
   }
 
   // Render Title with optional highlighted word
@@ -317,14 +331,18 @@ export function CommonPopup({
   // Calculate progress for minutes widget
   const minutesPercent = Math.min(100, Math.max(0, Math.round((minutesUsed / (minutesTotal || 1)) * 100)));
 
+  const { width: windowWidth } = useWindowDimensions();
+  const isDesktop = windowWidth >= 768;
+  const isBottomSheet = !isDesktop && resolvedPreset === 'get-extra-time';
+
   return (
     <Modal
       transparent
       visible={visible}
-      animationType="fade"
+      animationType={isBottomSheet ? 'slide' : 'fade'}
       onRequestClose={onClose}
     >
-      <View style={styles.backdrop}>
+      <View style={[styles.backdrop, isBottomSheet && styles.backdropBottomSheet]}>
         {/* Click outside to close */}
         {closeOnBackdropPress && (
           <Pressable
@@ -335,7 +353,191 @@ export function CommonPopup({
           />
         )}
 
-        {/* Modal Card */}
+        {resolvedPreset === 'get-extra-time' ? (
+          <View
+            style={[
+              styles.card,
+              styles.extraTimeModalCard,
+              isDesktop ? styles.extraTimeModalCardDesktop : styles.extraTimeBottomSheet,
+              containerStyle,
+            ]}
+          >
+            {/* Top Sheet Handle Bar (Mobile Bottom Sheet) */}
+            {!isDesktop && <View style={styles.sheetHandleBar} />}
+
+            {/* Top Close Button (✕) in circle */}
+            {finalShowClose && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.sheetCloseButton,
+                  pressed && styles.closeButtonPressed,
+                ]}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                hitSlop={8}
+              >
+                <Svg width={13} height={13} viewBox="0 0 24 24" fill="none">
+                  <Path
+                    d="M18 6L6 18M6 6L18 18"
+                    stroke="#64748B"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                  />
+                </Svg>
+              </Pressable>
+            )}
+
+            {/* Header Category Tag */}
+            <Text style={styles.extraCategoryText}>GET EXTRA TALK TIME</Text>
+
+            {/* Title */}
+            <Text style={[styles.extraTitleText, !isDesktop && styles.extraTitleTextMobile]}>
+              Keep the conversation <Text style={styles.extraHighlightText}>going!</Text>
+            </Text>
+
+            {/* Subtitle */}
+            <Text style={[styles.extraSubtitleText, !isDesktop && styles.extraSubtitleTextMobile]}>
+              {finalSubtitle}
+            </Text>
+
+            {/* 3 Package Cards (Side-by-Side Row) */}
+            <View style={[styles.extraPackagesContainer, !isDesktop && styles.extraPackagesContainerMobileRow]}>
+              {/* Package 1: +30 Min */}
+              <View style={[styles.extraPackageCard, !isDesktop && styles.extraPackageCardMobileCol]}>
+                <View style={[styles.extraPackageIconCircle, { backgroundColor: '#E0F2FE' }]}>
+                  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                    <Circle cx="12" cy="12" r="10" stroke="#0284C7" strokeWidth="2" />
+                    <Path d="M12 6V12L15 15" stroke="#0284C7" strokeWidth="2" strokeLinecap="round" />
+                  </Svg>
+                </View>
+                <Text style={[styles.extraPackageTitle, !isDesktop && styles.extraPackageTitleMobile]}>
+                  +30 Min
+                </Text>
+                <Text style={[styles.extraPackageSubtitle, !isDesktop && styles.extraPackageSubtitleMobile]}>
+                  Quick Practice
+                </Text>
+                <Text style={[styles.extraPackagePrice, !isDesktop && styles.extraPackagePriceMobile]}>
+                  Rs. 300
+                </Text>
+                <Pressable
+                  style={({ pressed }) => [styles.extraGetBtnOutline, pressed && styles.btnPressed]}
+                  onPress={() => {
+                    onClose();
+                    onSelectPackage?.({ id: '30-min', minutes: 30, price: 'Rs. 300' });
+                  }}
+                >
+                  <Text style={[styles.extraGetBtnOutlineText, !isDesktop && styles.extraGetBtnTextMobile]}>
+                    Get Now
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Package 2: +120 Min (Most Popular) */}
+              <View
+                style={[
+                  styles.extraPackageCard,
+                  styles.extraPackageCardPopular,
+                  !isDesktop && styles.extraPackageCardMobileCol,
+                ]}
+              >
+                <View style={styles.popularBadge}>
+                  <Text style={styles.popularBadgeText}>Most Popular</Text>
+                </View>
+                <View style={[styles.extraPackageIconCircle, { backgroundColor: '#EDE9FE' }]}>
+                  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                    <Circle cx="12" cy="12" r="10" stroke="#6366F1" strokeWidth="2" />
+                    <Path d="M12 6V12L15 15" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" />
+                  </Svg>
+                </View>
+                <Text style={[styles.extraPackageTitle, !isDesktop && styles.extraPackageTitleMobile]}>
+                  +120 Min
+                </Text>
+                <Text style={[styles.extraPackageSubtitle, !isDesktop && styles.extraPackageSubtitleMobile]}>
+                  Keep Going
+                </Text>
+                <Text style={[styles.extraPackagePrice, !isDesktop && styles.extraPackagePriceMobile]}>
+                  Rs. 900
+                </Text>
+                <Pressable
+                  style={({ pressed }) => [styles.extraGetBtnSolid, pressed && styles.btnPressed]}
+                  onPress={() => {
+                    onClose();
+                    onSelectPackage?.({ id: '120-min', minutes: 120, price: 'Rs. 900' });
+                  }}
+                >
+                  <Text style={[styles.extraGetBtnSolidText, !isDesktop && styles.extraGetBtnTextMobile]}>
+                    Get Now
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Package 3: +300 Min */}
+              <View style={[styles.extraPackageCard, !isDesktop && styles.extraPackageCardMobileCol]}>
+                <View style={[styles.extraPackageIconCircle, { backgroundColor: '#FCE7F3' }]}>
+                  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                    <Circle cx="12" cy="12" r="10" stroke="#DB2777" strokeWidth="2" />
+                    <Path d="M12 6V12L15 15" stroke="#DB2777" strokeWidth="2" strokeLinecap="round" />
+                  </Svg>
+                </View>
+                <Text style={[styles.extraPackageTitle, !isDesktop && styles.extraPackageTitleMobile]}>
+                  +300 Min
+                </Text>
+                <Text style={[styles.extraPackageSubtitle, !isDesktop && styles.extraPackageSubtitleMobile]}>
+                  Max Practice
+                </Text>
+                <Text style={[styles.extraPackagePrice, !isDesktop && styles.extraPackagePriceMobile]}>
+                  Rs. 2,000
+                </Text>
+                <Pressable
+                  style={({ pressed }) => [styles.extraGetBtnOutline, pressed && styles.btnPressed]}
+                  onPress={() => {
+                    onClose();
+                    onSelectPackage?.({ id: '300-min', minutes: 300, price: 'Rs. 2,000' });
+                  }}
+                >
+                  <Text style={[styles.extraGetBtnOutlineText, !isDesktop && styles.extraGetBtnTextMobile]}>
+                    Get Now
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Bottom Banner */}
+            <View style={styles.extraBannerContainer}>
+              <View style={styles.extraBannerLeft}>
+                <View style={styles.extraBannerIconBox}>
+                  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                    <Rect x="3" y="11" width="18" height="11" rx="2" stroke="#0057FF" strokeWidth="2" />
+                    <Path d="M7 11V7A5 5 0 0 1 17 7V11" stroke="#0057FF" strokeWidth="2" />
+                  </Svg>
+                </View>
+
+                <View style={styles.extraBannerTextCol}>
+                  <Text style={styles.extraBannerTitle}>Need more than this?</Text>
+                  <Text style={styles.extraBannerSubtitle}>
+                    Check out our Monthly Plans for better value and more benefits
+                  </Text>
+                </View>
+              </View>
+
+              <Pressable
+                style={({ pressed }) => [styles.extraBannerBtn, pressed && styles.btnPressed]}
+                onPress={() => {
+                  onClose();
+                  if (onFooterButtonPress) {
+                    onFooterButtonPress();
+                  } else {
+                    router.push('/upgrade');
+                  }
+                }}
+              >
+                <Text style={styles.extraBannerBtnText}>View Plans →</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+        /* Modal Card */
         <View style={[styles.card, containerStyle]}>
           {/* Top Close Button (✕) */}
           {finalShowClose && (
@@ -522,6 +724,7 @@ export function CommonPopup({
             </Pressable>
           ) : null}
         </View>
+        )}
       </View>
     </Modal>
   );
@@ -758,5 +961,276 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#2563EB',
     textAlign: 'center',
+  },
+
+  backdropBottomSheet: {
+    justifyContent: 'flex-end',
+    paddingHorizontal: 0,
+    paddingBottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+  },
+  /* Get Extra Talk Time Modal Styles */
+  extraTimeModalCard: {
+    width: '92%',
+    maxWidth: 420,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 20,
+    alignItems: 'stretch',
+  },
+  extraTimeModalCardDesktop: {
+    maxWidth: 680,
+    paddingHorizontal: 28,
+    paddingTop: 28,
+    paddingBottom: 24,
+  },
+  extraTimeBottomSheet: {
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'stretch',
+  },
+  sheetHandleBar: {
+    width: 44,
+    height: 4.5,
+    borderRadius: 3,
+    backgroundColor: '#E2E8F0',
+    alignSelf: 'center',
+    marginBottom: 10,
+  },
+  sheetCloseButton: {
+    position: 'absolute',
+    top: 14,
+    right: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  extraCategoryText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 11.5,
+    color: '#0057FF',
+    letterSpacing: 0.5,
+    marginBottom: 5,
+  },
+  extraTitleText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 22,
+    color: '#0F172A',
+    letterSpacing: -0.3,
+    marginBottom: 5,
+  },
+  extraTitleTextMobile: {
+    fontSize: 20,
+    marginBottom: 4,
+  },
+  extraHighlightText: {
+    color: '#0057FF',
+  },
+  extraSubtitleText: {
+    ...fontStyle('outfit', 'regular'),
+    fontSize: 12.5,
+    color: '#64748B',
+    lineHeight: 17,
+    marginBottom: 18,
+  },
+  extraSubtitleTextMobile: {
+    fontSize: 11.5,
+    lineHeight: 16,
+    marginBottom: 16,
+  },
+  extraPackagesContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+    alignItems: 'stretch',
+  },
+  extraPackagesContainerMobileRow: {
+    gap: 8,
+    marginBottom: 14,
+  },
+  extraPackageCard: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  extraPackageCardMobileCol: {
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+  },
+  extraPackageCardPopular: {
+    borderColor: '#0057FF',
+    borderWidth: 2,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0px 4px 16px rgba(0, 87, 255, 0.14)' } as any)
+      : {
+          shadowColor: '#0057FF',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.14,
+          shadowRadius: 10,
+          elevation: 4,
+        }),
+  },
+  popularBadge: {
+    position: 'absolute',
+    top: -11,
+    backgroundColor: '#0057FF',
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 7,
+    alignSelf: 'center',
+    zIndex: 2,
+  },
+  popularBadgeText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 9.5,
+    color: '#FFFFFF',
+  },
+  extraPackageIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  extraPackageTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 14.5,
+    color: '#0F172A',
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  extraPackageTitleMobile: {
+    fontSize: 13.5,
+  },
+  extraPackageSubtitle: {
+    ...fontStyle('outfit', 'regular'),
+    fontSize: 10.5,
+    color: '#64748B',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  extraPackageSubtitleMobile: {
+    fontSize: 9.5,
+    marginBottom: 6,
+  },
+  extraPackagePrice: {
+    ...fontStyle('outfit', 'extraBold'),
+    fontSize: 16,
+    color: '#0F172A',
+    marginBottom: 10,
+  },
+  extraPackagePriceMobile: {
+    fontSize: 14.5,
+    marginBottom: 8,
+  },
+  extraGetBtnOutline: {
+    width: '90%',
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#0057FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  extraGetBtnOutlineText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 12,
+    color: '#0057FF',
+  },
+  extraGetBtnSolid: {
+    width: '90%',
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: '#0057FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  extraGetBtnSolidText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 12,
+    color: '#FFFFFF',
+  },
+  extraGetBtnTextMobile: {
+    fontSize: 11,
+  },
+  btnPressed: {
+    opacity: 0.8,
+    transform: [{ scale: 0.98 }],
+  },
+  extraBannerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F0F7FF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E0EDFF',
+    padding: 12,
+    gap: 10,
+  },
+  extraBannerLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  extraBannerIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  extraBannerTextCol: {
+    flex: 1,
+  },
+  extraBannerTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 12.5,
+    color: '#0F172A',
+  },
+  extraBannerSubtitle: {
+    ...fontStyle('outfit', 'regular'),
+    fontSize: 10.5,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  extraBannerBtn: {
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#0057FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  extraBannerBtnText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 11.5,
+    color: '#0057FF',
   },
 });

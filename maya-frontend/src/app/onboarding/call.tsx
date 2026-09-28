@@ -13,6 +13,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { AmbientGlow } from '@/components/call/ambient-glow';
 import { Radii } from '@/theme/tokens';
+import { EndCallIcon } from '@/components/icons/call-icons';
 
 type CallState = 'speaking' | 'listening';
 
@@ -155,7 +156,7 @@ export default function CallScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="End Session"
                 >
-                  <Text style={styles.endSessionIcon}>📞</Text>
+                  <EndCallIcon size={20} color="#ffffff" />
                   <Text style={styles.endSessionText}>End Session</Text>
                 </Pressable>
               </View>
@@ -223,7 +224,7 @@ export default function CallScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="End call"
               >
-                <Text style={styles.hangupIcon}>📞</Text>
+                <EndCallIcon size={28} color="#ffffff" />
               </Pressable>
             </View>
           )}
@@ -424,7 +425,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 10,
     elevation: 6,
-    transform: [{ rotate: '135deg' }],
   },
   settingsButton: {
     width: 40,

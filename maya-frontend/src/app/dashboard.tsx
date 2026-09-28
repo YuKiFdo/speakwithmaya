@@ -26,6 +26,7 @@ import {
 } from '@/components/icons/nav-icons';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
+import Svg, { Path, Circle, Rect } from 'react-native-svg';
 
 interface ScenarioItem {
   id: string;
@@ -89,6 +90,8 @@ const SOCIAL_AVATARS = [
 export default function DashboardScreen() {
   const params = useLocalSearchParams<{
     name?: string;
+    pro?: string;
+    popup?: string;
   }>();
 
   const displayName = params.name || 'Shehal';
@@ -133,8 +136,10 @@ export default function DashboardScreen() {
     : 16;
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('home');
-  const [isPro, setIsPro] = useState(false);
-  const [activePopup, setActivePopup] = useState<PopupPreset | null>(null);
+  const [isPro, setIsPro] = useState(params.pro !== 'false');
+  const [activePopup, setActivePopup] = useState<PopupPreset | null>(
+    (params.popup as PopupPreset) || null
+  );
 
   const handleStartTalking = () => {
     router.push({
@@ -147,6 +152,16 @@ export default function DashboardScreen() {
     if (tab === 'roadmap') {
       router.push({
         pathname: '/roadmap',
+        params,
+      });
+    } else if (tab === 'history') {
+      router.push({
+        pathname: '/history',
+        params,
+      });
+    } else if (tab === 'account') {
+      router.push({
+        pathname: '/account',
         params,
       });
     } else {
@@ -166,7 +181,7 @@ export default function DashboardScreen() {
             onSelectTab={handleSelectTab}
             isPro={isPro}
             onUpgrade={() => router.push('/upgrade')}
-            onGetExtraTime={() => setActivePopup('practice-complete')}
+            onGetExtraTime={() => setActivePopup('get-extra-time')}
           />
         )}
 
@@ -507,9 +522,13 @@ export default function DashboardScreen() {
                     if (!isPro) {
                       setActivePopup('daily-limit');
                     } else {
-                      setActivePopup('practice-complete');
+                      setActivePopup('get-extra-time');
                     }
                   }}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isPro ? 'Get Extra Talk Time' : 'Upgrade to premium'
+                  }
                 >
                   {isPro ? (
                     <>
@@ -632,7 +651,7 @@ export default function DashboardScreen() {
 
             <Pressable
               style={styles.mobileTabItem}
-              onPress={() => setActiveTab('history')}
+              onPress={() => router.push({ pathname: '/history', params })}
             >
               <HistoryNavIcon active={activeTab === 'history'} size={24} />
               <Text
@@ -648,7 +667,7 @@ export default function DashboardScreen() {
 
             <Pressable
               style={styles.mobileTabItem}
-              onPress={() => setActiveTab('account')}
+              onPress={() => router.push({ pathname: '/account', params })}
             >
               <AccountNavIcon active={activeTab === 'account'} size={24} />
               <Text
@@ -800,7 +819,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingBottom: 16,
+    paddingBottom: 2,
     borderBottomWidth: 1,
     borderBottomColor: '#f8fafc',
   },

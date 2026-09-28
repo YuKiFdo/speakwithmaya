@@ -42,7 +42,7 @@ interface MilestoneItem {
   sessionTime: string;
   status: 'completed' | 'in-progress' | 'locked';
   iconType: 'robot' | 'chat' | 'family' | 'home' | 'wave' | 'directions';
-  align: 'left' | 'right';
+  align?: 'left' | 'right';
   numberColor: string;
   haloColor: string;
   haloBorderColor?: string;
@@ -128,6 +128,19 @@ const MILESTONES: MilestoneItem[] = [
     haloBorderColor: '#BFDBFE',
     innerBg: '#FFFFFF',
   },
+  {
+    id: '07',
+    number: '07',
+    title: 'Asking for directions',
+    sessionTime: 'Session time · 10 min',
+    status: 'locked',
+    iconType: 'directions',
+    align: 'left',
+    numberColor: '#0057FF',
+    haloColor: '#EFF6FF',
+    haloBorderColor: '#BFDBFE',
+    innerBg: '#FFFFFF',
+  },
 ];
 
 export default function RoadmapScreen() {
@@ -148,15 +161,65 @@ export default function RoadmapScreen() {
   const xLeft = 40;
   const xRight = Math.max(860, trackWidth - 40);
   const R = 90;
-  const y1 = 200;
-  const y2 = 380;
-  const y3 = 560;
+  const desktopYStart = 200;
+  const desktopRowStep = 180;
+  const lastIdx = MILESTONES.length - 1;
+  const finalR = Math.max(0, Math.floor(lastIdx / 2));
+  const finalCol = lastIdx >= 0 ? lastIdx % 2 : 0;
+  const desktopRowCount = finalR + 1;
+  const desktopTrackHeight = desktopYStart + finalR * desktopRowStep + 90;
 
   // Symmetrically distribute column 1 and column 2 across the full container width:
   const col1X = Math.round(xLeft + (xRight - xLeft) * 0.16);
   const col2X = Math.round(xLeft + (xRight - xLeft) * 0.54);
 
-  const desktopSvgPath = `M ${xLeft} ${y1} L ${xRight - R} ${y1} A ${R} ${R} 0 0 1 ${xRight - R} ${y2} L ${xLeft + R} ${y2} A ${R} ${R} 0 0 0 ${xLeft + R} ${y3} L ${xRight - R} ${y3} A ${R} ${R} 0 0 1 ${xRight} ${y3 + 90}`;
+  // Dynamically generate Desktop Serpentine Track:
+  // Starts directly at the 1st milestone anchor point (col1X) and ends directly at the final milestone
+  let desktopSvgPath = '';
+  if (MILESTONES.length === 1) {
+    desktopSvgPath = `M ${col1X} ${desktopYStart} L ${col1X} ${desktopYStart}`;
+  } else if (MILESTONES.length > 1) {
+    desktopSvgPath = `M ${col1X} ${desktopYStart}`;
+
+    for (let r = 0; r <= finalR; r++) {
+      const yRow = desktopYStart + r * desktopRowStep;
+      const isFinalRow = r === finalR;
+
+      if (r === 0) {
+        if (isFinalRow) {
+          // Row 0 is final (2 items: index 0 at col1X, index 1 at col2X)
+          desktopSvgPath += ` L ${col2X} ${yRow}`;
+        } else {
+          // More rows follow: line to right turn and curve down to row 1
+          const yNext = desktopYStart + (r + 1) * desktopRowStep;
+          desktopSvgPath += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext}`;
+        }
+      } else if (r % 2 === 1) {
+        // Odd row: moving Right to Left
+        // Current position is at (xRight - R, yRow)
+        if (isFinalRow) {
+          // Stops at col1X (where the final milestone in this row is)
+          desktopSvgPath += ` L ${col1X} ${yRow}`;
+        } else {
+          // More rows follow: line to left turn and curve down to next row
+          const yNext = desktopYStart + (r + 1) * desktopRowStep;
+          desktopSvgPath += ` L ${xLeft + R} ${yRow} A ${R} ${R} 0 0 0 ${xLeft + R} ${yNext}`;
+        }
+      } else {
+        // Even row (r >= 2): moving Left to Right
+        // Current position is at (xLeft + R, yRow)
+        if (isFinalRow) {
+          // Stops at final milestone in this row
+          const targetX = finalCol === 0 ? col1X : col2X;
+          desktopSvgPath += ` L ${targetX} ${yRow}`;
+        } else {
+          // More rows follow: line to right turn and curve down to next row
+          const yNext = desktopYStart + (r + 1) * desktopRowStep;
+          desktopSvgPath += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext}`;
+        }
+      }
+    }
+  }
 
   // Responsive calculations for mobile track & milestone positions:
   const [layoutMobileWidth, setLayoutMobileWidth] = useState<number | null>(null);
@@ -166,23 +229,49 @@ export default function RoadmapScreen() {
   const mobileR = 64;
   const mobileTierHeight = mobileR * 2; // 128
   const mobileIconSize = 62;
-  const mobileYDropLen = 22;
+  const mobileYDropLen = 26;
   const mobileYTrack1 = 88;
 
   const mobileIconLeftX = 10 + mobileR; // 74
   const mobileIconRightX = mobileWidth - (10 + mobileR); // mobileWidth - 74
 
-  const mobileYTrack2 = mobileYTrack1 + mobileTierHeight; // 216
-  const mobileYTrack3 = mobileYTrack2 + mobileTierHeight; // 344
-  const mobileYTrack4 = mobileYTrack3 + mobileTierHeight; // 472
-  const mobileYTrack5 = mobileYTrack4 + mobileTierHeight; // 600
-  const mobileYTrack6 = mobileYTrack5 + mobileTierHeight; // 728
+  const mobileTotalHeight =
+    MILESTONES.length > 0
+      ? mobileYTrack1 + (MILESTONES.length - 1) * mobileTierHeight + 92
+      : 820;
 
-  const mobileSvgPath = `M ${mobileIconLeftX} ${mobileYTrack1} L ${mobileIconRightX} ${mobileYTrack1} A ${mobileR} ${mobileR} 0 0 1 ${mobileIconRightX} ${mobileYTrack2} L ${mobileIconLeftX} ${mobileYTrack2} A ${mobileR} ${mobileR} 0 0 0 ${mobileIconLeftX} ${mobileYTrack3} L ${mobileIconRightX} ${mobileYTrack3} A ${mobileR} ${mobileR} 0 0 1 ${mobileIconRightX} ${mobileYTrack4} L ${mobileIconLeftX} ${mobileYTrack4} A ${mobileR} ${mobileR} 0 0 0 ${mobileIconLeftX} ${mobileYTrack5} L ${mobileIconRightX} ${mobileYTrack5} A ${mobileR} ${mobileR} 0 0 1 ${mobileIconRightX} ${mobileYTrack6} L ${mobileIconLeftX} ${mobileYTrack6}`;
+  // Dynamically generate Mobile Serpentine Track:
+  // Starts at 1st milestone and ends directly at the final milestone
+  let mobileSvgPath = '';
+  if (MILESTONES.length === 1) {
+    mobileSvgPath = `M ${mobileIconLeftX} ${mobileYTrack1} L ${mobileIconLeftX} ${mobileYTrack1}`;
+  } else if (MILESTONES.length > 1) {
+    mobileSvgPath = `M ${mobileIconLeftX} ${mobileYTrack1} L ${mobileIconRightX} ${mobileYTrack1}`;
+    for (let i = 0; i < MILESTONES.length - 1; i++) {
+      const yNext = mobileYTrack1 + (i + 1) * mobileTierHeight;
+      const isLastStep = i === MILESTONES.length - 2;
+
+      if (i % 2 === 0) {
+        mobileSvgPath += ` A ${mobileR} ${mobileR} 0 0 1 ${mobileIconRightX} ${yNext}`;
+        if (!isLastStep) {
+          mobileSvgPath += ` L ${mobileIconLeftX} ${yNext}`;
+        }
+      } else {
+        mobileSvgPath += ` A ${mobileR} ${mobileR} 0 0 0 ${mobileIconLeftX} ${yNext}`;
+        if (!isLastStep) {
+          mobileSvgPath += ` L ${mobileIconRightX} ${yNext}`;
+        }
+      }
+    }
+  }
 
   const handleSelectTab = (tab: DashboardTab) => {
     if (tab === 'home') {
       router.push({ pathname: '/dashboard', params });
+    } else if (tab === 'history') {
+      router.push({ pathname: '/history', params });
+    } else if (tab === 'account') {
+      router.push({ pathname: '/account', params });
     } else {
       setActiveTab(tab);
     }
@@ -211,7 +300,7 @@ export default function RoadmapScreen() {
             onSelectTab={handleSelectTab}
             isPro={isPro}
             onUpgrade={() => router.push('/upgrade')}
-            onGetExtraTime={() => setActivePopup('practice-complete')}
+            onGetExtraTime={() => setActivePopup('get-extra-time')}
           />
         )}
 
@@ -285,7 +374,7 @@ export default function RoadmapScreen() {
             /* DESKTOP ROADMAP (100% FULL WIDTH WITH ACCURATE CONNECTIONS)      */
             /* ================================================================ */
             <View
-              style={styles.roadmapTrackContainerDesktop}
+              style={[styles.roadmapTrackContainerDesktop, { height: desktopTrackHeight }]}
               onLayout={(e) => {
                 const w = Math.round(e.nativeEvent.layout.width);
                 if (w > 0 && Math.abs(w - trackWidth) > 5) {
@@ -296,8 +385,8 @@ export default function RoadmapScreen() {
               <Svg
                 style={StyleSheet.absoluteFill}
                 width={trackWidth}
-                height={680}
-                viewBox={`0 0 ${trackWidth} 680`}
+                height={desktopTrackHeight}
+                viewBox={`0 0 ${trackWidth} ${desktopTrackHeight}`}
               >
                 {/* 1. Outer Emboss / Bevel Shadow */}
                 <Path
@@ -337,69 +426,63 @@ export default function RoadmapScreen() {
                 />
 
                 {/* Vertical Dotted Drops from Card Icons down to Anchors */}
-                {/* Row 1 */}
-                <Line x1={col1X} y1={128} x2={col1X} y2={y1} stroke="#93C5FD" strokeWidth="2" strokeDasharray="4,4" />
-                <Line x1={col2X} y1={128} x2={col2X} y2={y1} stroke="#93C5FD" strokeWidth="2" strokeDasharray="4,4" />
-
-                {/* Row 2 */}
-                <Line x1={col1X} y1={308} x2={col1X} y2={y2} stroke="#93C5FD" strokeWidth="2" strokeDasharray="4,4" />
-                <Line x1={col2X} y1={308} x2={col2X} y2={y2} stroke="#93C5FD" strokeWidth="2" strokeDasharray="4,4" />
-
-                {/* Row 3 */}
-                <Line x1={col1X} y1={488} x2={col1X} y2={y3} stroke="#93C5FD" strokeWidth="2" strokeDasharray="4,4" />
-                <Line x1={col2X} y1={488} x2={col2X} y2={y3} stroke="#93C5FD" strokeWidth="2" strokeDasharray="4,4" />
+                {MILESTONES.map((_, idx) => {
+                  const r = Math.floor(idx / 2);
+                  const x = idx % 2 === 0 ? col1X : col2X;
+                  const trackY = desktopYStart + r * desktopRowStep;
+                  const dropYStart = 128 + r * desktopRowStep;
+                  return (
+                    <Line
+                      key={`desktop-drop-${idx}`}
+                      x1={x}
+                      y1={dropYStart}
+                      x2={x}
+                      y2={trackY}
+                      stroke="#93C5FD"
+                      strokeWidth="2"
+                      strokeDasharray="4,4"
+                    />
+                  );
+                })}
 
                 {/* Blue Glow Anchor Dots on the Track */}
-                {/* Row 1 */}
-                <Circle cx={col1X} cy={y1} r={10} fill="rgba(0, 87, 255, 0.18)" />
-                <Circle cx={col1X} cy={y1} r={5} fill="#0057FF" stroke="#FFFFFF" strokeWidth={1.8} />
-
-                <Circle cx={col2X} cy={y1} r={10} fill="rgba(0, 87, 255, 0.18)" />
-                <Circle cx={col2X} cy={y1} r={5} fill="#0057FF" stroke="#FFFFFF" strokeWidth={1.8} />
-
-                {/* Row 2 */}
-                <Circle cx={col1X} cy={y2} r={10} fill="rgba(0, 87, 255, 0.18)" />
-                <Circle cx={col1X} cy={y2} r={5} fill="#0057FF" stroke="#FFFFFF" strokeWidth={1.8} />
-
-                <Circle cx={col2X} cy={y2} r={10} fill="rgba(0, 87, 255, 0.18)" />
-                <Circle cx={col2X} cy={y2} r={5} fill="#0057FF" stroke="#FFFFFF" strokeWidth={1.8} />
-
-                {/* Row 3 */}
-                <Circle cx={col1X} cy={y3} r={10} fill="rgba(0, 87, 255, 0.18)" />
-                <Circle cx={col1X} cy={y3} r={5} fill="#0057FF" stroke="#FFFFFF" strokeWidth={1.8} />
-
-                <Circle cx={col2X} cy={y3} r={10} fill="rgba(0, 87, 255, 0.18)" />
-                <Circle cx={col2X} cy={y3} r={5} fill="#0057FF" stroke="#FFFFFF" strokeWidth={1.8} />
+                {MILESTONES.map((_, idx) => {
+                  const r = Math.floor(idx / 2);
+                  const x = idx % 2 === 0 ? col1X : col2X;
+                  const trackY = desktopYStart + r * desktopRowStep;
+                  return (
+                    <React.Fragment key={`desktop-dot-${idx}`}>
+                      <Circle cx={x} cy={trackY} r={10} fill="rgba(0, 87, 255, 0.18)" />
+                      <Circle cx={x} cy={trackY} r={5} fill="#0057FF" stroke="#FFFFFF" strokeWidth={1.8} />
+                    </React.Fragment>
+                  );
+                })}
               </Svg>
 
               {/* Milestone Cards Overlay - Symmetrically Distributed Across Full Width */}
-              <View style={[styles.desktopCardSlot, { top: 40, left: col1X - 44 }]}>
-                <MilestoneCardDesktop item={MILESTONES[0]} onPress={() => handleMilestonePress(MILESTONES[0])} />
-              </View>
-              <View style={[styles.desktopCardSlot, { top: 40, left: col2X - 44 }]}>
-                <MilestoneCardDesktop item={MILESTONES[1]} onPress={() => handleMilestonePress(MILESTONES[1])} />
-              </View>
-
-              <View style={[styles.desktopCardSlot, { top: 220, left: col1X - 44 }]}>
-                <MilestoneCardDesktop item={MILESTONES[2]} onPress={() => handleMilestonePress(MILESTONES[2])} />
-              </View>
-              <View style={[styles.desktopCardSlot, { top: 220, left: col2X - 44 }]}>
-                <MilestoneCardDesktop item={MILESTONES[3]} onPress={() => handleMilestonePress(MILESTONES[3])} />
-              </View>
-
-              <View style={[styles.desktopCardSlot, { top: 400, left: col1X - 44 }]}>
-                <MilestoneCardDesktop item={MILESTONES[4]} onPress={() => handleMilestonePress(MILESTONES[4])} />
-              </View>
-              <View style={[styles.desktopCardSlot, { top: 400, left: col2X - 44 }]}>
-                <MilestoneCardDesktop item={MILESTONES[5]} onPress={() => handleMilestonePress(MILESTONES[5])} />
-              </View>
+              {MILESTONES.map((item, idx) => {
+                const r = Math.floor(idx / 2);
+                const x = idx % 2 === 0 ? col1X : col2X;
+                const cardTop = 40 + r * desktopRowStep;
+                return (
+                  <View
+                    key={item.id}
+                    style={[styles.desktopCardSlot, { top: cardTop, left: x - 44 }]}
+                  >
+                    <MilestoneCardDesktop
+                      item={item}
+                      onPress={() => handleMilestonePress(item)}
+                    />
+                  </View>
+                );
+              })}
             </View>
           ) : (
             /* ================================================================ */
             /* MOBILE SERPENTINE ROADMAP (MATCHES DESKTOP INNER SHADOW & NODES) */
             /* ================================================================ */
             <View
-              style={styles.mobileRoadmapContainer}
+              style={[styles.mobileRoadmapContainer, { height: mobileTotalHeight }]}
               onLayout={(e) => {
                 const w = Math.round(e.nativeEvent.layout.width);
                 if (w > 0 && Math.abs(w - mobileWidth) > 3) {
@@ -411,8 +494,8 @@ export default function RoadmapScreen() {
               <Svg
                 style={StyleSheet.absoluteFill}
                 width={mobileWidth}
-                height={820}
-                viewBox={`0 0 ${mobileWidth} 820`}
+                height={mobileTotalHeight}
+                viewBox={`0 0 ${mobileWidth} ${mobileTotalHeight}`}
               >
                 {/* 1. Outer Emboss / Bevel Shadow */}
                 <Path
@@ -497,7 +580,7 @@ export default function RoadmapScreen() {
 
               {/* Absolute Floating Milestone Nodes (Same floating style as desktop, no card box) */}
               {MILESTONES.map((item, idx) => {
-                const isLeft = item.align === 'left';
+                const isLeft = idx % 2 === 0;
                 const yTrack = mobileYTrack1 + idx * mobileTierHeight;
                 const slotTop = yTrack - mobileYDropLen - mobileIconSize;
 
@@ -517,6 +600,7 @@ export default function RoadmapScreen() {
                   >
                     <MilestoneCardMobile
                       item={item}
+                      isLeft={isLeft}
                       onPress={() => handleMilestonePress(item)}
                     />
                   </View>
@@ -556,7 +640,7 @@ export default function RoadmapScreen() {
 
             <Pressable
               style={styles.mobileTabItem}
-              onPress={() => setActiveTab('history')}
+              onPress={() => router.push({ pathname: '/history', params })}
             >
               <HistoryNavIcon active={false} size={24} />
               <Text style={styles.mobileTabLabel}>History</Text>
@@ -564,7 +648,7 @@ export default function RoadmapScreen() {
 
             <Pressable
               style={styles.mobileTabItem}
-              onPress={() => setActiveTab('account')}
+              onPress={() => router.push({ pathname: '/account', params })}
             >
               <AccountNavIcon active={false} size={24} />
               <Text style={styles.mobileTabLabel}>Account</Text>
@@ -656,7 +740,7 @@ function MilestoneCardDesktop({
       accessibilityRole="button"
       accessibilityLabel={`Milestone ${item.number}: ${item.title}`}
     >
-      <View style={[styles.haloCircleDesktop, { backgroundColor: item.haloColor, borderColor: getBorderColor(item.id) }]}>
+      <View style={[styles.haloCircleDesktop, { backgroundColor: item.haloColor, borderColor: item.haloBorderColor || getBorderColor(item.id) }]}>
         <View style={styles.innerIconCircleDesktop}>
           <MilestoneIcon type={item.iconType} />
         </View>
@@ -694,12 +778,13 @@ function MilestoneCardDesktop({
  */
 function MilestoneCardMobile({
   item,
+  isLeft = true,
   onPress,
 }: {
   item: MilestoneItem;
+  isLeft?: boolean;
   onPress: () => void;
 }) {
-  const isLeft = item.align === 'left';
   const borderColor = item.haloBorderColor || getBorderColor(item.id);
 
   return (
@@ -734,8 +819,8 @@ function MilestoneCardMobile({
           </View>
 
           <View style={[styles.mobileNodeTextCol, { marginLeft: 12 }]}>
-            <View style={styles.numberBadgeRow}>
-              <Text style={[styles.milestoneNumber, { color: item.numberColor }]}>
+            <View style={styles.numberBadgeRowMobile}>
+              <Text style={[styles.milestoneNumberMobile, { color: item.numberColor }]}>
                 {item.number}
               </Text>
               {item.status === 'completed' && (
@@ -756,13 +841,13 @@ function MilestoneCardMobile({
         /* RIGHT ALIGNED: Text on Left, Avatar on Right */
         <>
           <View style={[styles.mobileNodeTextCol, { marginRight: 12, alignItems: 'flex-end' }]}>
-            <View style={[styles.numberBadgeRow, { justifyContent: 'flex-end' }]}>
+            <View style={[styles.numberBadgeRowMobile, { justifyContent: 'flex-end' }]}>
               {item.status === 'completed' && (
                 <View style={styles.completedBadge}>
                   <Text style={styles.completedBadgeText}>COMPLETED</Text>
                 </View>
               )}
-              <Text style={[styles.milestoneNumber, { color: item.numberColor }]}>
+              <Text style={[styles.milestoneNumberMobile, { color: item.numberColor }]}>
                 {item.number}
               </Text>
             </View>
@@ -861,7 +946,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 16,
+    paddingBottom: 2,
     borderBottomWidth: 1,
     borderBottomColor: '#f8fafc',
     backgroundColor: '#ffffff',
@@ -881,7 +966,7 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
   },
   mobileHeadingSection: {
-    marginTop: 18,
+    marginTop: 8,
     marginBottom: 16,
   },
   headingTitleMobile: {
@@ -967,7 +1052,7 @@ const styles = StyleSheet.create({
   mobileMilestoneNode: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 2,
+    paddingVertical: 0,
   },
   mobileMilestoneNodeLeft: {
     gap: 12,
@@ -1021,15 +1106,26 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     maxWidth: 220,
   },
+  numberBadgeRowMobile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  milestoneNumberMobile: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 14,
+    letterSpacing: 0.1,
+  },
   milestoneTitleMobile: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 14.5,
+    fontSize: 13.5,
     color: '#0F172A',
-    lineHeight: 19,
+    lineHeight: 17.5,
   },
   milestoneSessionTimeMobile: {
     fontFamily: Fonts.outfit.regular,
-    fontSize: 11.5,
+    fontSize: 11,
     color: '#64748B',
     marginTop: 2,
   },
