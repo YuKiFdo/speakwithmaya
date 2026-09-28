@@ -14,6 +14,12 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { AmbientGlow } from '@/components/call/ambient-glow';
 import { Radii } from '@/theme/tokens';
 import { EndCallIcon } from '@/components/icons/call-icons';
+import { ToastPill, ToastPillPreset } from '@/components/ui/toast-pill';
+import {
+  GrammarFeedbackModal,
+  GrammarFeedbackData,
+} from '@/components/call/grammar-feedback-modal';
+import { useConnectionMonitor } from '@/hooks/useConnectionMonitor';
 
 type CallState = 'speaking' | 'listening';
 
@@ -29,13 +35,39 @@ export default function CallScreen() {
   const { isPhone } = useBreakpoint();
   const isWebOrDesktop = !isPhone;
 
-  const [callState, setCallState] = useState<CallState>('speaking');
+  // Real-time network & connection monitor
+  const connection = useConnectionMonitor();
+
+  const [callState, setCallState] = useState<CallState>('listening');
   const [secondsElapsed, setSecondsElapsed] = useState(16);
-  const [sessionEndNotice, setSessionEndNotice] = useState(false);
+  const [sessionEndNotice, setSessionEndNotice] = useState(true);
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
+  const [feedbackData, setFeedbackData] = useState<GrammarFeedbackData>({
+    originalSentence: 'I go to beach every weekend',
+    highlightedMistake: 'go',
+    correctedSentence: 'I go to the beach every weekend.',
+    highlightedCorrection: 'the',
+    whyExplanation: 'Use "the beach" because we usually refer to the beach as a specific place.',
+    autoDismissSeconds: 5,
+  });
+
+  // Priority: 1. Live network connection alert -> 2. Session ending notice -> 3. Idle / Hidden
+  const activeToastPreset: ToastPillPreset | null =
+    connection.toastPreset ?? (sessionEndNotice ? 'session-ends' : null);
+
+  const displayedStatusText = connection.isLost
+    ? 'Connection lost'
+    : connection.isReconnecting
+    ? 'Reconnecting...'
+    : connection.isWeak
+    ? 'Weak connection'
+    : callState === 'speaking'
+    ? 'Speaking..'
+    : 'Listening...';
 
   // Animation values for smooth cross-fading of ambient glows
-  const purpleGlowAnim = useRef(new Animated.Value(0)).current;
-  const blueAuraAnim = useRef(new Animated.Value(1)).current;
+  const purpleGlowAnim = useRef(new Animated.Value(1)).current;
+  const blueAuraAnim = useRef(new Animated.Value(0)).current;
 
   // Session elapsed timer
   useEffect(() => {
@@ -44,6 +76,7 @@ export default function CallScreen() {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
 
   // Animate glow changes when callState changes
   useEffect(() => {
@@ -192,7 +225,11 @@ export default function CallScreen() {
                     <View
                       style={[
                         styles.statusDot,
-                        callState === 'speaking'
+                        connection.isLost
+                          ? styles.statusDotRed
+                          : connection.isReconnecting || connection.isWeak
+                          ? styles.statusDotOrange
+                          : callState === 'speaking'
                           ? styles.statusDotGreen
                           : styles.statusDotRed,
                       ]}
@@ -205,12 +242,16 @@ export default function CallScreen() {
                   <Text
                     style={[
                       styles.stateLabel,
-                      callState === 'speaking'
+                      connection.isLost
+                        ? styles.stateLabelLost
+                        : connection.isReconnecting || connection.isWeak
+                        ? styles.stateLabelWarning
+                        : callState === 'speaking'
                         ? styles.stateLabelSpeaking
                         : styles.stateLabelListening,
                     ]}
                   >
-                    {callState === 'speaking' ? 'Speaking..' : 'Listening...'}
+                    {displayedStatusText}
                   </Text>
                 </View>
               </View>
@@ -249,7 +290,11 @@ export default function CallScreen() {
                     <View
                       style={[
                         styles.statusDot,
-                        callState === 'speaking'
+                        connection.isLost
+                          ? styles.statusDotRed
+                          : connection.isReconnecting || connection.isWeak
+                          ? styles.statusDotOrange
+                          : callState === 'speaking'
                           ? styles.statusDotGreen
                           : styles.statusDotRed,
                       ]}
@@ -262,27 +307,31 @@ export default function CallScreen() {
                   <Text
                     style={[
                       styles.stateLabelDesktop,
-                      callState === 'speaking'
+                      connection.isLost
+                        ? styles.stateLabelLost
+                        : connection.isReconnecting || connection.isWeak
+                        ? styles.stateLabelWarning
+                        : callState === 'speaking'
                         ? styles.stateLabelSpeaking
                         : styles.stateLabelListening,
                     ]}
                   >
-                    {callState === 'speaking' ? 'Speaking..' : 'Listening...'}
+                    {displayedStatusText}
                   </Text>
                 </View>
               </View>
             )}
 
-            {/* Session Ending Alert Banner */}
-            {callState === 'listening' && sessionEndNotice ? (
-              <View style={styles.noticePill}>
-                <Text style={styles.noticePillText}>
-                  The session ends in 4 seconds
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.noticePlaceholder} />
-            )}
+            {/* Session Ending & Network Connection Toast Pill */}
+            <View style={styles.noticeWrapper}>
+              {activeToastPreset && (
+                <ToastPill
+                  preset={activeToastPreset}
+                  text={activeToastPreset === 'session-ends' ? 'The session ends in 4 seconds' : undefined}
+                  visible={true}
+                />
+              )}
+            </View>
 
             {/* Conversation Prompt Text */}
             <Text style={[styles.promptText, isWebOrDesktop && styles.promptTextDesktop]}>
@@ -294,6 +343,13 @@ export default function CallScreen() {
           <AmbientGlow type="purple-bottom" opacity={purpleGlowAnim} />
         </View>
       </Pressable>
+
+      {/* Grammar Feedback Modal (Bottom Sheet on Mobile / Centered Card on Desktop) */}
+      <GrammarFeedbackModal
+        visible={feedbackVisible}
+        onClose={() => setFeedbackVisible(false)}
+        feedback={feedbackData}
+      />
     </SafeAreaView>
   );
 }
@@ -540,23 +596,11 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     width: '100%',
   },
-  noticePlaceholder: {
-    height: 38,
-    marginBottom: 20,
-  },
-  noticePill: {
-    backgroundColor: '#fff7ed',
-    borderWidth: 1,
-    borderColor: '#fed7aa',
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
+  noticeWrapper: {
+    minHeight: 40,
     marginBottom: 24,
-  },
-  noticePillText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#c2410c',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   promptText: {
     fontSize: 26,
@@ -573,7 +617,7 @@ const styles = StyleSheet.create({
   },
   hangupButtonPressed: {
     backgroundColor: '#dc2626',
-    transform: [{ rotate: '135deg' }, { scale: 0.95 }],
+    transform: [{ scale: 0.95 }],
   },
   hangupIcon: {
     fontSize: 22,
@@ -581,5 +625,14 @@ const styles = StyleSheet.create({
   },
   buttonPressed: {
     opacity: 0.7,
+  },
+  statusDotOrange: {
+    backgroundColor: '#f59e0b',
+  },
+  stateLabelLost: {
+    color: '#ef4444',
+  },
+  stateLabelWarning: {
+    color: '#f59e0b',
   },
 });
