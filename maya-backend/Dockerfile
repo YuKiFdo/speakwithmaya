@@ -6,10 +6,10 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Copy dependency manifests
-COPY package*.json ./
+COPY package*.json .npmrc* ./
 
 # Install all dependencies (including devDependencies needed for build)
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 # Copy source code and config
 COPY tsconfig*.json nest-cli.json ./
@@ -19,7 +19,7 @@ COPY src/ ./src/
 RUN npm run build
 
 # Prune devDependencies to keep image lean
-RUN npm prune --omit=dev
+RUN npm prune --omit=dev --legacy-peer-deps
 
 # -------------------------------------------------------------
 # Stage 2: Production Runtime
