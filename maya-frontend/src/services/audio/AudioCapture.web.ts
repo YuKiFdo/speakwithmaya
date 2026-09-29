@@ -1,4 +1,5 @@
 import { IAudioCapture, AudioCaptureCallbacks } from './AudioCapture';
+import { getLogTimestamp } from '@/utils/time';
 
 export class WebAudioCapture implements IAudioCapture {
   private audioCtx: AudioContext | null = null;
@@ -37,12 +38,17 @@ export class WebAudioCapture implements IAudioCapture {
       this.sourceNode = this.audioCtx.createMediaStreamSource(this.stream);
       this.workletNode = new AudioWorkletNode(this.audioCtx, 'pcm-downsampler-processor');
       let chunkCount = 0;
+      let noiseFloor = 0.010;
+      let isSpeaking = false;
+      let hangoverRemaining = 0;
+      const preRollBuffer: ArrayBuffer[] = [];
+      const HANGOVER_CHUNKS = 8; // ~800ms natural conversational pause window
+
       this.workletNode.port.onmessage = (event) => {
         if (!this.recording) return;
         const chunk = event.data as ArrayBuffer;
         if (chunk && chunk.byteLength > 0) {
           chunkCount++;
-          this.callbacks?.onAudioData(chunk);
 
           // Calculate RMS voice strength for real-time visual feedback
           const int16 = new Int16Array(chunk);
@@ -52,12 +58,58 @@ export class WebAudioCapture implements IAudioCapture {
             sumSquares += norm * norm;
           }
           const rms = Math.sqrt(sumSquares / int16.length);
-          // Scale RMS so conversational voice maps from 0.0 to 1.0 (noise gate < 0.01)
-          const volume = rms < 0.012 ? 0 : Math.min(1, Math.max(0, (rms - 0.012) * 8.0));
+
+          // Update adaptive noise floor during silence
+          if (rms < 0.016) {
+            noiseFloor = noiseFloor * 0.95 + rms * 0.05;
+          }
+
+          // Check if speaker is outputting AI audio or room echo is decaying
+          if (this.callbacks?.isOutputPlaying?.()) {
+            if (isSpeaking) {
+              isSpeaking = false;
+              hangoverRemaining = 0;
+              preRollBuffer.length = 0;
+            }
+            this.callbacks?.onVolumeChange?.(0);
+            return;
+          }
+
+          // Scale RMS so conversational voice maps from 0.0 to 1.0 (noise gate < noiseFloor)
+          const volume = rms < noiseFloor ? 0 : Math.min(1, Math.max(0, (rms - noiseFloor) * 7.5));
           this.callbacks?.onVolumeChange?.(volume);
 
-          if (chunkCount <= 3 || chunkCount % 50 === 0) {
-            console.log(`[WebAudioCapture] Mic captured chunk #${chunkCount}: ${chunk.byteLength} bytes, RMS=${rms.toFixed(4)}, vol=${volume.toFixed(2)}`);
+          // Client-Side VAD & Silence Gate
+          const speechThreshold = Math.max(0.020, noiseFloor * 1.85);
+
+          if (rms >= speechThreshold) {
+            if (!isSpeaking) {
+              isSpeaking = true;
+              console.log(`[${getLogTimestamp()}] 🎤 [User Speaking] Started (RMS=${rms.toFixed(3)})`);
+              this.callbacks?.onVoiceStart?.();
+
+              while (preRollBuffer.length > 0) {
+                const preChunk = preRollBuffer.shift();
+                if (preChunk) this.callbacks?.onAudioData(preChunk);
+              }
+            }
+
+            hangoverRemaining = HANGOVER_CHUNKS;
+            this.callbacks?.onAudioData(chunk);
+          } else if (hangoverRemaining > 0) {
+            hangoverRemaining--;
+            this.callbacks?.onAudioData(chunk);
+          } else {
+            if (isSpeaking) {
+              isSpeaking = false;
+              console.log(`[${getLogTimestamp()}] 🛑 [User Silent] Speech turn ended (RMS=${rms.toFixed(3)})`);
+              this.callbacks?.onVoiceEnd?.();
+            }
+
+            if (preRollBuffer.length >= 2) {
+              preRollBuffer.shift();
+            }
+            preRollBuffer.push(chunk);
           }
         }
       };

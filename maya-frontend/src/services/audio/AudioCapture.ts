@@ -8,6 +8,7 @@ export interface AudioCaptureCallbacks {
   onVoiceStart?: () => void;
   onVoiceEnd?: () => void;
   onError?: (error: Error) => void;
+  isOutputPlaying?: () => boolean;
 }
 
 export interface IAudioCapture {

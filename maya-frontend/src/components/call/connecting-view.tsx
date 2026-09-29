@@ -14,9 +14,10 @@ import { fontStyle } from '@/theme/fonts';
 
 interface ConnectingViewProps {
   onCancel?: () => void;
+  style?: any;
 }
 
-export function ConnectingView({ onCancel }: ConnectingViewProps) {
+export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
   // Animation values for radiating/rotating orbital rings
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -70,7 +71,7 @@ export function ConnectingView({ onCancel }: ConnectingViewProps) {
   });
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, style]}>
       <View style={styles.container}>
         {onCancel ? (
           <Pressable style={styles.cancelButton} onPress={onCancel} hitSlop={12}>
@@ -167,7 +168,7 @@ export function ConnectingView({ onCancel }: ConnectingViewProps) {
           </View>
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

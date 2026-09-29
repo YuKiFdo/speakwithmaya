@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Pressable,
   Animated,
+  Easing,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -54,7 +55,7 @@ export default function CallScreen() {
   useEffect(() => {
     liveCall.startCall();
     return () => {
-      liveCall.endCall();
+      liveCall.endCall(false);
     };
   }, []);
 
@@ -85,6 +86,48 @@ export default function CallScreen() {
   const purpleScaleAnim = useRef(new Animated.Value(1.0)).current;
   const blueAuraAnim = useRef(new Animated.Value(0)).current;
   const blueScaleAnim = useRef(new Animated.Value(1.0)).current;
+
+  // Smooth cinematic entrance transition from ConnectingView into active CallScreen
+  const [connectingVisible, setConnectingVisible] = useState(true);
+  const connectingFadeAnim = useRef(new Animated.Value(1)).current;
+  const connectingScaleAnim = useRef(new Animated.Value(1.0)).current;
+  const callContentFadeAnim = useRef(new Animated.Value(0)).current;
+  const callContentScaleAnim = useRef(new Animated.Value(0.97)).current;
+  const hasTransitionedRef = useRef(false);
+
+  useEffect(() => {
+    if (liveCall.status !== 'connecting' && liveCall.status !== 'idle' && !hasTransitionedRef.current) {
+      hasTransitionedRef.current = true;
+      Animated.parallel([
+        Animated.timing(connectingFadeAnim, {
+          toValue: 0,
+          duration: 450,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(connectingScaleAnim, {
+          toValue: 1.04,
+          duration: 450,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(callContentFadeAnim, {
+          toValue: 1,
+          duration: 500,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(callContentScaleAnim, {
+          toValue: 1.0,
+          duration: 500,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start(() => {
+        setConnectingVisible(false);
+      });
+    }
+  }, [liveCall.status]);
 
   // Animate glows reactively based on voice strength and call status
   useEffect(() => {
@@ -177,14 +220,19 @@ export default function CallScreen() {
     }
   };
 
-  if (liveCall.status === 'connecting') {
-    return <ConnectingView onCancel={handleHangup} />;
-  }
-
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Pressable style={styles.fullScreenTouch} onPress={handleScreenTouch}>
-        <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
+      <Animated.View
+        style={[
+          styles.mainContentWrapper,
+          {
+            opacity: callContentFadeAnim,
+            transform: [{ scale: callContentScaleAnim }],
+          },
+        ]}
+      >
+        <Pressable style={styles.fullScreenTouch} onPress={handleScreenTouch}>
+          <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
 
           {/* Ambient Edge Aura for Speaking State */}
           <AmbientGlow type="blue-aura" opacity={blueAuraAnim} />
@@ -388,6 +436,24 @@ export default function CallScreen() {
           <AmbientGlow type="purple-bottom" opacity={purpleGlowAnim} />
         </View>
       </Pressable>
+    </Animated.View>
+
+      {/* Smooth connecting overlay with cinematic crossfade and entrance zoom */}
+      {connectingVisible && (
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFill,
+            styles.connectingOverlay,
+            {
+              opacity: connectingFadeAnim,
+              transform: [{ scale: connectingScaleAnim }],
+            },
+          ]}
+          pointerEvents={liveCall.status === 'connecting' ? 'auto' : 'none'}
+        >
+          <ConnectingView onCancel={handleHangup} />
+        </Animated.View>
+      )}
 
       {/* Grammar Feedback Modal (Bottom Sheet on Mobile / Centered Card on Desktop) */}
       <GrammarFeedbackModal
@@ -405,6 +471,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#ffffff',
     alignItems: 'center',
+    position: 'relative',
+  },
+  mainContentWrapper: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+  },
+  connectingOverlay: {
+    zIndex: 999,
+    backgroundColor: '#ffffff',
   },
   fullScreenTouch: {
     flex: 1,

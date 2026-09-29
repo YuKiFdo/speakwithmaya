@@ -1,3 +1,5 @@
+import { getLogTimestamp } from '@/utils/time';
+
 export interface GrammarCorrectionPayload {
   studentSaid: string;
   moreNatural: string;
@@ -15,6 +17,9 @@ export interface LiveTransportCallbacks {
   onGrammarCorrection?: (correction: GrammarCorrectionPayload) => void;
   onConcludeCall?: (reason: string) => void;
   onUsageUpdate?: (tokens: { audioIn: number; audioOut: number; total: number }) => void;
+  onSessionResumptionUpdate?: (handle: string) => void;
+  onSessionResumed?: () => void;
+  onGoAway?: (timeLeft: string) => void;
   onError?: (err: Error) => void;
   onClose?: (code: number, reason: string) => void;
 }
@@ -26,6 +31,7 @@ export interface LiveTransportConfig {
   tools?: any[];
   model?: string;
   voiceName?: string;
+  resumptionHandle?: string | null;
 }
 
 export class LiveTransport {
@@ -34,10 +40,17 @@ export class LiveTransport {
   private config: LiveTransportConfig = {};
   private audioChunkCount: number = 0;
   private isOpen: boolean = false;
+  private resumptionHandle: string | null = null;
+  private isResumedSession: boolean = false;
+  private lastTurnDispatchedAt: number = 0;
+  private hasReceivedAudioThisTurn: boolean = false;
+  private currentTurnSubtitles: string = '';
 
   connect(config: LiveTransportConfig, callbacks: LiveTransportCallbacks): void {
     this.config = config;
     this.callbacks = callbacks;
+    this.resumptionHandle = config.resumptionHandle || this.resumptionHandle;
+    this.isResumedSession = !!this.resumptionHandle;
 
     if (!config.wsUrl) {
       const err = new Error('LiveTransport requires a valid Gemini Live WebSocket URL');
@@ -47,7 +60,12 @@ export class LiveTransport {
     }
 
     try {
-      console.log('[LiveTransport] Connecting to Gemini Live WebSocket URL:', config.wsUrl.split('?')[0]);
+      console.log(
+        '[LiveTransport] Connecting to Gemini Live WebSocket URL (resumed:',
+        this.isResumedSession,
+        '):',
+        config.wsUrl.split('?')[0],
+      );
       this.ws = new WebSocket(config.wsUrl);
 
       this.ws.onopen = () => {
@@ -81,7 +99,7 @@ export class LiveTransport {
   private sendInitialSetup() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    const setupMsg = {
+    const setupMsg: any = {
       setup: {
         model: `models/${this.config.model || 'gemini-3.8-live'}`,
         generationConfig: {
@@ -99,6 +117,10 @@ export class LiveTransport {
         },
         outputAudioTranscription: {},
         tools: this.config.tools || [],
+        sessionResumption: this.resumptionHandle ? { handle: this.resumptionHandle } : {},
+        contextWindowCompression: {
+          slidingWindow: {},
+        },
         systemInstruction: this.config.systemPrompt
           ? {
               parts: [{ text: this.config.systemPrompt }],
@@ -107,7 +129,7 @@ export class LiveTransport {
       },
     };
 
-    console.log('[LiveTransport] Sending setup message to Gemini...');
+    console.log('[LiveTransport] Sending setup message to Gemini... (resumed:', this.isResumedSession, ')');
     this.ws.send(JSON.stringify(setupMsg));
   }
 
@@ -138,7 +160,7 @@ export class LiveTransport {
     this.audioChunkCount++;
 
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      if (this.audioChunkCount <= 3) console.log('[LiveTransport] sendAudioChunk BLOCKED: ws not open, readyState=', this.ws?.readyState);
+      if (this.audioChunkCount <= 3) console.log(`[${getLogTimestamp()}] [LiveTransport] sendAudioChunk BLOCKED: ws not open, readyState=${this.ws?.readyState}`);
       return;
     }
 
@@ -146,17 +168,8 @@ export class LiveTransport {
     const bytes = new Uint8Array(pcm16Chunk);
     const len = bytes.byteLength;
 
-    if (this.audioChunkCount <= 5 || this.audioChunkCount % 50 === 0) {
-      // Check if data has audio signal
-      let nonZeroCount = 0;
-      for (let i = 0; i < Math.min(len, 200); i++) {
-        if (bytes[i] !== 0) nonZeroCount++;
-      }
-      console.log(`[LiveTransport] Streaming audio chunk #${this.audioChunkCount}: ${len} bytes (nonZero=${nonZeroCount}/${Math.min(len, 200)})`);
-    }
-
     if (len === 0) {
-      console.warn('[LiveTransport] sendAudioChunk: EMPTY buffer, skipping');
+      console.warn(`[${getLogTimestamp()}] [LiveTransport] sendAudioChunk: EMPTY buffer, skipping`);
       return;
     }
 
@@ -166,7 +179,7 @@ export class LiveTransport {
     }
     const base64Data = btoa(binary);
 
-    // Universal Gemini Live BidiGenerateContent audio payload (supports both audio and mediaChunks)
+    // Universal Gemini Live BidiGenerateContent audio payload
     const realtimeInput = {
       realtimeInput: {
         audio: {
@@ -187,7 +200,6 @@ export class LiveTransport {
 
   sendAudioStreamEnd() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    console.log('[LiveTransport] Sending audioStreamEnd (mic closed / session finish)');
     this.ws.send(
       JSON.stringify({
         realtimeInput: {
@@ -197,8 +209,39 @@ export class LiveTransport {
     );
   }
 
+  sendEndOfTurn() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.lastTurnDispatchedAt = Date.now();
+    this.hasReceivedAudioThisTurn = false;
+    this.currentTurnSubtitles = '';
+    console.log(`[${getLogTimestamp()}] 🚀 [Turn Dispatch] Streaming silence tail to trigger Gemini server-side VAD`);
+
+    // Stream 6 comfort silence frames (600ms of zeros) to provide acoustic silence decay.
+    // Gemini's server-side VAD automatically detects this natural pause and responds within ~800ms.
+    const silenceBase64 = 'A'.repeat(4264) + 'AAA=';
+    for (let i = 0; i < 6; i++) {
+      this.ws.send(
+        JSON.stringify({
+          realtimeInput: {
+            audio: {
+              mimeType: 'audio/pcm;rate=16000',
+              data: silenceBase64,
+            },
+            mediaChunks: [
+              {
+                mimeType: 'audio/pcm;rate=16000',
+                data: silenceBase64,
+              },
+            ],
+          },
+        }),
+      );
+    }
+  }
+
   sendInterrupted() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    console.log(`[${getLogTimestamp()}] [LiveTransport] Dispatching interrupt clientContent to Gemini`);
     this.ws.send(
       JSON.stringify({
         clientContent: {
@@ -226,21 +269,39 @@ export class LiveTransport {
 
       // Check for Gemini API errors
       if (msg.error) {
-        console.error('[LiveTransport] ❌ Gemini Live API Error:', JSON.stringify(msg.error));
+        console.error(`[${getLogTimestamp()}] [LiveTransport] ❌ Gemini Live API Error:`, JSON.stringify(msg.error));
         this.callbacks.onError?.(new Error(msg.error.message || 'Gemini Live error'));
         return;
       }
 
-      // Setup completion from Gemini -> trigger greeting!
+      // Setup completion from Gemini -> trigger greeting only on fresh sessions!
       if (msg.setupComplete) {
-        console.log('[LiveTransport] Gemini setupComplete received! Sending greeting...');
-        this.sendGreetingTurn();
+        console.log(`[${getLogTimestamp()}] [LiveTransport] Gemini setupComplete received! Resumed: ${this.isResumedSession}`);
+        if (this.isResumedSession) {
+          console.log(`[${getLogTimestamp()}] [LiveTransport] Existing session resumed successfully! Context preserved.`);
+          this.callbacks.onSessionResumed?.();
+        } else {
+          this.sendGreetingTurn();
+        }
         return;
       }
 
-      // Session heartbeat
+      // Session resumption token updates
       if (msg.sessionResumptionUpdate) {
+        const sru = msg.sessionResumptionUpdate;
+        const newHandle = sru.newHandle || sru.new_handle;
+        if (sru.resumable && newHandle) {
+          console.log(`[${getLogTimestamp()}] [LiveTransport] Session resumption handle updated: ${newHandle.substring(0, 16)}...`);
+          this.resumptionHandle = newHandle;
+          this.callbacks.onSessionResumptionUpdate?.(newHandle);
+        }
         return;
+      }
+
+      // Server GoAway warning before disconnection
+      if (msg.goAway) {
+        console.warn(`[${getLogTimestamp()}] [LiveTransport] Received GoAway from Gemini Live, timeLeft: ${msg.goAway.timeLeft}`);
+        this.callbacks.onGoAway?.(msg.goAway.timeLeft || '');
       }
 
       // 1. Audio and serverContent
@@ -251,6 +312,11 @@ export class LiveTransport {
         if (sc.modelTurn?.parts) {
           for (const part of sc.modelTurn.parts) {
             if (part.inlineData?.data) {
+              if (!this.hasReceivedAudioThisTurn) {
+                this.hasReceivedAudioThisTurn = true;
+                const delayMs = this.lastTurnDispatchedAt > 0 ? `${Date.now() - this.lastTurnDispatchedAt}ms` : 'instant';
+                console.log(`[${getLogTimestamp()}] 🤖 [Maya Voice] First audio chunk received (delay: ${delayMs})`);
+              }
               this.callbacks.onAudioChunk?.(part.inlineData.data);
             }
           }
@@ -259,33 +325,35 @@ export class LiveTransport {
         // Subtitles / output transcript (Maya speaking)
         const outputText = sc.outputTranscription?.text || sc.output_transcription?.text;
         if (outputText) {
-          console.log('[LiveTransport Maya Subtitle]:', outputText);
+          this.currentTurnSubtitles += outputText;
           this.callbacks.onOutputTranscript?.(outputText);
         }
 
-        // Interim Student transcript (streaming preview)
+        // Interim Student transcript (streaming preview for UI)
         const interimText = sc.interimInputTranscription?.text || sc.interim_input_transcription?.text;
         if (interimText) {
-          console.log('[LiveTransport Hearing User]:', interimText);
           this.callbacks.onInputTranscript?.(interimText);
         }
 
         // Final Student transcript
         const inputText = sc.inputTranscription?.text || sc.input_transcription?.text;
         if (inputText) {
-          console.log('[LiveTransport User Transcript]:', inputText);
+          console.log(`[${getLogTimestamp()}] 📝 [Student Said]: "${inputText}"`);
           this.callbacks.onInputTranscript?.(inputText);
         }
 
         // Interrupted by user voice (barge-in)
         if (sc.interrupted) {
-          console.log('[LiveTransport Interrupted by user voice]');
+          console.log(`[${getLogTimestamp()}] ⚡ [Interrupted] User voice interrupted Maya`);
+          this.currentTurnSubtitles = '';
           this.callbacks.onInterrupted?.();
         }
 
         // Turn complete
         if (sc.turnComplete) {
-          console.log('[LiveTransport Turn Complete]');
+          const completeTranscript = this.currentTurnSubtitles.trim();
+          console.log(`[${getLogTimestamp()}] ✅ [Maya Turn Complete]${completeTranscript ? `: "${completeTranscript}"` : ''}`);
+          this.currentTurnSubtitles = '';
           this.callbacks.onTurnComplete?.();
         }
       }
@@ -295,7 +363,7 @@ export class LiveTransport {
         const functionResponses = [];
 
         for (const call of msg.toolCall.functionCalls) {
-          console.log('[LiveTransport Tool Call]:', call.name, call.args);
+          console.log(`[${getLogTimestamp()}] 🛠️ [Tool Call]: ${call.name}`, call.args || {});
           if (call.name === 'show_grammar_correction' && call.args) {
             const correction: GrammarCorrectionPayload = {
               studentSaid: call.args.studentSaid,
@@ -338,10 +406,9 @@ export class LiveTransport {
         }
       }
 
-      // 3. Usage metadata (can be on top-level msg, serverContent, or modelTurn)
+      // 3. Usage metadata (internal ledger update, no terminal spam)
       const usage = msg.usageMetadata || msg.serverContent?.usageMetadata || msg.serverContent?.modelTurn?.usageMetadata;
       if (usage) {
-        console.log('[LiveTransport Usage Metadata]:', usage);
         this.callbacks.onUsageUpdate?.({
           audioIn: usage.promptTokenCount || 0,
           audioOut: usage.candidatesTokenCount || 0,
@@ -351,6 +418,10 @@ export class LiveTransport {
     } catch (e) {
       console.error('[LiveTransport] Error parsing incoming WebSocket message:', e);
     }
+  }
+
+  getResumptionHandle(): string | null {
+    return this.resumptionHandle;
   }
 
   close() {

@@ -57,7 +57,8 @@ export class NativeAudioPlayer implements IAudioPlayer {
   private statusSub: any = null;
   private queue: string[] = [];
   private isPlayingAudio: boolean = false;
-  private readonly batchSize: number = 3; // ~150ms chunks per playlist segment for low latency
+  private readonly initialBatchSize: number = 6; // ~300ms initial buffer so ExoPlayer never starves
+  private readonly chunkBatchSize: number = 8; // ~400ms per batch for smooth, gapless playback
   private idleDebounceTimer: any = null;
 
   async init(callbacks?: AudioPlayerCallbacks): Promise<void> {
@@ -121,15 +122,21 @@ export class NativeAudioPlayer implements IAudioPlayer {
           const hasQueued = this.queue.length > 0;
 
           if (hasMoreTracks || hasQueued) {
-            // Track transition in progress, do NOT declare idle
             if (this.idleDebounceTimer) {
               clearTimeout(this.idleDebounceTimer);
               this.idleDebounceTimer = null;
             }
+            if (hasQueued) {
+              this.enqueueBatchAndPlay();
+            } else if (hasMoreTracks) {
+              try {
+                this.playlist?.play();
+              } catch {}
+            }
             return;
           }
 
-          // Debounce idle declaration by 600ms to allow final track and Android speaker buffer to finish draining completely
+          // Debounce idle declaration by 1000ms to allow final track and Android speaker buffer to finish draining completely
           if (!this.idleDebounceTimer && this.isPlayingAudio) {
             this.idleDebounceTimer = setTimeout(() => {
               if (this.queue.length > 0) {
@@ -141,7 +148,7 @@ export class NativeAudioPlayer implements IAudioPlayer {
               this.callbacks?.onPlaybackStateChange?.('idle');
               this.callbacks?.onVolumeChange?.(0);
               this.idleDebounceTimer = null;
-            }, 600);
+            }, 1000);
           }
         }
       });
@@ -181,22 +188,19 @@ export class NativeAudioPlayer implements IAudioPlayer {
 
     this.queue.push(base64Pcm);
 
-    // Enqueue batch when enough chunks arrive (~300ms) to ensure continuous, gapless playback
-    if (!this.isPlayingAudio) {
-      if (this.queue.length >= this.batchSize) {
-        this.enqueueBatchAndPlay();
-      }
-    } else {
-      if (this.queue.length >= this.batchSize) {
-        this.enqueueBatchAndPlay();
-      }
+    // Start playing when initial buffer reaches initialBatchSize (~300ms)
+    // While already playing, enqueue additional batches when chunkBatchSize is reached
+    const requiredBatch = this.isPlayingAudio ? this.chunkBatchSize : this.initialBatchSize;
+    if (this.queue.length >= requiredBatch) {
+      this.enqueueBatchAndPlay();
     }
   }
 
-  private assembleBatchWavUri(maxChunks: number): string | null {
+  private assembleBatchWavUri(maxChunks?: number): string | null {
     if (this.queue.length === 0) return null;
+    const limit = maxChunks ?? this.queue.length;
     const batch: string[] = [];
-    while (this.queue.length > 0 && batch.length < maxChunks) {
+    while (this.queue.length > 0 && batch.length < limit) {
       batch.push(this.queue.shift()!);
     }
 
@@ -209,7 +213,7 @@ export class NativeAudioPlayer implements IAudioPlayer {
     return `data:audio/wav;base64,${wavBase64}`;
   }
 
-  private enqueueBatchAndPlay(): void {
+  private enqueueBatchAndPlay(drainAll: boolean = false): void {
     if (!this.playlist) {
       this.setupPlaylist();
     }
@@ -220,12 +224,12 @@ export class NativeAudioPlayer implements IAudioPlayer {
       this.idleDebounceTimer = null;
     }
 
-    const dataUri = this.assembleBatchWavUri(this.batchSize);
+    // Drain all available chunks or up to chunkBatchSize * 2 to minimize track switches
+    const dataUri = this.assembleBatchWavUri(drainAll ? undefined : Math.min(this.queue.length, this.chunkBatchSize * 2));
     if (!dataUri) return;
 
     try {
       if (!this.isPlayingAudio) {
-        // Reset playlist for each new speech turn so playback starts cleanly at track 0
         console.log('[NativeAudioPlayer] Starting new speech turn -> resetting playlist for track 0');
         this.setupPlaylist();
         this.playlist!.add({ uri: dataUri });
@@ -234,6 +238,8 @@ export class NativeAudioPlayer implements IAudioPlayer {
         this.playlist!.play();
       } else {
         this.playlist.add({ uri: dataUri });
+        // Critical for Android ExoPlayer: if the previous track finished before this one was added,
+        // calling play() restarts playback of the appended item so it never gets stuck!
         this.playlist.play();
       }
     } catch (err) {
@@ -242,13 +248,13 @@ export class NativeAudioPlayer implements IAudioPlayer {
   }
 
   flush(): void {
-    // When turn completes, cancel any pending idle timer and flush remaining chunks into playlist
+    // When turn completes, cancel any pending idle timer and flush remaining chunks into playlist in a single batch
     if (this.idleDebounceTimer) {
       clearTimeout(this.idleDebounceTimer);
       this.idleDebounceTimer = null;
     }
-    while (this.queue.length > 0) {
-      this.enqueueBatchAndPlay();
+    if (this.queue.length > 0) {
+      this.enqueueBatchAndPlay(true);
     }
   }
 
