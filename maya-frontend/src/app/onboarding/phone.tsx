@@ -3,6 +3,7 @@ import { View, Text, TextInput, StyleSheet, Pressable, KeyboardAvoidingView, Pla
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
+import { StepTransition } from '@/components/onboarding/step-transition';
 import { LKFlag } from '@/components/icons/lk-flag';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Colors, Radii } from '@/theme/tokens';
@@ -14,7 +15,7 @@ export default function PhoneScreen() {
 
   const handleSendCode = () => {
     const formattedPhone = phone.trim() ? `+94 ${phone.trim()}` : '+94 77 123 4567';
-    router.push({
+    router.replace({
       pathname: '/onboarding/otp',
       params: {
         name: params.name || '',
@@ -36,7 +37,7 @@ export default function PhoneScreen() {
           </View>
 
           {/* Main Content */}
-          <View style={styles.body}>
+          <StepTransition style={styles.body}>
             {/* Plan Info Card */}
             <View style={styles.planCard}>
               <Text style={styles.cardHeader}>
@@ -73,7 +74,7 @@ export default function PhoneScreen() {
                 />
               </View>
             </View>
-          </View>
+          </StepTransition>
 
           {/* Bottom Button */}
           <View style={styles.footer}>

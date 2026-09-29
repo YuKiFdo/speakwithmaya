@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { StepTransition } from '@/components/onboarding/step-transition';
 import { Colors, Radii } from '@/theme/tokens';
 
 export default function IntroCallScreen() {
@@ -23,15 +24,15 @@ export default function IntroCallScreen() {
   }>();
 
   const handleStartCall = () => {
-    router.push({
+    router.replace({
       pathname: '/onboarding/connecting',
       params,
     });
   };
 
   const handleSkip = () => {
-    router.push({
-      pathname: '/explore',
+    router.replace({
+      pathname: '/dashboard',
       params,
     });
   };
@@ -39,8 +40,9 @@ export default function IntroCallScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <ScrollView
-          style={styles.scrollArea}
+        <StepTransition style={{ flex: 1, width: '100%' }}>
+          <ScrollView
+            style={styles.scrollArea}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
@@ -137,6 +139,7 @@ export default function IntroCallScreen() {
             <Text style={styles.startCallButtonText}>Start Call</Text>
           </Pressable>
         </View>
+        </StepTransition>
       </View>
     </SafeAreaView>
   );

@@ -21,15 +21,15 @@ export default function SessionCompleteScreen() {
   const practiceDuration = params.duration || '15 min';
 
   const handleContinueLearning = () => {
-    router.push({
-      pathname: '/explore',
+    router.replace({
+      pathname: '/dashboard',
       params,
     });
   };
 
   const handleViewSummary = () => {
-    router.push({
-      pathname: '/explore',
+    router.replace({
+      pathname: '/history',
       params: { ...params, viewSummary: 'true' },
     });
   };

@@ -9,21 +9,22 @@
 
 | Dimension | Verified Fact | Source URL |
 | :--- | :--- | :--- |
-| **Recommended Model ID** | `gemini-3.1-flash-live-preview` (Current generation live preview model, updated March 2026) | [Gemini Live Models](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-live-preview) |
-| **Fallback / Secondary Model** | `gemini-2.5-flash-native-audio-preview-12-2025` | [Gemini Pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-25-flash-native-audio-live-api) |
-| **Audio Input Format** | Raw 16-bit linear PCM, 16 kHz sample rate, little-endian, mono (`audio/pcm;rate=16000`) | [Live API WebSocket Guide](https://ai.google.dev/gemini-api/docs/live-api/get-started-websocket#send-audio) |
-| **Audio Output Format** | 24 kHz linear PCM audio stream (`audio/pcm;rate=24000`) | [Live API Audio Reference](https://ai.google.dev/gemini-api/docs/live-api) |
+| **Recommended Conversational Live Model** | `gemini-3.8-live` (Full bidirectional speech agent with `response_modalities: ["AUDIO"]`) | [Gemini Live API Guide](https://ai.google.dev/gemini-api/docs/live-api) |
+| **Live Transcription Model** | `gemini-3.5-transcribe-live` (Dedicated speech-to-text pipeline, `response_modalities: ["TEXT"]`, supports `mode: "SMART" \| "VERBATIM"`, `custom_vocabulary`, automatic language detection) | [Gemini 3.5 Transcribe Live](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe) |
+| **Fallback Live Model** | `gemini-3.1-flash-live-preview` / `gemini-2.5-flash-native-audio-preview-12-2025` | [Gemini Pricing](https://ai.google.dev/gemini-api/docs/pricing) |
+| **WebSocket Connection Endpoint** | `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={API_KEY}` | [Gemini Live WebSocket Docs](https://ai.google.dev/gemini-api/docs/live-api) |
+| **Audio Input Format** | Raw 16-bit linear PCM, 16 kHz sample rate, little-endian, mono (`audio/pcm;rate=16000`), sent in chunks of ~100ms via `realtimeInput.audio: { data, mimeType }` | [Live API Audio Reference](https://ai.google.dev/gemini-api/docs/live-api) |
+| **Audio Output Format** | 24 kHz linear PCM audio stream (`audio/pcm;rate=24000`) emitted via `serverContent.modelTurn.parts[].inlineData.data` | [Live API Audio Reference](https://ai.google.dev/gemini-api/docs/live-api) |
+| **Stream Termination Signal** | Client signals utterance completion or end of stream via `realtimeInput: { audioStreamEnd: true }` | [Gemini Live Capabilities](https://ai.google.dev/gemini-api/docs/live-api/capabilities) |
+| **Non-Blocking Tool Calling** | Tool declarations support `behavior: "NON_BLOCKING"` to execute grammar evaluation and UI actions asynchronously without halting voice dialogue. Client responds with `scheduling: "WHEN_IDLE"` | [Live API Tool Use](https://ai.google.dev/gemini-api/docs/live-api/tools) |
+| **Transcriptions (Interim & Final)** | Emits `interim_input_transcription` (low-latency partial updates for UI subtitle preview) and `input_transcription` (authoritative committed text) | [Live API Transcription Docs](https://ai.google.dev/gemini-api/docs/live-api) |
 | **Audio Input Pricing** | **$3.00 per 1M tokens** (equivalent to approximately **$0.005 per minute** of audio streamed) | [Gemini 3.1 Flash Live Pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-31-flash-live-preview) |
 | **Audio Output Pricing** | **$12.00 per 1M tokens** (equivalent to approximately **$0.018 per minute** of audio generated) | [Gemini 3.1 Flash Live Pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-31-flash-live-preview) |
 | **Text Input Pricing** | $0.75 per 1M tokens | [Gemini 3.1 Flash Live Pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-31-flash-live-preview) |
 | **Text Output Pricing** | $4.50 per 1M tokens | [Gemini 3.1 Flash Live Pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-31-flash-live-preview) |
 | **Audio Token Rate (In)** | ~25 tokens per second (~1,500 tokens/minute) | [Gemini Audio Tokens](https://ai.google.dev/gemini-api/docs/tokens) |
 | **Audio Token Rate (Out)** | ~30–35 tokens per second (~1,800–2,100 tokens/minute) | [Gemini Audio Tokens](https://ai.google.dev/gemini-api/docs/tokens) |
-| **Context Window** | Input token limit: 131,072; Output token limit: 65,536 | [Gemini 3.1 Flash Live Card](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-live-preview) |
-| **Session Duration Limits** | `expireTime` configurable up to 30 minutes; `newSessionExpireTime` default 1 minute | [Ephemeral Tokens Guide](https://ai.google.dev/gemini-api/docs/live-api/ephemeral-tokens) |
 | **Session Resumption** | Supported via `sessionResumption: {}` configuration; allows reconnecting a session every 10 minutes | [Session Resumption Guide](https://ai.google.dev/gemini-api/docs/live-session#session-resumption) |
-| **Turn Coverage** | Defaults to `TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO` | [Live API Capabilities](https://ai.google.dev/gemini-api/docs/live-api/capabilities) |
-| **Thinking Configuration** | Uses `thinkingLevel: "minimal"` for lowest latency dialogue | [Gemini 3.1 Live Migration](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-live-preview#migrating-from-gemini-25-flash-live) |
 
 ### Ephemeral Token Architecture (Browser Client Direct Connection)
 1. **Server-Side Token Minting Endpoint:**

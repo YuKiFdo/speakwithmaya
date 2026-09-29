@@ -11,7 +11,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import Svg, { Circle } from 'react-native-svg';
 
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+// Strip out React Native Web's synthetic collapsable attribute before passing to SVG circle on Web only
+const BaseCircle = Platform.OS === 'web'
+  ? React.forwardRef<any, any>(({ collapsable, ...props }, ref) => <Circle ref={ref} {...props} />)
+  : Circle;
+
+if (Platform.OS === 'web') {
+  (BaseCircle as any).displayName = 'WebSafeCircle';
+}
+
+const AnimatedCircle = Animated.createAnimatedComponent(BaseCircle);
 
 // Checklist steps with their trigger thresholds
 const CHECKLIST_ITEMS = [
@@ -34,6 +43,32 @@ const STROKE_WIDTH = 8;
 const RADIUS = (CIRCLE_SIZE - STROKE_WIDTH) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
+// Isolated counter component: only the percentage number re-renders on ticks,
+// leaving the parent screen, SVG tree, and checklist completely calm at 60 FPS
+const PercentageCounter = React.memo(function PercentageCounter({
+  anim,
+}: {
+  anim: Animated.Value;
+}) {
+  const [percent, setPercent] = useState(0);
+
+  useEffect(() => {
+    let last = -1;
+    const id = anim.addListener(({ value }) => {
+      const p = Math.round(value * 100);
+      if (p !== last) {
+        last = p;
+        setPercent(p);
+      }
+    });
+    return () => {
+      anim.removeListener(id);
+    };
+  }, [anim]);
+
+  return <Text style={styles.percentText}>{percent}%</Text>;
+});
+
 export default function BuildingPlanScreen() {
   const params = useLocalSearchParams<{
     phone?: string;
@@ -46,49 +81,57 @@ export default function BuildingPlanScreen() {
   }>();
 
   const progressAnim = useRef(new Animated.Value(0)).current;
-  const [displayPercent, setDisplayPercent] = useState(0);
-  const [statusText, setStatusText] = useState(STATUS_MESSAGES[0].text);
-  const [checkedItems, setCheckedItems] = useState<boolean[]>(
-    CHECKLIST_ITEMS.map(() => false),
-  );
 
-  // Animated stroke dash offset
-  const strokeDashoffset = progressAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [CIRCUMFERENCE, 0],
-  });
+  // Stored in ref so it is created once, not 100 times during ticks
+  const strokeDashoffset = useRef(
+    progressAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [CIRCUMFERENCE, 0],
+    }),
+  ).current;
+
+  const [statusText, setStatusText] = useState(STATUS_MESSAGES[0].text);
+  const [checkedCount, setCheckedCount] = useState(0);
 
   useEffect(() => {
-    // Listener to update display percent, status text, and checklist
+    let lastMsg = STATUS_MESSAGES[0].text;
+    let lastCount = 0;
+
     const listenerId = progressAnim.addListener(({ value }) => {
-      const pct = Math.round(value * 100);
-      setDisplayPercent(pct);
-
-      // Update status message
-      let currentMessage = STATUS_MESSAGES[0].text;
+      // 1. Update status message ONLY when milestone is crossed (4 times total)
+      let currentMsg = STATUS_MESSAGES[0].text;
       for (const msg of STATUS_MESSAGES) {
-        if (value >= msg.at) currentMessage = msg.text;
+        if (value >= msg.at) currentMsg = msg.text;
       }
-      setStatusText(currentMessage);
+      if (currentMsg !== lastMsg) {
+        lastMsg = currentMsg;
+        setStatusText(currentMsg);
+      }
 
-      // Check off items
-      setCheckedItems(CHECKLIST_ITEMS.map((item) => value >= item.triggerAt));
+      // 2. Update checklist ONLY when a threshold is crossed (3 times total)
+      let count = 0;
+      for (let i = 0; i < CHECKLIST_ITEMS.length; i++) {
+        if (value >= CHECKLIST_ITEMS[i].triggerAt) count = i + 1;
+      }
+      if (count !== lastCount) {
+        lastCount = count;
+        setCheckedCount(count);
+      }
     });
 
-    // Run the progress animation (~3 seconds)
+    // Run the progress animation (~3.2 seconds) with smooth cubic ease-out
     Animated.timing(progressAnim, {
       toValue: 1,
       duration: 3200,
-      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-      useNativeDriver: false, // We need JS-driven for the listener
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
     }).start(() => {
-      // Navigate to next screen after a brief pause
       setTimeout(() => {
         router.replace({
           pathname: '/onboarding/intro-call',
           params,
         });
-      }, 600);
+      }, 500);
     });
 
     return () => {
@@ -130,9 +173,9 @@ export default function BuildingPlanScreen() {
               transform={`rotate(-90 ${CIRCLE_SIZE / 2} ${CIRCLE_SIZE / 2})`}
             />
           </Svg>
-          {/* Percentage text overlaid */}
+          {/* Isolated percentage counter */}
           <View style={styles.percentOverlay}>
-            <Text style={styles.percentText}>{displayPercent}%</Text>
+            <PercentageCounter anim={progressAnim} />
           </View>
         </View>
 
@@ -143,7 +186,7 @@ export default function BuildingPlanScreen() {
         {/* Checklist */}
         <View style={styles.checklist}>
           {CHECKLIST_ITEMS.map((item, index) => {
-            const isChecked = checkedItems[index];
+            const isChecked = index < checkedCount;
             return (
               <View key={item.label} style={styles.checklistRow}>
                 <View
@@ -207,29 +250,27 @@ const styles = StyleSheet.create({
       : { fontFamily: 'Outfit_700Bold' }),
   },
   title: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '800',
     color: '#0f172a',
-    letterSpacing: -0.5,
-    textAlign: 'center',
-    marginBottom: 8,
+    letterSpacing: -0.4,
+    marginBottom: 6,
     ...(Platform.OS === 'web'
       ? { fontFamily: 'Outfit, sans-serif' }
       : { fontFamily: 'Outfit_800ExtraBold' }),
   },
   subtitle: {
     fontSize: 15,
-    color: '#94a3b8',
-    textAlign: 'center',
-    marginBottom: 40,
+    color: '#64748b',
+    marginBottom: 36,
+    height: 22,
     ...(Platform.OS === 'web'
       ? { fontFamily: 'Inter, sans-serif' }
       : { fontFamily: 'Inter_400Regular' }),
   },
   checklist: {
     width: '100%',
-    gap: 18,
-    paddingHorizontal: 8,
+    gap: 16,
   },
   checklistRow: {
     flexDirection: 'row',
@@ -237,35 +278,33 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   checkCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#e8ecf0',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#cbd5e1',
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkCircleActive: {
     backgroundColor: '#0085db',
+    borderColor: '#0085db',
   },
   checkMark: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     lineHeight: 18,
   },
   checkLabel: {
     fontSize: 16,
-    fontWeight: '600',
     color: '#0f172a',
+    fontWeight: '500',
     ...(Platform.OS === 'web'
       ? { fontFamily: 'Inter, sans-serif' }
-      : { fontFamily: 'Inter_600SemiBold' }),
+      : { fontFamily: 'Inter_500Medium' }),
   },
   checkLabelInactive: {
-    color: '#cbd5e1',
-    fontWeight: '400',
-    ...(Platform.OS === 'web'
-      ? { fontFamily: 'Inter, sans-serif' }
-      : { fontFamily: 'Inter_400Regular' }),
+    color: '#94a3b8',
   },
 });

@@ -15,10 +15,6 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
 import {
-  HomeNavIcon,
-  RoadmapNavIcon,
-  HistoryNavIcon,
-  AccountNavIcon,
   CrownSolidIcon,
 } from '@/components/icons/nav-icons';
 import {
@@ -58,11 +54,11 @@ export default function AccountScreen() {
 
   const handleSelectTab = (tab: DashboardTab) => {
     if (tab === 'home') {
-      router.push({ pathname: '/dashboard', params });
+      router.replace({ pathname: '/dashboard', params });
     } else if (tab === 'roadmap') {
-      router.push({ pathname: '/roadmap', params });
+      router.replace({ pathname: '/roadmap', params });
     } else if (tab === 'history') {
-      router.push({ pathname: '/history', params });
+      router.replace({ pathname: '/history', params });
     } else {
       setActiveTab(tab);
     }
@@ -229,47 +225,7 @@ export default function AccountScreen() {
           </ScrollView>
         </View>
 
-        {/* ==================================================================== */}
-        {/* MOBILE BOTTOM NAVIGATION TABS (MATCHES SCREENSHOT) */}
-        {/* ==================================================================== */}
-        {!isDesktop && (
-          <View style={styles.mobileBottomTabs}>
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => router.push({ pathname: '/dashboard', params })}
-            >
-              <HomeNavIcon active={false} size={24} />
-              <Text style={styles.mobileTabLabel}>Home</Text>
-            </Pressable>
 
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => router.push({ pathname: '/roadmap', params })}
-            >
-              <RoadmapNavIcon active={false} size={24} />
-              <Text style={styles.mobileTabLabel}>Roadmap</Text>
-            </Pressable>
-
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => router.push({ pathname: '/history', params })}
-            >
-              <HistoryNavIcon active={false} size={24} />
-              <Text style={styles.mobileTabLabel}>History</Text>
-            </Pressable>
-
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => setActiveTab('account')}
-            >
-              <AccountNavIcon active={true} size={24} color="#0057FF" />
-              <Text style={[styles.mobileTabLabel, styles.mobileTabLabelActive]}>
-                Account
-              </Text>
-              <View style={styles.activeIndicatorDot} />
-            </Pressable>
-          </View>
-        )}
 
         {/* ==================================================================== */}
         {/* POPUP MODAL */}
@@ -1204,43 +1160,4 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 
-  /* Mobile Bottom Navigation */
-  mobileBottomTabs: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  mobileTabItem: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 4,
-    minWidth: 60,
-  },
-  mobileTabLabel: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 11,
-    color: '#94A3B8',
-    marginTop: 4,
-  },
-  mobileTabLabelActive: {
-    ...fontStyle('outfit', 'bold'),
-    color: '#0057FF',
-  },
-  activeIndicatorDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#0057FF',
-    marginTop: 3,
-  },
 });

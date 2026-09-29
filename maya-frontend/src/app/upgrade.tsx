@@ -17,12 +17,7 @@ import { Fonts, fontStyle } from '@/theme/fonts';
 import { Radii } from '@/theme/tokens';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
-import {
-  HomeNavIcon,
-  RoadmapNavIcon,
-  HistoryNavIcon,
-  AccountNavIcon,
-} from '@/components/icons/nav-icons';
+import { Ionicons } from '@expo/vector-icons';
 
 // ─── Plan Data ───────────────────────────────────────────────────────────────
 
@@ -313,11 +308,11 @@ export default function UpgradeScreen() {
   };
 
   // Mobile bottom nav tab data
-  const MOBILE_TABS: { id: DashboardTab; label: string; Icon: typeof HomeNavIcon }[] = [
-    { id: 'home', label: 'Home', Icon: HomeNavIcon },
-    { id: 'roadmap', label: 'Roadmap', Icon: RoadmapNavIcon },
-    { id: 'history', label: 'History', Icon: HistoryNavIcon },
-    { id: 'account', label: 'Account', Icon: AccountNavIcon },
+  const MOBILE_TABS: { id: DashboardTab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { id: 'home', label: 'Home', icon: 'home-outline' },
+    { id: 'roadmap', label: 'Roadmap', icon: 'map-outline' },
+    { id: 'history', label: 'History', icon: 'time-outline' },
+    { id: 'account', label: 'Account', icon: 'person-outline' },
   ];
 
   return (
@@ -662,26 +657,28 @@ export default function UpgradeScreen() {
       {/* ──────────── MOBILE BOTTOM NAV ──────────── */}
       {!isDesktop && (
         <View style={styles.mobileBottomTabs}>
-          {MOBILE_TABS.map((tab) => {
-            const isActive = false;
-            return (
-              <Pressable
-                key={tab.id}
-                style={styles.mobileTabItem}
-                onPress={() => handleSelectTab(tab.id)}
-                accessibilityRole="button"
-                accessibilityLabel={tab.label}
-              >
-                <tab.Icon
-                  color={isActive ? '#0085db' : '#94a3b8'}
-                  size={22}
-                />
-                <Text style={styles.mobileTabLabel}>
-                  {tab.label}
-                </Text>
-              </Pressable>
-            );
-          })}
+          {MOBILE_TABS.map((tab) => (
+            <Pressable
+              key={tab.id}
+              style={({ pressed }) => [
+                styles.mobileTabItem,
+                pressed && { opacity: 0.7 },
+              ]}
+              android_ripple={{ color: 'rgba(43, 91, 255, 0.12)', borderless: true, radius: 28 }}
+              onPress={() => handleSelectTab(tab.id)}
+              accessibilityRole="button"
+              accessibilityLabel={tab.label}
+            >
+              <Ionicons
+                name={tab.icon}
+                size={22}
+                color="#94a3b8"
+              />
+              <Text style={styles.mobileTabLabel}>
+                {tab.label}
+              </Text>
+            </Pressable>
+          ))}
         </View>
       )}
     </SafeAreaView>

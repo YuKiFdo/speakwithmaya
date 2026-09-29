@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, StyleSheet, Animated, Easing } from 'react-native';
 import { Colors } from '@/theme/tokens';
 
 interface ProgressBarProps {
@@ -7,11 +7,30 @@ interface ProgressBarProps {
 }
 
 export function ProgressBar({ progress }: ProgressBarProps) {
-  const percentage = Math.min(Math.max(progress * 100, 0), 100);
+  // Clamp progress between 0 and 1
+  const target = Math.min(Math.max(progress, 0), 1);
+  
+  // Start slightly behind target on first mount so the initial transition glides forward nicely
+  const animValue = useRef(new Animated.Value(Math.max(0, target - 0.12))).current;
+
+  useEffect(() => {
+    Animated.timing(animValue, {
+      toValue: target,
+      duration: 360,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [target]);
+
+  const widthInterpolation = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+    extrapolate: 'clamp',
+  });
 
   return (
     <View style={styles.track}>
-      <View style={[styles.fill, { width: `${percentage}%` }]} />
+      <Animated.View style={[styles.fill, { width: widthInterpolation }]} />
     </View>
   );
 }

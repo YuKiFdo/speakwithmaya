@@ -3,6 +3,7 @@ import { View, Text, TextInput, StyleSheet, Pressable, KeyboardAvoidingView, Pla
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
+import { StepTransition } from '@/components/onboarding/step-transition';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Radii } from '@/theme/tokens';
 
@@ -12,7 +13,7 @@ export default function NameScreen() {
 
   const handleContinue = () => {
     // Navigate to screen 3 (phone number & plan)
-    router.push({
+    router.replace({
       pathname: '/onboarding/phone',
       params: { name: name.trim() },
     });
@@ -36,7 +37,7 @@ export default function NameScreen() {
           </View>
 
           {/* Main Body */}
-          <View style={styles.body}>
+          <StepTransition style={styles.body}>
             {/* Card Prompt */}
             <View style={styles.promptCard}>
               <Text style={styles.cardGreeting}>
@@ -61,7 +62,7 @@ export default function NameScreen() {
                 onSubmitEditing={handleContinue}
               />
             </View>
-          </View>
+          </StepTransition>
 
           {/* Bottom Button */}
           <View style={styles.footer}>

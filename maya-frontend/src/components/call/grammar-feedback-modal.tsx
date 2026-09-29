@@ -538,12 +538,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#2B5BFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
+    ...Platform.select({
+      web: { boxShadow: '0 4px 8px rgba(43, 91, 255, 0.25)' } as any,
+      default: {
+        shadowColor: '#2B5BFF',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 8,
+        elevation: 4,
+      },
+    }),
   },
+
   ctaButtonPressed: {
     backgroundColor: '#1E40AF',
     transform: [{ scale: 0.99 }],

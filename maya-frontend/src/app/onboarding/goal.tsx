@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
+import { StepTransition } from '@/components/onboarding/step-transition';
 import { OptionCard } from '@/components/onboarding/option-card';
 import { Colors, Radii } from '@/theme/tokens';
 
@@ -51,7 +52,7 @@ export default function GoalScreen() {
 
   const handleContinue = () => {
     if (!selectedGoal) return;
-    router.push({
+    router.replace({
       pathname: '/onboarding/challenge',
       params: { ...params, goal: selectedGoal },
     });
@@ -66,8 +67,9 @@ export default function GoalScreen() {
         </View>
 
         {/* Scrollable Content */}
-        <ScrollView
-          style={styles.scrollArea}
+        <StepTransition style={{ flex: 1, width: '100%' }}>
+          <ScrollView
+            style={styles.scrollArea}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
@@ -109,6 +111,7 @@ export default function GoalScreen() {
             <Text style={styles.ctaButtonText}>Continue</Text>
           </Pressable>
         </View>
+        </StepTransition>
       </View>
     </SafeAreaView>
   );

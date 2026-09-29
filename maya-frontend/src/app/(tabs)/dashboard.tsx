@@ -15,10 +15,7 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Colors, Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
 import {
-  HomeNavIcon,
-  RoadmapNavIcon,
   HistoryNavIcon,
-  AccountNavIcon,
   CrownSolidIcon,
   BannerCrownIcon,
   BannerRoadmapIcon,
@@ -150,17 +147,17 @@ export default function DashboardScreen() {
 
   const handleSelectTab = (tab: DashboardTab) => {
     if (tab === 'roadmap') {
-      router.push({
+      router.replace({
         pathname: '/roadmap',
         params,
       });
     } else if (tab === 'history') {
-      router.push({
+      router.replace({
         pathname: '/history',
         params,
       });
     } else if (tab === 'account') {
-      router.push({
+      router.replace({
         pathname: '/account',
         params,
       });
@@ -612,76 +609,7 @@ export default function DashboardScreen() {
           </View>
         </ScrollView>
 
-        {/* ==================================================================== */}
-        {/* MOBILE BOTTOM NAVIGATION TABS */}
-        {/* ==================================================================== */}
-        {!isDesktop && (
-          <View style={styles.mobileBottomTabs}>
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => setActiveTab('home')}
-            >
-              <HomeNavIcon active={activeTab === 'home'} size={24} />
-              <Text
-                style={[
-                  styles.mobileTabLabel,
-                  activeTab === 'home' && styles.mobileTabLabelActive,
-                ]}
-              >
-                Home
-              </Text>
-              {activeTab === 'home' && <View style={styles.activeDot} />}
-            </Pressable>
 
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => router.push({ pathname: '/roadmap', params })}
-            >
-              <RoadmapNavIcon active={activeTab === 'roadmap'} size={24} />
-              <Text
-                style={[
-                  styles.mobileTabLabel,
-                  activeTab === 'roadmap' && styles.mobileTabLabelActive,
-                ]}
-              >
-                Roadmap
-              </Text>
-              {activeTab === 'roadmap' && <View style={styles.activeDot} />}
-            </Pressable>
-
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => router.push({ pathname: '/history', params })}
-            >
-              <HistoryNavIcon active={activeTab === 'history'} size={24} />
-              <Text
-                style={[
-                  styles.mobileTabLabel,
-                  activeTab === 'history' && styles.mobileTabLabelActive,
-                ]}
-              >
-                History
-              </Text>
-              {activeTab === 'history' && <View style={styles.activeDot} />}
-            </Pressable>
-
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => router.push({ pathname: '/account', params })}
-            >
-              <AccountNavIcon active={activeTab === 'account'} size={24} />
-              <Text
-                style={[
-                  styles.mobileTabLabel,
-                  activeTab === 'account' && styles.mobileTabLabelActive,
-                ]}
-              >
-                Account
-              </Text>
-              {activeTab === 'account' && <View style={styles.activeDot} />}
-            </Pressable>
-          </View>
-        )}
 
         {/* ==================================================================== */}
         {/* COMMON POPUP (UNLOCK WITH PREMIUM / DAILY LIMIT / PRACTICE COMPLETE / LEVEL UP) */}
@@ -1308,51 +1236,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     textAlign: 'center',
   },
-  /* Mobile Bottom Navigation */
-  mobileBottomTabs: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 68,
-    backgroundColor: '#ffffff',
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingBottom: 8,
-  },
-  mobileTabItem: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    minWidth: 60,
-  },
-  mobileTabIcon: {
-    fontSize: 20,
-    opacity: 0.6,
-  },
-  mobileTabIconActive: {
-    opacity: 1,
-  },
-  mobileTabLabel: {
-    ...fontStyle('outfit', 'medium'),
-    fontSize: 11,
-    color: '#64748b',
-    marginTop: 3,
-  },
-  mobileTabLabelActive: {
-    ...fontStyle('outfit', 'bold'),
-    color: '#2B5BFF',
-  },
-  activeDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#2B5BFF',
-    marginTop: 2,
-  },
+
   cardPressed: {
     opacity: 0.92,
     transform: [{ scale: 0.99 }],

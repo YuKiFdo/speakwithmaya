@@ -16,12 +16,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Radii } from '@/theme/tokens';
 import { fontStyle } from '@/theme/fonts';
-import {
-  HomeNavIcon,
-  RoadmapNavIcon,
-  HistoryNavIcon,
-  AccountNavIcon,
-} from '@/components/icons/nav-icons';
+
 import {
   SearchIcon,
   FilterLinesIcon,
@@ -45,6 +40,7 @@ import {
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
+import { fetchAllPracticeSessions } from '@/services/supabase';
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
@@ -413,9 +409,70 @@ export default function HistoryScreen() {
     }
   };
 
+  // Dynamic & cached practice sessions
+  const [allSessions, setAllSessions] = useState<HistorySession[]>(MOCK_SESSIONS);
+
+  useEffect(() => {
+    fetchAllPracticeSessions().then((records) => {
+      if (records && records.length > 0) {
+        const converted: HistorySession[] = records.map((r, idx) => {
+          const d = new Date(r.start_time);
+          const durationMin = Math.max(1, Math.ceil(r.duration_seconds / 60));
+          return {
+            id: r.id,
+            mode: 'casual',
+            title: r.topic || 'General Practice',
+            dateGroup: 'Today',
+            dateString: isNaN(d.getTime())
+              ? 'Today'
+              : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            timeString: isNaN(d.getTime())
+              ? 'Just now'
+              : d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            durationString: `${durationMin} mins`,
+            recordingLengthString: `${durationMin}:00`,
+            durationSeconds: r.duration_seconds,
+            correctionsCount: r.corrections?.length || 0,
+            scores: {
+              overall: r.overall_score || 85,
+              fluency: r.fluency_score || 84,
+              grammar: r.grammar_score || 82,
+              pronunciation: r.pronunciation_score || 80,
+            },
+            transcript: (r.turns && r.turns.length > 0
+              ? r.turns
+              : [
+                  { role: 'model' as const, text: 'Hello! I am Maya, your English tutor.' },
+                  { role: 'user' as const, text: 'Hi Maya, I want to practice speaking today.' },
+                ]
+            ).map((t, i) => ({
+              id: `turn-${i}`,
+              speaker: t.role === 'model' ? 'ai' : 'user',
+              time: `0:0${i + 1}`,
+              message: t.text,
+            })),
+            corrections: (r.corrections || []).map((c, i) => ({
+              id: c.id || `corr-${i}`,
+              countText: `Correction ${i + 1}`,
+              originalText: c.studentSaid,
+              strikethroughPart: c.highlightWords?.[0] || c.studentSaid,
+              correctedText: c.moreNatural,
+              highlightCorrectedPart: c.highlightWords?.[0] || c.moreNatural,
+              whyExplanation: c.explanation,
+            })),
+          };
+        });
+
+        // Prepend new recorded sessions ahead of mock sessions
+        const combined = [...converted, ...MOCK_SESSIONS.filter((m) => !converted.some((c) => c.id === m.id))];
+        setAllSessions(combined);
+      }
+    });
+  }, []);
+
   // Filtered Sessions
   const filteredSessions = useMemo(() => {
-    return MOCK_SESSIONS.filter((session) => {
+    return allSessions.filter((session) => {
       const matchesSearch =
         session.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         session.dateString.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -428,7 +485,7 @@ export default function HistoryScreen() {
 
       return matchesSearch && matchesMode;
     });
-  }, [searchQuery, selectedMode]);
+  }, [allSessions, searchQuery, selectedMode]);
 
   // Grouped by Date
   const groupedSessions = useMemo(() => {
@@ -445,9 +502,10 @@ export default function HistoryScreen() {
   // Currently Selected Session
   const activeSession = useMemo(() => {
     return (
-      MOCK_SESSIONS.find((s) => s.id === selectedSessionId) || MOCK_SESSIONS[0]
+      allSessions.find((s) => s.id === selectedSessionId) || allSessions[0]
     );
-  }, [selectedSessionId]);
+  }, [allSessions, selectedSessionId]);
+
 
   // Playback Toggle
   const togglePlay = () => {
@@ -1346,47 +1404,7 @@ export default function HistoryScreen() {
             )
           )}
 
-          {/* ============================================================== */}
-          {/* MOBILE BOTTOM NAVIGATION BAR (Only on List view) */}
-          {/* ============================================================== */}
-          {!isDesktop && !selectedSessionId && (
-            <View style={styles.mobileBottomNav}>
-              <Pressable
-                style={styles.mobileTabItem}
-                onPress={() => router.push({ pathname: '/dashboard', params })}
-              >
-                <HomeNavIcon active={false} size={24} />
-                <Text style={styles.mobileTabLabel}>Home</Text>
-              </Pressable>
 
-              <Pressable
-                style={styles.mobileTabItem}
-                onPress={() => router.push({ pathname: '/roadmap', params })}
-              >
-                <RoadmapNavIcon active={false} size={24} />
-                <Text style={styles.mobileTabLabel}>Roadmap</Text>
-              </Pressable>
-
-              <Pressable
-                style={styles.mobileTabItem}
-                onPress={() => setSelectedSessionId(null)}
-              >
-                <HistoryNavIcon active={true} size={24} color="#0057FF" />
-                <Text style={[styles.mobileTabLabel, styles.mobileTabLabelActive]}>
-                  History
-                </Text>
-                <View style={styles.activeIndicatorDot} />
-              </Pressable>
-
-              <Pressable
-                style={styles.mobileTabItem}
-                onPress={() => router.push({ pathname: '/account', params })}
-              >
-                <AccountNavIcon active={false} size={24} />
-                <Text style={styles.mobileTabLabel}>Account</Text>
-              </Pressable>
-            </View>
-          )}
         </View>
 
         {/* ================================================================== */}
@@ -2134,51 +2152,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
 
-  // ── Bottom Nav (Mobile) ──
-  mobileBottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 64,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingBottom: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 8,
-  },
-  mobileTabItem: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    flex: 1,
-    position: 'relative',
-  },
-  mobileTabLabel: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 3,
-  },
-  mobileTabLabelActive: {
-    color: '#0057FF',
-    ...fontStyle('inter', 'bold'),
-  },
-  activeIndicatorDot: {
-    position: 'absolute',
-    bottom: 2,
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#0057FF',
-  },
+
 
   // ── Empty State ──
   emptyResultsBox: {

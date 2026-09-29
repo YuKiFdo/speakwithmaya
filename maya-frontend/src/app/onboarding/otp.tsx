@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
+import { StepTransition } from '@/components/onboarding/step-transition';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Colors, Radii } from '@/theme/tokens';
 
@@ -80,7 +81,7 @@ export default function OtpScreen() {
 
   const handleVerify = () => {
     const code = otp.join('');
-    router.push({
+    router.replace({
       pathname: '/onboarding/goal',
       params: { name: params.name, phone: params.phone },
     });
@@ -101,7 +102,7 @@ export default function OtpScreen() {
           </View>
 
           {/* Main Content */}
-          <View style={styles.body}>
+          <StepTransition style={styles.body}>
             {/* Header Prompt Card */}
             <View style={styles.promptCard}>
               <Text style={styles.cardTitle}>
@@ -162,7 +163,7 @@ export default function OtpScreen() {
                 </Text>
               )}
             </View>
-          </View>
+          </StepTransition>
 
           {/* Bottom CTA Button */}
           <View style={styles.footer}>

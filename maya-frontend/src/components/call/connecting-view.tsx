@@ -7,22 +7,16 @@ import {
   Animated,
   Easing,
   Platform,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
-import { Colors } from '@/theme/tokens';
+import { fontStyle } from '@/theme/fonts';
 
-export default function ConnectingScreen() {
-  const params = useLocalSearchParams<{
-    phone?: string;
-    name?: string;
-    goal?: string;
-    challenge?: string;
-    level?: string;
-    language?: string;
-    dailyGoal?: string;
-  }>();
+interface ConnectingViewProps {
+  onCancel?: () => void;
+}
 
+export function ConnectingView({ onCancel }: ConnectingViewProps) {
   // Animation values for radiating/rotating orbital rings
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -59,11 +53,6 @@ export default function ConnectingScreen() {
     rotationLoop.start();
     pulseLoop.start();
 
-    router.replace({
-      pathname: '/onboarding/call',
-      params,
-    });
-
     return () => {
       rotationLoop.stop();
       pulseLoop.stop();
@@ -83,6 +72,12 @@ export default function ConnectingScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
+        {onCancel ? (
+          <Pressable style={styles.cancelButton} onPress={onCancel} hitSlop={12}>
+            <Text style={styles.cancelButtonText}>✕</Text>
+          </Pressable>
+        ) : null}
+
         {/* Orbital Animation with Maya's Avatar */}
         <View style={styles.animationArea}>
           {/* Outer Ring 3 */}
@@ -137,7 +132,7 @@ export default function ConnectingScreen() {
           <Text style={styles.title}>Connecting to Maya...</Text>
           <Text style={styles.subtitle}>
             Setting things up for your conversation.{'\n'}
-            This will just take a few seconds.
+            Maya will welcome you in just a moment.
           </Text>
         </View>
 
@@ -181,6 +176,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#ffffff',
     alignItems: 'center',
+    width: '100%',
   },
   container: {
     flex: 1,
@@ -191,6 +187,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     alignSelf: 'center',
+    position: 'relative',
+  },
+  cancelButton: {
+    position: 'absolute',
+    top: 16,
+    right: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    color: '#64748b',
+    fontWeight: '700',
   },
   animationArea: {
     width: 280,
@@ -248,13 +262,14 @@ const styles = StyleSheet.create({
     marginVertical: 16,
   },
   title: {
+    ...fontStyle('outfit', 'bold'),
     fontSize: 27,
-    fontWeight: '800',
     color: '#0f172a',
     letterSpacing: -0.5,
     textAlign: 'center',
   },
   subtitle: {
+    ...fontStyle('outfit', 'medium'),
     fontSize: 15,
     color: '#64748b',
     textAlign: 'center',
@@ -276,8 +291,8 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   tipsHeader: {
+    ...fontStyle('outfit', 'bold'),
     fontSize: 17,
-    fontWeight: '700',
     color: '#0f172a',
     marginBottom: 16,
   },
@@ -298,15 +313,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkTick: {
+    ...fontStyle('outfit', 'bold'),
     color: '#ffffff',
     fontSize: 13,
-    fontWeight: '800',
     lineHeight: 15,
     textAlign: 'center',
   },
   tipText: {
+    ...fontStyle('outfit', 'medium'),
     fontSize: 14.5,
-    fontWeight: '500',
     color: '#334155',
   },
 });

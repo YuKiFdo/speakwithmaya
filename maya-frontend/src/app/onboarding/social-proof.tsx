@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
+import { StepTransition } from '@/components/onboarding/step-transition';
 import { LKFlag } from '@/components/icons/lk-flag';
 import { Colors, Radii } from '@/theme/tokens';
 
@@ -24,7 +25,7 @@ export default function SocialProofScreen() {
   }>();
 
   const handleContinue = () => {
-    router.push({
+    router.replace({
       pathname: '/onboarding/building-plan',
       params,
     });
@@ -35,12 +36,13 @@ export default function SocialProofScreen() {
       <View style={styles.container}>
         {/* Top Progress Bar */}
         <View style={styles.progressContainer}>
-          <ProgressBar progress={0.5} />
+          <ProgressBar progress={0.95} />
         </View>
 
         {/* Scrollable Content */}
-        <ScrollView
-          style={styles.scrollArea}
+        <StepTransition style={{ flex: 1, width: '100%' }}>
+          <ScrollView
+            style={styles.scrollArea}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
@@ -114,6 +116,7 @@ export default function SocialProofScreen() {
             <Text style={styles.ctaButtonText}>Continue</Text>
           </Pressable>
         </View>
+        </StepTransition>
       </View>
     </SafeAreaView>
   );

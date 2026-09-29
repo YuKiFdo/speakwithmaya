@@ -16,10 +16,6 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
 import {
-  HomeNavIcon,
-  RoadmapNavIcon,
-  HistoryNavIcon,
-  AccountNavIcon,
   LockIcon,
 } from '@/components/icons/nav-icons';
 import {
@@ -614,47 +610,7 @@ export default function RoadmapScreen() {
         </ScrollView>
       </View>
 
-        {/* ==================================================================== */}
-        {/* MOBILE BOTTOM NAVIGATION TABS (MATCHES SCREENSHOT) */}
-        {/* ==================================================================== */}
-        {!isDesktop && (
-          <View style={styles.mobileBottomTabs}>
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => router.push({ pathname: '/dashboard', params })}
-            >
-              <HomeNavIcon active={false} size={24} />
-              <Text style={styles.mobileTabLabel}>Home</Text>
-            </Pressable>
 
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => setActiveTab('roadmap')}
-            >
-              <RoadmapNavIcon active={true} size={24} color="#0057FF" />
-              <Text style={[styles.mobileTabLabel, styles.mobileTabLabelActive]}>
-                Roadmap
-              </Text>
-              <View style={styles.activeIndicatorDot} />
-            </Pressable>
-
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => router.push({ pathname: '/history', params })}
-            >
-              <HistoryNavIcon active={false} size={24} />
-              <Text style={styles.mobileTabLabel}>History</Text>
-            </Pressable>
-
-            <Pressable
-              style={styles.mobileTabItem}
-              onPress={() => router.push({ pathname: '/account', params })}
-            >
-              <AccountNavIcon active={false} size={24} />
-              <Text style={styles.mobileTabLabel}>Account</Text>
-            </Pressable>
-          </View>
-        )}
 
         {/* ==================================================================== */}
         {/* POPUP MODAL */}
@@ -1181,41 +1137,4 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  /* Mobile Bottom Navigation */
-  mobileBottomTabs: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 68,
-    backgroundColor: '#ffffff',
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingBottom: 8,
-  },
-  mobileTabItem: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-  },
-  mobileTabLabel: {
-    fontFamily: Fonts.outfit.medium,
-    fontSize: 10.5,
-    color: '#94a3b8',
-    marginTop: 3,
-  },
-  mobileTabLabelActive: {
-    color: '#0057FF',
-    fontFamily: Fonts.outfit.bold,
-  },
-  activeIndicatorDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#0057FF',
-    marginTop: 3,
-  },
 });

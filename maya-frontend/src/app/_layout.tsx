@@ -62,7 +62,15 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShown: false }}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: 'slide_from_right',
+          animationDuration: 280,
+          animationTypeForReplace: 'push',
+          contentStyle: { backgroundColor: '#ffffff' },
+        }}
+      >
         <Stack.Screen name="index" />
         <Stack.Screen name="onboarding/name" />
         <Stack.Screen name="onboarding/phone" />
@@ -73,17 +81,38 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding/language" />
         <Stack.Screen name="onboarding/daily-goal" />
         <Stack.Screen name="onboarding/social-proof" />
-        <Stack.Screen name="onboarding/building-plan" />
-        <Stack.Screen name="onboarding/intro-call" />
-        <Stack.Screen name="onboarding/connecting" />
-        <Stack.Screen name="onboarding/call" />
-        <Stack.Screen name="onboarding/complete" />
-        <Stack.Screen name="dashboard" />
-        <Stack.Screen name="explore" />
-        <Stack.Screen name="roadmap" />
-        <Stack.Screen name="history" />
-        <Stack.Screen name="account" />
-        <Stack.Screen name="upgrade" />
+        <Stack.Screen
+          name="onboarding/building-plan"
+          options={{ animation: 'fade', animationDuration: 240 }}
+        />
+        <Stack.Screen
+          name="onboarding/intro-call"
+          options={{ animation: 'slide_from_right', animationDuration: 280 }}
+        />
+        <Stack.Screen
+          name="onboarding/connecting"
+          options={{ animation: 'fade', animationDuration: 240 }}
+        />
+        <Stack.Screen
+          name="onboarding/call"
+          options={{ animation: 'fade', animationDuration: 260 }}
+        />
+        <Stack.Screen
+          name="onboarding/complete"
+          options={{ animation: 'fade', animationDuration: 260 }}
+        />
+        <Stack.Screen
+          name="(tabs)"
+          options={{ animation: 'fade', animationDuration: 180 }}
+        />
+        <Stack.Screen
+          name="explore"
+          options={{ animation: 'fade', animationDuration: 180 }}
+        />
+        <Stack.Screen
+          name="upgrade"
+          options={{ animation: 'slide_from_bottom', animationDuration: 280 }}
+        />
       </Stack>
     </ThemeProvider>
   );

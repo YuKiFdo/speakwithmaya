@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
+import { StepTransition } from '@/components/onboarding/step-transition';
 import { OptionCard } from '@/components/onboarding/option-card';
 import { LKFlag } from '@/components/icons/lk-flag';
 import { Colors, Radii } from '@/theme/tokens';
@@ -85,7 +86,7 @@ export default function LanguageScreen() {
 
   const handleContinue = () => {
     if (!selectedLanguage) return;
-    router.push({
+    router.replace({
       pathname: '/onboarding/daily-goal',
       params: { ...params, language: selectedLanguage },
     });
@@ -100,8 +101,9 @@ export default function LanguageScreen() {
         </View>
 
         {/* Scrollable Content */}
-        <ScrollView
-          style={styles.scrollArea}
+        <StepTransition style={{ flex: 1, width: '100%' }}>
+          <ScrollView
+            style={styles.scrollArea}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
@@ -185,6 +187,7 @@ export default function LanguageScreen() {
             <Text style={styles.ctaButtonText}>Continue</Text>
           </Pressable>
         </View>
+        </StepTransition>
       </View>
     </SafeAreaView>
   );

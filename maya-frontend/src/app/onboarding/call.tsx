@@ -19,9 +19,12 @@ import {
   GrammarFeedbackModal,
   GrammarFeedbackData,
 } from '@/components/call/grammar-feedback-modal';
+import { ConversationDisplay } from '@/components/call/conversation-display';
 import { useConnectionMonitor } from '@/hooks/useConnectionMonitor';
+import { fontStyle } from '@/theme/fonts';
 
-type CallState = 'speaking' | 'listening';
+import { useLiveCall } from '@/hooks/useLiveCall';
+import { ConnectingView } from '@/components/call/connecting-view';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -38,76 +41,110 @@ export default function CallScreen() {
   // Real-time network & connection monitor
   const connection = useConnectionMonitor();
 
-  const [callState, setCallState] = useState<CallState>('listening');
-  const [secondsElapsed, setSecondsElapsed] = useState(16);
-  const [sessionEndNotice, setSessionEndNotice] = useState(true);
-  const [feedbackVisible, setFeedbackVisible] = useState(false);
-  const [feedbackData, setFeedbackData] = useState<GrammarFeedbackData>({
-    originalSentence: 'I go to beach every weekend',
-    highlightedMistake: 'go',
-    correctedSentence: 'I go to the beach every weekend.',
-    highlightedCorrection: 'the',
-    whyExplanation: 'Use "the beach" because we usually refer to the beach as a specific place.',
-    autoDismissSeconds: 5,
+  // Core Gemini Live Audio & Call Engine
+  const liveCall = useLiveCall({
+    topic: params.goal || 'General Speaking Practice',
+    goal: params.goal,
+    level: params.level,
   });
 
-  // Priority: 1. Live network connection alert -> 2. Session ending notice -> 3. Idle / Hidden
-  const activeToastPreset: ToastPillPreset | null =
-    connection.toastPreset ?? (sessionEndNotice ? 'session-ends' : null);
+  const [sessionEndNotice, setSessionEndNotice] = useState(false);
 
-  const displayedStatusText = connection.isLost
+  // Auto-start Gemini Live call session on component mount with cleanup on unmount
+  useEffect(() => {
+    liveCall.startCall();
+    return () => {
+      liveCall.endCall();
+    };
+  }, []);
+
+  const isReconnecting = liveCall.status === 'reconnecting' || connection.isReconnecting;
+  const isConnectionLost = connection.isLost;
+
+  // Priority: 1. Live network connection alert -> 2. Session ending notice -> 3. Idle / Hidden
+  const activeToastPreset: ToastPillPreset | null = isReconnecting
+    ? 'reconnecting'
+    : isConnectionLost
+    ? 'connection-lost'
+    : (connection.toastPreset ?? (sessionEndNotice ? 'session-ends' : null));
+
+  const displayedStatusText = isConnectionLost
     ? 'Connection lost'
-    : connection.isReconnecting
+    : isReconnecting
     ? 'Reconnecting...'
     : connection.isWeak
     ? 'Weak connection'
-    : callState === 'speaking'
+    : liveCall.status === 'speaking'
     ? 'Speaking..'
+    : liveCall.status === 'connecting'
+    ? 'Connecting...'
     : 'Listening...';
 
-  // Animation values for smooth cross-fading of ambient glows
-  const purpleGlowAnim = useRef(new Animated.Value(1)).current;
+  // Animation values for dynamic speech-reactive ambient glows
+  const purpleGlowAnim = useRef(new Animated.Value(0.38)).current;
+  const purpleScaleAnim = useRef(new Animated.Value(1.0)).current;
   const blueAuraAnim = useRef(new Animated.Value(0)).current;
+  const blueScaleAnim = useRef(new Animated.Value(1.0)).current;
 
-  // Session elapsed timer
+  // Animate glows reactively based on voice strength and call status
   useEffect(() => {
-    const timer = setInterval(() => {
-      setSecondsElapsed((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-
-  // Animate glow changes when callState changes
-  useEffect(() => {
-    if (callState === 'listening') {
+    if (liveCall.status === 'speaking') {
+      // Maya speaking: fade out purple bottom glow
       Animated.parallel([
         Animated.timing(purpleGlowAnim, {
-          toValue: 1,
-          duration: 400,
+          toValue: 0,
+          duration: 300,
           useNativeDriver: Platform.OS !== 'web',
         }),
+        Animated.timing(purpleScaleAnim, {
+          toValue: 0.95,
+          duration: 300,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        // Blue edge aura pulses with Maya's voice intensity
         Animated.timing(blueAuraAnim, {
-          toValue: 0,
-          duration: 400,
+          toValue: 0.38 + liveCall.modelVolume * 0.62,
+          duration: liveCall.modelVolume > 0.05 ? 80 : 200,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(blueScaleAnim, {
+          toValue: 1.0 + liveCall.modelVolume * 0.08,
+          duration: liveCall.modelVolume > 0.05 ? 80 : 200,
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
     } else {
+      // Maya listening / idle: fade out blue aura
+      // Resting purple bottom glow stays low (~0.38 opacity, scale 1.0) when silent.
+      // When user speaks into the mic, it swells up and intensifies in real time!
+      const isUserSpeaking = liveCall.userVolume > 0.02;
+      const targetPurpleOpacity = 0.38 + liveCall.userVolume * 0.62;
+      const targetPurpleScale = 1.0 + liveCall.userVolume * 0.28;
+
       Animated.parallel([
-        Animated.timing(purpleGlowAnim, {
+        Animated.timing(blueAuraAnim, {
           toValue: 0,
-          duration: 400,
+          duration: 350,
           useNativeDriver: Platform.OS !== 'web',
         }),
-        Animated.timing(blueAuraAnim, {
-          toValue: 1,
-          duration: 400,
+        Animated.timing(blueScaleAnim, {
+          toValue: 1.0,
+          duration: 350,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(purpleGlowAnim, {
+          toValue: targetPurpleOpacity,
+          duration: isUserSpeaking ? 60 : 180,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(purpleScaleAnim, {
+          toValue: targetPurpleScale,
+          duration: isUserSpeaking ? 60 : 180,
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
     }
-  }, [callState]);
+  }, [liveCall.status, liveCall.userVolume, liveCall.modelVolume]);
 
   // Format mm:ss
   const formatTime = (secs: number) => {
@@ -116,34 +153,39 @@ export default function CallScreen() {
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  const handleToggleState = () => {
-    if (callState === 'speaking') {
-      setCallState('listening');
-      setSessionEndNotice(true);
+  const handleToggleMute = () => {
+    if (liveCall.status === 'speaking') {
+      liveCall.interrupt();
     } else {
-      setCallState('speaking');
-      setSessionEndNotice(false);
+      liveCall.toggleMute();
     }
   };
 
   const handleHangup = () => {
-    router.push({
-      pathname: '/onboarding/complete',
-      params: { ...params, duration: '15 min' },
-    });
+    liveCall.endCall();
   };
 
   const handleBackToHome = () => {
-    router.push({
-      pathname: '/explore',
-      params,
-    });
+    liveCall.endCall();
   };
+
+  const handleScreenTouch = () => {
+    if (liveCall.status === 'speaking') {
+      liveCall.interrupt();
+    } else {
+      liveCall.resumeAudio();
+    }
+  };
+
+  if (liveCall.status === 'connecting') {
+    return <ConnectingView onCancel={handleHangup} />;
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Pressable style={styles.fullScreenTouch} onPress={handleToggleState}>
+      <Pressable style={styles.fullScreenTouch} onPress={handleScreenTouch}>
         <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
+
           {/* Ambient Edge Aura for Speaking State */}
           <AmbientGlow type="blue-aura" opacity={blueAuraAnim} />
 
@@ -229,24 +271,24 @@ export default function CallScreen() {
                           ? styles.statusDotRed
                           : connection.isReconnecting || connection.isWeak
                           ? styles.statusDotOrange
-                          : callState === 'speaking'
+                          : liveCall.status === 'speaking'
                           ? styles.statusDotGreen
                           : styles.statusDotRed,
                       ]}
                     />
                     <Text style={styles.timerText}>
-                      {formatTime(secondsElapsed)}{' '}
+                      {formatTime(liveCall.secondsElapsed)}{' '}
                       <Text style={styles.timerMax}>/ 15:00</Text>
                     </Text>
                   </View>
                   <Text
                     style={[
                       styles.stateLabel,
-                      connection.isLost
+                      isConnectionLost
                         ? styles.stateLabelLost
-                        : connection.isReconnecting || connection.isWeak
+                        : isReconnecting || connection.isWeak
                         ? styles.stateLabelWarning
-                        : callState === 'speaking'
+                        : liveCall.status === 'speaking'
                         ? styles.stateLabelSpeaking
                         : styles.stateLabelListening,
                     ]}
@@ -294,13 +336,13 @@ export default function CallScreen() {
                           ? styles.statusDotRed
                           : connection.isReconnecting || connection.isWeak
                           ? styles.statusDotOrange
-                          : callState === 'speaking'
+                          : liveCall.status === 'speaking'
                           ? styles.statusDotGreen
                           : styles.statusDotRed,
                       ]}
                     />
                     <Text style={styles.timerTextDesktop}>
-                      {formatTime(secondsElapsed)}{' '}
+                      {formatTime(liveCall.secondsElapsed)}{' '}
                       <Text style={styles.timerMax}>/ 15:00</Text>
                     </Text>
                   </View>
@@ -311,7 +353,7 @@ export default function CallScreen() {
                         ? styles.stateLabelLost
                         : connection.isReconnecting || connection.isWeak
                         ? styles.stateLabelWarning
-                        : callState === 'speaking'
+                        : liveCall.status === 'speaking'
                         ? styles.stateLabelSpeaking
                         : styles.stateLabelListening,
                     ]}
@@ -333,26 +375,30 @@ export default function CallScreen() {
               )}
             </View>
 
-            {/* Conversation Prompt Text */}
-            <Text style={[styles.promptText, isWebOrDesktop && styles.promptTextDesktop]}>
-              That's great! What do you usually do on weekends?
-            </Text>
+            {/* Conversation Display with Multi-Turn History (Image 2 Design) */}
+            <ConversationDisplay
+              previousText={liveCall.previousSubtitles}
+              currentText={liveCall.subtitles}
+              isSpeaking={liveCall.status === 'speaking'}
+              isWebOrDesktop={isWebOrDesktop}
+            />
           </View>
 
-          {/* Bottom Purple Ambient Glow for Listening State */}
+          {/* Bottom Purple Ambient Glow for Listening State (Speech-Reactive) */}
           <AmbientGlow type="purple-bottom" opacity={purpleGlowAnim} />
         </View>
       </Pressable>
 
       {/* Grammar Feedback Modal (Bottom Sheet on Mobile / Centered Card on Desktop) */}
       <GrammarFeedbackModal
-        visible={feedbackVisible}
-        onClose={() => setFeedbackVisible(false)}
-        feedback={feedbackData}
+        visible={liveCall.feedbackVisible}
+        onClose={liveCall.closeFeedbackModal}
+        feedback={liveCall.feedbackData || undefined}
       />
     </SafeAreaView>
   );
 }
+
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -397,15 +443,15 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   backArrow: {
+    ...fontStyle('outfit', 'semiBold'),
     fontSize: 22,
     color: '#64748b',
-    fontWeight: '600',
     lineHeight: 22,
   },
   backText: {
+    ...fontStyle('outfit', 'medium'),
     fontSize: 14,
     color: '#64748b',
-    fontWeight: '500',
   },
   desktopRightActions: {
     flexDirection: 'row',
@@ -420,11 +466,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    shadowColor: '#ef4444',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    ...Platform.select({
+      web: { boxShadow: '0 4px 8px rgba(239, 68, 68, 0.3)' } as any,
+      default: {
+        shadowColor: '#ef4444',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+      },
+    }),
   },
   endSessionPressed: {
     backgroundColor: '#dc2626',
@@ -436,9 +487,9 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '135deg' }],
   },
   endSessionText: {
+    ...fontStyle('outfit', 'bold'),
     color: '#ffffff',
     fontSize: 14,
-    fontWeight: '700',
   },
   /* Mobile Top Bar */
   mobileTopBar: {
@@ -463,11 +514,16 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     padding: 2,
     backgroundColor: '#ffffff',
-    shadowColor: '#0085db',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
+    ...Platform.select({
+      web: { boxShadow: '0 3px 8px rgba(0, 133, 219, 0.15)' } as any,
+      default: {
+        shadowColor: '#0085db',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 3,
+      },
+    }),
   },
   mobileHangupButton: {
     width: 54,
@@ -476,11 +532,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#ef4444',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#ef4444',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6,
+    ...Platform.select({
+      web: { boxShadow: '0 6px 10px rgba(239, 68, 68, 0.35)' } as any,
+      default: {
+        shadowColor: '#ef4444',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.35,
+        shadowRadius: 10,
+        elevation: 6,
+      },
+    }),
   },
   settingsButton: {
     width: 40,
@@ -503,8 +564,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   mayaNameMobile: {
+    ...fontStyle('outfit', 'bold'),
     fontSize: 18,
-    fontWeight: '800',
     color: '#0f172a',
     letterSpacing: -0.3,
   },
@@ -521,29 +582,35 @@ const styles = StyleSheet.create({
     borderRadius: 44,
     padding: 3,
     backgroundColor: '#ffffff',
-    shadowColor: '#0085db',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
-    elevation: 5,
+    ...Platform.select({
+      web: { boxShadow: '0 4px 14px rgba(0, 133, 219, 0.2)' } as any,
+      default: {
+        shadowColor: '#0085db',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 14,
+        elevation: 5,
+      },
+    }),
   },
+
   desktopInfoTexts: {
     justifyContent: 'center',
   },
   mayaNameDesktop: {
+    ...fontStyle('outfit', 'bold'),
     fontSize: 24,
-    fontWeight: '800',
     color: '#0f172a',
     letterSpacing: -0.4,
   },
   timerTextDesktop: {
+    ...fontStyle('outfit', 'bold'),
     fontSize: 15,
-    fontWeight: '700',
     color: '#0f172a',
   },
   stateLabelDesktop: {
+    ...fontStyle('outfit', 'semiBold'),
     fontSize: 15,
-    fontWeight: '600',
     marginTop: 3,
   },
   timerRow: {
@@ -563,19 +630,22 @@ const styles = StyleSheet.create({
   statusDotRed: {
     backgroundColor: '#ef4444',
   },
+  statusDotOrange: {
+    backgroundColor: '#f59e0b',
+  },
   timerText: {
+    ...fontStyle('outfit', 'bold'),
     fontSize: 13,
-    fontWeight: '700',
     color: '#0f172a',
   },
   timerMax: {
+    ...fontStyle('outfit', 'regular'),
     fontSize: 13,
-    fontWeight: '400',
     color: '#94a3b8',
   },
   stateLabel: {
+    ...fontStyle('outfit', 'semiBold'),
     fontSize: 13,
-    fontWeight: '600',
     marginTop: 2,
   },
   stateLabelSpeaking: {
@@ -584,36 +654,45 @@ const styles = StyleSheet.create({
   stateLabelListening: {
     color: '#a855f7',
   },
+  stateLabelWarning: {
+    color: '#f59e0b',
+  },
+  stateLabelLost: {
+    color: '#ef4444',
+  },
   centerContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
+    paddingBottom: 48,
     zIndex: 10,
   },
   centerContentDesktop: {
     maxWidth: 780,
     alignSelf: 'center',
     width: '100%',
+    paddingTop: 36,
   },
   noticeWrapper: {
     minHeight: 40,
-    marginBottom: 24,
+    marginBottom: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
   promptText: {
-    fontSize: 26,
-    fontWeight: '800',
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 22,
     color: '#0f172a',
     textAlign: 'center',
-    lineHeight: 36,
-    letterSpacing: -0.4,
+    lineHeight: 32,
+    letterSpacing: -0.3,
   },
   promptTextDesktop: {
-    fontSize: 36,
-    lineHeight: 48,
-    maxWidth: 680,
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 28,
+    lineHeight: 40,
+    maxWidth: 720,
   },
   hangupButtonPressed: {
     backgroundColor: '#dc2626',
@@ -625,14 +704,5 @@ const styles = StyleSheet.create({
   },
   buttonPressed: {
     opacity: 0.7,
-  },
-  statusDotOrange: {
-    backgroundColor: '#f59e0b',
-  },
-  stateLabelLost: {
-    color: '#ef4444',
-  },
-  stateLabelWarning: {
-    color: '#f59e0b',
   },
 });
