@@ -55,32 +55,14 @@ export function MicrophonePermissionPopup({
   const isDenied = errorType === 'denied';
   const isInsecure = errorType === 'insecure';
   const isUnsupported = errorType === 'unsupported';
+  const isError = isDenied || isInsecure || isUnsupported;
 
   const env = useMemo(() => detectPlatformEnvironment(), [visible]);
 
-  // Header Graphic with layered glow and Ionicons vector microphone
-  const renderHeaderGraphic = () => {
-    const isError = isDenied || isInsecure || isUnsupported;
-    const circleBg = isError ? '#FEF2F2' : '#EFF6FF';
-    const circleBorder = isError ? '#FECACA' : '#DBEAFE';
-    const iconColor = isError ? '#DC2626' : '#2563EB';
-
-    return (
-      <View style={styles.graphicWrapper}>
-        {/* Soft Outer Aura */}
-        <View
-          style={[
-            styles.glowRingOuter,
-            { backgroundColor: isError ? 'rgba(239, 68, 68, 0.12)' : 'rgba(37, 99, 235, 0.12)' },
-          ]}
-        />
-        {/* Inner Circle */}
-        <View style={[styles.glowRingInner, { backgroundColor: circleBg, borderColor: circleBorder }]}>
-          <Ionicons name="mic" size={38} color={iconColor} />
-        </View>
-      </View>
-    );
-  };
+  // Dynamic image: request permission vs blocked/denied
+  const popupImage = isError
+    ? require('@/assets/images/maya-mic-blocked.png')
+    : require('@/assets/images/maya-request-mic.png');
 
   // Determine Title, Subtitle, and Button Text
   let title = 'Enable Your Microphone';
@@ -335,7 +317,7 @@ export function MicrophonePermissionPopup({
       visible={visible}
       onClose={onClose}
       preset="custom"
-      imageSource={require('@/assets/images/maya-mic.png')}
+      imageSource={popupImage}
       title={title}
       titleHighlight={titleHighlight}
       subtitle={subtitle}
@@ -366,37 +348,6 @@ export function MicrophonePermissionPopup({
 }
 
 const styles = StyleSheet.create({
-  graphicWrapper: {
-    width: 96,
-    height: 96,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  glowRingOuter: {
-    position: 'absolute',
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-  },
-  glowRingInner: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      web: { boxShadow: '0 8px 16px rgba(37, 99, 235, 0.15)' } as any,
-      default: {
-        shadowColor: '#2563EB',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-        elevation: 3,
-      },
-    }),
-  },
   troubleshootCard: {
     width: '100%',
     backgroundColor: '#F8FAFC',
