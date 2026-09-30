@@ -14,6 +14,9 @@ export class WebAudioCapture implements IAudioCapture {
     this.callbacks = callbacks;
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (typeof window !== 'undefined' && !window.isSecureContext) {
+        throw new Error('Microphone access requires a secure HTTPS connection. Please load this page over HTTPS.');
+      }
       throw new Error('Microphone access is not supported in this browser.');
     }
 

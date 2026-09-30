@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import Svg, {
   Path,
   Polygon,
@@ -59,7 +60,7 @@ export interface CommonPopupProps {
 
   // Primary action button
   primaryButtonText?: string;
-  primaryButtonIcon?: 'crown' | 'play' | 'arrow' | 'none' | React.ReactNode;
+  primaryButtonIcon?: 'crown' | 'play' | 'arrow' | 'mic' | 'none' | React.ReactNode;
   showPrimaryArrow?: boolean;
   onPrimaryPress?: () => void;
 
@@ -320,6 +321,11 @@ export function CommonPopup({
         <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" style={styles.btnLeadingIcon}>
           <Path d="M6 4L19 12L6 20V4Z" fill="#FFFFFF" />
         </Svg>
+      );
+    }
+    if (finalBtnIcon === 'mic') {
+      return (
+        <Ionicons name="mic" size={18} color="#FFFFFF" style={styles.btnLeadingIcon} />
       );
     }
     if (React.isValidElement(finalBtnIcon)) {

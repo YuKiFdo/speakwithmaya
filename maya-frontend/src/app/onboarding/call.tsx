@@ -26,6 +26,7 @@ import { fontStyle } from '@/theme/fonts';
 
 import { useLiveCall } from '@/hooks/useLiveCall';
 import { ConnectingView } from '@/components/call/connecting-view';
+import { MicrophonePermissionPopup } from '@/components/call/microphone-permission-popup';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -58,6 +59,23 @@ export default function CallScreen() {
       liveCall.endCall(false);
     };
   }, []);
+
+  // Safety guard for Web / iOS Chrome: If connecting takes longer than 6s without audio resolution,
+  // open the permission modal so user can trigger the browser prompt with a direct tap.
+  useEffect(() => {
+    let timeout: any = null;
+    if (liveCall.status === 'connecting' && Platform.OS === 'web') {
+      timeout = setTimeout(() => {
+        if (liveCall.status === 'connecting') {
+          console.log('[CallScreen] Connecting timeout reached on web -> showing permission modal');
+          liveCall.setIsPermissionModalVisible(true);
+        }
+      }, 6000);
+    }
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [liveCall.status]);
 
   const isReconnecting = liveCall.status === 'reconnecting' || connection.isReconnecting;
   const isConnectionLost = connection.isLost;
@@ -460,6 +478,17 @@ export default function CallScreen() {
         visible={liveCall.feedbackVisible}
         onClose={liveCall.closeFeedbackModal}
         feedback={liveCall.feedbackData || undefined}
+      />
+
+      {/* Microphone Permission Modal (matches common popup design language) */}
+      <MicrophonePermissionPopup
+        visible={liveCall.isPermissionModalVisible}
+        onClose={() => {
+          liveCall.closePermissionModal();
+          handleHangup();
+        }}
+        onAllow={liveCall.requestMicrophoneAndStart}
+        errorType={liveCall.permissionErrorType}
       />
     </SafeAreaView>
   );

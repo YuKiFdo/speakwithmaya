@@ -7,6 +7,7 @@ import { createAudioPlayer } from '@/services/audio/AudioPlayer';
 import { LiveTransport, GrammarCorrectionPayload } from '@/services/gemini/LiveTransport';
 import { persistSessionRecord, SessionHistoryRecord } from '@/services/supabase';
 import { GrammarFeedbackData } from '@/components/call/grammar-feedback-modal';
+import { MicPermissionErrorType } from '@/components/call/microphone-permission-popup';
 import { getLogTimestamp } from '@/utils/time';
 
 export const getBackendBaseUrl = (): string => {
@@ -42,6 +43,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const [tokens, setTokens] = useState({ audioIn: 0, audioOut: 0, total: 0, costLkr: 0 });
   const [userVolume, setUserVolume] = useState<number>(0);
   const [modelVolume, setModelVolume] = useState<number>(0);
+  const [isPermissionModalVisible, setIsPermissionModalVisible] = useState<boolean>(false);
+  const [permissionErrorType, setPermissionErrorType] = useState<MicPermissionErrorType>(null);
 
   const captureRef = useRef(createAudioCapture());
   const playerRef = useRef(createAudioPlayer());
@@ -500,9 +503,43 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         onError: (err: Error) => console.error('[AudioCapture Error]:', err),
       });
 
-    } catch (err) {
+      // Microphone initialized successfully
+      setIsPermissionModalVisible(false);
+      setPermissionErrorType(null);
+    } catch (err: any) {
       console.error('[StartCall Error]:', err);
       setStatus('idle');
+
+      const errMsg = err?.message || String(err);
+      const errName = err?.name || '';
+      const isNotAllowed =
+        errName === 'NotAllowedError' ||
+        errName === 'PermissionDeniedError' ||
+        errMsg.toLowerCase().includes('permission') ||
+        errMsg.toLowerCase().includes('not allowed');
+
+      const isInsecure =
+        errMsg.toLowerCase().includes('https') ||
+        (Platform.OS === 'web' &&
+          typeof window !== 'undefined' &&
+          !window.isSecureContext &&
+          window.location.hostname !== 'localhost' &&
+          window.location.hostname !== '127.0.0.1');
+
+      const isUnsupported = errMsg.toLowerCase().includes('not supported');
+
+      if (isInsecure) {
+        setPermissionErrorType('insecure');
+        setIsPermissionModalVisible(true);
+      } else if (isNotAllowed) {
+        setPermissionErrorType('denied');
+        setIsPermissionModalVisible(true);
+      } else if (isUnsupported) {
+        setPermissionErrorType('unsupported');
+        setIsPermissionModalVisible(true);
+      } else {
+        setPermissionErrorType('error');
+      }
     }
   }, [options.topic, options.goal, options.level, isMuted]);
 
@@ -629,6 +666,15 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     setModelVolume(0);
   }, []);
 
+  const requestMicrophoneAndStart = useCallback(async () => {
+    setIsPermissionModalVisible(false);
+    await startCall(false);
+  }, [startCall]);
+
+  const closePermissionModal = useCallback(() => {
+    setIsPermissionModalVisible(false);
+  }, []);
+
   return {
     status,
     secondsElapsed,
@@ -640,6 +686,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     tokens,
     userVolume,
     modelVolume,
+    isPermissionModalVisible,
+    permissionErrorType,
+    setIsPermissionModalVisible,
+    closePermissionModal,
+    requestMicrophoneAndStart,
     startCall,
     endCall,
     toggleMute,
