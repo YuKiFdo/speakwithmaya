@@ -167,36 +167,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         cachedTokenDataRef.current = null;
       }
 
-      // 1. Fetch ephemeral token from NestJS backend (or use cached configuration during reconnect)
-      let tokenData = cachedTokenDataRef.current;
-      if (!tokenData) {
-        const backendBaseUrl = getBackendBaseUrl();
-        const res = await fetch(`${backendBaseUrl}/v1/session-token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            topic: options.topic,
-            goal: options.goal,
-            level: options.level,
-          }),
-        });
-
-        if (!res.ok) {
-          const errBody = await res.text().catch(() => '');
-          throw new Error(`Failed to obtain ephemeral session token from backend (${res.status}): ${errBody}`);
-        }
-
-        tokenData = await res.json();
-        if (!tokenData?.wsUrl || !tokenData?.token) {
-          throw new Error('Backend returned invalid session token response: wsUrl or token is missing');
-        }
-
-        cachedTokenDataRef.current = tokenData;
-      }
-
-      sessionIdRef.current = tokenData.sessionId || sessionIdRef.current;
-
-      // 2. Initialize Audio Player
+      // 1. Initialize Audio Player
       await playerRef.current.init({
         onPlaybackStateChange: (pState: 'idle' | 'speaking') => {
           const isSpeaking = pState === 'speaking';
@@ -236,7 +207,105 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         onError: (err: Error) => console.error('[AudioPlayer Error]:', err),
       });
 
-      // 3. Connect Live Transport WebSocket
+      // 2. Acquire and start Microphone Capture BEFORE connecting to Gemini Live!
+      // This ensures we NEVER connect to Gemini or start consuming tokens until the user has granted microphone permission.
+      await captureRef.current.start({
+        isOutputPlaying: () => {
+          return (
+            isMutedRef.current ||
+            isModelSpeakingRef.current ||
+            isConcludingRef.current ||
+            statusRef.current === 'reconnecting' ||
+            statusRef.current === 'ended' ||
+            Date.now() < echoHangoverUntilRef.current
+          );
+        },
+        onAudioData: (pcm16: ArrayBuffer) => {
+          // Half-duplex acoustic echo gate: clamp mic while model is speaking, farewell concluding, reverb is decaying, or reconnecting
+          const isBlocked =
+            isMutedRef.current ||
+            isModelSpeakingRef.current ||
+            isConcludingRef.current ||
+            statusRef.current === 'reconnecting' ||
+            statusRef.current === 'ended' ||
+            Date.now() < echoHangoverUntilRef.current;
+
+          if (!isBlocked && transportRef.current.isConnected()) {
+            userChunksSentRef.current++;
+            transportRef.current.sendAudioChunk(pcm16);
+          }
+        },
+        onVoiceEnd: () => {
+          // When client-side VAD detects end of speech, explicitly signal turn completion to Gemini Live
+          const isBlocked =
+            isMutedRef.current ||
+            isModelSpeakingRef.current ||
+            isConcludingRef.current ||
+            statusRef.current === 'reconnecting' ||
+            statusRef.current === 'ended' ||
+            Date.now() < echoHangoverUntilRef.current;
+
+          // Only dispatch end-of-turn if genuine user speech chunks were actually streamed to Gemini
+          if (!isBlocked && userChunksSentRef.current >= 3 && transportRef.current.isConnected()) {
+            transportRef.current.sendEndOfTurn();
+            userChunksSentRef.current = 0;
+          }
+        },
+        onVolumeChange: (vol: number) => {
+          const isBlocked =
+            isMutedRef.current ||
+            isModelSpeakingRef.current ||
+            isConcludingRef.current ||
+            Date.now() < echoHangoverUntilRef.current;
+
+          const currentVol = isBlocked ? 0 : vol;
+          const now = Date.now();
+          if (
+            (currentVol === 0 && lastUserVolValueRef.current !== 0) ||
+            (now - lastUserVolUpdateRef.current >= 80 && Math.abs(currentVol - lastUserVolValueRef.current) >= 0.04)
+          ) {
+            lastUserVolUpdateRef.current = now;
+            lastUserVolValueRef.current = currentVol;
+            setUserVolume(currentVol);
+          }
+        },
+        onError: (err: Error) => console.error('[AudioCapture Error]:', err),
+      });
+
+      // Microphone initialized successfully -> dismiss permission modal
+      setIsPermissionModalVisible(false);
+      setPermissionErrorType(null);
+
+      // 3. Fetch ephemeral token from NestJS backend (ONLY AFTER MIC PERMISSION IS CONFIRMED)
+      let tokenData = cachedTokenDataRef.current;
+      if (!tokenData) {
+        const backendBaseUrl = getBackendBaseUrl();
+        const res = await fetch(`${backendBaseUrl}/v1/session-token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic: options.topic,
+            goal: options.goal,
+            level: options.level,
+          }),
+        });
+
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => '');
+          throw new Error(`Failed to obtain ephemeral session token from backend (${res.status}): ${errBody}`);
+        }
+
+        tokenData = await res.json();
+        if (!tokenData?.wsUrl || !tokenData?.token) {
+          throw new Error('Backend returned invalid session token response: wsUrl or token is missing');
+        }
+
+        cachedTokenDataRef.current = tokenData;
+      }
+
+      sessionIdRef.current = tokenData.sessionId || sessionIdRef.current;
+
+      // 4. Connect Live Transport WebSocket to Gemini Live
       transportRef.current.connect(
         {
           wsUrl: tokenData.wsUrl,
@@ -438,77 +507,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
         },
       );
-
-      // 4. Start Microphone Capture
-      await captureRef.current.start({
-        isOutputPlaying: () => {
-          return (
-            isMutedRef.current ||
-            isModelSpeakingRef.current ||
-            isConcludingRef.current ||
-            statusRef.current === 'reconnecting' ||
-            statusRef.current === 'ended' ||
-            Date.now() < echoHangoverUntilRef.current
-          );
-        },
-        onAudioData: (pcm16: ArrayBuffer) => {
-          // Half-duplex acoustic echo gate: clamp mic while model is speaking, farewell concluding, reverb is decaying, or reconnecting
-          const isBlocked =
-            isMutedRef.current ||
-            isModelSpeakingRef.current ||
-            isConcludingRef.current ||
-            statusRef.current === 'reconnecting' ||
-            statusRef.current === 'ended' ||
-            Date.now() < echoHangoverUntilRef.current;
-
-          if (!isBlocked && transportRef.current.isConnected()) {
-            userChunksSentRef.current++;
-            transportRef.current.sendAudioChunk(pcm16);
-          }
-        },
-        onVoiceEnd: () => {
-          // When client-side VAD detects end of speech, explicitly signal turn completion to Gemini Live
-          const isBlocked =
-            isMutedRef.current ||
-            isModelSpeakingRef.current ||
-            isConcludingRef.current ||
-            statusRef.current === 'reconnecting' ||
-            statusRef.current === 'ended' ||
-            Date.now() < echoHangoverUntilRef.current;
-
-          // Only dispatch end-of-turn if genuine user speech chunks were actually streamed to Gemini
-          if (!isBlocked && userChunksSentRef.current >= 3 && transportRef.current.isConnected()) {
-            transportRef.current.sendEndOfTurn();
-            userChunksSentRef.current = 0;
-          }
-        },
-        onVolumeChange: (vol: number) => {
-          const isBlocked =
-            isMutedRef.current ||
-            isModelSpeakingRef.current ||
-            isConcludingRef.current ||
-            Date.now() < echoHangoverUntilRef.current;
-
-          const currentVol = isBlocked ? 0 : vol;
-          const now = Date.now();
-          if (
-            (currentVol === 0 && lastUserVolValueRef.current !== 0) ||
-            (now - lastUserVolUpdateRef.current >= 80 && Math.abs(currentVol - lastUserVolValueRef.current) >= 0.04)
-          ) {
-            lastUserVolUpdateRef.current = now;
-            lastUserVolValueRef.current = currentVol;
-            setUserVolume(currentVol);
-          }
-        },
-        onError: (err: Error) => console.error('[AudioCapture Error]:', err),
-      });
-
-      // Microphone initialized successfully
-      setIsPermissionModalVisible(false);
-      setPermissionErrorType(null);
     } catch (err: any) {
       console.error('[StartCall Error]:', err);
-      setStatus('idle');
+      // Keep status as 'connecting' so ConnectingView remains visible behind the permission popup
+      setStatus('connecting');
+      statusRef.current = 'connecting';
 
       const errMsg = err?.message || String(err);
       const errName = err?.name || '';
@@ -539,6 +542,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         setIsPermissionModalVisible(true);
       } else {
         setPermissionErrorType('error');
+        setIsPermissionModalVisible(true);
       }
     }
   }, [options.topic, options.goal, options.level, isMuted]);

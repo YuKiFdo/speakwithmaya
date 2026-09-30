@@ -335,7 +335,7 @@ export function MicrophonePermissionPopup({
       visible={visible}
       onClose={onClose}
       preset="custom"
-      renderHeaderGraphic={renderHeaderGraphic}
+      imageSource={require('@/assets/images/maya-mic.png')}
       title={title}
       titleHighlight={titleHighlight}
       subtitle={subtitle}

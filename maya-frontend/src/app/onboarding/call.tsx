@@ -60,22 +60,6 @@ export default function CallScreen() {
     };
   }, []);
 
-  // Safety guard for Web / iOS Chrome: If connecting takes longer than 6s without audio resolution,
-  // open the permission modal so user can trigger the browser prompt with a direct tap.
-  useEffect(() => {
-    let timeout: any = null;
-    if (liveCall.status === 'connecting' && Platform.OS === 'web') {
-      timeout = setTimeout(() => {
-        if (liveCall.status === 'connecting') {
-          console.log('[CallScreen] Connecting timeout reached on web -> showing permission modal');
-          liveCall.setIsPermissionModalVisible(true);
-        }
-      }, 6000);
-    }
-    return () => {
-      if (timeout) clearTimeout(timeout);
-    };
-  }, [liveCall.status]);
 
   const isReconnecting = liveCall.status === 'reconnecting' || connection.isReconnecting;
   const isConnectionLost = connection.isLost;
