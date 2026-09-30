@@ -25,6 +25,13 @@
 | **Audio Token Rate (In)** | ~25 tokens per second (~1,500 tokens/minute) | [Gemini Audio Tokens](https://ai.google.dev/gemini-api/docs/tokens) |
 | **Audio Token Rate (Out)** | ~30–35 tokens per second (~1,800–2,100 tokens/minute) | [Gemini Audio Tokens](https://ai.google.dev/gemini-api/docs/tokens) |
 | **Session Resumption** | Supported via `sessionResumption: {}` configuration; allows reconnecting a session every 10 minutes | [Session Resumption Guide](https://ai.google.dev/gemini-api/docs/live-session#session-resumption) |
+| **`mediaChunks` Deprecation** | `realtimeInput.mediaChunks[]` is **DEPRECATED** — use `audio`, `video`, or `text` fields instead. Multiple mediaChunks not supported; only first processed. May cause Error 1007. | [Live API Reference - BidiGenerateContentRealtimeInput](https://ai.google.dev/api/live#BidiGenerateContentRealtimeInput) |
+| **`automaticActivityDetection`** | Server-side VAD config: `disabled` (bool), `startOfSpeechSensitivity` (HIGH/LOW), `endOfSpeechSensitivity` (HIGH/LOW), `prefixPaddingMs` (int32), `silenceDurationMs` (int32). Enabled by default. | [Live API Reference - AutomaticActivityDetection](https://ai.google.dev/api/live#AutomaticActivityDetection) |
+| **`audioStreamEnd` Signal** | Signals mic turned off/paused. Only for use with automatic activity detection enabled. Client can reopen stream by sending audio. Use to flush cached audio on mic pause >1s. | [Live API Reference - BidiGenerateContentRealtimeInput](https://ai.google.dev/api/live#BidiGenerateContentRealtimeInput) |
+| **`contextWindowCompression`** | `triggerTokens` sets when compression fires; `slidingWindow.targetTokens` defaults to `triggerTokens/2`. System instructions and `prefixTurns` are protected from eviction. | [Live API Reference - SlidingWindow](https://ai.google.dev/api/live#SlidingWindow) |
+| **Session Lifetime (No Compression)** | Audio-only: 15 min. Audio+video: 2 min. With compression: unlimited. Connection lifetime: ~10 min (use session resumption). | [Session Management Guide](https://ai.google.dev/gemini-api/docs/live-api/session-management#session-lifetime) |
+| **`proactiveAudio`** | Allows model to reject responding to irrelevant audio. Permanently enabled by default on Gemini 3.8 Live (setting `false` will error). v1beta API. | [Live API Capabilities - Proactive Audio](https://ai.google.dev/gemini-api/docs/live-api/capabilities#proactive-audio) |
+| **`affectiveDialog` Removed** | Feature removed from API. Remove `enable_affective_dialog` configs to avoid errors. | [Gemini Live API Changelog](https://ai.google.dev/gemini-api/docs/live-api/capabilities) |
 
 ### Ephemeral Token Architecture (Browser Client Direct Connection)
 1. **Server-Side Token Minting Endpoint:**

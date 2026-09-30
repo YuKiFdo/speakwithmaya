@@ -55,6 +55,8 @@ export class LiveTransport {
   private hasReceivedAudioThisTurn: boolean = false;
   private currentTurnSubtitles: string = '';
   private isWrappingUp: boolean = false;
+  private pendingFeedbackNudge: boolean = false;
+  private feedbackNudgeTimer: ReturnType<typeof setTimeout> | null = null;
 
   connect(config: LiveTransportConfig, callbacks: LiveTransportCallbacks): void {
     this.config = config;
@@ -122,6 +124,16 @@ export class LiveTransport {
             },
           },
         },
+        // Official Gemini Live API VAD tuning (ai.google.dev/api/live#AutomaticActivityDetection)
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            disabled: false,
+            startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+            endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
+            prefixPaddingMs: 200,
+            silenceDurationMs: 700,
+          },
+        },
         inputAudioTranscription: {
           languageCodes: ['en-US', 'si-LK'],
         },
@@ -129,7 +141,10 @@ export class LiveTransport {
         tools: this.config.tools || [],
         sessionResumption: this.resumptionHandle ? { handle: this.resumptionHandle } : {},
         contextWindowCompression: {
-          slidingWindow: {},
+          triggerTokens: 25000,
+          slidingWindow: {
+            targetTokens: 12500,
+          },
         },
         systemInstruction: this.config.systemPrompt
           ? {
@@ -193,19 +208,13 @@ export class LiveTransport {
     }
     const base64Data = btoa(binary);
 
-    // Universal Gemini Live BidiGenerateContent audio payload
+    // Gemini Live BidiGenerateContent audio payload (mediaChunks is DEPRECATED per official docs)
     const realtimeInput = {
       realtimeInput: {
         audio: {
           mimeType: 'audio/pcm;rate=16000',
           data: base64Data,
         },
-        mediaChunks: [
-          {
-            mimeType: 'audio/pcm;rate=16000',
-            data: base64Data,
-          },
-        ],
       },
     };
 
@@ -230,8 +239,17 @@ export class LiveTransport {
     this.currentTurnSubtitles = '';
     console.log(`[${getLogTimestamp()}] 🚀 [Turn Dispatch] Streaming silence tail to trigger Gemini server-side VAD`);
 
-    // Stream 6 comfort silence frames (600ms of zeros) to provide acoustic silence decay.
-    // Gemini's server-side VAD automatically detects this natural pause and responds within ~800ms.
+    // If user speaks during the post-coaching pause, cancel the nudge — user responded naturally
+    if (this.feedbackNudgeTimer) {
+      clearTimeout(this.feedbackNudgeTimer);
+      this.feedbackNudgeTimer = null;
+      this.pendingFeedbackNudge = false;
+      console.log(`[${getLogTimestamp()}] ⏹️ [Feedback Nudge] Cancelled — student responded during coaching pause`);
+    }
+
+    // Stream 6 comfort silence frames (600ms of zeros) as acoustic hint to server-side VAD.
+    // With realtimeInputConfig.automaticActivityDetection properly configured, the server
+    // detects end-of-speech automatically. These silence frames help the VAD commit faster.
     const silenceBase64 = 'A'.repeat(4264) + 'AAA=';
     for (let i = 0; i < 6; i++) {
       this.ws.send(
@@ -241,12 +259,6 @@ export class LiveTransport {
               mimeType: 'audio/pcm;rate=16000',
               data: silenceBase64,
             },
-            mediaChunks: [
-              {
-                mimeType: 'audio/pcm;rate=16000',
-                data: silenceBase64,
-              },
-            ],
           },
         }),
       );
@@ -266,10 +278,10 @@ export class LiveTransport {
     );
   }
 
-  sendTimeWrapupCue(remainingSeconds: number = 45) {
+  sendTimeWrapupCue(remainingSeconds: number = 0) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     this.isWrappingUp = true;
-    console.log(`[${getLogTimestamp()}] ⏰ [LiveTransport] Dispatching time wrap-up cue (${remainingSeconds}s remaining) to Gemini Live`);
+    console.log(`[${getLogTimestamp()}] ⏰ [LiveTransport] Dispatching farewell cue to Gemini Live (session time ended)`);
     const cueMsg = {
       clientContent: {
         turns: [
@@ -277,7 +289,7 @@ export class LiveTransport {
             role: 'user',
             parts: [
               {
-                text: `[SYSTEM TIME NOTICE: Exactly ${remainingSeconds} seconds remain in this practice session. In your next spoken turn, seamlessly begin wrapping up: share 1 short encouraging observation or compliment on how they did today, thank them warmly, say your cheerful goodbye aloud, and call conclude_call.]`,
+                text: `[SYSTEM TIME NOTICE: The practice session time has ended. Right now, in your current spoken turn, wrap up naturally: share 1 short encouraging observation about how they did today, thank them warmly, speak your cheerful goodbye aloud, and then call conclude_call. Keep your farewell brief (under 15 seconds of speech).]`,
               },
             ],
           },
@@ -286,6 +298,27 @@ export class LiveTransport {
       },
     };
     this.ws.send(JSON.stringify(cueMsg));
+  }
+
+  private sendContinueAfterFeedback() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    console.log(`[${getLogTimestamp()}] ▶️ [Feedback Nudge] Sending continue cue to model after coaching pause`);
+    const nudgeMsg = {
+      clientContent: {
+        turns: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: '[The student has seen the correction. Continue the conversation naturally — ask your next question or respond to what they said.]',
+              },
+            ],
+          },
+        ],
+        turnComplete: true,
+      },
+    };
+    this.ws.send(JSON.stringify(nudgeMsg));
   }
 
   private async handleMessage(data: string | Blob | ArrayBuffer) {
@@ -391,6 +424,17 @@ export class LiveTransport {
           console.log(`[${getLogTimestamp()}] ✅ [Maya Turn Complete]${completeTranscript ? `: "${completeTranscript}"` : ''}`);
           this.currentTurnSubtitles = '';
           this.callbacks.onTurnComplete?.();
+
+          // After a coaching turn WITH AUDIO, wait 3 seconds then nudge the model to continue
+          // Skip the tool-call turnComplete (no audio) — only fire on the coaching audio turnComplete
+          if (this.pendingFeedbackNudge && this.hasReceivedAudioThisTurn) {
+            this.pendingFeedbackNudge = false;
+            if (this.feedbackNudgeTimer) clearTimeout(this.feedbackNudgeTimer);
+            console.log(`[${getLogTimestamp()}] ⏳ [Feedback Pause] Coaching turn complete — waiting 3s before nudging model to continue`);
+            this.feedbackNudgeTimer = setTimeout(() => {
+              this.sendContinueAfterFeedback();
+            }, 3000);
+          }
         }
       }
 
@@ -408,13 +452,14 @@ export class LiveTransport {
               highlightWords: call.args.highlightWords || [],
             };
             this.callbacks.onGrammarCorrection?.(correction);
+            this.pendingFeedbackNudge = true;
 
             functionResponses.push({
               name: call.name,
               id: call.id,
               response: {
-                result: 'ok',
-                scheduling: 'WHEN_IDLE',
+                result: 'displayed_to_student',
+                instruction: 'Correction card shown to student. Now speak ONLY the coaching sentence explaining the correction. Do NOT add any follow-up question or new topic. End your turn after coaching.',
               },
             });
           } else if (call.name === 'show_rephrase_suggestion' && call.args) {
@@ -425,23 +470,22 @@ export class LiveTransport {
               highlightWords: call.args.highlightWords || [],
             };
             this.callbacks.onRephraseSuggestion?.(suggestion);
+            this.pendingFeedbackNudge = true;
 
             functionResponses.push({
               name: call.name,
               id: call.id,
               response: {
-                result: 'ok',
-                scheduling: 'WHEN_IDLE',
+                result: 'displayed_to_student',
+                instruction: 'Rephrase suggestion shown to student. Now speak ONLY the coaching sentence explaining why this phrasing sounds more natural. Do NOT add any follow-up question or new topic. End your turn after coaching.',
               },
             });
           } else if (call.name === 'conclude_call') {
-            const reason = (call.args?.farewellReason || '').toLowerCase();
-            const isGenuineDeparture =
-              this.isWrappingUp ||
-              /\b(bye|goodbye|enough|athii|athi|yanna|have to go|see you|stop|end|leave|finish|exit|wrap up|time limit|time)\b/i.test(reason);
+            const reason = (call.args?.farewellReason || '');
 
-            if (isGenuineDeparture) {
-              console.log(`[${getLogTimestamp()}] 🏁 [LiveTransport] Genuine conclude_call accepted (reason: "${reason}")`);
+            if (this.isWrappingUp) {
+              // System farewell cue was sent — conclude is legitimate
+              console.log(`[${getLogTimestamp()}] 🏁 [LiveTransport] conclude_call ACCEPTED (isWrappingUp=true, reason: "${reason}")`);
               this.callbacks.onConcludeCall?.(call.args?.farewellReason || 'Session concluding');
               functionResponses.push({
                 name: call.name,
@@ -452,13 +496,14 @@ export class LiveTransport {
                 },
               });
             } else {
-              console.warn(`[${getLogTimestamp()}] ⚠️ [LiveTransport] Rejecting premature conclude_call (reason: "${reason}") - student did not request to end.`);
+              // System farewell cue NOT sent yet — model is self-concluding prematurely
+              console.warn(`[${getLogTimestamp()}] ⚠️ [LiveTransport] conclude_call REJECTED (isWrappingUp=false, reason: "${reason}") — session time has NOT ended yet.`);
               functionResponses.push({
                 name: call.name,
                 id: call.id,
                 response: {
                   rejected: true,
-                  message: 'The student has NOT said goodbye or ended the call. Please continue the conversation without concluding.',
+                  message: 'Session time has NOT ended. The student has NOT asked to leave. Continue the conversation normally. You will receive a [SYSTEM TIME NOTICE] when it is time to conclude.',
                 },
               });
             }

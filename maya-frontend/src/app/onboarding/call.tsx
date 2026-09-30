@@ -67,7 +67,6 @@ export default function CallScreen() {
     scenarioId: params.scenarioId,
   });
 
-  const [sessionEndNotice, setSessionEndNotice] = useState(false);
 
   // Auto-start Gemini Live call session on component mount with cleanup on unmount
   useEffect(() => {
@@ -78,32 +77,60 @@ export default function CallScreen() {
   }, []);
 
 
-  const remainingSeconds = Math.max(0, targetDuration - liveCall.secondsElapsed);
-  const isWrapupTime = remainingSeconds <= 45 && remainingSeconds > 0 && liveCall.secondsElapsed > 0;
-  const hasTriggeredWrapupRef = useRef(false);
+  // Timer: user gets the FULL targetDuration for uninterrupted conversation.
+  // Farewell only fires AFTER time is up. Display freezes at the target so extra farewell time is invisible.
+  const hasTriggeredFarewellRef = useRef(false);
+  const farewellGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTimeUp = liveCall.secondsElapsed >= targetDuration && liveCall.secondsElapsed > 0;
 
+  // Freeze displayed time at targetDuration — farewell grace period is invisible to the user
+  const displayedElapsed = Math.min(liveCall.secondsElapsed, targetDuration);
+  const remainingSeconds = Math.max(0, targetDuration - displayedElapsed);
+  const isFarewellPhase = isTimeUp && hasTriggeredFarewellRef.current;
+
+  // When time is up, send the farewell cue to Maya (she speaks goodbye AFTER the full session)
   useEffect(() => {
     if (
-      isWrapupTime &&
-      !hasTriggeredWrapupRef.current &&
+      isTimeUp &&
+      !hasTriggeredFarewellRef.current &&
       (liveCall.status === 'speaking' || liveCall.status === 'listening')
     ) {
-      hasTriggeredWrapupRef.current = true;
-      console.log(`[call.tsx] 45s wrapup threshold reached (remaining: ${remainingSeconds}s) -> dispatching time wrap-up cue`);
-      liveCall.sendTimeWrapupCue(remainingSeconds);
+      hasTriggeredFarewellRef.current = true;
+      console.log(`[call.tsx] ⏰ Session time reached (${targetDuration}s) -> dispatching farewell cue to Maya`);
+      liveCall.sendTimeWrapupCue(0);
+
+      // Safety: auto-end the call after 25s grace period if Maya/Gemini fails to conclude
+      farewellGraceTimerRef.current = setTimeout(() => {
+        console.log('[call.tsx] ⏰ Farewell grace period (25s) elapsed -> auto-ending call');
+        liveCall.endCall();
+      }, 25000);
     }
-  }, [isWrapupTime, remainingSeconds, liveCall.status]);
+  }, [isTimeUp, liveCall.status]);
+
+  // Cleanup grace timer on unmount
+  useEffect(() => {
+    return () => {
+      if (farewellGraceTimerRef.current) clearTimeout(farewellGraceTimerRef.current);
+    };
+  }, []);
 
   const isCallActive = liveCall.status === 'speaking' || liveCall.status === 'listening';
   const isReconnecting = !isCallActive && (liveCall.status === 'reconnecting' || connection.isReconnecting);
   const isConnectionLost = !isCallActive && (connection.isLost || liveCall.status === 'ended');
 
-  // Priority: 1. Live network connection alert -> 2. Session ending countdown -> 3. Idle / Hidden
+  const isSessionEndingNear = (remainingSeconds <= 30 && liveCall.secondsElapsed > 0) || isFarewellPhase;
+
+  // Priority:
+  // 1. Critical connection alerts (reconnecting / connection lost)
+  // 2. Session ending countdown & farewell wrap-up (takes top priority as time nears end)
+  // 3. Ambient network notices (weak connection, connection restored)
   const activeToastPreset: ToastPillPreset | null = isReconnecting
     ? 'reconnecting'
     : isConnectionLost
     ? 'connection-lost'
-    : (connection.toastPreset ?? (isWrapupTime ? 'session-ends' : null));
+    : isSessionEndingNear
+    ? 'session-ends'
+    : connection.toastPreset;
 
   const displayedStatusText = isConnectionLost
     ? 'Connection lost'
@@ -232,15 +259,6 @@ export default function CallScreen() {
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // Session duration timer: triggers wrapup alert 1 min before end, and finishes when duration is reached
-  useEffect(() => {
-    if (liveCall.secondsElapsed > 0 && liveCall.secondsElapsed >= targetDuration - 60) {
-      setSessionEndNotice(true);
-    }
-    if (liveCall.secondsElapsed >= targetDuration) {
-      liveCall.endCall();
-    }
-  }, [liveCall.secondsElapsed, targetDuration]);
 
   const handleToggleMute = () => {
     if (liveCall.status === 'speaking') {
@@ -369,7 +387,7 @@ export default function CallScreen() {
                       ]}
                     />
                     <Text style={styles.timerText}>
-                      {formatTime(liveCall.secondsElapsed)}{' '}
+                      {formatTime(displayedElapsed)}{' '}
                       <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
                     </Text>
                   </View>
@@ -432,7 +450,7 @@ export default function CallScreen() {
                       ]}
                     />
                     <Text style={styles.timerTextDesktop}>
-                      {formatTime(liveCall.secondsElapsed)}{' '}
+                      {formatTime(displayedElapsed)}{' '}
                       <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
                     </Text>
                   </View>
@@ -459,7 +477,8 @@ export default function CallScreen() {
               {activeToastPreset && (
                 <ToastPill
                   preset={activeToastPreset}
-                  secondsRemaining={activeToastPreset === 'session-ends' ? remainingSeconds : undefined}
+                  secondsRemaining={activeToastPreset === 'session-ends' && remainingSeconds > 0 ? remainingSeconds : undefined}
+                  text={activeToastPreset === 'session-ends' && remainingSeconds === 0 ? 'Wrapping up session...' : undefined}
                   visible={true}
                 />
               )}

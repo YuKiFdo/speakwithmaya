@@ -520,7 +520,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
                   isConcludingRef.current = false;
                   endCallRef.current?.();
                 }
-              }, 6000);
+              }, 12000);
             }
           },
           onUsageUpdate: (usage) => {
