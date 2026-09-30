@@ -106,49 +106,17 @@ export function useConnectionMonitor(): ConnectionMonitorState {
       connection.addEventListener('change', updateConnectionInfo);
     }
 
-    // Active heartbeat ping probe every 3 seconds to catch real offline immediately
-    // even if mobile browser delays dispatching the offline event
-    const pingInterval = setInterval(async () => {
-      if (simulatedStatus !== null) return;
-
-      if (!navigator.onLine) {
-        handleOffline();
-        return;
-      }
-
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-        await fetch('https://clients3.google.com/generate_204', {
-          method: 'HEAD',
-          mode: 'no-cors',
-          cache: 'no-store',
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-
-        // Ping succeeded: if we were previously lost, restore connection
-        if (status === 'lost') {
-          handleOnline();
-        }
-      } catch (err) {
-        // If ping fails or aborts due to no internet route
-        handleOffline();
-      }
-    }, 3000);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       if (connection && typeof connection.removeEventListener === 'function') {
         connection.removeEventListener('change', updateConnectionInfo);
       }
-      clearInterval(pingInterval);
       if (restoreTimerRef.current) {
         clearTimeout(restoreTimerRef.current);
       }
     };
-  }, [handleOnline, handleOffline, status, simulatedStatus]);
+  }, [handleOnline, handleOffline]);
 
   // Handle simulation requests
   const simulateStatus = useCallback((target: ConnectionQuality | null) => {

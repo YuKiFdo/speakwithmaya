@@ -17,6 +17,21 @@ export class CreateSessionTokenDto {
   @IsOptional()
   @IsString()
   mode?: string;
+
+  @IsOptional()
+  @IsNumber()
+  durationSeconds?: number;
+
+  @IsOptional()
+  @IsString()
+  languageMode?: string;
+
+  @IsOptional()
+  aiSuggestions?: boolean;
+
+  @IsOptional()
+  @IsString()
+  scenarioId?: string;
 }
 
 export class SessionTokensDto {
@@ -107,6 +122,12 @@ export class FinishSessionDto {
   @ValidateNested({ each: true })
   @Type(() => GrammarCorrectionDto)
   grammarCorrections?: GrammarCorrectionDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GrammarCorrectionDto)
+  rephraseSuggestions?: GrammarCorrectionDto[];
 
   @IsOptional()
   @ValidateNested()

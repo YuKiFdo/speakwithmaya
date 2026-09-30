@@ -98,13 +98,39 @@ function CloseIcon({ size = 16 }: { size?: number }) {
   );
 }
 
+function SparkleIcon({ size = 24 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 2L14.4 8.6L21 11L14.4 13.4L12 20L9.6 13.4L3 11L9.6 8.6L12 2Z"
+        fill="#2B5BFF"
+      />
+      <Path
+        d="M19 16L20 18.5L22.5 19.5L20 20.5L19 23L18 20.5L15.5 19.5L18 18.5L19 16Z"
+        fill="#60A5FA"
+      />
+    </Svg>
+  );
+}
+
+function InfoCircleIcon({ size = 20 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx="12" cy="12" r="10" stroke="#2563EB" strokeWidth="2" />
+      <Path d="M12 16V12" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" />
+      <Circle cx="12" cy="8" r="1.2" fill="#2563EB" />
+    </Svg>
+  );
+}
+
 // ─── PROPS & TYPES ────────────────────────────────────────────────────────────
 
 export interface GrammarFeedbackData {
+  type?: 'grammar' | 'rephrase';
   originalSentence: string;
-  highlightedMistake: string;
+  highlightedMistake?: string;
   correctedSentence: string;
-  highlightedCorrection: string;
+  highlightedCorrection?: string;
   whyExplanation: string;
   autoDismissSeconds?: number;
 }
@@ -116,6 +142,7 @@ export interface GrammarFeedbackModalProps {
 }
 
 const DEFAULT_FEEDBACK: GrammarFeedbackData = {
+  type: 'grammar',
   originalSentence: 'I go to beach every weekend',
   highlightedMistake: 'go',
   correctedSentence: 'I go to the beach every weekend.',
@@ -244,13 +271,21 @@ export function GrammarFeedbackModal({
           {/* Top Header Row */}
           <View style={styles.headerRow}>
             <View style={styles.headerIconSquare}>
-              <GrammarDocumentIcon size={24} />
+              {feedback.type === 'rephrase' ? (
+                <SparkleIcon size={24} />
+              ) : (
+                <GrammarDocumentIcon size={24} />
+              )}
             </View>
 
             <View style={styles.headerTitlesCol}>
-              <Text style={styles.headerTitle}>Grammar Feedback</Text>
+              <Text style={styles.headerTitle}>
+                {feedback.type === 'rephrase' ? 'Rephrase Suggestion' : 'Grammar Feedback'}
+              </Text>
               <Text style={styles.headerSubtitle}>
-                Here are a few improvements from your last response.
+                {feedback.type === 'rephrase'
+                  ? "Here's a more natural way to say it."
+                  : 'Here are a few improvements from your last response.'}
               </Text>
             </View>
 
@@ -265,52 +300,92 @@ export function GrammarFeedbackModal({
             </Pressable>
           </View>
 
-          {/* Section: Your sentence */}
-          <View style={styles.sectionBlock}>
-            <Text style={styles.sectionLabel}>Your sentence</Text>
-            <View style={styles.mistakeCard}>
-              <View style={styles.sentenceTextWrapper}>
-                {renderSentenceWithHighlight(
-                  feedback.originalSentence,
-                  feedback.highlightedMistake,
-                  '#EF4444'
-                )}
+          {feedback.type === 'rephrase' ? (
+            <>
+              {/* Section: What you said */}
+              <View style={styles.sectionBlock}>
+                <Text style={styles.sectionLabel}>What you said</Text>
+                <View style={styles.rephraseWhatYouSaidCard}>
+                  <Text style={styles.sentenceBaseText}>{feedback.originalSentence}</Text>
+                </View>
               </View>
-              <View style={styles.badgeWrapper}>
-                <CircleCrossIcon size={24} />
-              </View>
-            </View>
-          </View>
 
-          {/* Section: Corrected version */}
-          <View style={styles.sectionBlock}>
-            <Text style={styles.sectionLabel}>Corrected version</Text>
-            <View style={styles.correctedCard}>
-              <View style={styles.sentenceTextWrapper}>
-                {renderSentenceWithHighlight(
-                  feedback.correctedSentence,
-                  feedback.highlightedCorrection,
-                  '#10B981'
-                )}
+              {/* Section: A more natural way */}
+              <View style={styles.sectionBlock}>
+                <Text style={styles.sectionLabel}>A more natural way</Text>
+                <View style={styles.rephraseNaturalCard}>
+                  <View style={styles.sentenceTextWrapper}>
+                    <Text style={styles.rephraseNaturalText}>{feedback.correctedSentence}</Text>
+                  </View>
+                  <View style={styles.badgeWrapper}>
+                    <CircleCheckIcon size={24} />
+                  </View>
+                </View>
               </View>
-              <View style={styles.badgeWrapper}>
-                <CircleCheckIcon size={24} />
-              </View>
-            </View>
-          </View>
 
-          {/* Section: Why this is better */}
-          <View style={styles.whyCard}>
-            <View style={styles.lightbulbCircle}>
-              <LightbulbIcon size={18} />
-            </View>
-            <View style={styles.whyTextCol}>
-              <Text style={styles.whyTitle}>Why this is better</Text>
-              <Text style={styles.whyExplanationText}>
-                {feedback.whyExplanation}
-              </Text>
-            </View>
-          </View>
+              {/* Section: Why this sounds more natural */}
+              <View style={styles.rephraseWhyCard}>
+                <View style={styles.infoCircle}>
+                  <InfoCircleIcon size={20} />
+                </View>
+                <View style={styles.whyTextCol}>
+                  <Text style={styles.rephraseWhyTitle}>Why this sounds more natural</Text>
+                  <Text style={styles.rephraseWhyExplanationText}>
+                    {feedback.whyExplanation}
+                  </Text>
+                </View>
+              </View>
+            </>
+          ) : (
+            <>
+              {/* Section: Your sentence */}
+              <View style={styles.sectionBlock}>
+                <Text style={styles.sectionLabel}>Your sentence</Text>
+                <View style={styles.mistakeCard}>
+                  <View style={styles.sentenceTextWrapper}>
+                    {renderSentenceWithHighlight(
+                      feedback.originalSentence,
+                      feedback.highlightedMistake || '',
+                      '#EF4444'
+                    )}
+                  </View>
+                  <View style={styles.badgeWrapper}>
+                    <CircleCrossIcon size={24} />
+                  </View>
+                </View>
+              </View>
+
+              {/* Section: Corrected version */}
+              <View style={styles.sectionBlock}>
+                <Text style={styles.sectionLabel}>Corrected version</Text>
+                <View style={styles.correctedCard}>
+                  <View style={styles.sentenceTextWrapper}>
+                    {renderSentenceWithHighlight(
+                      feedback.correctedSentence,
+                      feedback.highlightedCorrection || '',
+                      '#10B981'
+                    )}
+                  </View>
+                  <View style={styles.badgeWrapper}>
+                    <CircleCheckIcon size={24} />
+                  </View>
+                </View>
+              </View>
+
+              {/* Section: Why this is better */}
+              <View style={styles.whyCard}>
+                <View style={styles.lightbulbCircle}>
+                  <LightbulbIcon size={18} />
+                </View>
+                <View style={styles.whyTextCol}>
+                  <Text style={styles.whyTitle}>Why this is better</Text>
+                  <Text style={styles.whyExplanationText}>
+                    {feedback.whyExplanation}
+                  </Text>
+                </View>
+              </View>
+            </>
+          )}
 
           {/* Action CTA Button */}
           <Pressable
@@ -528,6 +603,66 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'regular'),
     fontSize: 13,
     color: '#64748B',
+    lineHeight: 19,
+  },
+
+  // ── Rephrase Suggestion Cards ──
+  rephraseWhatYouSaidCard: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  rephraseNaturalCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 12,
+  },
+  rephraseNaturalText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 15,
+    color: '#15803D',
+    lineHeight: 22,
+  },
+  rephraseWhyCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+    marginBottom: 22,
+  },
+  infoCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  rephraseWhyTitle: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 14,
+    color: '#1D4ED8',
+    marginBottom: 3,
+  },
+  rephraseWhyExplanationText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#1E40AF',
     lineHeight: 19,
   },
 

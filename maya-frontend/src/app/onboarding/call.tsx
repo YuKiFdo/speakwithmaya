@@ -35,6 +35,13 @@ export default function CallScreen() {
     goal?: string;
     challenge?: string;
     level?: string;
+    duration?: string;
+    durationMinutes?: string;
+    languageMode?: 'sinhala' | 'english';
+    aiSuggestions?: string;
+    topic?: string;
+    scenarioId?: string;
+    scenarioTitle?: string;
   }>();
 
   const { isPhone } = useBreakpoint();
@@ -43,11 +50,21 @@ export default function CallScreen() {
   // Real-time network & connection monitor
   const connection = useConnectionMonitor();
 
+  const durationSec = params.duration ? parseInt(params.duration, 10) : 300;
+  const targetDuration = isNaN(durationSec) ? 300 : durationSec;
+  const aiSug = params.aiSuggestions !== 'false';
+  const langMode = params.languageMode === 'english' ? 'english' : 'sinhala';
+  const effectiveTopic = params.topic || params.goal || 'General Speaking Practice';
+
   // Core Gemini Live Audio & Call Engine
   const liveCall = useLiveCall({
-    topic: params.goal || 'General Speaking Practice',
+    topic: effectiveTopic,
     goal: params.goal,
     level: params.level,
+    durationSeconds: targetDuration,
+    languageMode: langMode,
+    aiSuggestions: aiSug,
+    scenarioId: params.scenarioId,
   });
 
   const [sessionEndNotice, setSessionEndNotice] = useState(false);
@@ -61,21 +78,38 @@ export default function CallScreen() {
   }, []);
 
 
-  const isReconnecting = liveCall.status === 'reconnecting' || connection.isReconnecting;
-  const isConnectionLost = connection.isLost;
+  const remainingSeconds = Math.max(0, targetDuration - liveCall.secondsElapsed);
+  const isWrapupTime = remainingSeconds <= 45 && remainingSeconds > 0 && liveCall.secondsElapsed > 0;
+  const hasTriggeredWrapupRef = useRef(false);
 
-  // Priority: 1. Live network connection alert -> 2. Session ending notice -> 3. Idle / Hidden
+  useEffect(() => {
+    if (
+      isWrapupTime &&
+      !hasTriggeredWrapupRef.current &&
+      (liveCall.status === 'speaking' || liveCall.status === 'listening')
+    ) {
+      hasTriggeredWrapupRef.current = true;
+      console.log(`[call.tsx] 45s wrapup threshold reached (remaining: ${remainingSeconds}s) -> dispatching time wrap-up cue`);
+      liveCall.sendTimeWrapupCue(remainingSeconds);
+    }
+  }, [isWrapupTime, remainingSeconds, liveCall.status]);
+
+  const isCallActive = liveCall.status === 'speaking' || liveCall.status === 'listening';
+  const isReconnecting = !isCallActive && (liveCall.status === 'reconnecting' || connection.isReconnecting);
+  const isConnectionLost = !isCallActive && (connection.isLost || liveCall.status === 'ended');
+
+  // Priority: 1. Live network connection alert -> 2. Session ending countdown -> 3. Idle / Hidden
   const activeToastPreset: ToastPillPreset | null = isReconnecting
     ? 'reconnecting'
     : isConnectionLost
     ? 'connection-lost'
-    : (connection.toastPreset ?? (sessionEndNotice ? 'session-ends' : null));
+    : (connection.toastPreset ?? (isWrapupTime ? 'session-ends' : null));
 
   const displayedStatusText = isConnectionLost
     ? 'Connection lost'
     : isReconnecting
     ? 'Reconnecting...'
-    : connection.isWeak
+    : (!isCallActive && connection.isWeak)
     ? 'Weak connection'
     : liveCall.status === 'speaking'
     ? 'Speaking..'
@@ -198,6 +232,16 @@ export default function CallScreen() {
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  // Session duration timer: triggers wrapup alert 1 min before end, and finishes when duration is reached
+  useEffect(() => {
+    if (liveCall.secondsElapsed > 0 && liveCall.secondsElapsed >= targetDuration - 60) {
+      setSessionEndNotice(true);
+    }
+    if (liveCall.secondsElapsed >= targetDuration) {
+      liveCall.endCall();
+    }
+  }, [liveCall.secondsElapsed, targetDuration]);
+
   const handleToggleMute = () => {
     if (liveCall.status === 'speaking') {
       liveCall.interrupt();
@@ -317,18 +361,16 @@ export default function CallScreen() {
                     <View
                       style={[
                         styles.statusDot,
-                        connection.isLost
+                        isConnectionLost
                           ? styles.statusDotRed
-                          : connection.isReconnecting || connection.isWeak
+                          : isReconnecting || (!isCallActive && connection.isWeak)
                           ? styles.statusDotOrange
-                          : liveCall.status === 'speaking'
-                          ? styles.statusDotGreen
-                          : styles.statusDotRed,
+                          : styles.statusDotGreen,
                       ]}
                     />
                     <Text style={styles.timerText}>
                       {formatTime(liveCall.secondsElapsed)}{' '}
-                      <Text style={styles.timerMax}>/ 15:00</Text>
+                      <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
                     </Text>
                   </View>
                   <Text
@@ -336,7 +378,7 @@ export default function CallScreen() {
                       styles.stateLabel,
                       isConnectionLost
                         ? styles.stateLabelLost
-                        : isReconnecting || connection.isWeak
+                        : isReconnecting || (!isCallActive && connection.isWeak)
                         ? styles.stateLabelWarning
                         : liveCall.status === 'speaking'
                         ? styles.stateLabelSpeaking
@@ -382,26 +424,24 @@ export default function CallScreen() {
                     <View
                       style={[
                         styles.statusDot,
-                        connection.isLost
+                        isConnectionLost
                           ? styles.statusDotRed
-                          : connection.isReconnecting || connection.isWeak
+                          : isReconnecting || (!isCallActive && connection.isWeak)
                           ? styles.statusDotOrange
-                          : liveCall.status === 'speaking'
-                          ? styles.statusDotGreen
-                          : styles.statusDotRed,
+                          : styles.statusDotGreen,
                       ]}
                     />
                     <Text style={styles.timerTextDesktop}>
                       {formatTime(liveCall.secondsElapsed)}{' '}
-                      <Text style={styles.timerMax}>/ 15:00</Text>
+                      <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
                     </Text>
                   </View>
                   <Text
                     style={[
                       styles.stateLabelDesktop,
-                      connection.isLost
+                      isConnectionLost
                         ? styles.stateLabelLost
-                        : connection.isReconnecting || connection.isWeak
+                        : isReconnecting || (!isCallActive && connection.isWeak)
                         ? styles.stateLabelWarning
                         : liveCall.status === 'speaking'
                         ? styles.stateLabelSpeaking
@@ -419,7 +459,7 @@ export default function CallScreen() {
               {activeToastPreset && (
                 <ToastPill
                   preset={activeToastPreset}
-                  text={activeToastPreset === 'session-ends' ? 'The session ends in 4 seconds' : undefined}
+                  secondsRemaining={activeToastPreset === 'session-ends' ? remainingSeconds : undefined}
                   visible={true}
                 />
               )}

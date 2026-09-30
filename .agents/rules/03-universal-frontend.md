@@ -70,3 +70,8 @@ description: Universal frontend standards (Expo, React Native for Web, Expo Rout
     - Web: Use CSS `filter: 'grayscale(100%)'`.
     - Native (Android/iOS): Use reduced opacity (e.g., `opacity: 0.35`) without `tintColor`, or provide a dedicated grayscale image asset.
     - `tintColor` is reserved exclusively for single-color monochrome vector glyphs/masks.
+
+## 6. Icons: Always Use `@expo/vector-icons`
+- **Mandatory Standard:** Always use `@expo/vector-icons` (e.g. `Ionicons`, `MaterialCommunityIcons`, `Feather`, `FontAwesome5`, `Octicons`) for UI icons.
+- Ensure icons render consistently across Web, iOS, and Android without requiring platform-specific workarounds.
+- Do not introduce custom ad-hoc SVGs or third-party icon packages when `@expo/vector-icons` provides standard equivalents.

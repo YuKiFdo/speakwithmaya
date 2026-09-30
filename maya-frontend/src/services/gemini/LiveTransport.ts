@@ -7,6 +7,13 @@ export interface GrammarCorrectionPayload {
   highlightWords: string[];
 }
 
+export interface RephraseSuggestionPayload {
+  studentSaid: string;
+  moreNatural: string;
+  explanation: string;
+  highlightWords: string[];
+}
+
 export interface LiveTransportCallbacks {
   onOpen?: () => void;
   onAudioChunk?: (base64Pcm: string) => void;
@@ -15,6 +22,7 @@ export interface LiveTransportCallbacks {
   onTurnComplete?: () => void;
   onInterrupted?: () => void;
   onGrammarCorrection?: (correction: GrammarCorrectionPayload) => void;
+  onRephraseSuggestion?: (suggestion: RephraseSuggestionPayload) => void;
   onConcludeCall?: (reason: string) => void;
   onUsageUpdate?: (tokens: { audioIn: number; audioOut: number; total: number }) => void;
   onSessionResumptionUpdate?: (handle: string) => void;
@@ -32,6 +40,7 @@ export interface LiveTransportConfig {
   model?: string;
   voiceName?: string;
   resumptionHandle?: string | null;
+  greetingPrompt?: string;
 }
 
 export class LiveTransport {
@@ -45,6 +54,7 @@ export class LiveTransport {
   private lastTurnDispatchedAt: number = 0;
   private hasReceivedAudioThisTurn: boolean = false;
   private currentTurnSubtitles: string = '';
+  private isWrappingUp: boolean = false;
 
   connect(config: LiveTransportConfig, callbacks: LiveTransportCallbacks): void {
     this.config = config;
@@ -136,6 +146,10 @@ export class LiveTransport {
   private sendGreetingTurn() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
+    const greetingText =
+      this.config.greetingPrompt ||
+      'Hello Maya! Greet me warmly in 1 short sentence as my speaking coach, and ask me a quick question to kick off our practice.';
+
     const initialGreetingTurn = {
       clientContent: {
         turns: [
@@ -143,7 +157,7 @@ export class LiveTransport {
             role: 'user',
             parts: [
               {
-                text: 'Hello Maya! Greet me warmly in 1 short sentence as my speaking coach, and ask me a quick question to kick off our practice.',
+                text: greetingText,
               },
             ],
           },
@@ -152,7 +166,7 @@ export class LiveTransport {
       },
     };
 
-    console.log('[LiveTransport] Dispatching initial greeting prompt to Gemini Live...');
+    console.log('[LiveTransport] Dispatching initial greeting prompt to Gemini Live:', greetingText.slice(0, 60) + '...');
     this.ws.send(JSON.stringify(initialGreetingTurn));
   }
 
@@ -250,6 +264,28 @@ export class LiveTransport {
         },
       }),
     );
+  }
+
+  sendTimeWrapupCue(remainingSeconds: number = 45) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.isWrappingUp = true;
+    console.log(`[${getLogTimestamp()}] ⏰ [LiveTransport] Dispatching time wrap-up cue (${remainingSeconds}s remaining) to Gemini Live`);
+    const cueMsg = {
+      clientContent: {
+        turns: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: `[SYSTEM TIME NOTICE: Exactly ${remainingSeconds} seconds remain in this practice session. In your next spoken turn, seamlessly begin wrapping up: share 1 short encouraging observation or compliment on how they did today, thank them warmly, say your cheerful goodbye aloud, and call conclude_call.]`,
+              },
+            ],
+          },
+        ],
+        turnComplete: true,
+      },
+    };
+    this.ws.send(JSON.stringify(cueMsg));
   }
 
   private async handleMessage(data: string | Blob | ArrayBuffer) {
@@ -381,16 +417,51 @@ export class LiveTransport {
                 scheduling: 'WHEN_IDLE',
               },
             });
-          } else if (call.name === 'conclude_call') {
-            this.callbacks.onConcludeCall?.(call.args?.farewellReason || 'User departure');
+          } else if (call.name === 'show_rephrase_suggestion' && call.args) {
+            const suggestion: RephraseSuggestionPayload = {
+              studentSaid: call.args.studentSaid,
+              moreNatural: call.args.moreNatural,
+              explanation: call.args.explanation || '',
+              highlightWords: call.args.highlightWords || [],
+            };
+            this.callbacks.onRephraseSuggestion?.(suggestion);
+
             functionResponses.push({
               name: call.name,
               id: call.id,
               response: {
-                result: 'concluding',
+                result: 'ok',
                 scheduling: 'WHEN_IDLE',
               },
             });
+          } else if (call.name === 'conclude_call') {
+            const reason = (call.args?.farewellReason || '').toLowerCase();
+            const isGenuineDeparture =
+              this.isWrappingUp ||
+              /\b(bye|goodbye|enough|athii|athi|yanna|have to go|see you|stop|end|leave|finish|exit|wrap up|time limit|time)\b/i.test(reason);
+
+            if (isGenuineDeparture) {
+              console.log(`[${getLogTimestamp()}] 🏁 [LiveTransport] Genuine conclude_call accepted (reason: "${reason}")`);
+              this.callbacks.onConcludeCall?.(call.args?.farewellReason || 'Session concluding');
+              functionResponses.push({
+                name: call.name,
+                id: call.id,
+                response: {
+                  result: 'concluding',
+                  scheduling: 'WHEN_IDLE',
+                },
+              });
+            } else {
+              console.warn(`[${getLogTimestamp()}] ⚠️ [LiveTransport] Rejecting premature conclude_call (reason: "${reason}") - student did not request to end.`);
+              functionResponses.push({
+                name: call.name,
+                id: call.id,
+                response: {
+                  rejected: true,
+                  message: 'The student has NOT said goodbye or ended the call. Please continue the conversation without concluding.',
+                },
+              });
+            }
           }
         }
 

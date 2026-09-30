@@ -4,13 +4,28 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { createAudioCapture } from '@/services/audio/AudioCapture';
 import { createAudioPlayer } from '@/services/audio/AudioPlayer';
-import { LiveTransport, GrammarCorrectionPayload } from '@/services/gemini/LiveTransport';
+import { LiveTransport, GrammarCorrectionPayload, RephraseSuggestionPayload } from '@/services/gemini/LiveTransport';
 import { persistSessionRecord, SessionHistoryRecord } from '@/services/supabase';
 import { GrammarFeedbackData } from '@/components/call/grammar-feedback-modal';
 import { MicPermissionErrorType } from '@/components/call/microphone-permission-popup';
 import { getLogTimestamp } from '@/utils/time';
 
 export const getBackendBaseUrl = (): string => {
+  // Local web development: always point to local NestJS backend on port 3000
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:3000';
+    }
+  }
+
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    if (Platform.OS !== 'web') {
+      const metroHost = Constants.expoConfig?.hostUri?.split(':')[0];
+      return metroHost ? `http://${metroHost}:3000` : 'http://10.0.2.2:3000';
+    }
+    return 'http://localhost:3000';
+  }
+
   let url = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3000';
   if (Platform.OS !== 'web' && url.includes('localhost')) {
     const metroHost = Constants.expoConfig?.hostUri?.split(':')[0];
@@ -29,6 +44,10 @@ interface UseLiveCallOptions {
   topic?: string;
   goal?: string;
   level?: string;
+  durationSeconds?: number;
+  languageMode?: 'sinhala' | 'english';
+  aiSuggestions?: boolean;
+  scenarioId?: string;
 }
 
 export function useLiveCall(options: UseLiveCallOptions = {}) {
@@ -287,6 +306,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             topic: options.topic,
             goal: options.goal,
             level: options.level,
+            durationSeconds: options.durationSeconds,
+            languageMode: options.languageMode,
+            aiSuggestions: options.aiSuggestions,
+            scenarioId: options.scenarioId,
           }),
         });
 
@@ -315,6 +338,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           model: tokenData.model,
           voiceName: tokenData.voiceName || 'Aoede',
           resumptionHandle: resumptionHandleRef.current,
+          greetingPrompt: tokenData.greetingPrompt,
         },
         {
           onOpen: () => {
@@ -459,12 +483,30 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             correctionsRef.current.push(correctionItem);
 
             setFeedbackData({
+              type: 'grammar',
               originalSentence: payload.studentSaid,
               correctedSentence: payload.moreNatural,
               whyExplanation: payload.explanation,
               highlightedMistake: payload.highlightWords?.[0] || '',
               highlightedCorrection: payload.highlightWords?.[0] || '',
               autoDismissSeconds: 6,
+            });
+            setFeedbackVisible(true);
+          },
+          onRephraseSuggestion: (payload: RephraseSuggestionPayload) => {
+            const correctionItem = {
+              ...payload,
+              timestamp: new Date().toISOString(),
+            };
+            correctionsRef.current.push(correctionItem);
+
+            setFeedbackData({
+              type: 'rephrase',
+              originalSentence: payload.studentSaid,
+              correctedSentence: payload.moreNatural,
+              whyExplanation: payload.explanation,
+              highlightedCorrection: payload.highlightWords?.[0] || '',
+              autoDismissSeconds: 5,
             });
             setFeedbackVisible(true);
           },
@@ -679,6 +721,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     setIsPermissionModalVisible(false);
   }, []);
 
+  const sendTimeWrapupCue = useCallback((remainingSeconds?: number) => {
+    transportRef.current.sendTimeWrapupCue(remainingSeconds);
+  }, []);
+
   return {
     status,
     secondsElapsed,
@@ -701,6 +747,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     closeFeedbackModal,
     resumeAudio,
     interrupt,
+    sendTimeWrapupCue,
   };
 }
 

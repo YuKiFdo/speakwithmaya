@@ -23,6 +23,7 @@ import {
 } from '@/components/icons/nav-icons';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
+import { CreateSessionModal, CreateSessionConfig } from '@/components/call/create-session-modal';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 
 interface ScenarioItem {
@@ -137,12 +138,33 @@ export default function DashboardScreen() {
   const [activePopup, setActivePopup] = useState<PopupPreset | null>(
     (params.popup as PopupPreset) || null
   );
+  const [createSessionVisible, setCreateSessionVisible] = useState(false);
+  const [selectedScenario, setSelectedScenario] = useState<{ id: string; title: string } | null>(null);
 
-  const handleStartTalking = () => {
+  const handleOpenCreateSession = (scenario?: { id: string; title: string }) => {
+    setSelectedScenario(scenario || null);
+    setCreateSessionVisible(true);
+  };
+
+  const handleStartSession = (config: CreateSessionConfig) => {
+    setCreateSessionVisible(false);
     router.push({
       pathname: '/onboarding/connecting',
-      params,
+      params: {
+        ...params,
+        duration: String(config.durationSeconds),
+        durationMinutes: String(config.durationMinutes),
+        languageMode: config.languageMode,
+        aiSuggestions: String(config.aiSuggestions),
+        topic: config.topic,
+        scenarioId: config.scenarioId || '',
+        scenarioTitle: config.scenarioTitle || '',
+      },
     });
+  };
+
+  const handleStartTalking = () => {
+    handleOpenCreateSession();
   };
 
   const handleSelectTab = (tab: DashboardTab) => {
@@ -425,7 +447,7 @@ export default function DashboardScreen() {
                         if (isLocked) {
                           setActivePopup('unlock-premium');
                         } else {
-                          handleStartTalking();
+                          handleOpenCreateSession({ id: item.id, title: item.title });
                         }
                       }}
                       accessibilityRole="button"
@@ -629,6 +651,20 @@ export default function DashboardScreen() {
           onFooterButtonPress={() => {
             router.push('/upgrade');
             setActivePopup(null);
+          }}
+        />
+
+        {/* CREATE NEW SESSION MODAL */}
+        <CreateSessionModal
+          visible={createSessionVisible}
+          onClose={() => setCreateSessionVisible(false)}
+          onStartSession={handleStartSession}
+          scenarioId={selectedScenario?.id}
+          scenarioTitle={selectedScenario?.title}
+          isPro={isPro}
+          onUpgradePrompt={() => {
+            setCreateSessionVisible(false);
+            setActivePopup('unlock-premium');
           }}
         />
       </View>
