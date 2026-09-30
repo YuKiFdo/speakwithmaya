@@ -112,20 +112,52 @@ GOAL: ${dto.goal || 'Engage in natural conversation'}
 - VOICE TONE CONSISTENCY: Keep a steady, cheerful, warm pitch and natural pace throughout the entire conversation.`;
 
     const grammarInstruction = aiSuggestions
-      ? `AI SUGGESTIONS & CORRECTIONS (STRICT & SELECTIVE):
+      ? isSinhala
+        ? `AI SUGGESTIONS & CORRECTIONS (STRICT & SELECTIVE - SINHALA HELP MODE ACTIVE):
+CURRENT SESSION LANGUAGE: SINHALA (සිංහල).
+1. GRAMMAR CORRECTION TOOL ('show_grammar_correction'):
+   - Call ONLY when the student makes an actual GRAMMATICAL ERROR in their English speech (e.g. tense mismatch, subject-verb agreement, singular vs. plural confusion like 'A projects', incorrect preposition, missing article, or incorrect verb forms).
+   - Do NOT call for stylistic preferences or natural rephrasing if grammar is already correct.
+   - Supply:
+     - studentSaid: The student phrase containing the grammar mistake
+     - moreNatural: The grammatically corrected English phrasing
+     - explanation: 1 short, friendly sentence in natural SINHALA (සිංහලෙන්) explaining the grammar rule or reason why this correction is needed
+     - highlightWords: An array of the specific corrected English words
+   - SPOKEN COACHING INTEGRATION (CRITICAL):
+     - When you call this tool, do NOT ignore the correction and do NOT speak the coaching reason in English!
+     - Verbally coach the student in 1 warm, encouraging sentence in Sinhala explaining why:
+       "ඒක මෙහෙම කියන එක වඩාත් හරි: '[moreNatural]', මොකද [කෙටි හේතුව සිංහලෙන්]."
+     - If the student also asked you a question, coach the phrasing first in Sinhala, then briefly answer their question.
+2. REPHRASE SUGGESTION TOOL ('show_rephrase_suggestion'):
+   - Call when the student's phrase is grammatically acceptable or understandable, but could be phrased much more naturally, idiomatically, or professionally in conversational English.
+   - Example: Student says "I am doing coding since 3 years" -> Rephrase: "I've been coding for three years".
+   - Supply:
+     - studentSaid: The student's phrasing
+     - moreNatural: The more natural/native English phrasing
+     - explanation: 1 short, friendly sentence in natural SINHALA (සිංහලෙන්) explaining why this sounds more natural
+     - highlightWords: Key improved English words
+   - SPOKEN COACHING INTEGRATION (CRITICAL):
+     - When you call this tool, do NOT ignore the suggestion and do NOT speak the coaching reason in English!
+     - Verbally explain to the student in Sinhala how to say it more naturally and why it sounds better:
+       "ඒක මෙහෙම කියන එක වඩාත් natural: '[moreNatural]', මොකද [කෙටි හේතුව සිංහලෙන්]."
+     - Then, if the student asked you a question or raised an idea, briefly address it in 1 short sentence so the conversation continues naturally.
+3. PACING & FREQUENCY:
+   - Call AT MOST 1 tool every 2 to 3 turns so the student can focus on speaking without feeling interrupted.
+   - Keep your verbal coaching warm, encouraging, in natural Sinhala, and under 20 to 25 words so speaking flow remains active.`
+        : `AI SUGGESTIONS & CORRECTIONS (STRICT & SELECTIVE - ENGLISH ONLY MODE):
+CURRENT SESSION LANGUAGE: ENGLISH ONLY.
 1. GRAMMAR CORRECTION TOOL ('show_grammar_correction'):
    - Call ONLY when the student makes an actual GRAMMATICAL ERROR (e.g. tense mismatch, subject-verb agreement, singular vs. plural confusion like 'A projects', incorrect preposition, missing article, or incorrect verb forms).
    - Do NOT call for stylistic preferences or natural rephrasing if grammar is already correct.
    - Supply:
      - studentSaid: The student phrase containing the grammar mistake
      - moreNatural: The grammatically corrected phrasing
-     - explanation: A short 1-sentence friendly rule explaining why
+     - explanation: A short 1-sentence friendly rule explaining why in English
      - highlightWords: An array of the specific corrected words
-   - SPOKEN COACHING INTEGRATION:
+   - SPOKEN COACHING INTEGRATION (CRITICAL):
      - When you call this tool, do NOT ignore the correction and rush into answering.
-     - Verbally coach the student in 1 warm, encouraging sentence explaining why the correction is better.
-     - English mode: "Quick tip: it's better to say '[moreNatural]' because [short reason why]."
-     - Sinhala mode: "ඒක මෙහෙම කියන එක වඩාත් හරි: '[moreNatural]', මොකද [short reason in Sinhala]."
+     - Verbally coach the student in 1 warm, encouraging sentence explaining why the correction is better:
+       "Quick tip: it's better to say '[moreNatural]' because [short reason why]."
      - If the student also asked you a question, coach the phrasing first, then briefly answer their question.
 2. REPHRASE SUGGESTION TOOL ('show_rephrase_suggestion'):
    - Call when the student's phrase is grammatically acceptable or understandable, but could be phrased much more naturally, idiomatically, or professionally in conversational English.
@@ -133,13 +165,12 @@ GOAL: ${dto.goal || 'Engage in natural conversation'}
    - Supply:
      - studentSaid: The student's phrasing
      - moreNatural: The more natural/native phrasing
-     - explanation: 1 short sentence explaining why this sounds more natural
+     - explanation: 1 short sentence in English explaining why this sounds more natural
      - highlightWords: Key improved words
-   - SPOKEN COACHING INTEGRATION:
+   - SPOKEN COACHING INTEGRATION (CRITICAL):
      - When you call this tool, do NOT ignore the suggestion or give an answer as if nothing happened!
      - Verbally explain to the student how to say it more naturally and why it sounds better:
-     - English mode: "A more natural way to say that is: '[moreNatural]'—because [short reason why it sounds better]."
-     - Sinhala mode: "ඒක මෙහෙම කියන එක වඩාත් natural: '[moreNatural]', මොකද [short reason in Sinhala]."
+       "A more natural way to say that is: '[moreNatural]'—because [short reason why it sounds better]."
      - Then, if the student asked you a question or raised an idea, briefly address it in 1 short sentence so the conversation continues naturally.
 3. PACING & FREQUENCY:
    - Call AT MOST 1 tool every 2 to 3 turns so the student can focus on speaking without feeling interrupted.
@@ -260,7 +291,7 @@ ${scenarioInstruction}
     }
   }
 
-  getToolsDeclaration(aiSuggestions: boolean = true) {
+  getToolsDeclaration(aiSuggestions: boolean = true, isSinhala: boolean = false) {
     const functions: any[] = [
       {
         name: 'conclude_call',
@@ -300,8 +331,9 @@ ${scenarioInstruction}
               },
               explanation: {
                 type: 'STRING',
-                description:
-                  'A short 1-sentence friendly explanation of the grammar rule or reason for the correction',
+                description: isSinhala
+                  ? 'A short 1-sentence friendly explanation of the grammar rule in Sinhala (සිංහලෙන් කෙටි පැහැදිලි කිරීමක්)'
+                  : 'A short 1-sentence friendly explanation of the grammar rule or reason for the correction',
               },
               highlightWords: {
                 type: 'ARRAY',
@@ -330,8 +362,9 @@ ${scenarioInstruction}
               },
               explanation: {
                 type: 'STRING',
-                description:
-                  'Why this phrasing sounds more natural or conversational in context',
+                description: isSinhala
+                  ? 'Why this phrasing sounds more natural, explained in Sinhala (සිංහලෙන් කෙටි පැහැදිලි කිරීමක්)'
+                  : 'Why this phrasing sounds more natural or conversational in context',
               },
               highlightWords: {
                 type: 'ARRAY',
@@ -350,8 +383,9 @@ ${scenarioInstruction}
 
   async createSessionToken(userId: string = 'guest-user', dto: CreateSessionTokenDto) {
     const sessionId = randomUUID();
+    const isSinhala = dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
     const systemPrompt = this.getSystemPrompt(dto);
-    const tools = this.getToolsDeclaration(dto.aiSuggestions !== false);
+    const tools = this.getToolsDeclaration(dto.aiSuggestions !== false, isSinhala);
 
     const apiKey = process.env.GEMINI_API_KEY || this.geminiApiKey;
     let ephemeralToken = 'gemini-live-token-' + randomUUID();
