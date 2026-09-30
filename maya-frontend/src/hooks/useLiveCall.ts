@@ -489,7 +489,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               whyExplanation: payload.explanation,
               highlightedMistake: payload.highlightWords?.[0] || '',
               highlightedCorrection: payload.highlightWords?.[0] || '',
-              autoDismissSeconds: 6,
+              autoDismissSeconds: 15,
             });
             setFeedbackVisible(true);
           },
@@ -506,7 +506,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               correctedSentence: payload.moreNatural,
               whyExplanation: payload.explanation,
               highlightedCorrection: payload.highlightWords?.[0] || '',
-              autoDismissSeconds: 5,
+              autoDismissSeconds: 15,
             });
             setFeedbackVisible(true);
           },
