@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Animated,
   Easing,
+  PanResponder,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
@@ -151,6 +152,51 @@ export function CreateSessionModal({
     }
   }, [visible, initialTopic, scenarioId]);
 
+  // Slide-down gesture to dismiss bottom sheet on mobile
+  const sheetTranslateY = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      sheetTranslateY.setValue(0);
+    }
+  }, [visible, sheetTranslateY]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Activate if user drags downwards by > 4px
+        return gestureState.dy > 4;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          sheetTranslateY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 70 || gestureState.vy > 0.4) {
+          // Slide all the way down and close
+          Animated.timing(sheetTranslateY, {
+            toValue: 600,
+            duration: 180,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: Platform.OS !== 'web',
+          }).start(() => {
+            sheetTranslateY.setValue(0);
+            onClose();
+          });
+        } else {
+          // Snap back to original position
+          Animated.spring(sheetTranslateY, {
+            toValue: 0,
+            bounciness: 4,
+            useNativeDriver: Platform.OS !== 'web',
+          }).start();
+        }
+      },
+    })
+  ).current;
+
   // Contextual placeholder based on scenario
   const getPlaceholderText = () => {
     if (scenarioId === 'job-interview') {
@@ -213,17 +259,33 @@ export function CreateSessionModal({
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={[styles.modalContainer, isBottomSheet && styles.modalContainerBottomSheet]}
         >
-          <View
+          <Animated.View
             style={[
               styles.card,
               isDesktop ? styles.cardDesktop : styles.bottomSheetCard,
+              isBottomSheet && {
+                transform: [{ translateY: sheetTranslateY }],
+              },
             ]}
           >
-            {/* Top Sheet Handle Bar (Mobile Bottom Sheet like Extra Time Modal) */}
-            {isBottomSheet && <View style={styles.sheetHandleBar} />}
+            {/* Top Sheet Handle Bar (Mobile Bottom Sheet) with Slide-Down PanResponder & Tap-to-Close */}
+            {isBottomSheet && (
+              <Pressable
+                style={styles.sheetHandleContainer}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close bottom sheet"
+                {...panResponder.panHandlers}
+              >
+                <View style={styles.sheetHandleBar} />
+              </Pressable>
+            )}
 
             {/* Header */}
-            <View style={[styles.headerRow, isDesktop ? styles.headerRowDesktop : styles.headerRowMobile]}>
+            <View
+              style={[styles.headerRow, isDesktop ? styles.headerRowDesktop : styles.headerRowMobile]}
+              {...(isBottomSheet ? panResponder.panHandlers : {})}
+            >
               <View style={styles.headerLeft}>
                 {/* Blue Plus Icon Circle */}
                 <View style={[styles.avatarCircle, isDesktop && styles.avatarCircleDesktop]}>
@@ -586,7 +648,7 @@ export function CreateSessionModal({
                 </Text>
               </Pressable>
             </View>
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
       </View>
     </Modal>
@@ -684,15 +746,23 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     overflow: 'hidden',
   },
+  sheetHandleContainer: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 10,
+    paddingBottom: 6,
+    flexShrink: 0,
+    ...Platform.select({
+      web: { cursor: 'grab' } as any,
+    }),
+  },
   sheetHandleBar: {
     width: 44,
     height: 4.5,
     borderRadius: 3,
     backgroundColor: '#CBD5E1',
     alignSelf: 'center',
-    marginTop: 10,
-    marginBottom: 2,
-    flexShrink: 0,
   },
 
   /* Header */
