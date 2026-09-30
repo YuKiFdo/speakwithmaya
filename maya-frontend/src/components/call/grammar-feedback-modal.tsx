@@ -148,7 +148,7 @@ const DEFAULT_FEEDBACK: GrammarFeedbackData = {
   correctedSentence: 'I go to the beach every weekend.',
   highlightedCorrection: 'the',
   whyExplanation: 'Use "the beach" because we usually refer to the beach as a specific place.',
-  autoDismissSeconds: 15,
+  autoDismissSeconds: 10,
 };
 
 export function GrammarFeedbackModal({
@@ -160,7 +160,7 @@ export function GrammarFeedbackModal({
   const isDesktop = !isPhone;
   const { width: windowWidth } = useWindowDimensions();
 
-  const initialSeconds = feedback.autoDismissSeconds ?? 15;
+  const initialSeconds = feedback.autoDismissSeconds ?? 10;
   const [countdown, setCountdown] = useState(initialSeconds);
 
   // Slide animation for mobile bottom sheet / scale animation for desktop
