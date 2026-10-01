@@ -75,7 +75,7 @@ export class LiveTransport {
   connect(config: LiveTransportConfig, callbacks: LiveTransportCallbacks): void {
     this.config = config;
     this.callbacks = callbacks;
-    this.resumptionHandle = config.resumptionHandle || this.resumptionHandle;
+    this.resumptionHandle = config.resumptionHandle || null;
     this.isResumedSession = !!this.resumptionHandle;
 
     if (!config.wsUrl) {
@@ -126,7 +126,6 @@ export class LiveTransport {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
     const generationConfig: GenerationConfig = {
-      enableAffectiveDialog: true,
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
@@ -255,7 +254,7 @@ export class LiveTransport {
     this.lastTurnDispatchedAt = Date.now();
     this.hasReceivedAudioThisTurn = false;
     this.currentTurnSubtitles = '';
-    console.log(`[${getLogTimestamp()}] 🚀 [Turn Dispatch] Streaming silence tail to trigger Gemini server-side VAD`);
+    console.log(`[${getLogTimestamp()}] 🚀 [Turn Dispatch] Signaling turn end to Gemini server-side VAD`);
 
     // If user speaks during the post-coaching pause, cancel the nudge — user responded naturally
     if (this.feedbackNudgeTimer) {
@@ -265,22 +264,8 @@ export class LiveTransport {
       console.log(`[${getLogTimestamp()}] ⏹️ [Feedback Nudge] Cancelled — student responded during coaching pause`);
     }
 
-    // Stream 6 comfort silence frames (600ms of zeros) as acoustic hint to server-side VAD.
-    // With realtimeInputConfig.automaticActivityDetection properly configured, the server
-    // detects end-of-speech automatically. These silence frames help the VAD commit faster.
-    const silenceBase64 = 'A'.repeat(4264) + 'AAA=';
-    for (let i = 0; i < 6; i++) {
-      this.ws.send(
-        JSON.stringify({
-          realtimeInput: {
-            audio: {
-              mimeType: 'audio/pcm;rate=16000',
-              data: silenceBase64,
-            },
-          },
-        }),
-      );
-    }
+    // Official Gemini Live API signal: notify server-side VAD that audio stream turn has ended
+    this.sendAudioStreamEnd();
   }
 
   sendInterrupted() {
