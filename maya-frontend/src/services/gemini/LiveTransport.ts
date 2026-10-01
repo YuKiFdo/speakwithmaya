@@ -1,10 +1,15 @@
 import { getLogTimestamp } from '@/utils/time';
-import type {
-  LiveClientMessage,
-  LiveServerMessage,
-  UsageMetadata,
-  GenerationConfig,
-  ModalityTokenCount,
+import {
+  Modality,
+  StartSensitivity,
+  EndSensitivity,
+  type LiveClientMessage,
+  type LiveServerMessage,
+  type LiveServerSessionResumptionUpdate,
+  type LiveServerContent,
+  type UsageMetadata,
+  type GenerationConfig,
+  type ModalityTokenCount,
 } from '@google/genai';
 
 export interface GrammarCorrectionPayload {
@@ -49,6 +54,7 @@ export interface LiveTransportConfig {
   resumptionHandle?: string | null;
   greetingPrompt?: string;
   languageMode?: string;
+  generationConfig?: GenerationConfig;
 }
 
 export class LiveTransport {
@@ -119,26 +125,29 @@ export class LiveTransport {
   private sendInitialSetup() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    const setupMsg: any = {
-      setup: {
-        model: `models/${this.config.model || 'gemini-3.8-live'}`,
-        generationConfig: {
-          enableAffectiveDialog: true,
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: this.config.voiceName || 'Aoede',
-              },
-            },
+    const generationConfig: GenerationConfig = {
+      enableAffectiveDialog: true,
+      responseModalities: [Modality.AUDIO],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: {
+            voiceName: this.config.voiceName || 'Aoede',
           },
         },
+      },
+      ...this.config.generationConfig,
+    };
+
+    const setupMsg: LiveClientMessage = {
+      setup: {
+        model: `models/${this.config.model || 'gemini-3.8-live'}`,
+        generationConfig,
         // Official Gemini Live API VAD tuning (ai.google.dev/api/live#AutomaticActivityDetection)
         realtimeInputConfig: {
           automaticActivityDetection: {
             disabled: false,
-            startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
-            endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
+            startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
             prefixPaddingMs: 200,
             silenceDurationMs: 700,
           },
@@ -150,15 +159,15 @@ export class LiveTransport {
         tools: this.config.tools || [],
         sessionResumption: this.resumptionHandle ? { handle: this.resumptionHandle } : undefined,
         contextWindowCompression: {
-          triggerTokens: 25000,
+          triggerTokens: '25000',
           slidingWindow: {
-            targetTokens: 12500,
+            targetTokens: '12500',
           },
         },
         systemInstruction: this.config.systemPrompt
           ? {
-              parts: [{ text: this.config.systemPrompt }],
-            }
+            parts: [{ text: this.config.systemPrompt }],
+          }
           : undefined,
       },
     };
@@ -361,12 +370,12 @@ export class LiveTransport {
     if (!text) return;
 
     try {
-      const msg = JSON.parse(text);
+      const msg: LiveServerMessage = JSON.parse(text);
 
       // Check for Gemini API errors
-      if (msg.error) {
-        console.error(`[${getLogTimestamp()}] [LiveTransport] ❌ Gemini Live API Error:`, JSON.stringify(msg.error));
-        this.callbacks.onError?.(new Error(msg.error.message || 'Gemini Live error'));
+      if ((msg as any).error) {
+        console.error(`[${getLogTimestamp()}] [LiveTransport] ❌ Gemini Live API Error:`, JSON.stringify((msg as any).error));
+        this.callbacks.onError?.(new Error((msg as any).error.message || 'Gemini Live error'));
         return;
       }
 
@@ -384,8 +393,8 @@ export class LiveTransport {
 
       // Session resumption token updates
       if (msg.sessionResumptionUpdate) {
-        const sru = msg.sessionResumptionUpdate;
-        const newHandle = sru.newHandle || sru.new_handle;
+        const sru: LiveServerSessionResumptionUpdate = msg.sessionResumptionUpdate;
+        const newHandle = sru.newHandle || (sru as any).new_handle;
         if (sru.resumable && newHandle) {
           console.log(`[${getLogTimestamp()}] [LiveTransport] Session resumption handle updated: ${newHandle.substring(0, 16)}...`);
           this.resumptionHandle = newHandle;
@@ -402,7 +411,7 @@ export class LiveTransport {
 
       // 1. Audio and serverContent
       if (msg.serverContent) {
-        const sc = msg.serverContent;
+        const sc: LiveServerContent = msg.serverContent;
 
         // Model audio playback chunks
         if (sc.modelTurn?.parts) {
@@ -419,20 +428,20 @@ export class LiveTransport {
         }
 
         // Subtitles / output transcript (Maya speaking)
-        const outputText = sc.outputTranscription?.text || sc.output_transcription?.text;
+        const outputText = sc.outputTranscription?.text || (sc as any).output_transcription?.text;
         if (outputText) {
           this.currentTurnSubtitles += outputText;
           this.callbacks.onOutputTranscript?.(outputText);
         }
 
         // Interim Student transcript (streaming preview for UI)
-        const interimText = sc.interimInputTranscription?.text || sc.interim_input_transcription?.text;
+        const interimText = sc.interimInputTranscription?.text || (sc as any).interim_input_transcription?.text;
         if (interimText) {
           this.callbacks.onInputTranscript?.(interimText);
         }
 
         // Final Student transcript
-        const inputText = sc.inputTranscription?.text || sc.input_transcription?.text;
+        const inputText = sc.inputTranscription?.text || (sc as any).input_transcription?.text;
         if (inputText) {
           console.log(`[${getLogTimestamp()}] 📝 [Student Said]: "${inputText}"`);
           this.callbacks.onInputTranscript?.(inputText);
@@ -521,18 +530,20 @@ export class LiveTransport {
 
       // 2. Tool Calls (show_grammar_correction, conclude_call)
       if (msg.toolCall?.functionCalls) {
+        const functionCalls = msg.toolCall.functionCalls;
         const functionResponses = [];
 
         const isSinhala = this.config.languageMode === 'sinhala';
 
-        for (const call of msg.toolCall.functionCalls) {
-          console.log(`[${getLogTimestamp()}] 🛠️ [Tool Call Invoked]: ${call.name}`, JSON.stringify(call.args || {}));
-          if (call.name === 'show_grammar_correction' && call.args) {
+        for (const call of functionCalls) {
+          const args = (call.args || {}) as any;
+          console.log(`[${getLogTimestamp()}] 🛠️ [Tool Call Invoked]: ${call.name}`, JSON.stringify(args));
+          if (call.name === 'show_grammar_correction') {
             const correction: GrammarCorrectionPayload = {
-              studentSaid: call.args.studentSaid,
-              moreNatural: call.args.moreNatural,
-              explanation: call.args.explanation || '',
-              highlightWords: call.args.highlightWords || [],
+              studentSaid: String(args.studentSaid || args.student_said || ''),
+              moreNatural: String(args.moreNatural || args.more_natural || ''),
+              explanation: String(args.explanation || ''),
+              highlightWords: Array.isArray(args.highlightWords || args.highlight_words) ? (args.highlightWords || args.highlight_words) : [],
             };
             console.log(
               `[${getLogTimestamp()}] 💡 [Tool: Grammar Correction] Mistake: "${correction.studentSaid}" -> Fix: "${correction.moreNatural}" (Why: "${correction.explanation}")`,
@@ -541,8 +552,8 @@ export class LiveTransport {
 
             this.pendingFeedbackNudge = true;
             console.log(`[${getLogTimestamp()}] 📌 [Feedback Nudge Armed]: pendingFeedbackNudge = TRUE. Will trigger continuation after Maya delivers coaching speech.`);
-            const targetPhrase = ((call.args.moreNatural as string) || '').replace(/"/g, "'");
-            const rawExplanation = ((call.args.explanation as string) || '').replace(/"/g, "'");
+            const targetPhrase = correction.moreNatural.replace(/"/g, "'");
+            const rawExplanation = correction.explanation.replace(/"/g, "'");
 
             functionResponses.push({
               name: call.name,
@@ -555,12 +566,12 @@ export class LiveTransport {
               },
             });
             console.log(`[${getLogTimestamp()}] 📤 [Tool Response Queued]: Queued response for show_grammar_correction`);
-          } else if (call.name === 'show_rephrase_suggestion' && call.args) {
+          } else if (call.name === 'show_rephrase_suggestion') {
             const suggestion: RephraseSuggestionPayload = {
-              studentSaid: call.args.studentSaid,
-              moreNatural: call.args.moreNatural,
-              explanation: call.args.explanation || '',
-              highlightWords: call.args.highlightWords || [],
+              studentSaid: String(args.studentSaid || args.student_said || ''),
+              moreNatural: String(args.moreNatural || args.more_natural || ''),
+              explanation: String(args.explanation || ''),
+              highlightWords: Array.isArray(args.highlightWords || args.highlight_words) ? (args.highlightWords || args.highlight_words) : [],
             };
             console.log(
               `[${getLogTimestamp()}] 💬 [Tool: Rephrase Suggestion] Phrasing: "${suggestion.studentSaid}" -> More Natural: "${suggestion.moreNatural}" (Why: "${suggestion.explanation}")`,
@@ -569,8 +580,8 @@ export class LiveTransport {
 
             this.pendingFeedbackNudge = true;
             console.log(`[${getLogTimestamp()}] 📌 [Feedback Nudge Armed]: pendingFeedbackNudge = TRUE. Will trigger continuation after Maya delivers coaching speech.`);
-            const targetPhrase = ((call.args.moreNatural as string) || '').replace(/"/g, "'");
-            const rawExplanation = ((call.args.explanation as string) || '').replace(/"/g, "'");
+            const targetPhrase = suggestion.moreNatural.replace(/"/g, "'");
+            const rawExplanation = suggestion.explanation.replace(/"/g, "'");
 
             functionResponses.push({
               name: call.name,
@@ -584,14 +595,14 @@ export class LiveTransport {
             });
             console.log(`[${getLogTimestamp()}] 📤 [Tool Response Queued]: Queued response for show_rephrase_suggestion`);
           } else if (call.name === 'conclude_call') {
-            const reason = (call.args?.farewellReason || '');
+            const reason = String(args.farewellReason || args.farewell_reason || '');
             const isUserDeparture = /\b(bye|goodbye|good bye|see you|athii|yanna|enough|leave|gotta go|have to go|talk later|catch you|take care)\b/i.test(reason);
             const canConclude = this.isWrappingUp || isUserDeparture;
 
             if (canConclude) {
               // System farewell cue was sent or student explicitly said goodbye
               console.log(`[${getLogTimestamp()}] 🏁 [Tool: Conclude Call ACCEPTED]: isWrappingUp=${this.isWrappingUp}, isUserDeparture=${isUserDeparture}, reason: "${reason}"`);
-              this.callbacks.onConcludeCall?.(call.args?.farewellReason || 'Session concluding');
+              this.callbacks.onConcludeCall?.(reason || 'Session concluding');
               functionResponses.push({
                 name: call.name,
                 id: call.id,
@@ -629,7 +640,8 @@ export class LiveTransport {
       }
 
       // 3. Usage metadata (internal ledger update, no terminal spam)
-      const usage = msg.usageMetadata || msg.serverContent?.usageMetadata || msg.serverContent?.modelTurn?.usageMetadata;
+      const usage: (UsageMetadata & { candidatesTokenCount?: number }) | undefined =
+        msg.usageMetadata || (msg.serverContent as any)?.usageMetadata || (msg.serverContent as any)?.modelTurn?.usageMetadata;
       if (usage) {
         console.log(usage)
         let audioOutFromDetails = 0;
@@ -674,7 +686,7 @@ export class LiveTransport {
     if (this.ws) {
       try {
         this.ws.close();
-      } catch {}
+      } catch { }
       this.ws = null;
     }
   }
