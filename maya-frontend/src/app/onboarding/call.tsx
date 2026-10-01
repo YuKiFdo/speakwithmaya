@@ -32,6 +32,8 @@ export default function CallScreen() {
   const params = useLocalSearchParams<{
     phone?: string;
     name?: string;
+    userName?: string;
+    isIntroCall?: string;
     goal?: string;
     challenge?: string;
     level?: string;
@@ -55,6 +57,8 @@ export default function CallScreen() {
   const aiSug = params.aiSuggestions !== 'false';
   const langMode = params.languageMode === 'english' ? 'english' : 'sinhala';
   const effectiveTopic = params.topic || params.goal || 'General Speaking Practice';
+  const effectiveUserName = (params.name || params.userName || '').trim() || 'Tharindu';
+  const isIntro = params.isIntroCall === 'true';
 
   // Core Gemini Live Audio & Call Engine
   const liveCall = useLiveCall({
@@ -65,6 +69,8 @@ export default function CallScreen() {
     languageMode: langMode,
     aiSuggestions: aiSug,
     scenarioId: params.scenarioId,
+    userName: effectiveUserName,
+    isIntroCall: isIntro,
   });
 
 

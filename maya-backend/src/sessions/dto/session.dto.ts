@@ -32,6 +32,17 @@ export class CreateSessionTokenDto {
   @IsOptional()
   @IsString()
   scenarioId?: string;
+
+  @IsOptional()
+  @IsString()
+  userName?: string;
+
+  @IsOptional()
+  isIntroCall?: boolean;
+
+  @IsOptional()
+  @IsString()
+  memory?: string;
 }
 
 export class SessionTokensDto {

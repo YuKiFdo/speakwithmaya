@@ -41,6 +41,7 @@ export interface LiveTransportConfig {
   voiceName?: string;
   resumptionHandle?: string | null;
   greetingPrompt?: string;
+  languageMode?: string;
 }
 
 export class LiveTransport {
@@ -163,7 +164,7 @@ export class LiveTransport {
 
     const greetingText =
       this.config.greetingPrompt ||
-      'Hello Maya! Greet me warmly in 1 short sentence as my speaking coach, and ask me a quick question to kick off our practice.';
+      '[INSTRUCTION FOR OPENING TURN]: Greet the student warmly as their AI English speaking coach and ask an engaging opening question to begin practice.';
 
     const initialGreetingTurn = {
       clientContent: {
@@ -267,6 +268,11 @@ export class LiveTransport {
 
   sendInterrupted() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (this.feedbackNudgeTimer) {
+      clearTimeout(this.feedbackNudgeTimer);
+      this.feedbackNudgeTimer = null;
+    }
+    this.pendingFeedbackNudge = false;
     console.log(`[${getLogTimestamp()}] [LiveTransport] Dispatching interrupt clientContent to Gemini`);
     this.ws.send(
       JSON.stringify({
@@ -302,7 +308,12 @@ export class LiveTransport {
 
   private sendContinueAfterFeedback() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    console.log(`[${getLogTimestamp()}] ▶️ [Feedback Nudge] Sending continue cue to model after coaching pause`);
+    const isSinhala = this.config.languageMode === 'sinhala';
+    console.log(`[${getLogTimestamp()}] ▶️ [Feedback Nudge] Sending smooth continuation cue to model (isSinhala: ${isSinhala})`);
+    const cueText = isSinhala
+      ? '[INSTRUCTION]: The student has absorbed your coaching tip. In lively everyday Sinhala, naturally and dynamically transition back into the conversation in your own spontaneous words, and continue with your next engaging question on our topic.'
+      : '[INSTRUCTION]: The student has absorbed your coaching tip. With warmth and vibrant energy, naturally and dynamically bridge back into the conversation with your own fresh words (without using any scripted or repetitive phrases), and ask your next engaging question on our topic.';
+
     const nudgeMsg = {
       clientContent: {
         turns: [
@@ -310,7 +321,7 @@ export class LiveTransport {
             role: 'user',
             parts: [
               {
-                text: '[The student has seen the correction. Continue the conversation naturally — ask your next question or respond to what they said.]',
+                text: cueText,
               },
             ],
           },
@@ -319,6 +330,8 @@ export class LiveTransport {
       },
     };
     this.ws.send(JSON.stringify(nudgeMsg));
+    this.pendingFeedbackNudge = false;
+    this.feedbackNudgeTimer = null;
   }
 
   private async handleMessage(data: string | Blob | ArrayBuffer) {
@@ -425,15 +438,15 @@ export class LiveTransport {
           this.currentTurnSubtitles = '';
           this.callbacks.onTurnComplete?.();
 
-          // After a coaching turn WITH AUDIO, wait 3 seconds then nudge the model to continue
+          // After a coaching turn WITH AUDIO, wait 750ms then nudge the model to continue smoothly
           // Skip the tool-call turnComplete (no audio) — only fire on the coaching audio turnComplete
           if (this.pendingFeedbackNudge && this.hasReceivedAudioThisTurn) {
             this.pendingFeedbackNudge = false;
             if (this.feedbackNudgeTimer) clearTimeout(this.feedbackNudgeTimer);
-            console.log(`[${getLogTimestamp()}] ⏳ [Feedback Pause] Coaching turn complete — waiting 3s before nudging model to continue`);
+            console.log(`[${getLogTimestamp()}] ⏳ [Feedback Pause] Coaching turn complete — brief 750ms pause before smooth continuation`);
             this.feedbackNudgeTimer = setTimeout(() => {
               this.sendContinueAfterFeedback();
-            }, 3000);
+            }, 750);
           }
         }
       }
@@ -441,6 +454,8 @@ export class LiveTransport {
       // 2. Tool Calls (show_grammar_correction, conclude_call)
       if (msg.toolCall?.functionCalls) {
         const functionResponses = [];
+
+        const isSinhala = this.config.languageMode === 'sinhala';
 
         for (const call of msg.toolCall.functionCalls) {
           console.log(`[${getLogTimestamp()}] 🛠️ [Tool Call]: ${call.name}`, call.args || {});
@@ -452,14 +467,16 @@ export class LiveTransport {
               highlightWords: call.args.highlightWords || [],
             };
             this.callbacks.onGrammarCorrection?.(correction);
-            this.pendingFeedbackNudge = true;
 
+            this.pendingFeedbackNudge = true;
             functionResponses.push({
               name: call.name,
               id: call.id,
               response: {
                 result: 'displayed_to_student',
-                instruction: 'Correction card shown to student. Now speak ONLY the coaching sentence explaining the correction. Do NOT add any follow-up question or new topic. End your turn after coaching.',
+                instruction: isSinhala
+                  ? 'Correction card displayed to student. Deliver ONLY your brief, warm coaching in natural Sinhala. Do NOT add any follow-up question. End your turn after coaching.'
+                  : 'Correction card displayed to student. Deliver ONLY your brief, warm coaching sentence. Do NOT add any follow-up question. End your turn after coaching.',
               },
             });
           } else if (call.name === 'show_rephrase_suggestion' && call.args) {
@@ -470,40 +487,44 @@ export class LiveTransport {
               highlightWords: call.args.highlightWords || [],
             };
             this.callbacks.onRephraseSuggestion?.(suggestion);
-            this.pendingFeedbackNudge = true;
 
+            this.pendingFeedbackNudge = true;
             functionResponses.push({
               name: call.name,
               id: call.id,
               response: {
                 result: 'displayed_to_student',
-                instruction: 'Rephrase suggestion shown to student. Now speak ONLY the coaching sentence explaining why this phrasing sounds more natural. Do NOT add any follow-up question or new topic. End your turn after coaching.',
+                instruction: isSinhala
+                  ? 'Rephrase suggestion card displayed to student. Deliver ONLY your brief, warm explanation in natural Sinhala. Do NOT add any follow-up question. End your turn after coaching.'
+                  : 'Rephrase suggestion card displayed to student. Deliver ONLY your brief, warm explanation. Do NOT add any follow-up question. End your turn after coaching.',
               },
             });
           } else if (call.name === 'conclude_call') {
             const reason = (call.args?.farewellReason || '');
+            const isUserDeparture = /\b(bye|goodbye|good bye|see you|athii|yanna|enough|leave|gotta go|have to go|talk later|catch you|take care)\b/i.test(reason);
+            const canConclude = this.isWrappingUp || isUserDeparture;
 
-            if (this.isWrappingUp) {
-              // System farewell cue was sent — conclude is legitimate
-              console.log(`[${getLogTimestamp()}] 🏁 [LiveTransport] conclude_call ACCEPTED (isWrappingUp=true, reason: "${reason}")`);
+            if (canConclude) {
+              // System farewell cue was sent or student explicitly said goodbye
+              console.log(`[${getLogTimestamp()}] 🏁 [LiveTransport] conclude_call ACCEPTED (isWrappingUp=${this.isWrappingUp}, isUserDeparture=${isUserDeparture}, reason: "${reason}")`);
               this.callbacks.onConcludeCall?.(call.args?.farewellReason || 'Session concluding');
               functionResponses.push({
                 name: call.name,
                 id: call.id,
                 response: {
                   result: 'concluding',
-                  scheduling: 'WHEN_IDLE',
+                  instruction: 'Call concluded. Farewell delivered. Do NOT speak any further words.',
                 },
               });
             } else {
-              // System farewell cue NOT sent yet — model is self-concluding prematurely
+              // System farewell cue NOT sent yet AND student did not ask to leave — model is self-concluding prematurely
               console.warn(`[${getLogTimestamp()}] ⚠️ [LiveTransport] conclude_call REJECTED (isWrappingUp=false, reason: "${reason}") — session time has NOT ended yet.`);
               functionResponses.push({
                 name: call.name,
                 id: call.id,
                 response: {
                   rejected: true,
-                  message: 'Session time has NOT ended. The student has NOT asked to leave. Continue the conversation normally. You will receive a [SYSTEM TIME NOTICE] when it is time to conclude.',
+                  message: 'REJECTED: Session time has NOT ended, and the student did not ask to leave. You are strictly forbidden to wrap up or say goodbye on your own initiative. Continue the conversation immediately: ask your next engaging question on the topic without mentioning this rejection.',
                 },
               });
             }
@@ -542,6 +563,11 @@ export class LiveTransport {
 
   close() {
     this.isOpen = false;
+    if (this.feedbackNudgeTimer) {
+      clearTimeout(this.feedbackNudgeTimer);
+      this.feedbackNudgeTimer = null;
+    }
+    this.pendingFeedbackNudge = false;
     if (this.ws) {
       try {
         this.ws.close();

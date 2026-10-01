@@ -48,6 +48,8 @@ interface UseLiveCallOptions {
   languageMode?: 'sinhala' | 'english';
   aiSuggestions?: boolean;
   scenarioId?: string;
+  userName?: string;
+  isIntroCall?: boolean;
 }
 
 export function useLiveCall(options: UseLiveCallOptions = {}) {
@@ -310,6 +312,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             languageMode: options.languageMode,
             aiSuggestions: options.aiSuggestions,
             scenarioId: options.scenarioId,
+            userName: options.userName,
+            isIntroCall: options.isIntroCall,
           }),
         });
 
@@ -339,6 +343,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           voiceName: tokenData.voiceName || 'Aoede',
           resumptionHandle: resumptionHandleRef.current,
           greetingPrompt: tokenData.greetingPrompt,
+          languageMode: tokenData.languageMode || options.languageMode,
         },
         {
           onOpen: () => {

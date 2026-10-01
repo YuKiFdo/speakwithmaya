@@ -26,7 +26,10 @@ export default function IntroCallScreen() {
   const handleStartCall = () => {
     router.replace({
       pathname: '/onboarding/connecting',
-      params,
+      params: {
+        ...params,
+        isIntroCall: 'true',
+      },
     });
   };
 
