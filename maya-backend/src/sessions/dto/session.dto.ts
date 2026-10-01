@@ -144,4 +144,34 @@ export class FinishSessionDto {
   @ValidateNested()
   @Type(() => ScoresDto)
   scores?: ScoresDto;
+
+  @IsOptional()
+  @IsString()
+  userName?: string;
+
+  @IsOptional()
+  @IsString()
+  model?: string;
+
+  @IsOptional()
+  @IsString()
+  topic?: string;
+}
+
+export class QueryUsageDto {
+  @IsOptional()
+  @IsString()
+  range?: string; // 'today' | '7d' | '30d' | 'custom'
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  model?: string;
 }

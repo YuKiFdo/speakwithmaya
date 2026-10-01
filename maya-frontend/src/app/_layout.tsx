@@ -113,6 +113,10 @@ export default function RootLayout() {
           name="upgrade"
           options={{ animation: 'slide_from_bottom', animationDuration: 280 }}
         />
+        <Stack.Screen
+          name="admin/usage"
+          options={{ animation: 'fade', animationDuration: 200 }}
+        />
       </Stack>
     </ThemeProvider>
   );

@@ -481,6 +481,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             }
           },
           onGrammarCorrection: (payload: GrammarCorrectionPayload) => {
+            console.log('[useLiveCall] 💡 [UI Feedback Card] Grammar correction displayed:', payload.studentSaid, '->', payload.moreNatural);
             const correctionItem = {
               ...payload,
               timestamp: new Date().toISOString(),
@@ -499,6 +500,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             setFeedbackVisible(true);
           },
           onRephraseSuggestion: (payload: RephraseSuggestionPayload) => {
+            console.log('[useLiveCall] 💬 [UI Feedback Card] Rephrase suggestion displayed:', payload.studentSaid, '->', payload.moreNatural);
             const correctionItem = {
               ...payload,
               timestamp: new Date().toISOString(),
@@ -515,8 +517,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             });
             setFeedbackVisible(true);
           },
-          onConcludeCall: () => {
-            console.log('[useLiveCall] Gemini requested conclude_call -> waiting for farewell speech to complete');
+          onConcludeCall: (reason?: string) => {
+            console.log(`[useLiveCall] 🏁 [Call Conclusion] conclude_call triggered (reason: "${reason || 'normal'}") -> waiting for farewell speech to complete`);
             isConcludingRef.current = true;
             if (!concludeTimerRef.current) {
               concludeTimerRef.current = setTimeout(() => {
@@ -678,6 +680,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           turns: turnsRef.current,
           grammarCorrections: correctionsRef.current,
+          userName: options.userName || 'Tharindu Fernando',
+          model: 'gemini-3.8-live',
+          topic: options.topic || 'English Speaking Practice',
         }),
       }).catch((err) => console.warn('[useLiveCall] Error calling finish endpoint:', err));
     } catch {}

@@ -307,12 +307,17 @@ export class LiveTransport {
   }
 
   private sendContinueAfterFeedback() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn(`[${getLogTimestamp()}] ⚠️ [Feedback Nudge] Cannot send continuation cue — WebSocket not open`);
+      return;
+    }
     const isSinhala = this.config.languageMode === 'sinhala';
-    console.log(`[${getLogTimestamp()}] ▶️ [Feedback Nudge] Sending smooth continuation cue to model (isSinhala: ${isSinhala})`);
+    console.log(`[${getLogTimestamp()}] 🚀 [Feedback Nudge] Triggering continuation cue (isSinhala: ${isSinhala})`);
     const cueText = isSinhala
-      ? '[INSTRUCTION]: The student has absorbed your coaching tip. In lively everyday Sinhala, naturally and dynamically transition back into the conversation in your own spontaneous words, and continue with your next engaging question on our topic.'
+      ? '[INSTRUCTION]: The student has absorbed your coaching tip. With warmth and energy, transition back into the practice conversation: ask your next question following the dual-language pattern (ask first in Sinhala, then in English: "[Sinhala question]? [English question]?") so the student hears both and your voice accent remains natural.'
       : '[INSTRUCTION]: The student has absorbed your coaching tip. With warmth and vibrant energy, naturally and dynamically bridge back into the conversation with your own fresh words (without using any scripted or repetitive phrases), and ask your next engaging question on our topic.';
+
+    console.log(`[${getLogTimestamp()}] 📜 [Feedback Nudge Prompt]: "${cueText}"`);
 
     const nudgeMsg = {
       clientContent: {
@@ -330,6 +335,7 @@ export class LiveTransport {
       },
     };
     this.ws.send(JSON.stringify(nudgeMsg));
+    console.log(`[${getLogTimestamp()}] ✅ [Feedback Nudge] Continuation cue successfully dispatched over WebSocket to Gemini`);
     this.pendingFeedbackNudge = false;
     this.feedbackNudgeTimer = null;
   }
@@ -434,7 +440,10 @@ export class LiveTransport {
         // Turn complete
         if (sc.turnComplete) {
           const completeTranscript = this.currentTurnSubtitles.trim();
-          console.log(`[${getLogTimestamp()}] ✅ [Maya Turn Complete]${completeTranscript ? `: "${completeTranscript}"` : ''}`);
+          console.log(
+            `[${getLogTimestamp()}] ✅ [Maya Turn Complete]${completeTranscript ? `: "${completeTranscript}"` : ''} ` +
+            `[AudioReceived: ${this.hasReceivedAudioThisTurn}, PendingNudge: ${this.pendingFeedbackNudge}]`,
+          );
           this.currentTurnSubtitles = '';
           this.callbacks.onTurnComplete?.();
 
@@ -443,11 +452,62 @@ export class LiveTransport {
           if (this.pendingFeedbackNudge && this.hasReceivedAudioThisTurn) {
             this.pendingFeedbackNudge = false;
             if (this.feedbackNudgeTimer) clearTimeout(this.feedbackNudgeTimer);
-            console.log(`[${getLogTimestamp()}] ⏳ [Feedback Pause] Coaching turn complete — brief 750ms pause before smooth continuation`);
+            console.log(`[${getLogTimestamp()}] ⏳ [Feedback Nudge] Spoken coaching finished! Starting 750ms pause before continuation prompt...`);
             this.feedbackNudgeTimer = setTimeout(() => {
+              console.log(`[${getLogTimestamp()}] ⏰ [Feedback Nudge] 750ms timer fired -> triggering sendContinueAfterFeedback()`);
               this.sendContinueAfterFeedback();
             }, 750);
+          } else if (this.pendingFeedbackNudge && !this.hasReceivedAudioThisTurn) {
+            console.log(`[${getLogTimestamp()}] ℹ️ [Feedback Turn] Tool handshake turn completed with no audio — pendingFeedbackNudge armed and waiting for Maya's coaching audio turn`);
+          } else if (!this.pendingFeedbackNudge && this.hasReceivedAudioThisTurn && completeTranscript) {
+            // Safety net: check if Maya delivered spoken coaching directly without emitting a tool call
+            const hasCoachingMarkers =
+              /(ඔයාට පුළුවන්|වඩාත් ස්වාභාවිකව|කියලා කියන්න|You can say|Try saying)\b/i.test(completeTranscript);
+            const isQuestion =
+              /[?؟]\s*$/.test(completeTranscript) ||
+              /\b(ද\?|මොකක්ද\?|කොහොමද\?|නේද\?|right\?|what\?|how\?)\s*$/i.test(completeTranscript);
+
+            if (hasCoachingMarkers && !isQuestion) {
+              console.warn(
+                `[${getLogTimestamp()}] ⚠️ [Direct Coaching Detected]: Maya delivered spoken coaching WITHOUT tool call: "${completeTranscript.slice(0, 80)}..."`,
+              );
+
+              // Extract target phrase inside quotes if present
+              const quotedMatch = completeTranscript.match(/["'“]([^"'“”]+)["'”]/);
+              const targetPhrase = quotedMatch ? quotedMatch[1] : '';
+
+              if (targetPhrase) {
+                const isRephrase = /(ස්වාභාවිකව|rephrase|natural)/i.test(completeTranscript);
+                if (isRephrase) {
+                  this.callbacks.onRephraseSuggestion?.({
+                    studentSaid: '',
+                    moreNatural: targetPhrase,
+                    explanation: completeTranscript,
+                    highlightWords: [targetPhrase],
+                  });
+                } else {
+                  this.callbacks.onGrammarCorrection?.({
+                    studentSaid: '',
+                    moreNatural: targetPhrase,
+                    explanation: completeTranscript,
+                    highlightWords: [targetPhrase],
+                  });
+                }
+                console.log(`[${getLogTimestamp()}] 💡 [UI Card Fallback]: Dispatched synthetic feedback card for "${targetPhrase}"`);
+              }
+
+              // Fire the 750ms nudge so conversation continues smoothly!
+              if (this.feedbackNudgeTimer) clearTimeout(this.feedbackNudgeTimer);
+              console.log(`[${getLogTimestamp()}] ⏳ [Feedback Nudge Fallback] Starting 750ms pause before continuation prompt...`);
+              this.feedbackNudgeTimer = setTimeout(() => {
+                console.log(`[${getLogTimestamp()}] ⏰ [Feedback Nudge Fallback] 750ms timer fired -> triggering sendContinueAfterFeedback()`);
+                this.sendContinueAfterFeedback();
+              }, 750);
+            }
           }
+
+          // Reset audio tracker for next turn
+          this.hasReceivedAudioThisTurn = false;
         }
       }
 
@@ -458,7 +518,7 @@ export class LiveTransport {
         const isSinhala = this.config.languageMode === 'sinhala';
 
         for (const call of msg.toolCall.functionCalls) {
-          console.log(`[${getLogTimestamp()}] 🛠️ [Tool Call]: ${call.name}`, call.args || {});
+          console.log(`[${getLogTimestamp()}] 🛠️ [Tool Call Invoked]: ${call.name}`, JSON.stringify(call.args || {}));
           if (call.name === 'show_grammar_correction' && call.args) {
             const correction: GrammarCorrectionPayload = {
               studentSaid: call.args.studentSaid,
@@ -466,19 +526,27 @@ export class LiveTransport {
               explanation: call.args.explanation || '',
               highlightWords: call.args.highlightWords || [],
             };
+            console.log(
+              `[${getLogTimestamp()}] 💡 [Tool: Grammar Correction] Mistake: "${correction.studentSaid}" -> Fix: "${correction.moreNatural}" (Why: "${correction.explanation}")`,
+            );
             this.callbacks.onGrammarCorrection?.(correction);
 
             this.pendingFeedbackNudge = true;
+            console.log(`[${getLogTimestamp()}] 📌 [Feedback Nudge Armed]: pendingFeedbackNudge = TRUE. Will trigger continuation after Maya delivers coaching speech.`);
+            const targetPhrase = ((call.args.moreNatural as string) || '').replace(/"/g, "'");
+            const rawExplanation = ((call.args.explanation as string) || '').replace(/"/g, "'");
+
             functionResponses.push({
               name: call.name,
               id: call.id,
               response: {
                 result: 'displayed_to_student',
                 instruction: isSinhala
-                  ? 'Correction card displayed to student. Deliver ONLY your brief, warm coaching in natural Sinhala. Do NOT add any follow-up question. End your turn after coaching.'
-                  : 'Correction card displayed to student. Deliver ONLY your brief, warm coaching sentence. Do NOT add any follow-up question. End your turn after coaching.',
+                  ? `Correction card displayed to student. In your spoken voice response, verbally model the corrected English phrase aloud and give your brief Sinhala explanation: say "ඔයාට පුළුවන් '${targetPhrase}' කියලා කියන්න" followed by your brief explanation in Sinhala ("${rawExplanation}"). Do NOT add any follow-up question. End your turn after coaching.`
+                  : `Correction card displayed to student. In your spoken voice response, verbally model the corrected English phrase aloud: say "You can say: '${targetPhrase}'" followed by your brief explanation ("${rawExplanation}"). Do NOT add any follow-up question. End your turn after coaching.`,
               },
             });
+            console.log(`[${getLogTimestamp()}] 📤 [Tool Response Queued]: Queued response for show_grammar_correction`);
           } else if (call.name === 'show_rephrase_suggestion' && call.args) {
             const suggestion: RephraseSuggestionPayload = {
               studentSaid: call.args.studentSaid,
@@ -486,19 +554,27 @@ export class LiveTransport {
               explanation: call.args.explanation || '',
               highlightWords: call.args.highlightWords || [],
             };
+            console.log(
+              `[${getLogTimestamp()}] 💬 [Tool: Rephrase Suggestion] Phrasing: "${suggestion.studentSaid}" -> More Natural: "${suggestion.moreNatural}" (Why: "${suggestion.explanation}")`,
+            );
             this.callbacks.onRephraseSuggestion?.(suggestion);
 
             this.pendingFeedbackNudge = true;
+            console.log(`[${getLogTimestamp()}] 📌 [Feedback Nudge Armed]: pendingFeedbackNudge = TRUE. Will trigger continuation after Maya delivers coaching speech.`);
+            const targetPhrase = ((call.args.moreNatural as string) || '').replace(/"/g, "'");
+            const rawExplanation = ((call.args.explanation as string) || '').replace(/"/g, "'");
+
             functionResponses.push({
               name: call.name,
               id: call.id,
               response: {
                 result: 'displayed_to_student',
                 instruction: isSinhala
-                  ? 'Rephrase suggestion card displayed to student. Deliver ONLY your brief, warm explanation in natural Sinhala. Do NOT add any follow-up question. End your turn after coaching.'
-                  : 'Rephrase suggestion card displayed to student. Deliver ONLY your brief, warm explanation. Do NOT add any follow-up question. End your turn after coaching.',
+                  ? `Rephrase suggestion card displayed to student. In your spoken voice response, verbally model the natural English phrase aloud and give your brief Sinhala explanation: say "මේක වඩාත් ස්වාභාවිකව '${targetPhrase}' කියලා කියන්න පුළුවන්" followed by your brief explanation in Sinhala ("${rawExplanation}"). Do NOT add any follow-up question. End your turn after coaching.`
+                  : `Rephrase suggestion card displayed to student. In your spoken voice response, verbally model the natural English phrase aloud: say "You can say: '${targetPhrase}'" followed by your brief explanation ("${rawExplanation}"). Do NOT add any follow-up question. End your turn after coaching.`,
               },
             });
+            console.log(`[${getLogTimestamp()}] 📤 [Tool Response Queued]: Queued response for show_rephrase_suggestion`);
           } else if (call.name === 'conclude_call') {
             const reason = (call.args?.farewellReason || '');
             const isUserDeparture = /\b(bye|goodbye|good bye|see you|athii|yanna|enough|leave|gotta go|have to go|talk later|catch you|take care)\b/i.test(reason);
@@ -506,7 +582,7 @@ export class LiveTransport {
 
             if (canConclude) {
               // System farewell cue was sent or student explicitly said goodbye
-              console.log(`[${getLogTimestamp()}] 🏁 [LiveTransport] conclude_call ACCEPTED (isWrappingUp=${this.isWrappingUp}, isUserDeparture=${isUserDeparture}, reason: "${reason}")`);
+              console.log(`[${getLogTimestamp()}] 🏁 [Tool: Conclude Call ACCEPTED]: isWrappingUp=${this.isWrappingUp}, isUserDeparture=${isUserDeparture}, reason: "${reason}"`);
               this.callbacks.onConcludeCall?.(call.args?.farewellReason || 'Session concluding');
               functionResponses.push({
                 name: call.name,
@@ -518,7 +594,7 @@ export class LiveTransport {
               });
             } else {
               // System farewell cue NOT sent yet AND student did not ask to leave — model is self-concluding prematurely
-              console.warn(`[${getLogTimestamp()}] ⚠️ [LiveTransport] conclude_call REJECTED (isWrappingUp=false, reason: "${reason}") — session time has NOT ended yet.`);
+              console.warn(`[${getLogTimestamp()}] ⚠️ [Tool: Conclude Call REJECTED]: isWrappingUp=false, reason: "${reason}" — session time has NOT ended yet.`);
               functionResponses.push({
                 name: call.name,
                 id: call.id,
@@ -533,6 +609,7 @@ export class LiveTransport {
 
         // Send function responses back
         if (functionResponses.length > 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
+          console.log(`[${getLogTimestamp()}] 📤 [LiveTransport] Dispatching ${functionResponses.length} toolResponse(s) to Gemini WebSocket`);
           this.ws.send(
             JSON.stringify({
               toolResponse: {

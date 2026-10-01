@@ -301,7 +301,7 @@ export default function CallScreen() {
           },
         ]}
       >
-        <Pressable style={styles.fullScreenTouch} onPress={handleScreenTouch}>
+        <Pressable style={styles.fullScreenTouch}>
           <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
 
           {/* Ambient Edge Aura for Speaking State */}
