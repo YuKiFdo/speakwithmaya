@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons, Feather } from '@expo/vector-icons';
-import Svg, { Path, Defs, LinearGradient, Stop, Line } from 'react-native-svg';
+import Svg, { Path, Defs, LinearGradient, Stop, Line, Circle } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
@@ -22,6 +22,7 @@ import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 interface DailyUsagePoint {
   date: string;
   tokens: number;
+  minutes?: number;
   costLkr: number;
   costUsd: number;
   sessionsCount: number;
@@ -151,6 +152,7 @@ export default function AdminUsageScreen() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<UsageResponse | null>(null);
   const [activeSession, setActiveSession] = useState<SessionRecord | null>(null);
+  const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
 
   // Fetch usage data from backend
   const fetchUsageData = async () => {
@@ -211,47 +213,80 @@ export default function AdminUsageScreen() {
   const points = data?.dailyUsage || [];
   const maxTokens = 32000;
 
-  const { pathString, areaString, xLabels } = useMemo(() => {
+  const { pathString, areaString, xLabels, coords } = useMemo(() => {
     if (!points || points.length === 0) {
-      return { pathString: '', areaString: '', xLabels: [] };
+      return { pathString: '', areaString: '', xLabels: [], coords: [] };
     }
 
     const n = points.length;
-    const coords = points.map((p, i) => {
+    const computedCoords = points.map((p, i) => {
       const x = paddingLeft + (i / Math.max(1, n - 1)) * innerWidth;
-      const normalizedY = Math.min(1, Math.max(0, p.tokens / maxTokens));
+      const minutesVal = p.minutes !== undefined ? p.minutes : p.tokens;
+      const normalizedY = Math.min(1, Math.max(0, minutesVal / maxTokens));
       const y = paddingTop + (1 - normalizedY) * innerHeight;
-      return { x, y, label: p.date };
+      return {
+        x,
+        y,
+        label: p.date,
+        minutes: minutesVal,
+        tokens: p.tokens,
+        costLkr: p.costLkr,
+        index: i,
+      };
     });
 
-    if (coords.length === 1) {
-      const p = coords[0];
+    if (computedCoords.length === 1) {
+      const p = computedCoords[0];
       return {
         pathString: `M ${paddingLeft} ${p.y} L ${chartWidth - paddingRight} ${p.y}`,
         areaString: `M ${paddingLeft} ${p.y} L ${chartWidth - paddingRight} ${p.y} L ${chartWidth - paddingRight} ${paddingTop + innerHeight} L ${paddingLeft} ${paddingTop + innerHeight} Z`,
         xLabels: [{ x: chartWidth / 2, label: p.label }],
+        coords: computedCoords,
       };
     }
 
     // Build smooth cubic Bezier curve
-    let d = `M ${coords[0].x} ${coords[0].y}`;
-    for (let i = 0; i < coords.length - 1; i++) {
-      const current = coords[i];
-      const next = coords[i + 1];
+    let d = `M ${computedCoords[0].x} ${computedCoords[0].y}`;
+    for (let i = 0; i < computedCoords.length - 1; i++) {
+      const current = computedCoords[i];
+      const next = computedCoords[i + 1];
       const controlX = (current.x + next.x) / 2;
       d += ` C ${controlX} ${current.y}, ${controlX} ${next.y}, ${next.x} ${next.y}`;
     }
 
-    const last = coords[coords.length - 1];
-    const first = coords[0];
+    const last = computedCoords[computedCoords.length - 1];
+    const first = computedCoords[0];
     const bottomY = paddingTop + innerHeight;
     const areaD = `${d} L ${last.x} ${bottomY} L ${first.x} ${bottomY} Z`;
 
-    const step = Math.ceil(coords.length / 4);
-    const labels = coords.filter((_, idx) => idx % step === 0 || idx === coords.length - 1);
+    const step = Math.ceil(computedCoords.length / 4);
+    const labels = computedCoords.filter((_, idx) => idx % step === 0 || idx === computedCoords.length - 1);
 
-    return { pathString: d, areaString: areaD, xLabels: labels };
+    return { pathString: d, areaString: areaD, xLabels: labels, coords: computedCoords };
   }, [points, chartWidth, innerWidth, innerHeight]);
+
+  // Only show vertical guideline, dot and tooltip when user is pointing/hovering
+  const activePoint = useMemo(() => {
+    if (!coords || coords.length === 0 || selectedPointIndex === null) return null;
+    if (coords[selectedPointIndex]) {
+      return coords[selectedPointIndex];
+    }
+    return null;
+  }, [coords, selectedPointIndex]);
+
+  const handleChartPointer = (clientX: number) => {
+    if (!coords || coords.length === 0) return;
+    let closestIdx = 0;
+    let minDiff = Infinity;
+    coords.forEach((pt, i) => {
+      const diff = Math.abs(pt.x - clientX);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIdx = i;
+      }
+    });
+    setSelectedPointIndex(closestIdx);
+  };
 
   const handleNavPress = (item: NavItem) => {
     setActiveNav(item.label);
@@ -496,7 +531,38 @@ export default function AdminUsageScreen() {
               </View>
 
               {/* SVG Wave Chart */}
-              <View style={styles.svgWrapper}>
+              <View
+                style={styles.svgWrapper}
+                // @ts-ignore Web pointer movement
+                onPointerMove={(e: any) => {
+                  const locX = e.nativeEvent?.offsetX ?? e.nativeEvent?.locationX;
+                  if (typeof locX === 'number') {
+                    handleChartPointer(locX);
+                  }
+                }}
+                // @ts-ignore Web pointer leave
+                onPointerLeave={() => {
+                  setSelectedPointIndex(null);
+                }}
+                onTouchMove={(e) => {
+                  const locX = e.nativeEvent?.locationX;
+                  if (typeof locX === 'number') {
+                    handleChartPointer(locX);
+                  }
+                }}
+                onTouchStart={(e) => {
+                  const locX = e.nativeEvent?.locationX;
+                  if (typeof locX === 'number') {
+                    handleChartPointer(locX);
+                  }
+                }}
+                onTouchEnd={() => {
+                  setSelectedPointIndex(null);
+                }}
+                onTouchCancel={() => {
+                  setSelectedPointIndex(null);
+                }}
+              >
                 {loading && !data ? (
                   <View style={styles.chartLoading}>
                     <ActivityIndicator size="small" color="#0d9488" />
@@ -529,6 +595,18 @@ export default function AdminUsageScreen() {
                       );
                     })}
 
+                    {/* Vertical Guideline for Active Selected Point */}
+                    {activePoint && (
+                      <Line
+                        x1={activePoint.x}
+                        y1={paddingTop - 6}
+                        x2={activePoint.x}
+                        y2={chartHeight - paddingBottom}
+                        stroke="#cbd5e1"
+                        strokeWidth="1"
+                      />
+                    )}
+
                     {/* Area Gradient Fill */}
                     {areaString ? <Path d={areaString} fill="url(#usageGradient)" /> : null}
 
@@ -543,7 +621,41 @@ export default function AdminUsageScreen() {
                         strokeLinejoin="round"
                       />
                     ) : null}
+
+                    {/* Circle Point Marker on the Curve */}
+                    {activePoint && (
+                      <Circle
+                        cx={activePoint.x}
+                        cy={activePoint.y}
+                        r={4.5}
+                        fill="#0f766e"
+                        stroke="#ffffff"
+                        strokeWidth="1.5"
+                      />
+                    )}
                   </Svg>
+                )}
+
+                {/* Floating Tooltip Card */}
+                {activePoint && !loading && (
+                  <View
+                    style={[
+                      styles.tooltipCard,
+                      {
+                        left:
+                          activePoint.x + 190 > chartWidth
+                            ? Math.max(10, activePoint.x - 185)
+                            : activePoint.x + 6,
+                        top: Math.max(8, Math.min(activePoint.y + 2, innerHeight - 40)),
+                      },
+                    ]}
+                    pointerEvents="none"
+                  >
+                    <Text style={styles.tooltipDateText}>{activePoint.label}</Text>
+                    <Text style={styles.tooltipValueText}>
+                      AI Minutes : {activePoint.minutes.toLocaleString()}
+                    </Text>
+                  </View>
                 )}
 
                 {/* Y Axis Labels Overlaid on Left */}
@@ -556,9 +668,20 @@ export default function AdminUsageScreen() {
                 </View>
 
                 {/* X Axis Labels along Bottom */}
-                <View style={[styles.xAxisLabels, { paddingLeft, paddingRight }]}>
+                <View style={styles.xAxisLabels}>
                   {xLabels.map((lbl, idx) => (
-                    <Text key={idx} style={styles.axisText}>
+                    <Text
+                      key={idx}
+                      style={[
+                        styles.axisText,
+                        {
+                          position: 'absolute',
+                          left: Math.max(0, lbl.x - 30),
+                          width: 60,
+                          textAlign: 'center',
+                        },
+                      ]}
+                    >
                       {lbl.label}
                     </Text>
                   ))}
@@ -1303,13 +1426,39 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    height: 18,
   },
   axisText: {
     ...fontStyle('inter', 'regular'),
     fontSize: 10,
     color: '#94a3b8',
+  },
+  tooltipCard: {
+    position: 'absolute',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 4,
+    zIndex: 20,
+    minWidth: 160,
+  },
+  tooltipDateText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 15,
+    color: '#0f172a',
+    marginBottom: 4,
+  },
+  tooltipValueText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 15,
+    color: '#0d9488',
   },
 
   // Table Card
