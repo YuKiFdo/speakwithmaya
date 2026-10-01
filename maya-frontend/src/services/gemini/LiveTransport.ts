@@ -254,7 +254,7 @@ export class LiveTransport {
     this.lastTurnDispatchedAt = Date.now();
     this.hasReceivedAudioThisTurn = false;
     this.currentTurnSubtitles = '';
-    console.log(`[${getLogTimestamp()}] 🚀 [Turn Dispatch] Signaling turn end to Gemini server-side VAD`);
+    console.log(`[${getLogTimestamp()}] 🚀 [Turn Dispatch] Streaming 600ms silence tail & signaling turn end to Gemini server-side VAD`);
 
     // If user speaks during the post-coaching pause, cancel the nudge — user responded naturally
     if (this.feedbackNudgeTimer) {
@@ -262,6 +262,22 @@ export class LiveTransport {
       this.feedbackNudgeTimer = null;
       this.pendingFeedbackNudge = false;
       console.log(`[${getLogTimestamp()}] ⏹️ [Feedback Nudge] Cancelled — student responded during coaching pause`);
+    }
+
+    // Stream 6 comfort silence frames (600ms of zeros, 1600 samples per 100ms = 3200 bytes)
+    // as an acoustic hint to help server-side VAD commit faster.
+    const silenceBase64 = 'A'.repeat(4267) + '=';
+    for (let i = 0; i < 6; i++) {
+      this.ws.send(
+        JSON.stringify({
+          realtimeInput: {
+            audio: {
+              mimeType: 'audio/pcm;rate=16000',
+              data: silenceBase64,
+            },
+          },
+        }),
+      );
     }
 
     // Official Gemini Live API signal: notify server-side VAD that audio stream turn has ended
