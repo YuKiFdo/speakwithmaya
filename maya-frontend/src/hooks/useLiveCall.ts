@@ -203,14 +203,16 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             // If session conclusion was requested, cleanly end call now that Maya finished her farewell speech
             if (isConcludingRef.current) {
               console.log('[useLiveCall] Maya finished speaking farewell message -> ending call now');
-              isConcludingRef.current = false;
+              hasFinishedRef.current = true;
+              setStatus('ended');
+              statusRef.current = 'ended';
               if (concludeTimerRef.current) {
                 clearTimeout(concludeTimerRef.current);
                 concludeTimerRef.current = null;
               }
               setTimeout(() => {
                 endCallRef.current?.();
-              }, 800);
+              }, 400);
               return;
             }
           }
@@ -551,15 +553,24 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onClose: (code?: number, reason?: string) => {
             console.log('[LiveTransport Closed]:', code, reason);
-            if (statusRef.current !== 'ended' && !isConcludingRef.current) {
+            const isCleanExit =
+              code === 1000 ||
+              code === 1001 ||
+              hasFinishedRef.current ||
+              isConcludingRef.current ||
+              statusRef.current === 'ended';
+
+            if (isCleanExit) {
+              console.log('[useLiveCall] Session closed cleanly (code:', code, '), no reconnect scheduled');
+              setStatus('ended');
+              statusRef.current = 'ended';
+            } else {
               if (code === 1011 || code === 1007) {
                 resumptionHandleRef.current = null;
                 cachedTokenDataRef.current = null;
               }
               setStatus('reconnecting');
               scheduleReconnect();
-            } else {
-              setStatus('ended');
             }
           },
         },

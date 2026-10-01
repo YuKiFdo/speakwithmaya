@@ -69,7 +69,8 @@ export async function persistSessionRecord(record: SessionHistoryRecord): Promis
   // Always cache locally for instant UI update
   saveLocalSession(record);
 
-  if (!supabase) return;
+  // Only call direct PostgREST if anon key is a valid JWT; otherwise backend /finish handles it
+  if (!supabase || !supabaseAnonKey.startsWith('ey')) return;
 
   try {
     // 1. Upsert session row
