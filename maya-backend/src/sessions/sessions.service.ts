@@ -571,7 +571,7 @@ ${scenarioInstruction}
       model: this.liveModel,
       systemPrompt,
       tools,
-      voiceName: 'Aoede',
+      voiceName: 'Callirrhoe',
       greetingPrompt,
       languageMode: isSinhala ? 'sinhala' : 'english',
     };

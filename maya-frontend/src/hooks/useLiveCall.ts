@@ -342,7 +342,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           systemPrompt: tokenData.systemPrompt,
           tools: tokenData.tools,
           model: tokenData.model,
-          voiceName: tokenData.voiceName || 'Aoede',
+          voiceName: tokenData.voiceName || 'Callirrhoe',
           resumptionHandle: resumptionHandleRef.current,
           greetingPrompt: tokenData.greetingPrompt,
           languageMode: tokenData.languageMode || options.languageMode,

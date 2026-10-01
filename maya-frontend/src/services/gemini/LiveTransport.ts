@@ -130,7 +130,7 @@ export class LiveTransport {
       speechConfig: {
         voiceConfig: {
           prebuiltVoiceConfig: {
-            voiceName: this.config.voiceName || 'Aoede',
+            voiceName: this.config.voiceName || 'Callirrhoe',
           },
         },
       },
