@@ -102,6 +102,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const reconnectTimerRef = useRef<any>(null);
   const resumptionHandleRef = useRef<string | null>(null);
   const cachedTokenDataRef = useRef<any>(null);
+  const hasFinishedRef = useRef<boolean>(false);
 
   // Sync state to refs for non-stale callback access
   useEffect(() => {
@@ -186,6 +187,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         reconnectAttemptsRef.current = 0;
         resumptionHandleRef.current = null;
         cachedTokenDataRef.current = null;
+        hasFinishedRef.current = false;
       }
 
       // 1. Initialize Audio Player
@@ -532,12 +534,14 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onUsageUpdate: (usage) => {
             const costLkr = Number((((usage.audioIn / 1_000_000) * 3.0 + (usage.audioOut / 1_000_000) * 12.0) * 300).toFixed(2));
-            setTokens({
+            const tokenData = {
               audioIn: usage.audioIn,
               audioOut: usage.audioOut,
               total: usage.total,
               costLkr,
-            });
+            };
+            tokensRef.current = tokenData;
+            setTokens(tokenData);
           },
           onError: (err: Error) => {
             console.error('[LiveTransport Error]:', err);
@@ -548,6 +552,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           onClose: (code?: number, reason?: string) => {
             console.log('[LiveTransport Closed]:', code, reason);
             if (statusRef.current !== 'ended' && !isConcludingRef.current) {
+              if (code === 1011 || code === 1007) {
+                resumptionHandleRef.current = null;
+                cachedTokenDataRef.current = null;
+              }
               setStatus('reconnecting');
               scheduleReconnect();
             } else {
@@ -597,7 +605,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   }, [options.topic, options.goal, options.level, isMuted]);
 
   const endCall = useCallback(async (shouldNavigate: boolean = true) => {
-    if (statusRef.current === 'ended') return;
+    if (hasFinishedRef.current || statusRef.current === 'ended') {
+      console.log('[useLiveCall] Call already finished or ending in progress, skipping redundant endCall');
+      return;
+    }
+    hasFinishedRef.current = true;
     setStatus('ended');
     statusRef.current = 'ended';
     setUserVolume(0);
@@ -662,7 +674,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       let audioOut = tokensRef.current.audioOut;
       let total = tokensRef.current.total;
 
-      if (total === 0 && secs > 1) {
+      // If audioOut is 0 but total > audioIn, calculate delta
+      if (audioOut === 0 && total > audioIn) {
+        audioOut = total - audioIn;
+      } else if (total === 0 && secs > 1) {
         audioIn = Math.round(secs * 25);
         audioOut = turnsRef.current.some((t) => t.role === 'model') ? Math.round((secs / 2) * 32) : 0;
         total = audioIn + audioOut;

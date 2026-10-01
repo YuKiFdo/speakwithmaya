@@ -31,7 +31,8 @@
 | **`contextWindowCompression`** | `triggerTokens` sets when compression fires; `slidingWindow.targetTokens` defaults to `triggerTokens/2`. System instructions and `prefixTurns` are protected from eviction. | [Live API Reference - SlidingWindow](https://ai.google.dev/api/live#SlidingWindow) |
 | **Session Lifetime (No Compression)** | Audio-only: 15 min. Audio+video: 2 min. With compression: unlimited. Connection lifetime: ~10 min (use session resumption). | [Session Management Guide](https://ai.google.dev/gemini-api/docs/live-api/session-management#session-lifetime) |
 | **`proactiveAudio`** | Allows model to reject responding to irrelevant audio. Permanently enabled by default on Gemini 3.8 Live (setting `false` will error). v1beta API. | [Live API Capabilities - Proactive Audio](https://ai.google.dev/gemini-api/docs/live-api/capabilities#proactive-audio) |
-| **`affectiveDialog` Removed** | Feature removed from API. Remove `enable_affective_dialog` configs to avoid errors. | [Gemini Live API Changelog](https://ai.google.dev/gemini-api/docs/live-api/capabilities) |
+| **`affectiveDialog`** | Lets Gemini adapt its response style to the input expression and tone. Set `apiVersion: "v1beta"` and `enableAffectiveDialog: true` inside `generationConfig`. Supported on `gemini-3.8-live` (not supported on `gemini-3.1-flash-live`). | [Gemini Live API Capabilities - Affective Dialog](https://ai.google.dev/gemini-api/docs/live-api/capabilities#affective-dialog) |
+| **`responseTokensDetails`** | Output token breakdown array in `usageMetadata` returning modality-specific token counts (`AUDIO`, `TEXT`). | [Gemini Live API Reference - UsageMetadata](https://ai.google.dev/api/live#usagemetadata) |
 
 ### Ephemeral Token Architecture (Browser Client Direct Connection)
 1. **Server-Side Token Minting Endpoint:**

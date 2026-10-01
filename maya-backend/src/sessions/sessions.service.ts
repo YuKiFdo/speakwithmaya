@@ -582,10 +582,15 @@ ${scenarioInstruction}
 
     // Calculate usage costs per verified pricing in docs/facts.md
     const audioInTokens = tokensUsed?.audioInTokens || 0;
-    const audioOutTokens = tokensUsed?.audioOutTokens || 0;
+    let audioOutTokens = tokensUsed?.audioOutTokens || 0;
     const textInTokens = tokensUsed?.promptTokens || 0;
     const textOutTokens = tokensUsed?.responseTokens || 0;
     const totalTokens = tokensUsed?.totalTokens || (audioInTokens + audioOutTokens + textInTokens + textOutTokens);
+
+    // If audioOutTokens is 0 but total exceeds input tokens, compute output tokens delta
+    if (audioOutTokens === 0 && totalTokens > (audioInTokens + textInTokens + textOutTokens)) {
+      audioOutTokens = totalTokens - (audioInTokens + textInTokens + textOutTokens);
+    }
 
     const costAudioIn = (audioInTokens / 1_000_000) * 3.0;
     const costAudioOut = (audioOutTokens / 1_000_000) * 12.0;
@@ -595,13 +600,39 @@ ${scenarioInstruction}
     const costLkr = Number((costUsd * this.usdToLkr).toFixed(2));
 
     this.logger.log(
-      `Finished session ${sessionId}: ${durationSeconds}s, ${totalTokens} tokens, Cost: $${costUsd} (LKR ${costLkr})`,
+      `Finished session ${sessionId}: ${durationSeconds}s, ${totalTokens} tokens (in: ${audioInTokens}, out: ${audioOutTokens}), Cost: $${costUsd} (LKR ${costLkr})`,
     );
 
     const resolvedUserId = THARINDU_USER_ID;
 
     if (this.supabase) {
       try {
+        // Prevent duplicate ledger entry and double counting if session was already finalized
+        const { data: existingLedger } = await this.supabase
+          .from('usage_ledger')
+          .select('id')
+          .eq('session_id', sessionId)
+          .maybeSingle();
+
+        if (existingLedger) {
+          this.logger.warn(`Session ${sessionId} is already finalized in usage_ledger. Ignoring duplicate finish request.`);
+          return {
+            sessionId,
+            sessionCode: `SM-${sessionId.slice(0, 5).toUpperCase()}`,
+            status: 'completed',
+            durationSeconds,
+            tokensUsed: {
+              totalTokens,
+              audioInTokens,
+              audioOutTokens,
+              costUsd,
+              costLkr,
+            },
+            correctionsRecorded: grammarCorrections?.length || 0,
+            scores: scores || { overall: 85, fluency: 84, grammar: 82, pronunciation: 86 },
+          };
+        }
+
         // 1. Update session status
         await this.supabase
           .from('sessions')
@@ -724,8 +755,17 @@ ${scenarioInstruction}
         if (error) {
           this.logger.error(`Error querying usage_ledger from Supabase: ${error.message}`);
         } else if (ledgerEntries) {
+          // Deduplicate entries by session_id in case historical duplicate entries exist
+          const seenSessions = new Set<string>();
+          const uniqueLedgerEntries = ledgerEntries.filter((row: any) => {
+            if (!row.session_id) return true;
+            if (seenSessions.has(row.session_id)) return false;
+            seenSessions.add(row.session_id);
+            return true;
+          });
+
           // Fetch turn counts and correction counts for sessions
-          const sessionIds = ledgerEntries.map((l: any) => l.session_id).filter(Boolean);
+          const sessionIds = uniqueLedgerEntries.map((l: any) => l.session_id).filter(Boolean);
           const turnsCountMap = new Map<string, number>();
           const correctionsCountMap = new Map<string, number>();
 
@@ -747,11 +787,11 @@ ${scenarioInstruction}
             });
           }
 
-          records = ledgerEntries.map((row: any, idx: number) => {
+          records = uniqueLedgerEntries.map((row: any, idx: number) => {
             const sess = row.sessions;
             const prof = sess?.profiles;
             const userName = prof?.display_name || THARINDU_NAME;
-            const sessionNum = 10480 + (ledgerEntries.length - idx);
+            const sessionNum = 10480 + (uniqueLedgerEntries.length - idx);
             const sessionCode = `SM-${sessionNum}`;
             const durationSec = row.duration_seconds || sess?.duration_seconds || 0;
             const durationFormatted = `${(durationSec / 60).toFixed(1)}m`;
@@ -759,6 +799,13 @@ ${scenarioInstruction}
             const dateObj = new Date(row.created_at || sess?.created_at || Date.now());
             const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             const displayDate = `${months[dateObj.getMonth()]} ${String(dateObj.getDate()).padStart(2, '0')}, ${dateObj.toTimeString().split(' ')[0]}`;
+
+            const inputTokens = (row.audio_in_tokens || 0) + (row.text_in_tokens || 0);
+            let outputTokens = (row.audio_out_tokens || 0) + (row.text_out_tokens || 0);
+            const totalTokens = row.total_tokens || 0;
+            if (outputTokens === 0 && totalTokens > inputTokens) {
+              outputTokens = totalTokens - inputTokens;
+            }
 
             return {
               id: row.session_id,
@@ -773,9 +820,9 @@ ${scenarioInstruction}
               model: this.liveModel,
               durationSeconds: durationSec,
               durationFormatted,
-              inputTokens: (row.audio_in_tokens || 0) + (row.text_in_tokens || 0),
-              outputTokens: (row.audio_out_tokens || 0) + (row.text_out_tokens || 0),
-              totalTokens: row.total_tokens || 0,
+              inputTokens,
+              outputTokens,
+              totalTokens,
               costUsd: Number(Number(row.cost_usd || 0).toFixed(6)),
               costLkr: Number(Number(row.cost_lkr || 0).toFixed(2)),
               status: ((sess?.status === 'completed' ? 'Success' : 'In Progress') as 'Success' | 'In Progress'),

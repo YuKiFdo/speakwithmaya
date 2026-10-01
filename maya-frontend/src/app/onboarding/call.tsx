@@ -74,11 +74,16 @@ export default function CallScreen() {
   });
 
 
+  const liveCallRef = useRef(liveCall);
+  useEffect(() => {
+    liveCallRef.current = liveCall;
+  }, [liveCall]);
+
   // Auto-start Gemini Live call session on component mount with cleanup on unmount
   useEffect(() => {
     liveCall.startCall();
     return () => {
-      liveCall.endCall(false);
+      liveCallRef.current.endCall(false);
     };
   }, []);
 
@@ -275,10 +280,18 @@ export default function CallScreen() {
   };
 
   const handleHangup = () => {
+    if (farewellGraceTimerRef.current) {
+      clearTimeout(farewellGraceTimerRef.current);
+      farewellGraceTimerRef.current = null;
+    }
     liveCall.endCall();
   };
 
   const handleBackToHome = () => {
+    if (farewellGraceTimerRef.current) {
+      clearTimeout(farewellGraceTimerRef.current);
+      farewellGraceTimerRef.current = null;
+    }
     liveCall.endCall();
   };
 

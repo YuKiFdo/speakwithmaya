@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../spoken-english-agent/app"
+		}
+	],
+	"settings": {}
+}

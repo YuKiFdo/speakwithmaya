@@ -1,4 +1,11 @@
 import { getLogTimestamp } from '@/utils/time';
+import type {
+  LiveClientMessage,
+  LiveServerMessage,
+  UsageMetadata,
+  GenerationConfig,
+  ModalityTokenCount,
+} from '@google/genai';
 
 export interface GrammarCorrectionPayload {
   studentSaid: string;
@@ -116,6 +123,7 @@ export class LiveTransport {
       setup: {
         model: `models/${this.config.model || 'gemini-3.8-live'}`,
         generationConfig: {
+          enableAffectiveDialog: true,
           responseModalities: ['AUDIO'],
           speechConfig: {
             voiceConfig: {
@@ -140,7 +148,7 @@ export class LiveTransport {
         },
         outputAudioTranscription: {},
         tools: this.config.tools || [],
-        sessionResumption: this.resumptionHandle ? { handle: this.resumptionHandle } : {},
+        sessionResumption: this.resumptionHandle ? { handle: this.resumptionHandle } : undefined,
         contextWindowCompression: {
           triggerTokens: 25000,
           slidingWindow: {
@@ -623,10 +631,28 @@ export class LiveTransport {
       // 3. Usage metadata (internal ledger update, no terminal spam)
       const usage = msg.usageMetadata || msg.serverContent?.usageMetadata || msg.serverContent?.modelTurn?.usageMetadata;
       if (usage) {
+        console.log(usage)
+        let audioOutFromDetails = 0;
+        if (Array.isArray(usage.responseTokensDetails)) {
+          for (const d of usage.responseTokensDetails) {
+            audioOutFromDetails += (d.tokenCount || 0);
+          }
+        }
+
+        const audioOut =
+          (audioOutFromDetails > 0 ? audioOutFromDetails : undefined) ??
+          usage.responseTokenCount ??
+          usage.candidatesTokenCount ??
+          (usage.totalTokenCount && usage.promptTokenCount
+            ? Math.max(0, usage.totalTokenCount - usage.promptTokenCount)
+            : 0);
+        const audioIn = usage.promptTokenCount || 0;
+        const total = usage.totalTokenCount || (audioIn + audioOut);
+
         this.callbacks.onUsageUpdate?.({
-          audioIn: usage.promptTokenCount || 0,
-          audioOut: usage.candidatesTokenCount || 0,
-          total: usage.totalTokenCount || 0,
+          audioIn,
+          audioOut,
+          total,
         });
       }
     } catch (e) {
