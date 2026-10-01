@@ -211,7 +211,41 @@ export default function AdminUsageScreen() {
   const innerHeight = chartHeight - paddingTop - paddingBottom;
 
   const points = data?.dailyUsage || [];
-  const maxTokens = 32000;
+
+  // Dynamic Y-axis scale based on real session minutes
+  const { chartMax, yTicks } = useMemo(() => {
+    const rawMax = Math.max(...points.map((p) => p.minutes ?? 0), 0);
+    let max = 10;
+    if (rawMax <= 10) {
+      max = 10;
+    } else if (rawMax <= 20) {
+      max = 20;
+    } else if (rawMax <= 50) {
+      max = 50;
+    } else if (rawMax <= 100) {
+      max = 100;
+    } else if (rawMax <= 500) {
+      max = Math.ceil(rawMax / 50) * 50;
+    } else if (rawMax <= 1000) {
+      max = Math.ceil(rawMax / 100) * 100;
+    } else {
+      max = Math.ceil(rawMax / 5000) * 5000;
+    }
+
+    const steps = 4;
+    const ticks: { val: number; label: string }[] = [];
+    for (let i = steps; i >= 0; i--) {
+      const val = Math.round((max / steps) * i);
+      const label =
+        val >= 1000
+          ? `${(val / 1000).toFixed(val % 1000 === 0 ? 0 : 1)}k`
+          : val > 0
+          ? `${val}m`
+          : '0m';
+      ticks.push({ val, label });
+    }
+    return { chartMax: max, yTicks: ticks };
+  }, [points]);
 
   const { pathString, areaString, xLabels, coords } = useMemo(() => {
     if (!points || points.length === 0) {
@@ -221,8 +255,8 @@ export default function AdminUsageScreen() {
     const n = points.length;
     const computedCoords = points.map((p, i) => {
       const x = paddingLeft + (i / Math.max(1, n - 1)) * innerWidth;
-      const minutesVal = p.minutes !== undefined ? p.minutes : p.tokens;
-      const normalizedY = Math.min(1, Math.max(0, minutesVal / maxTokens));
+      const minutesVal = p.minutes !== undefined ? p.minutes : 0;
+      const normalizedY = Math.min(1, Math.max(0, minutesVal / chartMax));
       const y = paddingTop + (1 - normalizedY) * innerHeight;
       return {
         x,
@@ -259,11 +293,11 @@ export default function AdminUsageScreen() {
     const bottomY = paddingTop + innerHeight;
     const areaD = `${d} L ${last.x} ${bottomY} L ${first.x} ${bottomY} Z`;
 
-    const step = Math.ceil(computedCoords.length / 4);
+    const step = Math.max(1, Math.floor(computedCoords.length / 5));
     const labels = computedCoords.filter((_, idx) => idx % step === 0 || idx === computedCoords.length - 1);
 
     return { pathString: d, areaString: areaD, xLabels: labels, coords: computedCoords };
-  }, [points, chartWidth, innerWidth, innerHeight]);
+  }, [points, chartWidth, innerWidth, innerHeight, chartMax]);
 
   // Only show vertical guideline, dot and tooltip when user is pointing/hovering
   const activePoint = useMemo(() => {
@@ -451,9 +485,9 @@ export default function AdminUsageScreen() {
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>AI Minutes Today</Text>
                 <Text style={[styles.metricValue, { color: '#0f172a' }]}>
-                  {data?.stats?.minutesToday && data.stats.minutesToday > 0
+                  {data?.stats?.minutesToday !== undefined
                     ? data.stats.minutesToday.toLocaleString()
-                    : '28,420'}
+                    : '0'}
                 </Text>
               </View>
 
@@ -461,9 +495,9 @@ export default function AdminUsageScreen() {
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>AI Minutes This Month</Text>
                 <Text style={[styles.metricValue, { color: '#0d9488' }]}>
-                  {data?.stats?.minutesThisMonth && data.stats.minutesThisMonth > 0
+                  {data?.stats?.minutesThisMonth !== undefined
                     ? data.stats.minutesThisMonth.toLocaleString()
-                    : '845,280'}
+                    : '0'}
                 </Text>
               </View>
 
@@ -471,9 +505,9 @@ export default function AdminUsageScreen() {
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>AI Sessions</Text>
                 <Text style={[styles.metricValue, { color: '#2563eb' }]}>
-                  {data?.stats?.totalSessions && data.stats.totalSessions > 0
+                  {data?.stats?.totalSessions !== undefined
                     ? data.stats.totalSessions.toLocaleString()
-                    : '64,280'}
+                    : '0'}
                 </Text>
               </View>
 
@@ -481,19 +515,19 @@ export default function AdminUsageScreen() {
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Estimated AI Cost</Text>
                 <Text style={[styles.metricValue, { color: '#ea580c' }]}>
-                  {data?.stats?.totalCostLkr && data.stats.totalCostLkr > 0
-                    ? `LKR ${data.stats.totalCostLkr.toLocaleString()}`
-                    : 'LKR 184,500'}
+                  {data?.stats?.totalCostLkr !== undefined
+                    ? `LKR ${data.stats.totalCostLkr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : 'LKR 0.00'}
                 </Text>
               </View>
 
-              {/* 5. Avg Cost Per Min (Replaced Avg Response Time) */}
+              {/* 5. Avg Cost Per Min */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Avg Cost Per Min</Text>
                 <Text style={[styles.metricValue, { color: '#7c3aed' }]}>
-                  {data?.stats?.avgCostPerMin
+                  {data?.stats?.avgCostPerMin !== undefined && data.stats.avgCostPerMin > 0
                     ? `LKR ${Number(data.stats.avgCostPerMin).toFixed(2)}`
-                    : 'LKR 1.48'}
+                    : 'LKR 0.00'}
                 </Text>
               </View>
             </View>
@@ -577,11 +611,12 @@ export default function AdminUsageScreen() {
                     </Defs>
 
                     {/* Horizontal Grid lines with Y-Axis values */}
-                    {[32000, 24000, 16000, 8000, 0].map((val) => {
-                      const normalizedY = Math.min(1, Math.max(0, val / maxTokens));
+                    {/* Horizontal Grid lines with dynamic Y-Axis values */}
+                    {yTicks.map((tick) => {
+                      const normalizedY = Math.min(1, Math.max(0, tick.val / chartMax));
                       const y = paddingTop + (1 - normalizedY) * innerHeight;
                       return (
-                        <React.Fragment key={val}>
+                        <React.Fragment key={tick.val}>
                           <Line
                             x1={paddingLeft}
                             y1={y}
@@ -589,7 +624,7 @@ export default function AdminUsageScreen() {
                             y2={y}
                             stroke="#f1f5f9"
                             strokeWidth="1"
-                            strokeDasharray={val === 0 ? undefined : '3,3'}
+                            strokeDasharray={tick.val === 0 ? undefined : '3,3'}
                           />
                         </React.Fragment>
                       );
@@ -660,9 +695,9 @@ export default function AdminUsageScreen() {
 
                 {/* Y Axis Labels Overlaid on Left */}
                 <View style={[styles.yAxisLabels, { height: innerHeight, top: paddingTop }]}>
-                  {['32k', '24k', '16k', '8k', '0k'].map((label) => (
-                    <Text key={label} style={styles.axisText}>
-                      {label}
+                  {yTicks.map((tick) => (
+                    <Text key={tick.label + tick.val} style={styles.axisText}>
+                      {tick.label}
                     </Text>
                   ))}
                 </View>
