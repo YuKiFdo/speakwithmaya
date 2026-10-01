@@ -401,11 +401,15 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
                 setPreviousSubtitles(currentModelTextRef.current.trim());
               }
               if (currentUserTextRef.current.trim()) {
-                turnsRef.current.push({
-                  role: 'user',
-                  text: currentUserTextRef.current.trim(),
-                  timestamp: new Date().toISOString(),
-                });
+                const textToPush = currentUserTextRef.current.trim();
+                const lastTurn = turnsRef.current[turnsRef.current.length - 1];
+                if (!lastTurn || lastTurn.role !== 'user' || lastTurn.text !== textToPush) {
+                  turnsRef.current.push({
+                    role: 'user',
+                    text: textToPush,
+                    timestamp: new Date().toISOString(),
+                  });
+                }
                 currentUserTextRef.current = '';
               }
               activeRoleRef.current = 'model';
@@ -424,11 +428,16 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           onInputTranscript: (text) => {
             if (activeRoleRef.current !== 'user') {
               if (currentModelTextRef.current.trim()) {
-                turnsRef.current.push({
-                  role: 'model',
-                  text: currentModelTextRef.current.trim(),
-                  timestamp: new Date().toISOString(),
-                });
+                const textToPush = currentModelTextRef.current.trim();
+                const lastTurn = turnsRef.current[turnsRef.current.length - 1];
+                if (!lastTurn || lastTurn.role !== 'model' || lastTurn.text !== textToPush) {
+                  turnsRef.current.push({
+                    role: 'model',
+                    text: textToPush,
+                    timestamp: new Date().toISOString(),
+                  });
+                }
+                currentModelTextRef.current = '';
               }
               activeRoleRef.current = 'user';
               currentUserTextRef.current = '';
@@ -438,14 +447,19 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onTurnComplete: () => {
             playerRef.current.flush();
-            if (activeRoleRef.current === 'model' && currentModelTextRef.current.trim()) {
-              turnsRef.current.push({
-                role: 'model',
-                text: currentModelTextRef.current.trim(),
-                timestamp: new Date().toISOString(),
-              });
-              activeRoleRef.current = null;
+            if (currentModelTextRef.current.trim()) {
+              const textToPush = currentModelTextRef.current.trim();
+              const lastTurn = turnsRef.current[turnsRef.current.length - 1];
+              if (!lastTurn || lastTurn.role !== 'model' || lastTurn.text !== textToPush) {
+                turnsRef.current.push({
+                  role: 'model',
+                  text: textToPush,
+                  timestamp: new Date().toISOString(),
+                });
+              }
+              currentModelTextRef.current = '';
             }
+            activeRoleRef.current = null;
 
             // If Gemini called conclude_call and this turn completed without Maya speaking audio:
             if (isConcludingRef.current && !isModelSpeakingRef.current) {
@@ -475,15 +489,21 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             playerRef.current.clear();
             setStatus('listening');
             setModelVolume(0);
-            if (activeRoleRef.current === 'model' && currentModelTextRef.current.trim()) {
-              turnsRef.current.push({
-                role: 'model',
-                text: currentModelTextRef.current.trim(),
-                timestamp: new Date().toISOString(),
-              });
-              activeRoleRef.current = null;
+            if (currentModelTextRef.current.trim()) {
+              const textToPush = currentModelTextRef.current.trim();
+              const lastTurn = turnsRef.current[turnsRef.current.length - 1];
+              if (!lastTurn || lastTurn.role !== 'model' || lastTurn.text !== textToPush) {
+                turnsRef.current.push({
+                  role: 'model',
+                  text: textToPush,
+                  timestamp: new Date().toISOString(),
+                });
+              }
+              currentModelTextRef.current = '';
             }
+            activeRoleRef.current = null;
           },
+
           onGrammarCorrection: (payload: GrammarCorrectionPayload) => {
             console.log('[useLiveCall] 💡 [UI Feedback Card] Grammar correction displayed:', payload.studentSaid, '->', payload.moreNatural);
             const correctionItem = {

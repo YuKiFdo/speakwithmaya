@@ -34,6 +34,16 @@ export class SessionsController {
     return this.sessionsService.finishSession(sessionId, userId, dto);
   }
 
+  @Get('sessions')
+  async getSessions() {
+    return this.sessionsService.getUserSessions();
+  }
+
+  @Get('sessions/:id')
+  async getSessionById(@Param('id') sessionId: string) {
+    return this.sessionsService.getSessionDetail(sessionId);
+  }
+
   @Get('admin/usage')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async getUsage(@Query() query: QueryUsageDto) {
@@ -45,3 +55,4 @@ export class SessionsController {
     return this.sessionsService.getSessionDetail(sessionId);
   }
 }
+

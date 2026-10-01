@@ -1106,4 +1106,65 @@ ${scenarioInstruction}
       topic: sess.topic || 'Speaking Practice',
     };
   }
+
+  async getUserSessions() {
+    if (!this.supabase) {
+      return [];
+    }
+
+    try {
+      const { data: sessions, error } = await this.supabase
+        .from('sessions')
+        .select(`
+          *,
+          session_turns (*),
+          grammar_corrections (*)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        this.logger.error(`Error querying user sessions from Supabase: ${error.message}`);
+        return [];
+      }
+
+      return (sessions || []).map((sess: any) => {
+        const mappedTurns = (sess.session_turns || [])
+          .sort((a: any, b: any) => (a.turn_order || 0) - (b.turn_order || 0))
+          .map((t: any) => ({
+            role: t.role,
+            text: t.text_transcript,
+            timestamp: t.timestamp || t.created_at,
+          }));
+
+        const mappedCorrections = (sess.grammar_corrections || []).map((c: any) => ({
+          id: c.id,
+          studentSaid: c.student_said,
+          moreNatural: c.more_natural,
+          explanation: c.explanation,
+          highlightWords: c.highlight_words || [],
+          timestamp: c.created_at,
+        }));
+
+        return {
+          id: sess.id,
+          user_id: sess.user_id,
+          start_time: sess.start_time || sess.created_at,
+          end_time: sess.end_time,
+          duration_seconds: sess.duration_seconds || 0,
+          topic: sess.topic || 'General Practice',
+          overall_score: sess.overall_score ?? 85,
+          fluency_score: sess.fluency_score ?? 84,
+          grammar_score: sess.grammar_score ?? 82,
+          pronunciation_score: sess.pronunciation_score ?? 86,
+          status: sess.status || 'completed',
+          turns: mappedTurns,
+          corrections: mappedCorrections,
+        };
+      });
+    } catch (e: unknown) {
+      this.logger.error(`Error in getUserSessions: ${e instanceof Error ? e.message : String(e)}`);
+      return [];
+    }
+  }
 }
+

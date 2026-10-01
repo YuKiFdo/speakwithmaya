@@ -68,7 +68,7 @@ export interface HistorySession {
   id: string;
   mode: PracticeMode;
   title: string;
-  dateGroup: 'Today' | 'Yesterday' | 'May 25, 2026';
+  dateGroup: 'Today' | 'Yesterday' | 'May 25, 2026' | string;
   dateString: string;
   timeString: string;
   durationString: string;
@@ -76,7 +76,15 @@ export interface HistorySession {
   correctionsCount: number;
   recordingLengthString: string;
   transcript: TranscriptTurn[];
+  corrections?: CorrectionItem[];
+  scores?: {
+    overall: number;
+    fluency: number;
+    grammar: number;
+    pronunciation: number;
+  };
 }
+
 
 // ─── MOCK DATA ───────────────────────────────────────────────────────────────
 
@@ -86,240 +94,7 @@ const WAVEFORM_HEIGHTS = [
   34, 20, 14, 24, 32, 28, 18, 12,
 ];
 
-const MOCK_SESSIONS: HistorySession[] = [
-  {
-    id: 'session-1',
-    mode: 'workplace',
-    title: 'Workplace Conversation',
-    dateGroup: 'Today',
-    dateString: 'May 27, 2026',
-    timeString: '12:24 PM',
-    durationString: '12 min',
-    durationSeconds: 720,
-    correctionsCount: 8,
-    recordingLengthString: '12:00',
-    transcript: [
-      {
-        id: 'turn-1',
-        speaker: 'user',
-        time: '12:24 PM',
-        message: 'I did the report yesterday.',
-        correction: {
-          id: 'corr-1',
-          countText: '1 correction',
-          originalText: 'I did the report yesterday.',
-          strikethroughPart: 'did the report yesterday.',
-          correctedText: 'did the report yesterday.',
-          highlightCorrectedPart: 'did the report yesterday.',
-          whyExplanation: 'Use the past tense "did" here.',
-        },
-      },
-      {
-        id: 'turn-2',
-        speaker: 'ai',
-        time: '12:24 PM',
-        message: 'Great! Can you tell me what you included in the report?',
-      },
-      {
-        id: 'turn-3',
-        speaker: 'user',
-        time: '12:24 PM',
-        message: 'I included the project updates, risks, and next steps.',
-      },
-      {
-        id: 'turn-4',
-        speaker: 'ai',
-        time: '12:25 PM',
-        message: "That's good. How do you plan to present it to the team?",
-      },
-      {
-        id: 'turn-5',
-        speaker: 'user',
-        time: '12:26 PM',
-        message: "I'll explain the key points and then open it for feedback.",
-        correction: {
-          id: 'corr-2',
-          countText: '1 correction',
-          originalText: 'explain the key points and then open it for feedback.',
-          strikethroughPart: 'explain the key points and then open it for feedback.',
-          correctedText: 'explain the key points and then open it for feedback.',
-          highlightCorrectedPart: 'explain the key points and then open it for feedback.',
-          whyExplanation: 'Avoid contractions in formal speech.',
-        },
-      },
-      {
-        id: 'turn-6',
-        speaker: 'ai',
-        time: '12:26 PM',
-        message: 'Sounds like a solid plan. Let me know if you need any help.',
-      },
-    ],
-  },
-  {
-    id: 'session-2',
-    mode: 'casual',
-    title: 'Casual Chat',
-    dateGroup: 'Yesterday',
-    dateString: 'May 26, 2026',
-    timeString: '08:15 PM',
-    durationString: '7 min',
-    durationSeconds: 420,
-    correctionsCount: 5,
-    recordingLengthString: '07:15',
-    transcript: [
-      {
-        id: 'turn-2-1',
-        speaker: 'ai',
-        time: '08:15 PM',
-        message: 'Hey there! How was your weekend? Did you do anything exciting?',
-      },
-      {
-        id: 'turn-2-2',
-        speaker: 'user',
-        time: '08:16 PM',
-        message: 'I went to the beach with some friends and we played volleyball.',
-        correction: {
-          id: 'corr-2-1',
-          countText: '1 correction',
-          originalText: 'we play volleyball',
-          strikethroughPart: 'we play volleyball',
-          correctedText: 'we played volleyball',
-          highlightCorrectedPart: 'we played volleyball',
-          whyExplanation: 'Maintain past tense consistency for past weekend activities.',
-        },
-      },
-      {
-        id: 'turn-2-3',
-        speaker: 'ai',
-        time: '08:16 PM',
-        message: 'That sounds really refreshing! Who won the match?',
-      },
-      {
-        id: 'turn-2-4',
-        speaker: 'user',
-        time: '08:17 PM',
-        message: 'Our team won the final set, so we celebrated with fresh king coconut water.',
-      },
-    ],
-  },
-  {
-    id: 'session-3',
-    mode: 'interview',
-    title: 'Job Interview Practice',
-    dateGroup: 'Yesterday',
-    dateString: 'May 26, 2026',
-    timeString: '03:45 PM',
-    durationString: '15 min',
-    durationSeconds: 900,
-    correctionsCount: 12,
-    recordingLengthString: '15:20',
-    transcript: [
-      {
-        id: 'turn-3-1',
-        speaker: 'ai',
-        time: '03:45 PM',
-        message: 'Welcome! Tell me about a challenging project you managed recently.',
-      },
-      {
-        id: 'turn-3-2',
-        speaker: 'user',
-        time: '03:46 PM',
-        message: 'In my last role, I led a cross-functional team of five engineers to deliver a cloud migration ahead of deadline.',
-        correction: {
-          id: 'corr-3-1',
-          countText: '1 correction',
-          originalText: 'ahead of deadline',
-          strikethroughPart: 'ahead of deadline',
-          correctedText: 'ahead of schedule / before the deadline',
-          highlightCorrectedPart: 'ahead of schedule',
-          whyExplanation: 'Say "ahead of schedule" or "before the deadline" for professional phrasing.',
-        },
-      },
-      {
-        id: 'turn-3-3',
-        speaker: 'ai',
-        time: '03:48 PM',
-        message: 'Impressive leadership! How did you resolve roadblocks when deadlines were tight?',
-      },
-      {
-        id: 'turn-3-4',
-        speaker: 'user',
-        time: '03:50 PM',
-        message: 'We held daily stand-ups and proactively reprioritized non-critical deliverables.',
-      },
-    ],
-  },
-  {
-    id: 'session-4',
-    mode: 'phone',
-    title: 'Phone Call Practice',
-    dateGroup: 'May 25, 2026',
-    dateString: 'May 25, 2026',
-    timeString: '06:20 PM',
-    durationString: '10 min',
-    durationSeconds: 600,
-    correctionsCount: 6,
-    recordingLengthString: '10:04',
-    transcript: [
-      {
-        id: 'turn-4-1',
-        speaker: 'ai',
-        time: '06:20 PM',
-        message: 'Thank you for calling Sunrise Clinic. How may I direct your call today?',
-      },
-      {
-        id: 'turn-4-2',
-        speaker: 'user',
-        time: '06:21 PM',
-        message: 'Hello, I would like to schedule an appointment with Dr. Silva for tomorrow afternoon if possible.',
-      },
-      {
-        id: 'turn-4-3',
-        speaker: 'ai',
-        time: '06:21 PM',
-        message: 'Certainly. Dr. Silva has an opening at 2:30 PM. Would that time suit you?',
-      },
-      {
-        id: 'turn-4-4',
-        speaker: 'user',
-        time: '06:22 PM',
-        message: "Yes, 2:30 PM works perfectly. Could you send me an SMS confirmation?",
-      },
-    ],
-  },
-  {
-    id: 'session-5',
-    mode: 'travel',
-    title: 'Travel English',
-    dateGroup: 'May 25, 2026',
-    dateString: 'May 25, 2026',
-    timeString: '11:10 AM',
-    durationString: '9 min',
-    durationSeconds: 540,
-    correctionsCount: 4,
-    recordingLengthString: '09:30',
-    transcript: [
-      {
-        id: 'turn-5-1',
-        speaker: 'ai',
-        time: '11:10 AM',
-        message: 'Good morning! Could I please see your passport and boarding pass?',
-      },
-      {
-        id: 'turn-5-2',
-        speaker: 'user',
-        time: '11:11 AM',
-        message: 'Here you go. Could you tell me which gate the flight to London departs from?',
-      },
-      {
-        id: 'turn-5-3',
-        speaker: 'ai',
-        time: '11:11 AM',
-        message: 'You will depart from Gate B14. Boarding starts in forty minutes.',
-      },
-    ],
-  },
-];
+
 
 // Helper to render mode icon
 function renderModeIcon(mode: PracticeMode, size = 20) {
@@ -373,10 +148,8 @@ export default function HistoryScreen() {
   const [selectedMode, setSelectedMode] = useState<PracticeMode>('all');
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
 
-  // Selected session (defaults to session-1 on desktop, null on mobile)
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
-    isDesktop ? 'session-1' : null
-  );
+  // Selected session (defaults to null, auto-selected on load)
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
   // Audio Playback State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -389,12 +162,16 @@ export default function HistoryScreen() {
   const correctionPositions = useRef<{ [id: string]: number }>({});
   const lastCorrectionIndexScrolled = useRef<number>(-1);
 
+  // Dynamic & cached practice sessions
+  const [allSessions, setAllSessions] = useState<HistorySession[]>([]);
+
+
   // Synchronize desktop selection
   useEffect(() => {
-    if (isDesktop && !selectedSessionId) {
-      setSelectedSessionId('session-1');
+    if (isDesktop && !selectedSessionId && allSessions.length > 0) {
+      setSelectedSessionId(allSessions[0].id);
     }
-  }, [isDesktop, selectedSessionId]);
+  }, [isDesktop, selectedSessionId, allSessions]);
 
   // Handle Tab Switch
   const handleSelectTab = (tab: DashboardTab) => {
@@ -409,20 +186,182 @@ export default function HistoryScreen() {
     }
   };
 
-  // Dynamic & cached practice sessions
-  const [allSessions, setAllSessions] = useState<HistorySession[]>(MOCK_SESSIONS);
 
   useEffect(() => {
     fetchAllPracticeSessions().then((records) => {
       if (records && records.length > 0) {
         const converted: HistorySession[] = records.map((r, idx) => {
           const d = new Date(r.start_time);
-          const durationMin = Math.max(1, Math.ceil(r.duration_seconds / 60));
+          const durationMin = Math.max(1, Math.ceil((r.duration_seconds || 60) / 60));
+          const durSecs = (r.duration_seconds || 0) % 60;
+          const recordingLengthString = `${Math.floor((r.duration_seconds || 0) / 60)}:${durSecs < 10 ? '0' : ''}${durSecs}`;
+
+          const now = new Date();
+          const isSameDay = (d1: Date, d2: Date) =>
+            d1.getFullYear() === d2.getFullYear() &&
+            d1.getMonth() === d2.getMonth() &&
+            d1.getDate() === d2.getDate();
+          const yesterday = new Date();
+          yesterday.setDate(now.getDate() - 1);
+
+          let dateGroup = 'Today';
+          if (!isNaN(d.getTime())) {
+            if (isSameDay(d, now)) {
+              dateGroup = 'Today';
+            } else if (isSameDay(d, yesterday)) {
+              dateGroup = 'Yesterday';
+            } else {
+              dateGroup = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            }
+          }
+
+          const rawCorrections = r.corrections || [];
+          const normalize = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+
+          const unassignedCorrections = rawCorrections.map((c, i) => {
+            const saidNorm = normalize(c.studentSaid);
+            return {
+              id: c.id || `corr-${r.id}-${i}`,
+              countText: `1 correction`,
+              originalText: c.studentSaid,
+              strikethroughPart: c.highlightWords?.[0] || c.studentSaid,
+              correctedText: c.moreNatural,
+              highlightCorrectedPart: c.highlightWords?.[0] || c.moreNatural,
+              whyExplanation: c.explanation,
+              studentSaidNormalized: saidNorm,
+              saidWords: saidNorm.split(' ').filter((w) => w.length > 1),
+              timestamp: c.timestamp,
+              used: false,
+            };
+          });
+
+          // Deduplicate consecutive identical turns (e.g. from historical duplicate events)
+          const rawTurns = r.turns && r.turns.length > 0 ? r.turns : [];
+          const turnsList: Array<{ role: 'user' | 'model'; text: string; timestamp?: string }> = [];
+          for (const t of rawTurns) {
+            const prev = turnsList[turnsList.length - 1];
+            if (!prev || prev.role !== t.role || prev.text.trim() !== t.text.trim()) {
+              turnsList.push(t);
+            }
+          }
+
+          const transcript: TranscriptTurn[] = turnsList.map((t, i) => {
+            const isUser = t.role === 'user';
+            let turnCorrection: CorrectionItem | undefined = undefined;
+
+            if (isUser && unassignedCorrections.length > 0) {
+              const userTextNormalized = normalize(t.text);
+
+              // 1. Text substring match
+              let matchIdx = unassignedCorrections.findIndex(
+                (c) =>
+                  !c.used &&
+                  c.studentSaidNormalized &&
+                  (userTextNormalized.includes(c.studentSaidNormalized) ||
+                    c.studentSaidNormalized.includes(userTextNormalized))
+              );
+
+              // 2. Word overlap match (>= 60% words match)
+              if (matchIdx === -1) {
+                matchIdx = unassignedCorrections.findIndex((c) => {
+                  if (c.used || c.saidWords.length === 0) return false;
+                  const matchedWords = c.saidWords.filter((w) => userTextNormalized.includes(w)).length;
+                  return matchedWords / c.saidWords.length >= 0.6;
+                });
+              }
+
+              // 3. Fallback: chronological assignment to the next unused correction
+              if (matchIdx === -1) {
+                matchIdx = unassignedCorrections.findIndex((c) => !c.used);
+              }
+
+              if (matchIdx !== -1) {
+                const matched = unassignedCorrections[matchIdx];
+                matched.used = true;
+                turnCorrection = {
+                  id: matched.id,
+                  countText: matched.countText,
+                  originalText: matched.originalText,
+                  strikethroughPart: matched.strikethroughPart,
+                  correctedText: matched.correctedText,
+                  highlightCorrectedPart: matched.highlightCorrectedPart,
+                  whyExplanation: matched.whyExplanation,
+                };
+              }
+            }
+
+
+            let turnTimeString = '';
+            if (t.timestamp) {
+              const tDate = new Date(t.timestamp);
+              if (!isNaN(tDate.getTime())) {
+                turnTimeString = tDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+              }
+            }
+            if (!turnTimeString) {
+              const mins = Math.floor(i / 2);
+              const secs = (i % 2) * 30;
+              turnTimeString = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+            }
+
+            return {
+              id: `turn-${r.id}-${i}`,
+              speaker: t.role === 'model' ? 'ai' : 'user',
+              time: turnTimeString,
+              message: t.text,
+              correction: turnCorrection,
+            };
+          });
+
+          // If no transcript turns were recorded but corrections exist, generate turn items from corrections
+          if (transcript.length === 0 && unassignedCorrections.length > 0) {
+            unassignedCorrections.forEach((c, idx) => {
+              transcript.push({
+                id: `turn-${r.id}-user-${idx}`,
+                speaker: 'user',
+                time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
+                message: c.originalText,
+                correction: {
+                  id: c.id,
+                  countText: c.countText,
+                  originalText: c.originalText,
+                  strikethroughPart: c.strikethroughPart,
+                  correctedText: c.correctedText,
+                  highlightCorrectedPart: c.highlightCorrectedPart,
+                  whyExplanation: c.whyExplanation,
+                },
+              });
+              transcript.push({
+                id: `turn-${r.id}-ai-${idx}`,
+                speaker: 'ai',
+                time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
+                message: `Great speaking! Remember: ${c.whyExplanation}`,
+              });
+            });
+          }
+
+          // If still completely empty
+          if (transcript.length === 0) {
+            transcript.push({
+              id: `turn-${r.id}-0`,
+              speaker: 'ai',
+              time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
+              message: 'Practice session completed successfully.',
+            });
+          }
+
+          let mode: PracticeMode = 'casual';
+          const tLower = (r.topic || '').toLowerCase();
+          if (tLower.includes('interview')) mode = 'interview';
+          else if (tLower.includes('workplace') || tLower.includes('business')) mode = 'workplace';
+          else if (tLower.includes('phone') || tLower.includes('call')) mode = 'phone';
+          else if (tLower.includes('travel') || tLower.includes('tour')) mode = 'travel';
+
           return {
             id: r.id,
-            mode: 'casual',
+            mode,
             title: r.topic || 'General Practice',
-            dateGroup: 'Today',
+            dateGroup,
             dateString: isNaN(d.getTime())
               ? 'Today'
               : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
@@ -430,30 +369,19 @@ export default function HistoryScreen() {
               ? 'Just now'
               : d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             durationString: `${durationMin} mins`,
-            recordingLengthString: `${durationMin}:00`,
-            durationSeconds: r.duration_seconds,
-            correctionsCount: r.corrections?.length || 0,
+            recordingLengthString,
+            durationSeconds: r.duration_seconds || 60,
+            correctionsCount: rawCorrections.length,
             scores: {
               overall: r.overall_score || 85,
               fluency: r.fluency_score || 84,
               grammar: r.grammar_score || 82,
               pronunciation: r.pronunciation_score || 80,
             },
-            transcript: (r.turns && r.turns.length > 0
-              ? r.turns
-              : [
-                  { role: 'model' as const, text: 'Hello! I am Maya, your English tutor.' },
-                  { role: 'user' as const, text: 'Hi Maya, I want to practice speaking today.' },
-                ]
-            ).map((t, i) => ({
-              id: `turn-${i}`,
-              speaker: t.role === 'model' ? 'ai' : 'user',
-              time: `0:0${i + 1}`,
-              message: t.text,
-            })),
-            corrections: (r.corrections || []).map((c, i) => ({
-              id: c.id || `corr-${i}`,
-              countText: `Correction ${i + 1}`,
+            transcript,
+            corrections: rawCorrections.map((c, i) => ({
+              id: c.id || `corr-${r.id}-${i}`,
+              countText: `1 correction`,
               originalText: c.studentSaid,
               strikethroughPart: c.highlightWords?.[0] || c.studentSaid,
               correctedText: c.moreNatural,
@@ -463,12 +391,19 @@ export default function HistoryScreen() {
           };
         });
 
-        // Prepend new recorded sessions ahead of mock sessions
-        const combined = [...converted, ...MOCK_SESSIONS.filter((m) => !converted.some((c) => c.id === m.id))];
-        setAllSessions(combined);
+        setAllSessions(converted);
+
+        // Automatically select the latest real session
+        if (converted.length > 0) {
+          setSelectedSessionId((prev) => (!prev ? converted[0].id : prev));
+        }
+      } else {
+        setAllSessions([]);
       }
     });
   }, []);
+
+
 
   // Filtered Sessions
   const filteredSessions = useMemo(() => {

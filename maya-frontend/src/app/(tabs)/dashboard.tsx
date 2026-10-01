@@ -92,7 +92,7 @@ export default function DashboardScreen() {
     popup?: string;
   }>();
 
-  const displayName = params.name || 'Shehal';
+  const displayName = params.name || 'Tharindu';
   const { isPhone } = useBreakpoint();
   const isDesktop = !isPhone;
   const { height: windowHeight } = useWindowDimensions();

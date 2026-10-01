@@ -141,7 +141,7 @@ const MILESTONES: MilestoneItem[] = [
 
 export default function RoadmapScreen() {
   const params = useLocalSearchParams<{ name?: string }>();
-  const displayName = params.name || 'Shehal';
+  const displayName = params.name || 'Tharindu';
   const { isPhone } = useBreakpoint();
   const isDesktop = !isPhone;
   const { width: windowWidth } = useWindowDimensions();
