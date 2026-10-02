@@ -245,52 +245,73 @@ export default function HistoryScreen() {
             }
           }
 
-          const transcript: TranscriptTurn[] = turnsList.map((t, i) => {
-            const isUser = t.role === 'user';
-            let turnCorrection: CorrectionItem | undefined = undefined;
+          // Pre-assign corrections using multi-pass matching
+          const turnCorrections: Array<CorrectionItem | undefined> = new Array(turnsList.length).fill(undefined);
 
-            if (isUser && unassignedCorrections.length > 0) {
-              const userTextNormalized = normalize(t.text);
-
-              // 1. Text substring match
-              let matchIdx = unassignedCorrections.findIndex(
-                (c) =>
-                  !c.used &&
-                  c.studentSaidNormalized &&
-                  (userTextNormalized.includes(c.studentSaidNormalized) ||
-                    c.studentSaidNormalized.includes(userTextNormalized))
-              );
-
-              // 2. Word overlap match (>= 60% words match)
-              if (matchIdx === -1) {
-                matchIdx = unassignedCorrections.findIndex((c) => {
-                  if (c.used || c.saidWords.length === 0) return false;
-                  const matchedWords = c.saidWords.filter((w) => userTextNormalized.includes(w)).length;
-                  return matchedWords / c.saidWords.length >= 0.6;
-                });
-              }
-
-              // 3. Fallback: chronological assignment to the next unused correction
-              if (matchIdx === -1) {
-                matchIdx = unassignedCorrections.findIndex((c) => !c.used);
-              }
-
-              if (matchIdx !== -1) {
-                const matched = unassignedCorrections[matchIdx];
-                matched.used = true;
-                turnCorrection = {
-                  id: matched.id,
-                  countText: matched.countText,
-                  originalText: matched.originalText,
-                  strikethroughPart: matched.strikethroughPart,
-                  correctedText: matched.correctedText,
-                  highlightCorrectedPart: matched.highlightCorrectedPart,
-                  whyExplanation: matched.whyExplanation,
-                };
-              }
+          // PASS 1: Exact substring match
+          unassignedCorrections.forEach((c) => {
+            if (c.used || !c.studentSaidNormalized) return;
+            const matchTurnIdx = turnsList.findIndex((t, idx) => {
+              if (t.role !== 'user' || turnCorrections[idx]) return false;
+              const userNorm = normalize(t.text);
+              return userNorm.includes(c.studentSaidNormalized) || c.studentSaidNormalized.includes(userNorm);
+            });
+            if (matchTurnIdx !== -1) {
+              c.used = true;
+              turnCorrections[matchTurnIdx] = {
+                id: c.id,
+                countText: c.countText,
+                originalText: c.originalText,
+                strikethroughPart: c.strikethroughPart,
+                correctedText: c.correctedText,
+                highlightCorrectedPart: c.highlightCorrectedPart,
+                whyExplanation: c.whyExplanation,
+              };
             }
+          });
 
+          // PASS 2: Significant word overlap match (>= 60% of mistake words match user turn)
+          unassignedCorrections.forEach((c) => {
+            if (c.used || c.saidWords.length === 0) return;
+            const matchTurnIdx = turnsList.findIndex((t, idx) => {
+              if (t.role !== 'user' || turnCorrections[idx]) return false;
+              const userNorm = normalize(t.text);
+              const matchedWords = c.saidWords.filter((w) => userNorm.includes(w)).length;
+              return matchedWords / c.saidWords.length >= 0.6;
+            });
+            if (matchTurnIdx !== -1) {
+              c.used = true;
+              turnCorrections[matchTurnIdx] = {
+                id: c.id,
+                countText: c.countText,
+                originalText: c.originalText,
+                strikethroughPart: c.strikethroughPart,
+                correctedText: c.correctedText,
+                highlightCorrectedPart: c.highlightCorrectedPart,
+                whyExplanation: c.whyExplanation,
+              };
+            }
+          });
 
+          // PASS 3: Fallback for any leftover unassigned corrections
+          unassignedCorrections.forEach((c) => {
+            if (c.used) return;
+            const emptyUserTurnIdx = turnsList.findIndex((t, idx) => t.role === 'user' && !turnCorrections[idx]);
+            if (emptyUserTurnIdx !== -1) {
+              c.used = true;
+              turnCorrections[emptyUserTurnIdx] = {
+                id: c.id,
+                countText: c.countText,
+                originalText: c.originalText,
+                strikethroughPart: c.strikethroughPart,
+                correctedText: c.correctedText,
+                highlightCorrectedPart: c.highlightCorrectedPart,
+                whyExplanation: c.whyExplanation,
+              };
+            }
+          });
+
+          const transcript: TranscriptTurn[] = turnsList.map((t, i) => {
             let turnTimeString = '';
             if (t.timestamp) {
               const tDate = new Date(t.timestamp);
@@ -309,9 +330,10 @@ export default function HistoryScreen() {
               speaker: t.role === 'model' ? 'ai' : 'user',
               time: turnTimeString,
               message: t.text,
-              correction: turnCorrection,
+              correction: turnCorrections[i],
             };
           });
+
 
           // If no transcript turns were recorded but corrections exist, generate turn items from corrections
           if (transcript.length === 0 && unassignedCorrections.length > 0) {

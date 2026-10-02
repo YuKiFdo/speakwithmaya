@@ -1,4 +1,15 @@
-import { Controller, Post, Get, Query, Body, Param, Req, Headers, UsePipes, ValidationPipe } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Query,
+  Body,
+  Param,
+  Headers,
+  UsePipes,
+  ValidationPipe,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { SessionsService } from './sessions.service.js';
 import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto } from './dto/session.dto.js';
 
@@ -12,11 +23,15 @@ export class SessionsController {
     @Body() dto: CreateSessionTokenDto,
     @Headers('authorization') authHeader?: string,
   ) {
-    // In production with SupabaseAuthGuard, extract user from JWT
-    let userId = 'guest-user';
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      userId = 'auth-user'; // Or decoded sub from Supabase JWT
+    if (!authHeader) {
+      throw new UnauthorizedException('Missing Authorization header');
     }
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!token) {
+      throw new UnauthorizedException('Invalid Bearer token');
+    }
+
+    const userId = await this.sessionsService.validateUser(token);
     return this.sessionsService.createSessionToken(userId, dto);
   }
 
@@ -27,10 +42,15 @@ export class SessionsController {
     @Body() dto: FinishSessionDto,
     @Headers('authorization') authHeader?: string,
   ) {
-    let userId = 'guest-user';
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      userId = 'auth-user';
+    if (!authHeader) {
+      throw new UnauthorizedException('Missing Authorization header');
     }
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!token) {
+      throw new UnauthorizedException('Invalid Bearer token');
+    }
+
+    const userId = await this.sessionsService.validateUser(token);
     return this.sessionsService.finishSession(sessionId, userId, dto);
   }
 

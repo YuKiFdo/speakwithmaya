@@ -155,6 +155,7 @@ export default function DashboardScreen() {
         duration: String(config.durationSeconds),
         durationMinutes: String(config.durationMinutes),
         languageMode: config.languageMode,
+        sinhalaStyle: config.sinhalaStyle || 'balanced',
         aiSuggestions: String(config.aiSuggestions),
         topic: config.topic,
         scenarioId: config.scenarioId || '',

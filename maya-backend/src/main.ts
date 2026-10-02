@@ -1,10 +1,13 @@
 import { NestFactory } from '@nestjs/core';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { AppModule, ObserveInstrument } from './app.module.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     instrument: ObserveInstrument,
   });
+
+  app.useWebSocketAdapter(new WsAdapter(app));
 
   // Enable CORS for web clients (e.g. Expo web on localhost:8081)
   app.enableCors({

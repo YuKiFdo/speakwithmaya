@@ -4,6 +4,10 @@ import { Type } from 'class-transformer';
 export class CreateSessionTokenDto {
   @IsOptional()
   @IsString()
+  sessionId?: string;
+
+  @IsOptional()
+  @IsString()
   topic?: string;
 
   @IsOptional()
@@ -25,6 +29,10 @@ export class CreateSessionTokenDto {
   @IsOptional()
   @IsString()
   languageMode?: string;
+
+  @IsOptional()
+  @IsString()
+  sinhalaStyle?: 'balanced' | 'deep_guidance';
 
   @IsOptional()
   aiSuggestions?: boolean;
@@ -56,7 +64,7 @@ export class SessionTokensDto {
 
   @IsOptional()
   @IsNumber()
-  totalTokens?: number;
+  textInTokens?: number;
 
   @IsOptional()
   @IsNumber()
@@ -64,7 +72,19 @@ export class SessionTokensDto {
 
   @IsOptional()
   @IsNumber()
+  textOutTokens?: number;
+
+  @IsOptional()
+  @IsNumber()
   audioOutTokens?: number;
+
+  @IsOptional()
+  @IsNumber()
+  thoughtsTokens?: number;
+
+  @IsOptional()
+  @IsNumber()
+  totalTokens?: number;
 }
 
 export class TurnDto {

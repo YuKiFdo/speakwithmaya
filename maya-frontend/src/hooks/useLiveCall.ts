@@ -4,11 +4,14 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { createAudioCapture } from '@/services/audio/AudioCapture';
 import { createAudioPlayer } from '@/services/audio/AudioPlayer';
-import { LiveTransport, GrammarCorrectionPayload, RephraseSuggestionPayload } from '@/services/gemini/LiveTransport';
-import { persistSessionRecord, SessionHistoryRecord } from '@/services/supabase';
+import { LiveTransport, ILiveTransport, GrammarCorrectionPayload, RephraseSuggestionPayload } from '@/services/gemini/LiveTransport';
+import { ServerLiveTransport } from '@/services/gemini/ServerLiveTransport';
+import { persistSessionRecord, SessionHistoryRecord, getAuthHeaders } from '@/services/supabase';
 import { GrammarFeedbackData } from '@/components/call/grammar-feedback-modal';
 import { MicPermissionErrorType } from '@/components/call/microphone-permission-popup';
 import { getLogTimestamp } from '@/utils/time';
+
+const USE_SERVER_LIVE = process.env.EXPO_PUBLIC_USE_SERVER_LIVE === 'true';
 
 export const getBackendBaseUrl = (): string => {
   // Local web development: always point to local NestJS backend on port 3000
@@ -46,6 +49,7 @@ interface UseLiveCallOptions {
   level?: string;
   durationSeconds?: number;
   languageMode?: 'sinhala' | 'english';
+  sinhalaStyle?: 'balanced' | 'deep_guidance';
   aiSuggestions?: boolean;
   scenarioId?: string;
   userName?: string;
@@ -61,7 +65,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const isMutedRef = useRef<boolean>(false);
   const [feedbackVisible, setFeedbackVisible] = useState<boolean>(false);
   const [feedbackData, setFeedbackData] = useState<GrammarFeedbackData | null>(null);
-  const [tokens, setTokens] = useState({ audioIn: 0, audioOut: 0, total: 0, costLkr: 0 });
+  const [tokens, setTokens] = useState({ textIn: 0, audioIn: 0, audioOut: 0, textOut: 0, thoughtsTokens: 0, total: 0, costLkr: 0 });
   const [userVolume, setUserVolume] = useState<number>(0);
   const [modelVolume, setModelVolume] = useState<number>(0);
   const [isPermissionModalVisible, setIsPermissionModalVisible] = useState<boolean>(false);
@@ -69,7 +73,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
   const captureRef = useRef(createAudioCapture());
   const playerRef = useRef(createAudioPlayer());
-  const transportRef = useRef(new LiveTransport());
+  const transportRef = useRef<ILiveTransport>(USE_SERVER_LIVE ? new ServerLiveTransport() : new LiveTransport());
 
   const timerRef = useRef<any>(null);
   const sessionIdRef = useRef<string>(`session-${Date.now()}`);
@@ -86,7 +90,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   }>>([]);
   const statusRef = useRef<CallStatus>('idle');
   const secondsElapsedRef = useRef<number>(0);
-  const tokensRef = useRef({ audioIn: 0, audioOut: 0, total: 0, costLkr: 0 });
+  const tokensRef = useRef({ textIn: 0, audioIn: 0, audioOut: 0, textOut: 0, thoughtsTokens: 0, total: 0, costLkr: 0 });
   const isConcludingRef = useRef<boolean>(false);
   const concludeTimerRef = useRef<any>(null);
   const isModelSpeakingRef = useRef<boolean>(false);
@@ -96,12 +100,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const lastModelVolUpdateRef = useRef<number>(0);
   const lastModelVolValueRef = useRef<number>(0);
   const userChunksSentRef = useRef<number>(0);
-  const endCallRef = useRef<(() => Promise<void>) | null>(null);
+  const endCallRef = useRef<((shouldNavigate?: boolean) => Promise<void>) | null>(null);
 
   const reconnectAttemptsRef = useRef<number>(0);
   const reconnectTimerRef = useRef<any>(null);
   const resumptionHandleRef = useRef<string | null>(null);
-  const cachedTokenDataRef = useRef<any>(null);
   const hasFinishedRef = useRef<boolean>(false);
 
   // Sync state to refs for non-stale callback access
@@ -167,8 +170,6 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         await startCall(true);
       } catch (err) {
         console.error('[useLiveCall] Reconnection failed:', err);
-        // Clear cached token if it failed to force refresh on next attempt
-        cachedTokenDataRef.current = null;
         scheduleReconnect();
       }
     }, delay);
@@ -186,7 +187,6 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         correctionsRef.current = [];
         reconnectAttemptsRef.current = 0;
         resumptionHandleRef.current = null;
-        cachedTokenDataRef.current = null;
         hasFinishedRef.current = false;
       }
 
@@ -203,16 +203,15 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             // If session conclusion was requested, cleanly end call now that Maya finished her farewell speech
             if (isConcludingRef.current) {
               console.log('[useLiveCall] Maya finished speaking farewell message -> ending call now');
-              hasFinishedRef.current = true;
-              setStatus('ended');
-              statusRef.current = 'ended';
+              isConcludingRef.current = false;
               if (concludeTimerRef.current) {
                 clearTimeout(concludeTimerRef.current);
                 concludeTimerRef.current = null;
               }
+              // Allow a brief 300ms pause for audio buffer completion then invoke endCall with navigation
               setTimeout(() => {
-                endCallRef.current?.();
-              }, 400);
+                endCallRef.current?.(true);
+              }, 300);
               return;
             }
           }
@@ -301,42 +300,46 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       setIsPermissionModalVisible(false);
       setPermissionErrorType(null);
 
-      // 3. Fetch ephemeral token from NestJS backend (ONLY AFTER MIC PERMISSION IS CONFIRMED)
-      let tokenData = cachedTokenDataRef.current;
-      if (!tokenData) {
-        const backendBaseUrl = getBackendBaseUrl();
-        const res = await fetch(`${backendBaseUrl}/v1/session-token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            topic: options.topic,
-            goal: options.goal,
-            level: options.level,
-            durationSeconds: options.durationSeconds,
-            languageMode: options.languageMode,
-            aiSuggestions: options.aiSuggestions,
-            scenarioId: options.scenarioId,
-            userName: options.userName,
-            isIntroCall: options.isIntroCall,
-          }),
-        });
+      // Compute rolling text memory from recent conversation turns to preserve context
+      const rollingMemory = turnsRef.current
+        .slice(-8)
+        .map((t) => `${t.role === 'user' ? 'Student' : 'Maya'}: ${t.text}`)
+        .join('\n');
 
-        if (!res.ok) {
-          const errBody = await res.text().catch(() => '');
-          throw new Error(`Failed to obtain ephemeral session token from backend (${res.status}): ${errBody}`);
-        }
+      const backendBaseUrl = getBackendBaseUrl();
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`${backendBaseUrl}/v1/session-token`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          sessionId: isReconnect ? sessionIdRef.current : undefined,
+          topic: options.topic,
+          goal: options.goal,
+          level: options.level,
+          durationSeconds: options.durationSeconds,
+          languageMode: options.languageMode,
+          sinhalaStyle: options.sinhalaStyle || 'balanced',
+          aiSuggestions: options.aiSuggestions,
+          scenarioId: options.scenarioId,
+          userName: options.userName,
+          isIntroCall: options.isIntroCall,
+          memory: rollingMemory || undefined,
+        }),
+      });
 
-        tokenData = await res.json();
-        if (!tokenData?.wsUrl || !tokenData?.token) {
-          throw new Error('Backend returned invalid session token response: wsUrl or token is missing');
-        }
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        throw new Error(`Failed to obtain ephemeral session token from backend (${res.status}): ${errBody}`);
+      }
 
-        cachedTokenDataRef.current = tokenData;
+      const tokenData = await res.json();
+      if (!tokenData?.wsUrl || !tokenData?.token) {
+        throw new Error('Backend returned invalid session token response: wsUrl or token is missing');
       }
 
       sessionIdRef.current = tokenData.sessionId || sessionIdRef.current;
 
-      // 4. Connect Live Transport WebSocket to Gemini Live
+      // 4. Connect Live Transport WebSocket (Direct to Google or Server-to-Server)
       transportRef.current.connect(
         {
           wsUrl: tokenData.wsUrl,
@@ -348,6 +351,20 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           resumptionHandle: resumptionHandleRef.current,
           greetingPrompt: tokenData.greetingPrompt,
           languageMode: tokenData.languageMode || options.languageMode,
+          sinhalaStyle: (tokenData.sinhalaStyle as any) || options.sinhalaStyle || 'balanced',
+          sessionOptions: {
+            topic: options.topic,
+            goal: options.goal,
+            level: options.level,
+            durationSeconds: options.durationSeconds,
+            languageMode: options.languageMode,
+            sinhalaStyle: options.sinhalaStyle || 'balanced',
+            aiSuggestions: options.aiSuggestions,
+            scenarioId: options.scenarioId,
+            userName: options.userName,
+            isIntroCall: options.isIntroCall,
+            memory: rollingMemory || undefined,
+          },
         },
         {
           onOpen: () => {
@@ -379,6 +396,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             scheduleReconnect();
           },
           onAudioChunk: (base64) => {
+            if (hasFinishedRef.current || statusRef.current === 'ended') return;
             isModelSpeakingRef.current = true;
             userChunksSentRef.current = 0;
             // While Maya is delivering her farewell speech, keep resetting the safety timeout so it never cuts her off
@@ -388,13 +406,14 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
                 if (isConcludingRef.current) {
                   console.log('[useLiveCall] Safety timeout reached for conclude_call -> ending call');
                   isConcludingRef.current = false;
-                  endCallRef.current?.();
+                  endCallRef.current?.(true);
                 }
               }, 12000);
             }
             playerRef.current.playPcmChunk(base64);
           },
           onOutputTranscript: (text) => {
+            if (hasFinishedRef.current || statusRef.current === 'ended') return;
             isModelSpeakingRef.current = true;
             if (activeRoleRef.current !== 'model') {
               if (currentModelTextRef.current.trim()) {
@@ -555,11 +574,36 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             }
           },
           onUsageUpdate: (usage) => {
-            const costLkr = Number((((usage.audioIn / 1_000_000) * 3.0 + (usage.audioOut / 1_000_000) * 12.0) * 300).toFixed(2));
+            const textIn = usage.textIn || 0;
+            const audioIn = usage.audioIn || 0;
+            const audioOut = usage.audioOut || 0;
+            const textOut = usage.textOut || 0;
+            const thoughtsTokens = usage.thoughtsTokens || 0;
+            const total = usage.total || (textIn + audioIn + audioOut + textOut + thoughtsTokens);
+
+            // Google Gemini Live verified pricing from docs/facts.md:
+            // Text In (System Prompt + Tools): $0.75 per 1M tokens
+            // Audio In (User Mic Voice + Context): $3.00 per 1M tokens
+            // Audio Out (Maya Spoken Voice): $12.00 per 1M tokens
+            // Text Out / Thoughts (Reasoning tokens): $4.50 per 1M tokens
+            // USD to LKR conversion (configurable via EXPO_PUBLIC_USD_TO_LKR)
+            const usdToLkr = Number(process.env.EXPO_PUBLIC_USD_TO_LKR) || 308.50;
+            const rateMultiplier = 0.48;
+            const rawCostUsd =
+              (textIn / 1_000_000) * 0.75 +
+              (audioIn / 1_000_000) * 3.0 +
+              (audioOut / 1_000_000) * 12.0 +
+              ((textOut + thoughtsTokens) / 1_000_000) * 4.5;
+            const costUsd = rawCostUsd * rateMultiplier;
+            const costLkr = Number((costUsd * usdToLkr).toFixed(2));
+
             const tokenData = {
-              audioIn: usage.audioIn,
-              audioOut: usage.audioOut,
-              total: usage.total,
+              textIn,
+              audioIn,
+              audioOut,
+              textOut,
+              thoughtsTokens,
+              total,
               costLkr,
             };
             tokensRef.current = tokenData;
@@ -587,7 +631,6 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             } else {
               if (code === 1011 || code === 1007) {
                 resumptionHandleRef.current = null;
-                cachedTokenDataRef.current = null;
               }
               setStatus('reconnecting');
               scheduleReconnect();
@@ -636,7 +679,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   }, [options.topic, options.goal, options.level, isMuted]);
 
   const endCall = useCallback(async (shouldNavigate: boolean = true) => {
-    if (hasFinishedRef.current || statusRef.current === 'ended') {
+    if (hasFinishedRef.current) {
       console.log('[useLiveCall] Call already finished or ending in progress, skipping redundant endCall');
       return;
     }
@@ -658,7 +701,6 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     reconnectAttemptsRef.current = 0;
     isConcludingRef.current = false;
     resumptionHandleRef.current = null;
-    cachedTokenDataRef.current = null;
 
     // 1. Immediately teardown audio & transport
     try {
@@ -696,42 +738,44 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       console.warn('[useLiveCall] Error persisting session record:', err)
     );
 
-    // 4. Notify backend asynchronously in background (non-blocking)
-    try {
-      const backendBaseUrl = getBackendBaseUrl();
-      // If Gemini didn't emit usageMetadata yet (e.g. abrupt disconnect) but turns occurred or seconds elapsed,
-      // calculate estimated tokens from verified facts.md rates (~25 tokens/s audio in, ~32 tokens/s audio out)
-      let audioIn = tokensRef.current.audioIn;
-      let audioOut = tokensRef.current.audioOut;
-      let total = tokensRef.current.total;
+    // 4. Notify backend asynchronously in background with auth headers (non-blocking)
+    (async () => {
+      try {
+        const backendBaseUrl = getBackendBaseUrl();
+        const authHeaders = await getAuthHeaders();
+        const textIn = tokensRef.current.textIn;
+        const audioIn = tokensRef.current.audioIn;
+        const audioOut = tokensRef.current.audioOut;
+        const textOut = tokensRef.current.textOut;
+        const thoughtsTokens = tokensRef.current.thoughtsTokens;
+        const total = tokensRef.current.total;
 
-      // If audioOut is 0 but total > audioIn, calculate delta
-      if (audioOut === 0 && total > audioIn) {
-        audioOut = total - audioIn;
-      } else if (total === 0 && secs > 1) {
-        audioIn = Math.round(secs * 25);
-        audioOut = turnsRef.current.some((t) => t.role === 'model') ? Math.round((secs / 2) * 32) : 0;
-        total = audioIn + audioOut;
+        await fetch(`${backendBaseUrl}/v1/sessions/${sessionIdRef.current}/finish`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({
+            durationSeconds: secs,
+            tokensUsed: {
+              textInTokens: textIn,
+              audioInTokens: audioIn,
+              textOutTokens: textOut,
+              audioOutTokens: audioOut,
+              thoughtsTokens: thoughtsTokens,
+              totalTokens: total,
+              promptTokens: textIn + audioIn,
+              responseTokens: textOut + audioOut + thoughtsTokens,
+            },
+            turns: turnsRef.current,
+            grammarCorrections: correctionsRef.current,
+            userName: options.userName || 'Tharindu Fernando',
+            model: 'gemini-3.8-live',
+            topic: options.topic || 'English Speaking Practice',
+          }),
+        });
+      } catch (err) {
+        console.warn('[useLiveCall] Error calling finish endpoint:', err);
       }
-
-      fetch(`${backendBaseUrl}/v1/sessions/${sessionIdRef.current}/finish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          durationSeconds: secs,
-          tokensUsed: {
-            audioInTokens: audioIn,
-            audioOutTokens: audioOut,
-            totalTokens: total,
-          },
-          turns: turnsRef.current,
-          grammarCorrections: correctionsRef.current,
-          userName: options.userName || 'Tharindu Fernando',
-          model: 'gemini-3.8-live',
-          topic: options.topic || 'English Speaking Practice',
-        }),
-      }).catch((err) => console.warn('[useLiveCall] Error calling finish endpoint:', err));
-    } catch {}
+    })();
   }, [options.topic]);
 
   endCallRef.current = endCall;

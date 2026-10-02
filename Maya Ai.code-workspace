@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../spoken-english-agent/app"
+		},
+		{
+			"path": "../tts-check"
 		}
 	],
 	"settings": {}

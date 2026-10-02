@@ -162,3 +162,32 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
 
   return [];
 }
+
+/**
+ * Resolves authentication headers for backend API requests.
+ * Uses active Supabase user session JWT if logged in,
+ * otherwise falls back to configured publishable/anon key.
+ */
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  try {
+    if (supabase) {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        headers['Authorization'] = `Bearer ${data.session.access_token}`;
+        return headers;
+      }
+    }
+  } catch (err) {
+    console.warn('[getAuthHeaders] Error retrieving session:', err);
+  }
+
+  if (supabaseAnonKey) {
+    headers['Authorization'] = `Bearer ${supabaseAnonKey}`;
+  }
+
+  return headers;
+}

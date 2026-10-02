@@ -44,8 +44,10 @@ export class WebAudioCapture implements IAudioCapture {
       let noiseFloor = 0.010;
       let isSpeaking = false;
       let hangoverRemaining = 0;
+      let candidateChunks: ArrayBuffer[] = [];
+      let candidateMaxRms = 0;
       const preRollBuffer: ArrayBuffer[] = [];
-      const HANGOVER_CHUNKS = 8; // ~800ms natural conversational pause window
+      const HANGOVER_CHUNKS = 8; // ~640ms natural pause window, matching Gemini server-side VAD (500-600ms)
 
       this.workletNode.port.onmessage = (event) => {
         if (!this.recording) return;
@@ -74,6 +76,8 @@ export class WebAudioCapture implements IAudioCapture {
               hangoverRemaining = 0;
               preRollBuffer.length = 0;
             }
+            candidateChunks = [];
+            candidateMaxRms = 0;
             this.callbacks?.onVolumeChange?.(0);
             return;
           }
@@ -82,27 +86,46 @@ export class WebAudioCapture implements IAudioCapture {
           const volume = rms < noiseFloor ? 0 : Math.min(1, Math.max(0, (rms - noiseFloor) * 7.5));
           this.callbacks?.onVolumeChange?.(volume);
 
-          // Client-Side VAD & Silence Gate
-          const speechThreshold = Math.max(0.020, noiseFloor * 1.85);
+          // Client-Side VAD & Silence Gate (prevent false triggers on breathing/fan noise < 0.040)
+          const speechThreshold = Math.max(0.040, noiseFloor * 2.5);
 
           if (rms >= speechThreshold) {
             if (!isSpeaking) {
-              isSpeaking = true;
-              console.log(`[${getLogTimestamp()}] 🎤 [User Speaking] Started (RMS=${rms.toFixed(3)})`);
-              this.callbacks?.onVoiceStart?.();
+              candidateChunks.push(chunk);
+              if (rms > candidateMaxRms) candidateMaxRms = rms;
 
-              while (preRollBuffer.length > 0) {
-                const preChunk = preRollBuffer.shift();
-                if (preChunk) this.callbacks?.onAudioData(preChunk);
+              // Commit to speaking if sustained for >= 2 chunks (~160ms) or single high-energy spoken chunk (RMS >= 0.065)
+              if (candidateChunks.length >= 2 || candidateMaxRms >= 0.065) {
+                isSpeaking = true;
+                console.log(`[${getLogTimestamp()}] 🎤 [User Speaking] Started (RMS=${candidateMaxRms.toFixed(3)})`);
+                this.callbacks?.onVoiceStart?.();
+
+                while (preRollBuffer.length > 0) {
+                  const preChunk = preRollBuffer.shift();
+                  if (preChunk) this.callbacks?.onAudioData(preChunk);
+                }
+
+                for (const cand of candidateChunks) {
+                  this.callbacks?.onAudioData(cand);
+                }
+                candidateChunks = [];
+                candidateMaxRms = 0;
+                hangoverRemaining = HANGOVER_CHUNKS;
               }
+            } else {
+              hangoverRemaining = HANGOVER_CHUNKS;
+              this.callbacks?.onAudioData(chunk);
             }
-
-            hangoverRemaining = HANGOVER_CHUNKS;
-            this.callbacks?.onAudioData(chunk);
           } else if (hangoverRemaining > 0) {
             hangoverRemaining--;
             this.callbacks?.onAudioData(chunk);
           } else {
+            if (candidateChunks.length > 0) {
+              // Discard transient spike (murmur/breath/click) without starting a speech turn
+              candidateChunks = [];
+              candidateMaxRms = 0;
+            }
+
             if (isSpeaking) {
               isSpeaking = false;
               console.log(`[${getLogTimestamp()}] 🛑 [User Silent] Speech turn ended (RMS=${rms.toFixed(3)})`);

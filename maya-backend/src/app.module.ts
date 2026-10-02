@@ -6,6 +6,7 @@ import { AppService } from './app.service.js';
 import { ConfigModule } from '@nestjs/config';
 import { HealthModule } from './health/health.module.js';
 import { SessionsModule } from './sessions/sessions.module.js';
+import { LiveModule } from './live/live.module.js';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -24,6 +25,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     }),
     HealthModule,
     SessionsModule,
+    LiveModule,
   ],
 
   controllers: [AppController],

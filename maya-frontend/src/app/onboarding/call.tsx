@@ -40,6 +40,7 @@ export default function CallScreen() {
     duration?: string;
     durationMinutes?: string;
     languageMode?: 'sinhala' | 'english';
+    sinhalaStyle?: 'balanced' | 'deep_guidance';
     aiSuggestions?: string;
     topic?: string;
     scenarioId?: string;
@@ -56,6 +57,7 @@ export default function CallScreen() {
   const targetDuration = isNaN(durationSec) ? 300 : durationSec;
   const aiSug = params.aiSuggestions !== 'false';
   const langMode = params.languageMode === 'english' ? 'english' : 'sinhala';
+  const sinhalaStyle = params.sinhalaStyle === 'deep_guidance' ? 'deep_guidance' : 'balanced';
   const effectiveTopic = params.topic || params.goal || 'General Speaking Practice';
   const effectiveUserName = (params.name || params.userName || '').trim() || 'Tharindu';
   const isIntro = params.isIntroCall === 'true';
@@ -67,6 +69,7 @@ export default function CallScreen() {
     level: params.level,
     durationSeconds: targetDuration,
     languageMode: langMode,
+    sinhalaStyle,
     aiSuggestions: aiSug,
     scenarioId: params.scenarioId,
     userName: effectiveUserName,
@@ -127,7 +130,7 @@ export default function CallScreen() {
 
   const isCallActive = liveCall.status === 'speaking' || liveCall.status === 'listening';
   const isReconnecting = !isCallActive && (liveCall.status === 'reconnecting' || connection.isReconnecting);
-  const isConnectionLost = !isCallActive && (connection.isLost || liveCall.status === 'ended');
+  const isConnectionLost = !isCallActive && connection.isLost && liveCall.status !== 'ended';
 
   const isSessionEndingNear = (remainingSeconds <= 30 && liveCall.secondsElapsed > 0) || isFarewellPhase;
 
@@ -147,6 +150,8 @@ export default function CallScreen() {
     ? 'Connection lost'
     : isReconnecting
     ? 'Reconnecting...'
+    : liveCall.status === 'ended'
+    ? 'Session ended'
     : (!isCallActive && connection.isWeak)
     ? 'Weak connection'
     : liveCall.status === 'speaking'

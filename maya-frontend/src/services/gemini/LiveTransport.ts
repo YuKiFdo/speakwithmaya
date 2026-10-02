@@ -10,6 +10,7 @@ import {
   type UsageMetadata,
   type GenerationConfig,
   type ModalityTokenCount,
+  ActivityHandling,
 } from '@google/genai';
 
 export interface GrammarCorrectionPayload {
@@ -36,7 +37,14 @@ export interface LiveTransportCallbacks {
   onGrammarCorrection?: (correction: GrammarCorrectionPayload) => void;
   onRephraseSuggestion?: (suggestion: RephraseSuggestionPayload) => void;
   onConcludeCall?: (reason: string) => void;
-  onUsageUpdate?: (tokens: { audioIn: number; audioOut: number; total: number }) => void;
+  onUsageUpdate?: (tokens: {
+    textIn: number;
+    audioIn: number;
+    audioOut: number;
+    textOut?: number;
+    thoughtsTokens?: number;
+    total: number;
+  }) => void;
   onSessionResumptionUpdate?: (handle: string) => void;
   onSessionResumed?: () => void;
   onGoAway?: (timeLeft: string) => void;
@@ -54,10 +62,23 @@ export interface LiveTransportConfig {
   resumptionHandle?: string | null;
   greetingPrompt?: string;
   languageMode?: string;
+  sinhalaStyle?: 'balanced' | 'deep_guidance';
   generationConfig?: GenerationConfig;
 }
 
-export class LiveTransport {
+export interface ILiveTransport {
+  connect(config: LiveTransportConfig & { sessionOptions?: any }, callbacks: LiveTransportCallbacks): void;
+  sendAudioChunk(pcm16: ArrayBuffer): void;
+  sendEndOfTurn(): void;
+  sendAudioStreamEnd(): void;
+  sendInterrupted(): void;
+  sendTimeWrapupCue(remainingSeconds?: number): void;
+  close(): void;
+  isConnected(): boolean;
+  getResumptionHandle?(): string | null;
+}
+
+export class LiveTransport implements ILiveTransport {
   private ws: WebSocket | null = null;
   private callbacks: LiveTransportCallbacks = {};
   private config: LiveTransportConfig = {};
@@ -71,12 +92,24 @@ export class LiveTransport {
   private isWrappingUp: boolean = false;
   private pendingFeedbackNudge: boolean = false;
   private feedbackNudgeTimer: ReturnType<typeof setTimeout> | null = null;
+  private cumulativeAudioOutTokens: number = 0;
+  private cumulativeTextOutTokens: number = 0;
+  private cumulativeAudioInTokens: number = 0;
+  private cumulativeTextInTokens: number = 0;
+  private cumulativeThoughtsTokens: number = 0;
 
   connect(config: LiveTransportConfig, callbacks: LiveTransportCallbacks): void {
     this.config = config;
     this.callbacks = callbacks;
     this.resumptionHandle = config.resumptionHandle || null;
     this.isResumedSession = !!this.resumptionHandle;
+    if (!this.isResumedSession) {
+      this.cumulativeAudioOutTokens = 0;
+      this.cumulativeTextOutTokens = 0;
+      this.cumulativeAudioInTokens = 0;
+      this.cumulativeTextInTokens = 0;
+      this.cumulativeThoughtsTokens = 0;
+    }
 
     if (!config.wsUrl) {
       const err = new Error('LiveTransport requires a valid Gemini Live WebSocket URL');
@@ -134,6 +167,9 @@ export class LiveTransport {
           },
         },
       },
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
       ...this.config.generationConfig,
     };
 
@@ -143,6 +179,7 @@ export class LiveTransport {
         generationConfig,
         // Official Gemini Live API VAD tuning (ai.google.dev/api/live#AutomaticActivityDetection)
         realtimeInputConfig: {
+          activityHandling: ActivityHandling.NO_INTERRUPTION,
           automaticActivityDetection: {
             disabled: false,
             startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
@@ -160,7 +197,7 @@ export class LiveTransport {
         contextWindowCompression: {
           triggerTokens: '25000',
           slidingWindow: {
-            targetTokens: '12500',
+            targetTokens: '12000',
           },
         },
         systemInstruction: this.config.systemPrompt
@@ -254,20 +291,19 @@ export class LiveTransport {
     this.lastTurnDispatchedAt = Date.now();
     this.hasReceivedAudioThisTurn = false;
     this.currentTurnSubtitles = '';
-    console.log(`[${getLogTimestamp()}] 🚀 [Turn Dispatch] Streaming 600ms silence tail & signaling turn end to Gemini server-side VAD`);
+    console.log(`[${getLogTimestamp()}] 🚀 [Turn Dispatch] User speech ended — streaming acoustic flush & signaling turnComplete to Gemini`);
 
-    // If user speaks during the post-coaching pause, cancel the nudge — user responded naturally
+    // If user speaks during coaching pause, cancel any pending timers
     if (this.feedbackNudgeTimer) {
       clearTimeout(this.feedbackNudgeTimer);
       this.feedbackNudgeTimer = null;
       this.pendingFeedbackNudge = false;
-      console.log(`[${getLogTimestamp()}] ⏹️ [Feedback Nudge] Cancelled — student responded during coaching pause`);
     }
 
-    // Stream 6 comfort silence frames (600ms of zeros, 1600 samples per 100ms = 3200 bytes)
-    // as an acoustic hint to help server-side VAD commit faster.
-    const silenceBase64 = 'A'.repeat(4267) + '=';
-    for (let i = 0; i < 6; i++) {
+    // Flush Gemini Live audio jitter buffer with 5 silence frames (400ms of zeros at 16kHz 16-bit mono).
+    // This pushes the user's speech through Gemini's acoustic layers so it transcribes immediately without waiting for desk taps!
+    const silenceBase64 = 'AAAA'.repeat(853) + 'AA==';
+    for (let i = 0; i < 5; i++) {
       this.ws.send(
         JSON.stringify({
           realtimeInput: {
@@ -280,8 +316,14 @@ export class LiveTransport {
       );
     }
 
-    // Official Gemini Live API signal: notify server-side VAD that audio stream turn has ended
-    this.sendAudioStreamEnd();
+    // Official Gemini Live API signal: tell server to generate response with currently accumulated audio NOW
+    this.ws.send(
+      JSON.stringify({
+        clientContent: {
+          turnComplete: true,
+        },
+      }),
+    );
   }
 
   sendInterrupted() {
@@ -330,9 +372,12 @@ export class LiveTransport {
       return;
     }
     const isSinhala = this.config.languageMode === 'sinhala';
-    console.log(`[${getLogTimestamp()}] 🚀 [Feedback Nudge] Triggering continuation cue (isSinhala: ${isSinhala})`);
+    const isDeepGuidance = isSinhala && this.config.sinhalaStyle === 'deep_guidance';
+    console.log(`[${getLogTimestamp()}] 🚀 [Feedback Nudge] Triggering continuation cue (isSinhala: ${isSinhala}, isDeepGuidance: ${isDeepGuidance})`);
     const cueText = isSinhala
-      ? '[INSTRUCTION]: The student has absorbed your coaching tip. With warmth and energy, transition back into the practice conversation: ask your next question following the dual-language pattern (ask first in Sinhala, then in English: "[Sinhala question]? [English question]?") so the student hears both and your voice accent remains natural.'
+      ? isDeepGuidance
+        ? '[INSTRUCTION]: The student has absorbed your coaching tip. With warmth and energy, transition back into the practice conversation: ask your next question following the dual-language pattern (ask first in Sinhala, then in English: "[Sinhala question]? [English question]?") so the student hears both and your voice accent remains natural.'
+        : '[INSTRUCTION]: The student has absorbed your coaching tip. With warmth, ask your next short English practice question directly (strictly under 8 words) to keep the conversation flowing smoothly.'
       : '[INSTRUCTION]: The student has absorbed your coaching tip. With warmth and vibrant energy, naturally and dynamically bridge back into the conversation with your own fresh words (without using any scripted or repetitive phrases), and ask your next engaging question on our topic.';
 
     console.log(`[${getLogTimestamp()}] 📜 [Feedback Nudge Prompt]: "${cueText}"`);
@@ -535,6 +580,7 @@ export class LiveTransport {
         const functionResponses = [];
 
         const isSinhala = this.config.languageMode === 'sinhala';
+        const isDeepGuidance = isSinhala && this.config.sinhalaStyle === 'deep_guidance';
 
         for (const call of functionCalls) {
           const args = (call.args || {}) as any;
@@ -551,9 +597,8 @@ export class LiveTransport {
             );
             this.callbacks.onGrammarCorrection?.(correction);
 
-            this.pendingFeedbackNudge = true;
-            console.log(`[${getLogTimestamp()}] 📌 [Feedback Nudge Armed]: pendingFeedbackNudge = TRUE. Will trigger continuation after Maya delivers coaching speech.`);
-            const targetPhrase = correction.moreNatural.replace(/"/g, "'");
+            this.pendingFeedbackNudge = false;
+            const shortKeyPhrase = (correction.moreNatural.split(/[.,;!?]/)[0] || correction.moreNatural).trim().replace(/"/g, "'");
             const rawExplanation = correction.explanation.replace(/"/g, "'");
 
             functionResponses.push({
@@ -562,8 +607,10 @@ export class LiveTransport {
               response: {
                 result: 'displayed_to_student',
                 instruction: isSinhala
-                  ? `Correction card displayed to student. In your spoken voice response, verbally model the corrected English phrase aloud and give your brief Sinhala explanation: say "ඔයාට පුළුවන් '${targetPhrase}' කියලා කියන්න" followed by your brief explanation in Sinhala ("${rawExplanation}"). Do NOT add any follow-up question. End your turn after coaching.`
-                  : `Correction card displayed to student. In your spoken voice response, verbally model the corrected English phrase aloud: say "You can say: '${targetPhrase}'" followed by your brief explanation ("${rawExplanation}"). Do NOT add any follow-up question. End your turn after coaching.`,
+                  ? isDeepGuidance
+                    ? `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "ඔයාට පුළුවන් '${shortKeyPhrase}' කියලා කියන්න", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
+                    : `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "ඔයාට පුළුවන් '${shortKeyPhrase}' කියලා කියන්න"), and immediately ask your next short English question. Total turn strictly under 12 words.`
+                  : `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`,
               },
             });
             console.log(`[${getLogTimestamp()}] 📤 [Tool Response Queued]: Queued response for show_grammar_correction`);
@@ -579,9 +626,8 @@ export class LiveTransport {
             );
             this.callbacks.onRephraseSuggestion?.(suggestion);
 
-            this.pendingFeedbackNudge = true;
-            console.log(`[${getLogTimestamp()}] 📌 [Feedback Nudge Armed]: pendingFeedbackNudge = TRUE. Will trigger continuation after Maya delivers coaching speech.`);
-            const targetPhrase = suggestion.moreNatural.replace(/"/g, "'");
+            this.pendingFeedbackNudge = false;
+            const shortKeyPhrase = (suggestion.moreNatural.split(/[.,;!?]/)[0] || suggestion.moreNatural).trim().replace(/"/g, "'");
             const rawExplanation = suggestion.explanation.replace(/"/g, "'");
 
             functionResponses.push({
@@ -590,14 +636,18 @@ export class LiveTransport {
               response: {
                 result: 'displayed_to_student',
                 instruction: isSinhala
-                  ? `Rephrase suggestion card displayed to student. In your spoken voice response, verbally model the natural English phrase aloud and give your brief Sinhala explanation: say "මේක වඩාත් ස්වාභාවිකව '${targetPhrase}' කියලා කියන්න පුළුවන්" followed by your brief explanation in Sinhala ("${rawExplanation}"). Do NOT add any follow-up question. End your turn after coaching.`
-                  : `Rephrase suggestion card displayed to student. In your spoken voice response, verbally model the natural English phrase aloud: say "You can say: '${targetPhrase}'" followed by your brief explanation ("${rawExplanation}"). Do NOT add any follow-up question. End your turn after coaching.`,
+                  ? isDeepGuidance
+                    ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${shortKeyPhrase}' කියලා කියන්න පුළුවන්", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
+                    : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${shortKeyPhrase}' කියලා කියන්න පුළුවන්"), and immediately ask your next short English question. Total turn strictly under 12 words.`
+                  : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`,
               },
             });
             console.log(`[${getLogTimestamp()}] 📤 [Tool Response Queued]: Queued response for show_rephrase_suggestion`);
           } else if (call.name === 'conclude_call') {
             const reason = String(args.farewellReason || args.farewell_reason || '');
-            const isUserDeparture = /\b(bye|goodbye|good bye|see you|athii|yanna|enough|leave|gotta go|have to go|talk later|catch you|take care)\b/i.test(reason);
+            const isUserDeparture =
+              /\b(bye|goodbye|good bye|see you|athii|yanna|enough|leave|leaving|going|gotta go|have to go|talk later|catch you|take care)\b/i.test(reason) ||
+              /(බායි|බයි|යනවා|යන්නම්|ඇති|නවත්තමු|කන්න යනවා)/.test(reason);
             const canConclude = this.isWrappingUp || isUserDeparture;
 
             if (canConclude) {
@@ -640,34 +690,121 @@ export class LiveTransport {
         }
       }
 
-      // 3. Usage metadata (internal ledger update, no terminal spam)
-      const usage: (UsageMetadata & { candidatesTokenCount?: number }) | undefined =
-        msg.usageMetadata || (msg.serverContent as any)?.usageMetadata || (msg.serverContent as any)?.modelTurn?.usageMetadata;
-      if (usage) {
-        console.log(usage)
-        let audioOutFromDetails = 0;
-        if (Array.isArray(usage.responseTokensDetails)) {
-          for (const d of usage.responseTokensDetails) {
-            audioOutFromDetails += (d.tokenCount || 0);
+      // 3. Multi-message wire schema usage extraction (Google AI Studio & Vertex AI formats)
+      const rawUsage: any =
+        msg.usageMetadata ||
+        (msg as any).usage_metadata ||
+        (msg.serverContent as any)?.usageMetadata ||
+        (msg.serverContent as any)?.usage_metadata ||
+        (msg.serverContent as any)?.modelTurn?.usageMetadata ||
+        (msg.serverContent as any)?.modelTurn?.usage_metadata;
+      if (rawUsage) {
+        // Output tokens: check responseTokensDetails (AI Studio) and candidatesTokensDetails (Vertex AI) in camelCase & snake_case
+        const outDetails =
+          rawUsage.responseTokensDetails ||
+          rawUsage.candidatesTokensDetails ||
+          rawUsage.response_tokens_details ||
+          rawUsage.candidates_tokens_details;
+
+        let turnAudioOut = 0;
+        let turnTextOut = 0;
+        if (Array.isArray(outDetails)) {
+          for (const d of outDetails) {
+            const count = Number(d.tokenCount || d.token_count || 0);
+            if (d.modality === 'AUDIO') {
+              turnAudioOut += count;
+            } else if (d.modality === 'TEXT') {
+              turnTextOut += count;
+            }
           }
         }
 
-        const audioOut =
-          (audioOutFromDetails > 0 ? audioOutFromDetails : undefined) ??
-          usage.responseTokenCount ??
-          usage.candidatesTokenCount ??
-          (usage.totalTokenCount && usage.promptTokenCount
-            ? Math.max(0, usage.totalTokenCount - usage.promptTokenCount)
-            : 0);
-        const audioIn = usage.promptTokenCount || 0;
-        const total = usage.totalTokenCount || (audioIn + audioOut);
+        const outCount = Number(
+          rawUsage.responseTokenCount ||
+          rawUsage.candidatesTokenCount ||
+          rawUsage.response_token_count ||
+          rawUsage.candidates_token_count ||
+          0,
+        );
+
+        if (turnAudioOut === 0 && turnTextOut === 0 && outCount > 0) {
+          turnAudioOut = outCount;
+        }
+
+        const turnThoughts = Number(rawUsage.thoughtsTokenCount || rawUsage.thoughts_token_count || 0);
+
+        // Input tokens: check promptTokensDetails in camelCase & snake_case
+        const inDetails = rawUsage.promptTokensDetails || rawUsage.prompt_tokens_details;
+        let turnTextIn = 0;
+        let turnAudioIn = 0;
+        if (Array.isArray(inDetails) && inDetails.length > 0) {
+          for (const d of inDetails) {
+            const count = Number(d.tokenCount || d.token_count || 0);
+            if (d.modality === 'TEXT') {
+              turnTextIn += count;
+            } else if (d.modality === 'AUDIO') {
+              turnAudioIn += count;
+            }
+          }
+        }
+
+        const promptCount = Number(rawUsage.promptTokenCount || rawUsage.prompt_token_count || 0);
+
+        // Proportional fallback if prompt details are missing:
+        // Avoid misclassifying expensive audio input tokens as cheap text tokens.
+        if (turnTextIn === 0 && turnAudioIn === 0 && promptCount > 0) {
+          const estimatedTextBaseline = this.config.systemPrompt
+            ? Math.max(250, Math.min(800, Math.ceil(this.config.systemPrompt.length / 4)))
+            : 400;
+
+          if (promptCount <= estimatedTextBaseline) {
+            turnTextIn = promptCount;
+            turnAudioIn = 0;
+          } else {
+            turnTextIn = estimatedTextBaseline;
+            turnAudioIn = promptCount - estimatedTextBaseline;
+          }
+        }
+
+        // Note on Gemini Live API:
+        // 1. Input tokens: promptTokenCount represents the CUMULATIVE context window processed so far.
+        //    We take the maximum/latest snapshot so it does not compound exponentially.
+        if (turnAudioIn > 0 || turnTextIn > 0 || promptCount > 0) {
+          this.cumulativeAudioInTokens = Math.max(this.cumulativeAudioInTokens, turnAudioIn);
+          this.cumulativeTextInTokens = Math.max(this.cumulativeTextInTokens, turnTextIn);
+        }
+
+        // 2. Output tokens: responseTokenCount / candidatesTokenCount represents the tokens generated
+        //    for the CURRENT model turn. We accumulate output tokens across all turns.
+        if (turnAudioOut > 0 || turnTextOut > 0 || outCount > 0) {
+          this.cumulativeAudioOutTokens += turnAudioOut;
+          this.cumulativeTextOutTokens += turnTextOut;
+        }
+        if (turnThoughts > 0) {
+          this.cumulativeThoughtsTokens += turnThoughts;
+        }
+
+        const total =
+          this.cumulativeAudioInTokens +
+          this.cumulativeTextInTokens +
+          this.cumulativeAudioOutTokens +
+          this.cumulativeTextOutTokens +
+          this.cumulativeThoughtsTokens;
+
+        console.log(
+          `[${getLogTimestamp()}] 📊 [Live Usage Snapshot]: in(text: ${this.cumulativeTextInTokens}, audio: ${this.cumulativeAudioInTokens}) | out(audio: ${this.cumulativeAudioOutTokens}, text: ${this.cumulativeTextOutTokens}, thoughts: ${this.cumulativeThoughtsTokens}) | Total: ${total}`
+        );
 
         this.callbacks.onUsageUpdate?.({
-          audioIn,
-          audioOut,
+          textIn: this.cumulativeTextInTokens,
+          audioIn: this.cumulativeAudioInTokens,
+          audioOut: this.cumulativeAudioOutTokens,
+          textOut: this.cumulativeTextOutTokens,
+          thoughtsTokens: this.cumulativeThoughtsTokens,
           total,
         });
       }
+
     } catch (e) {
       console.error('[LiveTransport] Error parsing incoming WebSocket message:', e);
     }
