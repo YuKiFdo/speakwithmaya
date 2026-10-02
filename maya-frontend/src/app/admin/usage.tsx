@@ -569,35 +569,38 @@ export default function AdminUsageScreen() {
               {/* SVG Wave Chart */}
               <View
                 style={styles.svgWrapper}
-                // @ts-ignore Web pointer movement
-                onPointerMove={(e: any) => {
-                  const locX = e.nativeEvent?.offsetX ?? e.nativeEvent?.locationX;
-                  if (typeof locX === 'number') {
-                    handleChartPointer(locX);
-                  }
-                }}
-                // @ts-ignore Web pointer leave
-                onPointerLeave={() => {
-                  setSelectedPointIndex(null);
-                }}
-                onTouchMove={(e) => {
-                  const locX = e.nativeEvent?.locationX;
-                  if (typeof locX === 'number') {
-                    handleChartPointer(locX);
-                  }
-                }}
-                onTouchStart={(e) => {
-                  const locX = e.nativeEvent?.locationX;
-                  if (typeof locX === 'number') {
-                    handleChartPointer(locX);
-                  }
-                }}
-                onTouchEnd={() => {
-                  setSelectedPointIndex(null);
-                }}
-                onTouchCancel={() => {
-                  setSelectedPointIndex(null);
-                }}
+                {...(Platform.OS === 'web'
+                  ? {
+                      onPointerMove: (e: any) => {
+                        const locX = e.nativeEvent?.offsetX ?? e.nativeEvent?.locationX;
+                        if (typeof locX === 'number') {
+                          handleChartPointer(locX);
+                        }
+                      },
+                      onPointerLeave: () => {
+                        setSelectedPointIndex(null);
+                      },
+                    }
+                  : {
+                      onTouchStart: (e: any) => {
+                        const locX = e.nativeEvent?.locationX;
+                        if (typeof locX === 'number') {
+                          handleChartPointer(locX);
+                        }
+                      },
+                      onTouchMove: (e: any) => {
+                        const locX = e.nativeEvent?.locationX;
+                        if (typeof locX === 'number') {
+                          handleChartPointer(locX);
+                        }
+                      },
+                      onTouchEnd: () => {
+                        setSelectedPointIndex(null);
+                      },
+                      onTouchCancel: () => {
+                        setSelectedPointIndex(null);
+                      },
+                    })}
               >
                 {loading && !data ? (
                   <View style={styles.chartLoading}>

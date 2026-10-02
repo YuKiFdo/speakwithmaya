@@ -174,19 +174,17 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.log('[LiveGateway] 🚀 Turn Complete: Flushing trailing silence frames & signaling turnComplete to Gemini Live');
       state.userSpeechActive = false;
 
-      // 1. Send 5 silence frames (400ms of zeros at 16kHz 16-bit mono) on the server.
-      // This pushes phonemes through Gemini's acoustic neural network without waiting for desk taps!
+      // 1. Send 1 brief silence frame (80ms of zeros at 16kHz 16-bit mono) on the server.
+      // This gently bounds the audio packet without overwhelming Gemini's decoder with dead silence.
       const silenceBytes = Buffer.alloc(1280 * 2, 0); // 80ms chunk of zeros
       const silenceBase64 = silenceBytes.toString('base64');
 
-      for (let i = 0; i < 5; i++) {
-        state.geminiSession.sendRealtimeInput({
-          audio: {
-            data: silenceBase64,
-            mimeType: 'audio/pcm;rate=16000',
-          },
-        });
-      }
+      state.geminiSession.sendRealtimeInput({
+        audio: {
+          data: silenceBase64,
+          mimeType: 'audio/pcm;rate=16000',
+        },
+      });
 
       // 2. Dispatch turn completion to Gemini
       // Official Gemini Live API: clientContent with turnComplete: true instructs Gemini

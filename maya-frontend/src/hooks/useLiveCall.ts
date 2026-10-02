@@ -197,8 +197,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           const isSpeaking = pState === 'speaking';
           isModelSpeakingRef.current = isSpeaking;
           if (!isSpeaking) {
-            // Echo hangover: give phone speaker 800ms to completely silence and room reverb to decay
-            echoHangoverUntilRef.current = Date.now() + 800;
+            // Echo hangover: give phone speaker 300ms to silence and room reverb to decay
+            echoHangoverUntilRef.current = Date.now() + 300;
             setModelVolume(0);
 
             // If session conclusion was requested, cleanly end call now that Maya finished her farewell speech
@@ -246,14 +246,13 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           );
         },
         onAudioData: (pcm16: ArrayBuffer) => {
-          // Half-duplex acoustic echo gate: clamp mic while model is speaking, farewell concluding, reverb is decaying, or reconnecting
+          // Half-duplex acoustic echo gate: clamp mic while model is actively outputting audio, farewell concluding, or reconnecting
           const isBlocked =
             isMutedRef.current ||
-            isModelSpeakingRef.current ||
             isConcludingRef.current ||
             statusRef.current === 'reconnecting' ||
             statusRef.current === 'ended' ||
-            Date.now() < echoHangoverUntilRef.current;
+            (isModelSpeakingRef.current && Date.now() < echoHangoverUntilRef.current);
 
           if (!isBlocked && transportRef.current.isConnected()) {
             userChunksSentRef.current++;
@@ -264,15 +263,16 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           // When client-side VAD detects end of speech, explicitly signal turn completion to Gemini Live
           const isBlocked =
             isMutedRef.current ||
-            isModelSpeakingRef.current ||
             isConcludingRef.current ||
             statusRef.current === 'reconnecting' ||
-            statusRef.current === 'ended' ||
-            Date.now() < echoHangoverUntilRef.current;
+            statusRef.current === 'ended';
 
-          // Only dispatch end-of-turn if genuine user speech chunks were actually streamed to Gemini
-          if (!isBlocked && userChunksSentRef.current >= 3 && transportRef.current.isConnected()) {
+          // Require >= 4 chunks (~320ms of genuine speech) so small noise spikes don't trigger turn completion
+          if (!isBlocked && userChunksSentRef.current >= 4 && transportRef.current.isConnected()) {
             transportRef.current.sendEndOfTurn();
+            userChunksSentRef.current = 0;
+          } else if (userChunksSentRef.current < 4) {
+            // Discard transient mic click or throat clear without signaling turn complete
             userChunksSentRef.current = 0;
           }
         },
