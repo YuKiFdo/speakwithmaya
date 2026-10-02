@@ -63,6 +63,8 @@ interface SessionRecord {
     highlightWords?: string[];
   }>;
   topic?: string;
+  languageMode?: string;
+  sinhalaStyle?: string;
 }
 
 interface UsageResponse {
@@ -823,16 +825,17 @@ export default function AdminUsageScreen() {
                   {/* Header Row */}
                   <View style={styles.tableHeaderRow}>
                     <Text style={[styles.th, { width: 140 }]}>Timestamp</Text>
-                    <Text style={[styles.th, { width: 160 }]}>User</Text>
-                    <Text style={[styles.th, { width: 110 }]}>Session</Text>
-                    <Text style={[styles.th, { width: 130 }]}>Model</Text>
-                    <Text style={[styles.th, { width: 90 }]}>Duration</Text>
-                    <Text style={[styles.th, { width: 110, textAlign: 'right' }]}>Input Tokens</Text>
-                    <Text style={[styles.th, { width: 110, textAlign: 'right' }]}>Output Tokens</Text>
-                    <Text style={[styles.th, { width: 100, textAlign: 'right' }]}>Total</Text>
-                    <Text style={[styles.th, { width: 110, textAlign: 'right' }]}>Est. Cost</Text>
-                    <Text style={[styles.th, { width: 100, textAlign: 'center' }]}>Status</Text>
-                    <Text style={[styles.th, { width: 80, textAlign: 'center' }]}>Action</Text>
+                    <Text style={[styles.th, { width: 150 }]}>User</Text>
+                    <Text style={[styles.th, { width: 105 }]}>Session</Text>
+                    <Text style={[styles.th, { width: 140 }]}>Language Mode</Text>
+                    <Text style={[styles.th, { width: 120 }]}>Model</Text>
+                    <Text style={[styles.th, { width: 85 }]}>Duration</Text>
+                    <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Input Tokens</Text>
+                    <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Output Tokens</Text>
+                    <Text style={[styles.th, { width: 95, textAlign: 'right' }]}>Total</Text>
+                    <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Est. Cost</Text>
+                    <Text style={[styles.th, { width: 90, textAlign: 'center' }]}>Status</Text>
+                    <Text style={[styles.th, { width: 75, textAlign: 'center' }]}>Action</Text>
                   </View>
 
                   {/* Table Body */}
@@ -857,7 +860,7 @@ export default function AdminUsageScreen() {
                         </Text>
 
                         {/* User */}
-                        <View style={[styles.tdUser, { width: 160 }]}>
+                        <View style={[styles.tdUser, { width: 150 }]}>
                           <View
                             style={[
                               styles.userAvatar,
@@ -874,29 +877,58 @@ export default function AdminUsageScreen() {
                         </View>
 
                         {/* Session */}
-                        <View style={[styles.td, { width: 110 }]}>
+                        <View style={[styles.td, { width: 105 }]}>
                           <Text style={styles.sessionCodeText}>{row.sessionCode}</Text>
                         </View>
 
+                        {/* Language Mode & Sinhala Style */}
+                        <View style={[styles.td, { width: 140 }]}>
+                          {row.languageMode === 'english' ? (
+                            <View style={styles.modeBadgeEnglish}>
+                              <Text style={styles.modeBadgeEnglishText}>English Only</Text>
+                            </View>
+                          ) : (
+                            <View
+                              style={
+                                row.sinhalaStyle === 'deep_guidance'
+                                  ? styles.modeBadgeSinhalaDeep
+                                  : styles.modeBadgeSinhalaBalanced
+                              }
+                            >
+                              <Text
+                                style={
+                                  row.sinhalaStyle === 'deep_guidance'
+                                    ? styles.modeBadgeSinhalaDeepText
+                                    : styles.modeBadgeSinhalaBalancedText
+                                }
+                              >
+                                {row.sinhalaStyle === 'deep_guidance'
+                                  ? 'Sinhala (Deep)'
+                                  : 'Sinhala (Balanced)'}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+
                         {/* Model Badge */}
-                        <View style={[styles.td, { width: 130 }]}>
+                        <View style={[styles.td, { width: 120 }]}>
                           <View style={styles.modelBadge}>
                             <Text style={styles.modelBadgeText}>{row.model}</Text>
                           </View>
                         </View>
 
                         {/* Duration */}
-                        <Text style={[styles.td, { width: 90 }]}>
+                        <Text style={[styles.td, { width: 85 }]}>
                           {row.durationFormatted || `${(row.durationSeconds / 60).toFixed(1)}m`}
                         </Text>
 
                         {/* Input Tokens */}
-                        <Text style={[styles.td, { width: 110, textAlign: 'right' }]}>
+                        <Text style={[styles.td, { width: 105, textAlign: 'right' }]}>
                           {row.inputTokens.toLocaleString()}
                         </Text>
 
                         {/* Output Tokens */}
-                        <Text style={[styles.td, { width: 110, textAlign: 'right' }]}>
+                        <Text style={[styles.td, { width: 105, textAlign: 'right' }]}>
                           {row.outputTokens.toLocaleString()}
                         </Text>
 
@@ -904,7 +936,7 @@ export default function AdminUsageScreen() {
                         <Text
                           style={[
                             styles.td,
-                            { width: 100, textAlign: 'right', ...fontStyle('inter', 'semiBold') },
+                            { width: 95, textAlign: 'right', ...fontStyle('inter', 'semiBold') },
                           ]}
                         >
                           {row.totalTokens.toLocaleString()}
@@ -914,21 +946,21 @@ export default function AdminUsageScreen() {
                         <Text
                           style={[
                             styles.td,
-                            { width: 110, textAlign: 'right', color: '#0d9488', ...fontStyle('inter', 'semiBold') },
+                            { width: 105, textAlign: 'right', color: '#0d9488', ...fontStyle('inter', 'semiBold') },
                           ]}
                         >
                           {`LKR ${row.costLkr.toFixed(2)}`}
                         </Text>
 
                         {/* Status */}
-                        <View style={[styles.td, { width: 100, alignItems: 'center' }]}>
+                        <View style={[styles.td, { width: 90, alignItems: 'center' }]}>
                           <View style={styles.statusBadge}>
                             <Text style={styles.statusBadgeText}>Success</Text>
                           </View>
                         </View>
 
                         {/* Action Detail */}
-                        <View style={[styles.td, { width: 80, alignItems: 'center' }]}>
+                        <View style={[styles.td, { width: 75, alignItems: 'center' }]}>
                           <Pressable
                             onPress={() => setActiveSession(row)}
                             style={styles.detailBtn}
@@ -1006,10 +1038,39 @@ export default function AdminUsageScreen() {
                 </View>
               </View>
 
-              {/* Topic */}
+              {/* Topic & Mode */}
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>Practice Topic / Scenario</Text>
                 <Text style={styles.modalTopicText}>{activeSession?.topic || 'Speaking Practice'}</Text>
+                
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 10 }}>
+                  <Text style={styles.modalStatLabel}>Language Mode:</Text>
+                  {activeSession?.languageMode === 'english' ? (
+                    <View style={styles.modeBadgeEnglish}>
+                      <Text style={styles.modeBadgeEnglishText}>English Only</Text>
+                    </View>
+                  ) : (
+                    <View
+                      style={
+                        activeSession?.sinhalaStyle === 'deep_guidance'
+                          ? styles.modeBadgeSinhalaDeep
+                          : styles.modeBadgeSinhalaBalanced
+                      }
+                    >
+                      <Text
+                        style={
+                          activeSession?.sinhalaStyle === 'deep_guidance'
+                            ? styles.modeBadgeSinhalaDeepText
+                            : styles.modeBadgeSinhalaBalancedText
+                        }
+                      >
+                        {activeSession?.sinhalaStyle === 'deep_guidance'
+                          ? 'Sinhala (Deep Guidance)'
+                          : 'Sinhala (Balanced Coaching)'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </View>
 
               {/* Grammar Corrections */}
@@ -1664,6 +1725,48 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'medium'),
     fontSize: 11,
     color: '#475569',
+  },
+  modeBadgeEnglish: {
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  modeBadgeEnglishText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#2563eb',
+  },
+  modeBadgeSinhalaBalanced: {
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  modeBadgeSinhalaBalancedText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#16a34a',
+  },
+  modeBadgeSinhalaDeep: {
+    backgroundColor: '#fef3c7',
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  modeBadgeSinhalaDeepText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#b45309',
   },
   statusBadge: {
     backgroundColor: '#ecfdf5',

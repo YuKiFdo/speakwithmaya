@@ -176,6 +176,14 @@ export class FinishSessionDto {
   @IsOptional()
   @IsString()
   topic?: string;
+
+  @IsOptional()
+  @IsString()
+  languageMode?: string;
+
+  @IsOptional()
+  @IsString()
+  sinhalaStyle?: string;
 }
 
 export class QueryUsageDto {

@@ -33,6 +33,8 @@ export interface UsageRecord {
   turns?: any[];
   grammarCorrections?: any[];
   topic?: string;
+  languageMode?: string;
+  sinhalaStyle?: string;
 }
 
 const THARINDU_USER_ID = 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
@@ -45,7 +47,7 @@ export class SessionsService {
   private readonly geminiApiKey: string | undefined;
   private readonly liveModel: string;
   private readonly usdToLkr = Number(process.env.USD_TO_LKR) || 308.50;
-  private readonly activeSessions = new Map<string, { userName?: string; model?: string; topic?: string; scenarioId?: string }>();
+  private readonly activeSessions = new Map<string, { userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string }>();
 
   constructor() {
     this.geminiApiKey = process.env.GEMINI_API_KEY;
@@ -465,6 +467,8 @@ ${memoryPart}`;
       model: this.liveModel,
       topic: dto.topic || 'General Practice',
       scenarioId: dto.scenarioId,
+      languageMode: isSinhala ? 'sinhala' : 'english',
+      sinhalaStyle: dto.sinhalaStyle || 'balanced',
     });
 
     const greetingPrompt = this.generateGreetingPrompt(dto);
@@ -613,6 +617,15 @@ ${memoryPart}`;
       } catch (e: unknown) {
         this.logger.error(`Error saving final session records to Supabase: ${e instanceof Error ? e.message : String(e)}`);
       }
+    }
+
+    if (dto.languageMode || dto.sinhalaStyle) {
+      const existing = this.activeSessions.get(sessionId) || {};
+      this.activeSessions.set(sessionId, {
+        ...existing,
+        languageMode: dto.languageMode || existing.languageMode,
+        sinhalaStyle: dto.sinhalaStyle || existing.sinhalaStyle,
+      });
     }
 
     const sessionCode = `SM-${sessionId.slice(0, 5).toUpperCase()}`;
@@ -765,6 +778,8 @@ ${memoryPart}`;
                 pronunciation: sess?.pronunciation_score ?? 86,
               },
               topic: sess?.topic || 'Speaking Practice',
+              languageMode: this.activeSessions.get(row.session_id)?.languageMode || 'sinhala',
+              sinhalaStyle: this.activeSessions.get(row.session_id)?.sinhalaStyle || 'balanced',
             };
           });
         }

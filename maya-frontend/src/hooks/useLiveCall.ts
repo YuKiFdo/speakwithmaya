@@ -771,6 +771,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             userName: options.userName || 'Tharindu Fernando',
             model: 'gemini-3.8-live',
             topic: options.topic || 'English Speaking Practice',
+            languageMode: options.languageMode || 'sinhala',
+            sinhalaStyle: options.sinhalaStyle || 'balanced',
           }),
         });
       } catch (err) {
