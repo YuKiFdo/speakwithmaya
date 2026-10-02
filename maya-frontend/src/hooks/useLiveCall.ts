@@ -11,7 +11,8 @@ import { GrammarFeedbackData } from '@/components/call/grammar-feedback-modal';
 import { MicPermissionErrorType } from '@/components/call/microphone-permission-popup';
 import { getLogTimestamp } from '@/utils/time';
 
-const USE_SERVER_LIVE = process.env.EXPO_PUBLIC_USE_SERVER_LIVE === 'true';
+// Default to true (Server-to-Server NestJS Gateway) unless explicitly set to 'false'
+const USE_SERVER_LIVE = process.env.EXPO_PUBLIC_USE_SERVER_LIVE !== 'false';
 
 export const getBackendBaseUrl = (): string => {
   // Local web development: always point to local NestJS backend on port 3000
