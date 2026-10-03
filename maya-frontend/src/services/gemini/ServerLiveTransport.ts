@@ -34,8 +34,22 @@ export class ServerLiveTransport implements ILiveTransport {
     this.callbacks = callbacks;
 
     try {
-      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport] Connecting to NestJS Gateway: ${this.backendWsUrl}`);
-      this.ws = new WebSocket(this.backendWsUrl);
+      let targetWsUrl = this.backendWsUrl;
+
+      // If backend gave an explicit wsUrl or if on web, dynamically match window location or configured backend
+      if (typeof window !== 'undefined' && window.location) {
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+          // If on a public domain or local network IP, connect to backend at the same origin or configured API
+          const host = process.env.EXPO_PUBLIC_BACKEND_URL 
+            ? process.env.EXPO_PUBLIC_BACKEND_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')
+            : `${window.location.hostname}:3000`;
+          targetWsUrl = `${proto}//${host}/live-session`;
+        }
+      }
+
+      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport] Connecting to NestJS Gateway: ${targetWsUrl}`);
+      this.ws = new WebSocket(targetWsUrl);
       this.ws.binaryType = 'arraybuffer';
 
       this.ws.onopen = () => {
