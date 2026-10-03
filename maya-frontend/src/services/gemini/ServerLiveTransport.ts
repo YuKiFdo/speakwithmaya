@@ -19,7 +19,7 @@ export class ServerLiveTransport implements ILiveTransport {
     if (backendWsUrl) {
       this.backendWsUrl = backendWsUrl;
     } else {
-      const httpBase = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+      const httpBase = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
       const wsProto = httpBase.startsWith('https') ? 'wss' : 'ws';
       const host = httpBase.replace(/^https?:\/\//, '').replace(/\/$/, '');
       this.backendWsUrl = `${wsProto}://${host}/live-session`;
