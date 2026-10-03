@@ -106,12 +106,18 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
   // 1. Fetch authoritative records from backend API (connected to Supabase via service role key)
   try {
     const backendUrl = getBackendBaseUrl();
-    const res = await fetch(`${backendUrl}/v1/sessions`);
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${backendUrl}/v1/sessions`, {
+      method: 'GET',
+      headers,
+    });
     if (res.ok) {
       const serverSessions: SessionHistoryRecord[] = await res.json();
       if (Array.isArray(serverSessions)) {
         return serverSessions;
       }
+    } else {
+      console.warn(`[fetchAllPracticeSessions] Backend returned ${res.status}: ${res.statusText}`);
     }
   } catch (err) {
     console.warn('[fetchAllPracticeSessions] Backend fetch error:', err);
