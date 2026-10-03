@@ -184,14 +184,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 9999,
+    ...(Platform.OS === 'web'
+      ? ({
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100vw',
+          height: '100dvh',
+          minHeight: '-webkit-fill-available',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+        } as any)
+      : {}),
   },
   card: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 28,
-    paddingVertical: 36,
+    alignSelf: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 32,
     width: '100%',
     maxWidth: 400,
+    ...(Platform.OS === 'web' ? ({ margin: 'auto' } as any) : {}),
   },
   brandRow: {
     alignItems: 'center',

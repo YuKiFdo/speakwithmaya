@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { fontStyle } from '@/theme/fonts';
 
@@ -63,12 +64,23 @@ export function MobileBottomTabs({
   navigation,
 }: MobileBottomTabsProps) {
   const { isPhone } = useBreakpoint();
+  const insets = useSafeAreaInsets();
 
   // Desktop uses the sidebar, not the bottom tab bar
   if (!isPhone) return null;
 
+  const safeBottom = Math.max(insets.bottom, 8);
+
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingBottom: safeBottom,
+          height: 56 + safeBottom,
+        },
+      ]}
+    >
       {state.routes.map((route, index) => {
         const isFocused = state.index === index;
         const config = TAB_CONFIG[route.name];
@@ -142,24 +154,30 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 68,
     backgroundColor: '#ffffff',
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    paddingBottom: 8,
-    // Elevation for Android, shadow for iOS/web
-    ...Platform.select({
-      android: { elevation: 8 },
-      default: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 4,
-      },
-    }),
+    zIndex: 1000,
+    ...(Platform.OS === 'web'
+      ? ({
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          width: '100%',
+          zIndex: 1000,
+          boxShadow: '0 -2px 10px rgba(0, 0, 0, 0.05)',
+        } as any)
+      : {
+          elevation: 8,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.06,
+          shadowRadius: 4,
+        }),
   },
   tabItem: {
     alignItems: 'center',

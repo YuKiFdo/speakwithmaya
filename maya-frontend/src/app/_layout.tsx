@@ -2,7 +2,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import { useColorScheme, Platform } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
   Outfit_400Regular,
@@ -57,13 +57,21 @@ export default function RootLayout() {
     // Settle DOM layout and prevent any millisecond mobile flicker on web refresh
     const timer = setTimeout(() => {
       setIsAppReady(true);
-    }, 850);
+    }, 350);
     return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
     if ((fontsLoaded || fontError) && isAppReady) {
       SplashScreen.hideAsync().catch(() => {});
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        const loader = document.getElementById('app-initial-loader');
+        if (loader) {
+          loader.style.opacity = '0';
+          loader.style.pointerEvents = 'none';
+          setTimeout(() => loader.remove(), 260);
+        }
+      }
     }
   }, [fontsLoaded, fontError, isAppReady]);
 
