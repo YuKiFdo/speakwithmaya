@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef} from 'react';
 import {
   View,
   Text,
@@ -8,13 +8,20 @@ import {
   ScrollView,
   Platform,
   useWindowDimensions,
+  ActivityIndicator,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import Svg, { Path, Circle, Line } from 'react-native-svg';
+import Svg, { Path, Circle, Line, SvgXml } from 'react-native-svg';
+import { Feather } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
+import { getBackendBaseUrl } from '@/hooks/useLiveCall';
+import { fetchAllPracticeSessions } from '@/services/supabase';
+import { adaptSvgColor } from '@/app/admin/roadmap';
 import {
   LockIcon,
 } from '@/components/icons/nav-icons';
@@ -30,53 +37,102 @@ import {
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
+import { MissionCardModal } from '@/components/roadmap/mission-card-modal';
 
-interface MilestoneItem {
+export interface MilestoneItem {
   id: string;
+  levelNumber: number;
   number: string;
   title: string;
   sessionTime: string;
+  targetDurationMinutes: number;
+  xpReward: number;
   status: 'completed' | 'in-progress' | 'locked';
   iconType: 'robot' | 'chat' | 'family' | 'home' | 'wave' | 'directions';
+  customSvg?: string;
   align?: 'left' | 'right';
   numberColor: string;
   haloColor: string;
   haloBorderColor?: string;
   innerBg: string;
+  topic?: string;
+  scenarioId?: string;
+  guidedPrompt?: {
+    scenarioRole?: string;
+    coachingFocus?: string;
+    openingQuestion?: string;
+    customPromptAddon?: string;
+  };
+  unlockRule?: {
+    type: 'free' | 'completion' | 'score' | 'time';
+    minScore?: number;
+    minDurationSeconds?: number;
+    requiresLevelNumber?: number;
+  };
+  learningObjectives?: Array<{
+    id: string;
+    title: string;
+    description?: string;
+    isMandatory?: boolean;
+  }>;
+  targetSpeakingShare?: number;
 }
 
-const MILESTONES: MilestoneItem[] = [
+const DEFAULT_MILESTONES: MilestoneItem[] = [
   {
-    id: '01',
+    id: 'lvl-01-meet-ai',
+    levelNumber: 1,
     number: '01',
     title: 'Meet your AI partner',
     sessionTime: 'Session time · 5 min',
-    status: 'completed',
+    targetDurationMinutes: 5,
+    xpReward: 50,
+    status: 'in-progress',
     iconType: 'robot',
     align: 'left',
     numberColor: '#0057FF',
     haloColor: '#EFF6FF',
     haloBorderColor: '#BFDBFE',
     innerBg: '#FFFFFF',
+    topic: 'Introduction & Greetings',
+    scenarioId: 'general-practice',
+    learningObjectives: [
+      { id: 'lvl1_obj1', title: 'Self-Introduction', description: 'Introduce name and occupation or background', isMandatory: true },
+      { id: 'lvl1_obj2', title: 'Answer Open Questions', description: 'Respond to icebreaker with complete sentences', isMandatory: true },
+    ],
+    targetSpeakingShare: 40,
   },
   {
-    id: '02',
+    id: 'lvl-02-daily-routine',
+    levelNumber: 2,
     number: '02',
     title: 'Talking about your day',
     sessionTime: 'Session time · 5 min',
-    status: 'in-progress',
+    targetDurationMinutes: 5,
+    xpReward: 75,
+    status: 'locked',
     iconType: 'chat',
     align: 'right',
     numberColor: '#9333EA',
     haloColor: '#FAF5FF',
     haloBorderColor: '#E9D5FF',
     innerBg: '#FFFFFF',
+    topic: 'Daily Habits & Morning Routine',
+    scenarioId: 'general-practice',
+    learningObjectives: [
+      { id: 'lvl2_obj1', title: 'Daily Routine', description: 'Describe morning or daily habits using present simple verbs', isMandatory: true },
+      { id: 'lvl2_obj2', title: 'Time Expressions', description: 'Use time transition words like first, then, after that', isMandatory: false },
+    ],
+    targetSpeakingShare: 40,
   },
   {
-    id: '03',
+    id: 'lvl-03-family-friends',
+    levelNumber: 3,
     number: '03',
     title: 'Family and friends',
     sessionTime: 'Session time · 10 min',
+    targetDurationMinutes: 10,
+    xpReward: 100,
     status: 'locked',
     iconType: 'family',
     align: 'left',
@@ -84,12 +140,22 @@ const MILESTONES: MilestoneItem[] = [
     haloColor: '#FFF1F2',
     haloBorderColor: '#FECDD3',
     innerBg: '#FFFFFF',
+    topic: 'Family & Relationships',
+    scenarioId: 'general-practice',
+    learningObjectives: [
+      { id: 'lvl3_obj1', title: 'Describe Relationships', description: 'Talk about a family member or friend with descriptive adjectives', isMandatory: true },
+      { id: 'lvl3_obj2', title: 'Ask Maya a Question', description: 'Inquire about Maya or share an anecdote', isMandatory: false },
+    ],
+    targetSpeakingShare: 40,
   },
   {
-    id: '04',
+    id: 'lvl-04-hometown',
+    levelNumber: 4,
     number: '04',
     title: 'Describing your home town',
     sessionTime: 'Session time · 10 min',
+    targetDurationMinutes: 10,
+    xpReward: 125,
     status: 'locked',
     iconType: 'home',
     align: 'right',
@@ -97,12 +163,17 @@ const MILESTONES: MilestoneItem[] = [
     haloColor: '#F0FDF4',
     haloBorderColor: '#BBF7D0',
     innerBg: '#FFFFFF',
+    topic: 'Hometown & Culture',
+    scenarioId: 'general-practice',
   },
   {
-    id: '05',
+    id: 'lvl-05-greetings-public',
+    levelNumber: 5,
     number: '05',
     title: 'Greetings & introductions in public',
     sessionTime: 'Session time · 10 min',
+    targetDurationMinutes: 10,
+    xpReward: 150,
     status: 'locked',
     iconType: 'wave',
     align: 'left',
@@ -110,12 +181,17 @@ const MILESTONES: MilestoneItem[] = [
     haloColor: '#FFFBEB',
     haloBorderColor: '#FDE68A',
     innerBg: '#FFFFFF',
+    topic: 'Social Small Talk',
+    scenarioId: 'workplace',
   },
   {
-    id: '06',
+    id: 'lvl-06-directions',
+    levelNumber: 6,
     number: '06',
     title: 'Asking for directions',
     sessionTime: 'Session time · 10 min',
+    targetDurationMinutes: 10,
+    xpReward: 200,
     status: 'locked',
     iconType: 'directions',
     align: 'right',
@@ -123,21 +199,77 @@ const MILESTONES: MilestoneItem[] = [
     haloColor: '#EFF6FF',
     haloBorderColor: '#BFDBFE',
     innerBg: '#FFFFFF',
-  },
-  {
-    id: '07',
-    number: '07',
-    title: 'Asking for directions',
-    sessionTime: 'Session time · 10 min',
-    status: 'locked',
-    iconType: 'directions',
-    align: 'left',
-    numberColor: '#0057FF',
-    haloColor: '#EFF6FF',
-    haloBorderColor: '#BFDBFE',
-    innerBg: '#FFFFFF',
+    topic: 'Travel & Navigation',
+    scenarioId: 'travel-english',
   },
 ];
+
+let cachedRoadmapMilestones: MilestoneItem[] | null = null;
+
+function getInitialCompletedLevelIds(): Set<string> {
+  const set = new Set<string>();
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const raw = window.localStorage.getItem('maya_cached_completed_levels');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          arr.forEach((id: string) => set.add(id));
+        }
+      }
+    } catch {}
+  }
+  return set;
+}
+
+function getInitialMilestones(): MilestoneItem[] {
+  const baseList =
+    cachedRoadmapMilestones && cachedRoadmapMilestones.length > 0
+      ? cachedRoadmapMilestones
+      : DEFAULT_MILESTONES;
+
+  const completedIds = getInitialCompletedLevelIds();
+  if (completedIds.size === 0) {
+    return baseList;
+  }
+
+  // Pre-seed completed level numbers from cached completed IDs
+  const completedLevelNumbers = new Set<number>();
+  baseList.forEach((lvl, idx) => {
+    const num = lvl.levelNumber ?? idx + 1;
+    if (
+      completedIds.has(lvl.id) ||
+      completedIds.has(`lvl-${num}`) ||
+      completedIds.has(`lvl-0${num}`) ||
+      completedIds.has(String(num))
+    ) {
+      completedLevelNumbers.add(num);
+      completedIds.add(lvl.id);
+    }
+  });
+
+  return baseList.map((lvl, idx) => {
+    const levelNum = lvl.levelNumber ?? idx + 1;
+    const prevLvl = idx > 0 ? baseList[idx - 1] : null;
+    const prevNum = prevLvl ? (prevLvl.levelNumber ?? idx) : null;
+
+    const isThisLevelCompleted =
+      completedIds.has(lvl.id) ||
+      completedLevelNumbers.has(levelNum);
+
+    const isPrevLevelCompleted =
+      levelNum === 1 ||
+      (prevNum !== null && completedLevelNumbers.has(prevNum)) ||
+      (prevLvl !== null && completedIds.has(prevLvl.id)) ||
+      completedLevelNumbers.has(levelNum - 1);
+
+    const status: 'completed' | 'in-progress' | 'locked' = isThisLevelCompleted
+      ? 'completed'
+      : (levelNum === 1 || isPrevLevelCompleted || lvl.unlockRule?.type === 'free' ? 'in-progress' : 'locked');
+
+    return { ...lvl, status };
+  });
+}
 
 export default function RoadmapScreen() {
   const params = useLocalSearchParams<{ name?: string }>();
@@ -149,6 +281,145 @@ export default function RoadmapScreen() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('roadmap');
   const [isPro, setIsPro] = useState(false);
   const [activePopup, setActivePopup] = useState<PopupPreset | null>(null);
+  const [selectedMission, setSelectedMission] = useState<MilestoneItem | null>(null);
+
+  const [milestones, setMilestones] = useState<MilestoneItem[]>(getInitialMilestones);
+  const [isLoadingLevels, setIsLoadingLevels] = useState<boolean>(!cachedRoadmapMilestones);
+
+  // Fetch published levels from backend & sync student unlocked status
+  const fetchRoadmapData = async () => {
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const [roadmapRes, sessions] = await Promise.all([
+        fetch(`${baseUrl}/v1/roadmap`).catch(() => null),
+        fetchAllPracticeSessions().catch(() => []),
+      ]);
+
+      let backendLevels: any[] = [];
+      if (roadmapRes && roadmapRes.ok) {
+        const json = await roadmapRes.json();
+        if (Array.isArray(json.levels) && json.levels.length > 0) {
+          backendLevels = json.levels;
+        }
+      }
+
+      const sourceLevels = backendLevels.length > 0 ? backendLevels : DEFAULT_MILESTONES;
+
+      // Determine which levels the student has genuinely completed
+      const completedLevelIds = getInitialCompletedLevelIds();
+      const completedLevelNumbers = new Set<number>();
+
+      // 1. Pre-seed completed level numbers from cached storage
+      sourceLevels.forEach((lvl: any, idx: number) => {
+        const lvlNum = lvl.levelNumber ?? idx + 1;
+        if (
+          completedLevelIds.has(lvl.id) ||
+          completedLevelIds.has(`lvl-${lvlNum}`) ||
+          completedLevelIds.has(`lvl-0${lvlNum}`) ||
+          completedLevelIds.has(String(lvlNum))
+        ) {
+          completedLevelNumbers.add(lvlNum);
+          completedLevelIds.add(lvl.id);
+        }
+      });
+
+      // 2. Cross-reference with completed sessions recorded in backend
+      if (Array.isArray(sessions)) {
+        sessions.forEach((s: any) => {
+          if (s.status === 'completed') {
+            if (s.roadmap_level_id) {
+              completedLevelIds.add(s.roadmap_level_id);
+            }
+            // Match against level topic/title or roadmap_level_id
+            sourceLevels.forEach((lvl: any, idx: number) => {
+              const lvlNum = lvl.levelNumber ?? idx + 1;
+              const lvlTopic = (lvl.topic || '').trim().toLowerCase();
+              const lvlTitle = (lvl.title || '').trim().toLowerCase();
+              const sTopic = (s.topic || '').trim().toLowerCase();
+              if (
+                s.roadmap_level_id === lvl.id ||
+                s.roadmap_level_id === `lvl-${lvlNum}` ||
+                s.roadmap_level_id === `lvl-0${lvlNum}` ||
+                (sTopic && (sTopic === lvlTopic || sTopic === lvlTitle))
+              ) {
+                completedLevelIds.add(lvl.id);
+                completedLevelNumbers.add(lvlNum);
+              }
+            });
+          }
+        });
+      }
+
+      const mappedMilestones: MilestoneItem[] = sourceLevels.map((lvl: any, idx: number) => {
+        const levelNum = lvl.levelNumber ?? idx + 1;
+        const prevLevel = idx > 0 ? sourceLevels[idx - 1] : null;
+        const prevLevelNum = prevLevel ? (prevLevel.levelNumber ?? idx) : null;
+
+        const isThisLevelCompleted =
+          completedLevelIds.has(lvl.id) ||
+          completedLevelNumbers.has(levelNum);
+
+        const isPrevLevelCompleted =
+          levelNum === 1 ||
+          (prevLevelNum !== null && completedLevelNumbers.has(prevLevelNum)) ||
+          (prevLevel !== null && completedLevelIds.has(prevLevel.id)) ||
+          completedLevelNumbers.has(levelNum - 1);
+
+        let status: 'completed' | 'in-progress' | 'locked' = 'locked';
+
+        if (isThisLevelCompleted) {
+          status = 'completed';
+        } else if (levelNum === 1 || isPrevLevelCompleted || lvl.unlockRule?.type === 'free') {
+          status = 'in-progress';
+        } else {
+          status = 'locked';
+        }
+
+        return {
+          id: lvl.id || `lvl-${levelNum}`,
+          levelNumber: levelNum,
+          number: String(levelNum).padStart(2, '0'),
+          title: lvl.title,
+          sessionTime: `Session time · ${lvl.targetDurationMinutes || 5} min`,
+          targetDurationMinutes: lvl.targetDurationMinutes || 5,
+          xpReward: lvl.xpReward || 50 + idx * 25,
+          status,
+          iconType: lvl.iconType || 'chat',
+          customSvg: lvl.customSvg,
+          numberColor: lvl.numberColor || '#0057FF',
+          haloColor: lvl.haloColor || '#EFF6FF',
+          haloBorderColor: lvl.haloBorderColor || '#BFDBFE',
+          innerBg: '#FFFFFF',
+          topic: lvl.topic,
+          scenarioId: lvl.scenarioId,
+          guidedPrompt: lvl.guidedPrompt,
+          unlockRule: lvl.unlockRule,
+          learningObjectives: lvl.learningObjectives,
+          targetSpeakingShare: lvl.targetSpeakingShare,
+        };
+      });
+
+      cachedRoadmapMilestones = mappedMilestones;
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+        try {
+          window.localStorage.setItem(
+            'maya_cached_completed_levels',
+            JSON.stringify(Array.from(completedLevelIds)),
+          );
+        } catch {}
+      }
+
+      setMilestones(mappedMilestones);
+    } catch (e) {
+      console.warn('[Roadmap] Error fetching dynamic roadmap data:', e);
+    } finally {
+      setIsLoadingLevels(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRoadmapData();
+  }, []);
 
   // Responsive full-width calculations for desktop track & milestone columns:
   const [layoutTrackWidth, setLayoutTrackWidth] = useState<number | null>(null);
@@ -159,7 +430,7 @@ export default function RoadmapScreen() {
   const R = 90;
   const desktopYStart = 200;
   const desktopRowStep = 180;
-  const lastIdx = MILESTONES.length - 1;
+  const lastIdx = milestones.length - 1;
   const finalR = Math.max(0, Math.floor(lastIdx / 2));
   const finalCol = lastIdx >= 0 ? lastIdx % 2 : 0;
   const desktopRowCount = finalR + 1;
@@ -170,11 +441,10 @@ export default function RoadmapScreen() {
   const col2X = Math.round(xLeft + (xRight - xLeft) * 0.54);
 
   // Dynamically generate Desktop Serpentine Track:
-  // Starts directly at the 1st milestone anchor point (col1X) and ends directly at the final milestone
   let desktopSvgPath = '';
-  if (MILESTONES.length === 1) {
+  if (milestones.length === 1) {
     desktopSvgPath = `M ${col1X} ${desktopYStart} L ${col1X} ${desktopYStart}`;
-  } else if (MILESTONES.length > 1) {
+  } else if (milestones.length > 1) {
     desktopSvgPath = `M ${col1X} ${desktopYStart}`;
 
     for (let r = 0; r <= finalR; r++) {
@@ -183,33 +453,25 @@ export default function RoadmapScreen() {
 
       if (r === 0) {
         if (isFinalRow) {
-          // Row 0 is final (2 items: index 0 at col1X, index 1 at col2X)
-          desktopSvgPath += ` L ${col2X} ${yRow}`;
+          const targetX = finalCol === 0 ? col1X : col2X;
+          desktopSvgPath += ` L ${targetX} ${yRow}`;
         } else {
-          // More rows follow: line to right turn and curve down to row 1
           const yNext = desktopYStart + (r + 1) * desktopRowStep;
           desktopSvgPath += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext}`;
         }
       } else if (r % 2 === 1) {
-        // Odd row: moving Right to Left
-        // Current position is at (xRight - R, yRow)
         if (isFinalRow) {
-          // Stops at col1X (where the final milestone in this row is)
-          desktopSvgPath += ` L ${col1X} ${yRow}`;
+          const targetX = finalCol === 0 ? col2X : col1X;
+          desktopSvgPath += ` L ${targetX} ${yRow}`;
         } else {
-          // More rows follow: line to left turn and curve down to next row
           const yNext = desktopYStart + (r + 1) * desktopRowStep;
           desktopSvgPath += ` L ${xLeft + R} ${yRow} A ${R} ${R} 0 0 0 ${xLeft + R} ${yNext}`;
         }
       } else {
-        // Even row (r >= 2): moving Left to Right
-        // Current position is at (xLeft + R, yRow)
         if (isFinalRow) {
-          // Stops at final milestone in this row
           const targetX = finalCol === 0 ? col1X : col2X;
           desktopSvgPath += ` L ${targetX} ${yRow}`;
         } else {
-          // More rows follow: line to right turn and curve down to next row
           const yNext = desktopYStart + (r + 1) * desktopRowStep;
           desktopSvgPath += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext}`;
         }
@@ -221,7 +483,7 @@ export default function RoadmapScreen() {
   const [layoutMobileWidth, setLayoutMobileWidth] = useState<number | null>(null);
   const mobileWidth = layoutMobileWidth ?? (!isDesktop ? Math.min(windowWidth - 40, 420) : 350);
 
-  // Mobile serpentine geometry (Natural default circular arcs A R R + Desktop Inner Shadow)
+  // Mobile serpentine geometry
   const mobileR = 64;
   const mobileTierHeight = mobileR * 2; // 128
   const mobileIconSize = 62;
@@ -232,20 +494,19 @@ export default function RoadmapScreen() {
   const mobileIconRightX = mobileWidth - (10 + mobileR); // mobileWidth - 74
 
   const mobileTotalHeight =
-    MILESTONES.length > 0
-      ? mobileYTrack1 + (MILESTONES.length - 1) * mobileTierHeight + 92
+    milestones.length > 0
+      ? mobileYTrack1 + (milestones.length - 1) * mobileTierHeight + 92
       : 820;
 
   // Dynamically generate Mobile Serpentine Track:
-  // Starts at 1st milestone and ends directly at the final milestone
   let mobileSvgPath = '';
-  if (MILESTONES.length === 1) {
+  if (milestones.length === 1) {
     mobileSvgPath = `M ${mobileIconLeftX} ${mobileYTrack1} L ${mobileIconLeftX} ${mobileYTrack1}`;
-  } else if (MILESTONES.length > 1) {
+  } else if (milestones.length > 1) {
     mobileSvgPath = `M ${mobileIconLeftX} ${mobileYTrack1} L ${mobileIconRightX} ${mobileYTrack1}`;
-    for (let i = 0; i < MILESTONES.length - 1; i++) {
+    for (let i = 0; i < milestones.length - 1; i++) {
       const yNext = mobileYTrack1 + (i + 1) * mobileTierHeight;
-      const isLastStep = i === MILESTONES.length - 2;
+      const isLastStep = i === milestones.length - 2;
 
       if (i % 2 === 0) {
         mobileSvgPath += ` A ${mobileR} ${mobileR} 0 0 1 ${mobileIconRightX} ${yNext}`;
@@ -277,11 +538,31 @@ export default function RoadmapScreen() {
     if (item.status === 'locked' && !isPro) {
       setActivePopup('unlock-premium');
     } else {
-      router.push({
-        pathname: '/onboarding/connecting',
-        params,
-      });
+      setSelectedMission(item);
     }
+  };
+
+  const handleStartMission = (item: MilestoneItem) => {
+    setSelectedMission(null);
+    router.push({
+      pathname: '/onboarding/call',
+      params: {
+        ...params,
+        roadmapLevelId: item.id,
+        levelNumber: String(item.levelNumber),
+        topic: item.topic || item.title,
+        scenarioTitle: item.title,
+        scenarioId: item.scenarioId || 'general-practice',
+        duration: String((item.targetDurationMinutes || 5) * 60),
+        durationMinutes: String(item.targetDurationMinutes || 5),
+        scenarioRole: item.guidedPrompt?.scenarioRole || '',
+        coachingFocus: item.guidedPrompt?.coachingFocus || '',
+        openingQuestion: item.guidedPrompt?.openingQuestion || '',
+        customPromptAddon: item.guidedPrompt?.customPromptAddon || '',
+        targetSpeakingShare: String(item.targetSpeakingShare || 40),
+        learningObjectives: item.learningObjectives && item.learningObjectives.length > 0 ? JSON.stringify(item.learningObjectives) : '',
+      },
+    });
   };
 
   return (
@@ -422,11 +703,15 @@ export default function RoadmapScreen() {
                 />
 
                 {/* Vertical Dotted Drops from Card Icons down to Anchors */}
-                {MILESTONES.map((_, idx) => {
+                {milestones.map((item, idx) => {
                   const r = Math.floor(idx / 2);
-                  const x = idx % 2 === 0 ? col1X : col2X;
+                  const isReversedRow = r % 2 === 1;
+                  const x = isReversedRow
+                    ? (idx % 2 === 0 ? col2X : col1X)
+                    : (idx % 2 === 0 ? col1X : col2X);
                   const trackY = desktopYStart + r * desktopRowStep;
                   const dropYStart = 128 + r * desktopRowStep;
+                  const isLocked = item.status === 'locked';
                   return (
                     <Line
                       key={`desktop-drop-${idx}`}
@@ -434,32 +719,78 @@ export default function RoadmapScreen() {
                       y1={dropYStart}
                       x2={x}
                       y2={trackY}
-                      stroke="#93C5FD"
+                      stroke={isLocked ? '#CBD5E1' : '#93C5FD'}
                       strokeWidth="2"
                       strokeDasharray="4,4"
                     />
                   );
                 })}
 
-                {/* Blue Glow Anchor Dots on the Track */}
-                {MILESTONES.map((_, idx) => {
+                {/* Blue / Grey / Glowing Anchor Dots on the Track */}
+                {milestones.map((item, idx) => {
                   const r = Math.floor(idx / 2);
-                  const x = idx % 2 === 0 ? col1X : col2X;
+                  const isReversedRow = r % 2 === 1;
+                  const x = isReversedRow
+                    ? (idx % 2 === 0 ? col2X : col1X)
+                    : (idx % 2 === 0 ? col1X : col2X);
                   const trackY = desktopYStart + r * desktopRowStep;
+                  const isLocked = item.status === 'locked';
+                  const isAvailable = item.status === 'in-progress';
                   return (
                     <React.Fragment key={`desktop-dot-${idx}`}>
-                      <Circle cx={x} cy={trackY} r={10} fill="rgba(0, 87, 255, 0.18)" />
-                      <Circle cx={x} cy={trackY} r={5} fill="#0057FF" stroke="#FFFFFF" strokeWidth={1.8} />
+                      {isAvailable ? (
+                        <>
+                          <Circle
+                            cx={x}
+                            cy={trackY}
+                            r={16}
+                            fill="rgba(0, 87, 255, 0.22)"
+                          />
+                          <Circle
+                            cx={x}
+                            cy={trackY}
+                            r={9}
+                            fill="#0057FF"
+                          />
+                          <Circle
+                            cx={x}
+                            cy={trackY}
+                            r={4}
+                            fill="#FFFFFF"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <Circle
+                            cx={x}
+                            cy={trackY}
+                            r={10}
+                            fill={isLocked ? 'rgba(148, 163, 184, 0.16)' : 'rgba(0, 87, 255, 0.18)'}
+                          />
+                          <Circle
+                            cx={x}
+                            cy={trackY}
+                            r={5}
+                            fill={isLocked ? '#94A3B8' : '#0057FF'}
+                            stroke="#FFFFFF"
+                            strokeWidth={1.8}
+                          />
+                        </>
+                      )}
                     </React.Fragment>
                   );
                 })}
               </Svg>
 
               {/* Milestone Cards Overlay - Symmetrically Distributed Across Full Width */}
-              {MILESTONES.map((item, idx) => {
+              {milestones.map((item, idx) => {
                 const r = Math.floor(idx / 2);
-                const x = idx % 2 === 0 ? col1X : col2X;
+                const isReversedRow = r % 2 === 1;
+                const x = isReversedRow
+                  ? (idx % 2 === 0 ? col2X : col1X)
+                  : (idx % 2 === 0 ? col1X : col2X);
                 const cardTop = 40 + r * desktopRowStep;
+
                 return (
                   <View
                     key={item.id}
@@ -531,10 +862,11 @@ export default function RoadmapScreen() {
                 />
 
                 {/* Vertical Dotted Drops from Card Avatar bottom down to Track Dots */}
-                {MILESTONES.map((_, idx) => {
+                {milestones.map((item, idx) => {
                   const x = idx % 2 === 0 ? mobileIconLeftX : mobileIconRightX;
                   const yTrack = mobileYTrack1 + idx * mobileTierHeight;
                   const yStart = yTrack - mobileYDropLen;
+                  const isLocked = item.status === 'locked';
                   return (
                     <Line
                       key={`mobile-drop-${idx}`}
@@ -542,40 +874,67 @@ export default function RoadmapScreen() {
                       y1={yStart}
                       x2={x}
                       y2={yTrack}
-                      stroke="#93C5FD"
+                      stroke={isLocked ? '#CBD5E1' : '#93C5FD'}
                       strokeWidth="2"
                       strokeDasharray="4,4"
                     />
                   );
                 })}
 
-                {/* Blue Glow Anchor Dots on the Track */}
-                {MILESTONES.map((_, idx) => {
+                {/* Blue / Grey / Glowing Anchor Dots on the Track */}
+                {milestones.map((item, idx) => {
                   const x = idx % 2 === 0 ? mobileIconLeftX : mobileIconRightX;
                   const yTrack = mobileYTrack1 + idx * mobileTierHeight;
+                  const isLocked = item.status === 'locked';
+                  const isAvailable = item.status === 'in-progress';
                   return (
                     <React.Fragment key={`mobile-dot-${idx}`}>
-                      <Circle
-                        cx={x}
-                        cy={yTrack}
-                        r={10}
-                        fill="rgba(0, 87, 255, 0.18)"
-                      />
-                      <Circle
-                        cx={x}
-                        cy={yTrack}
-                        r={5}
-                        fill="#0057FF"
-                        stroke="#FFFFFF"
-                        strokeWidth={2}
-                      />
+                      {isAvailable ? (
+                        <>
+                          <Circle
+                            cx={x}
+                            cy={yTrack}
+                            r={16}
+                            fill="rgba(0, 87, 255, 0.22)"
+                          />
+                          <Circle
+                            cx={x}
+                            cy={yTrack}
+                            r={9}
+                            fill="#0057FF"
+                          />
+                          <Circle
+                            cx={x}
+                            cy={yTrack}
+                            r={4}
+                            fill="#FFFFFF"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <Circle
+                            cx={x}
+                            cy={yTrack}
+                            r={10}
+                            fill={isLocked ? 'rgba(148, 163, 184, 0.16)' : 'rgba(0, 87, 255, 0.18)'}
+                          />
+                          <Circle
+                            cx={x}
+                            cy={yTrack}
+                            r={5}
+                            fill={isLocked ? '#94A3B8' : '#0057FF'}
+                            stroke="#FFFFFF"
+                            strokeWidth={2}
+                          />
+                        </>
+                      )}
                     </React.Fragment>
                   );
                 })}
               </Svg>
 
-              {/* Absolute Floating Milestone Nodes (Same floating style as desktop, no card box) */}
-              {MILESTONES.map((item, idx) => {
+              {/* Absolute Floating Milestone Nodes */}
+              {milestones.map((item, idx) => {
                 const isLeft = idx % 2 === 0;
                 const yTrack = mobileYTrack1 + idx * mobileTierHeight;
                 const slotTop = yTrack - mobileYDropLen - mobileIconSize;
@@ -630,6 +989,36 @@ export default function RoadmapScreen() {
             setActivePopup(null);
           }}
         />
+
+        {/* ==================================================================== */}
+        {/* MISSION CARD PREVIEW MODAL */}
+        {/* ==================================================================== */}
+        <MissionCardModal
+          visible={selectedMission !== null}
+          item={selectedMission}
+          userName={displayName}
+          nextItem={
+            selectedMission
+              ? milestones.find(
+                  (m) =>
+                    (m.levelNumber ?? 0) === (selectedMission.levelNumber ?? 0) + 1 &&
+                    m.status !== 'locked',
+                ) || null
+              : null
+          }
+          onClose={() => setSelectedMission(null)}
+          onStartPractice={handleStartMission}
+          onNextLevel={(next) => {
+            setSelectedMission(null);
+            setTimeout(() => {
+              setSelectedMission(next);
+            }, 100);
+          }}
+          onViewHistory={() => {
+            setSelectedMission(null);
+            router.push({ pathname: '/history', params });
+          }}
+        />
       </View>
     </SafeAreaView>
   );
@@ -638,22 +1027,43 @@ export default function RoadmapScreen() {
 /**
  * Milestone Icon Renderer
  */
-function MilestoneIcon({ type, size = 30 }: { type: MilestoneItem['iconType']; size?: number }) {
+function MilestoneIcon({
+  type,
+  size = 30,
+  customSvg,
+  color = '#0057FF',
+}: {
+  type: MilestoneItem['iconType'];
+  size?: number;
+  customSvg?: string;
+  color?: string;
+}) {
+  if (customSvg && customSvg.trim()) {
+    try {
+      const adapted = adaptSvgColor(customSvg, color);
+      if (adapted) {
+        return <SvgXml xml={adapted} width={size} height={size} />;
+      }
+    } catch (e) {
+      // fallback
+    }
+  }
+
   switch (type) {
     case 'robot':
-      return <RoadmapRobotIcon size={size} />;
+      return <RoadmapRobotIcon size={size} color={color} />;
     case 'chat':
-      return <RoadmapChatIcon size={size} />;
+      return <RoadmapChatIcon size={size} color={color} />;
     case 'family':
-      return <RoadmapFamilyIcon size={size} />;
+      return <RoadmapFamilyIcon size={size} color={color} />;
     case 'home':
-      return <RoadmapHomeIcon size={size} />;
+      return <RoadmapHomeIcon size={size} color={color} />;
     case 'wave':
-      return <RoadmapWaveIcon size={size} />;
+      return <RoadmapWaveIcon size={size} color={color} />;
     case 'directions':
-      return <RoadmapDirectionsIcon size={size} />;
+      return <RoadmapDirectionsIcon size={size} color={color} />;
     default:
-      return <LockIcon color="#94A3B8" size={Math.round(size * 0.7)} />;
+      return <LockIcon color={color || '#94A3B8'} size={Math.round(size * 0.7)} />;
   }
 }
 
@@ -677,6 +1087,239 @@ function getBorderColor(id: string) {
 }
 
 /**
+ * Gamified pulsing radar ring & floating 'START' beacon for active available milestones
+ */
+interface ActiveBeaconHaloProps {
+  size?: number;
+  color?: string;
+  showStartBadge?: boolean;
+  children: React.ReactNode;
+}
+
+function ActiveBeaconHalo({
+  size = 88,
+  color = '#0057FF',
+  showStartBadge = true,
+  children,
+}: ActiveBeaconHaloProps) {
+  const rippleAnim = React.useRef(new Animated.Value(0)).current;
+  const rippleAnim2 = React.useRef(new Animated.Value(0)).current;
+  const bounceAnim = React.useRef(new Animated.Value(0)).current;
+  const nodeBreathAnim = React.useRef(new Animated.Value(1)).current;
+
+  React.useEffect(() => {
+    // Primary radar ring
+    const rippleLoop = Animated.loop(
+      Animated.timing(rippleAnim, {
+        toValue: 1,
+        duration: 2200,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: Platform.OS !== 'web',
+      })
+    );
+
+    // Secondary ripple for mobile rich depth
+    const ripple2Loop = Animated.loop(
+      Animated.sequence([
+        Animated.delay(1000),
+        Animated.timing(rippleAnim2, {
+          toValue: 1,
+          duration: 2200,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(rippleAnim2, {
+          toValue: 0,
+          duration: 0,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ])
+    );
+
+    // Desktop bouncing 'START' pill
+    const bounceLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(bounceAnim, {
+          toValue: -6,
+          duration: 1000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(bounceAnim, {
+          toValue: 0,
+          duration: 1000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ])
+    );
+
+    // Mobile subtle node breathing
+    const breathLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(nodeBreathAnim, {
+          toValue: 1.045,
+          duration: 1300,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(nodeBreathAnim, {
+          toValue: 1,
+          duration: 1300,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ])
+    );
+
+    rippleLoop.start();
+    if (!showStartBadge) {
+      ripple2Loop.start();
+      breathLoop.start();
+    }
+    if (showStartBadge) {
+      bounceLoop.start();
+    }
+
+    return () => {
+      rippleLoop.stop();
+      ripple2Loop.stop();
+      bounceLoop.stop();
+      breathLoop.stop();
+    };
+  }, [showStartBadge]);
+
+  const rippleScale = rippleAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, showStartBadge ? 1.34 : 1.42],
+  });
+
+  const rippleOpacity = rippleAnim.interpolate({
+    inputRange: [0, 0.35, 1],
+    outputRange: [0.55, 0.28, 0],
+  });
+
+  const ripple2Scale = rippleAnim2.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.28],
+  });
+
+  const ripple2Opacity = rippleAnim2.interpolate({
+    inputRange: [0, 0.4, 1],
+    outputRange: [0.4, 0.18, 0],
+  });
+
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+      {/* Concentric Pulsing Radar Ring 1 */}
+      <Animated.View
+        style={{
+          position: 'absolute',
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: color,
+          transform: [{ scale: rippleScale }],
+          opacity: rippleOpacity,
+          zIndex: 0,
+        }}
+        pointerEvents="none"
+      />
+
+      {/* Secondary Staggered Wave (Mobile Screen Specific) */}
+      {!showStartBadge && (
+        <Animated.View
+          style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderWidth: 2,
+            borderColor: color,
+            transform: [{ scale: ripple2Scale }],
+            opacity: ripple2Opacity,
+            zIndex: 0,
+          }}
+          pointerEvents="none"
+        />
+      )}
+
+      {/* Floating Gamified 'START' Pill with Downward Arrow (Desktop Only) */}
+      {showStartBadge && (
+        <Animated.View
+          style={{
+            position: 'absolute',
+            top: size > 70 ? -24 : -20,
+            alignSelf: 'center',
+            alignItems: 'center',
+            zIndex: 10,
+            transform: [{ translateY: bounceAnim }],
+          }}
+          pointerEvents="none"
+        >
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: color,
+              paddingHorizontal: 8,
+              paddingVertical: 2.5,
+              borderRadius: 12,
+              gap: 3.5,
+              ...(Platform.OS === 'web'
+                ? ({ boxShadow: `0px 3px 8px ${color}66` } as any)
+                : {
+                    shadowColor: color,
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.35,
+                    shadowRadius: 4,
+                    elevation: 4,
+                  }),
+            }}
+          >
+            <Feather name="play" size={8.5} color="#FFFFFF" />
+            <Text
+              style={{
+                ...fontStyle('outfit', 'bold'),
+                fontSize: 9.5,
+                color: '#FFFFFF',
+                letterSpacing: 0.8,
+              }}
+            >
+              START
+            </Text>
+          </View>
+          {/* Pointer downward tip */}
+          <View
+            style={{
+              width: 0,
+              height: 0,
+              borderLeftWidth: 4,
+              borderRightWidth: 4,
+              borderTopWidth: 4,
+              borderLeftColor: 'transparent',
+              borderRightColor: 'transparent',
+              borderTopColor: color,
+              marginTop: -0.5,
+            }}
+          />
+        </Animated.View>
+      )}
+
+      {/* Inner Node Content (with subtle breathing on mobile) */}
+      <Animated.View
+        style={{
+          zIndex: 2,
+          transform: !showStartBadge ? [{ scale: nodeBreathAnim }] : undefined,
+        }}
+      >
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
+
+/**
  * Desktop Milestone Node Component
  */
 function MilestoneCardDesktop({
@@ -686,45 +1329,190 @@ function MilestoneCardDesktop({
   item: MilestoneItem;
   onPress: () => void;
 }) {
+  const isLocked = item.status === 'locked';
+  const isAvailable = item.status === 'in-progress';
+  const isCompleted = item.status === 'completed';
+  const haloBg = isLocked ? '#f1f5f9' : item.haloColor;
+  const haloBorder = isLocked ? '#cbd5e1' : item.haloBorderColor || getBorderColor(item.id);
+  const numberColor = isLocked ? '#94a3b8' : item.numberColor;
+  const iconColor = isLocked ? '#94a3b8' : item.numberColor;
+
+  const [isHovered, setIsHovered] = useState(false);
+  const lockShakeAnim = React.useRef(new Animated.Value(0)).current;
+  const iconTiltAnim = React.useRef(new Animated.Value(0)).current;
+  const checkBounceAnim = React.useRef(new Animated.Value(1)).current;
+
+  const triggerLockShake = () => {
+    Animated.sequence([
+      Animated.timing(lockShakeAnim, { toValue: -4, duration: 60, useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(lockShakeAnim, { toValue: 4, duration: 60, useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(lockShakeAnim, { toValue: -3, duration: 50, useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(lockShakeAnim, { toValue: 3, duration: 50, useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(lockShakeAnim, { toValue: 0, duration: 50, useNativeDriver: Platform.OS !== 'web' }),
+    ]).start();
+  };
+
+  React.useEffect(() => {
+    if (isHovered) {
+      if (isLocked) {
+        triggerLockShake();
+      } else {
+        // Playful icon micro-tilt
+        Animated.sequence([
+          Animated.timing(iconTiltAnim, { toValue: 1, duration: 150, useNativeDriver: Platform.OS !== 'web' }),
+          Animated.timing(iconTiltAnim, { toValue: -1, duration: 150, useNativeDriver: Platform.OS !== 'web' }),
+          Animated.timing(iconTiltAnim, { toValue: 0, duration: 120, useNativeDriver: Platform.OS !== 'web' }),
+        ]).start();
+
+        if (isCompleted) {
+          Animated.sequence([
+            Animated.timing(checkBounceAnim, { toValue: 1.25, duration: 160, useNativeDriver: Platform.OS !== 'web' }),
+            Animated.timing(checkBounceAnim, { toValue: 1, duration: 140, useNativeDriver: Platform.OS !== 'web' }),
+          ]).start();
+        }
+      }
+    }
+  }, [isHovered]);
+
+  const iconRotate = iconTiltAnim.interpolate({
+    inputRange: [-1, 0, 1],
+    outputRange: ['-7deg', '0deg', '7deg'],
+  });
+
+  const renderNodeContent = (isPressed: boolean) => (
+    <View
+      style={[
+        styles.haloCircleDesktop,
+        { backgroundColor: haloBg, borderColor: haloBorder },
+        isAvailable && styles.haloCircleAvailable,
+        isHovered && !isLocked && styles.haloCircleHovered,
+        isAvailable && (Platform.OS === 'web'
+          ? ({ boxShadow: isHovered
+                ? `0 0 0 4px #FFFFFF, 0 0 0 7px ${numberColor}, 0 12px 28px ${numberColor}55`
+                : `0 0 0 3px #FFFFFF, 0 0 0 5px ${numberColor}, 0 6px 20px ${numberColor}45` } as any)
+          : {
+              shadowColor: numberColor,
+              shadowOffset: { width: 0, height: isHovered ? 8 : 4 },
+              shadowOpacity: isHovered ? 0.55 : 0.45,
+              shadowRadius: isHovered ? 14 : 10,
+              elevation: isHovered ? 8 : 6,
+            }),
+        !isLocked && (isPressed
+          ? { transform: [{ translateY: 2 }, { scale: 0.94 }] }
+          : isHovered
+          ? { transform: [{ translateY: -4 }, { scale: 1.05 }] }
+          : { transform: [{ translateY: 0 }, { scale: 1 }] }),
+      ]}
+    >
+      <Animated.View
+        style={[
+          styles.innerIconCircleDesktop,
+          isLocked && styles.innerIconCircleLocked,
+          { transform: [{ rotate: iconRotate }] },
+        ]}
+      >
+        <MilestoneIcon type={item.iconType} customSvg={item.customSvg} color={iconColor} />
+      </Animated.View>
+
+      {item.status === 'completed' && (
+        <Animated.View
+          style={[styles.checkBadgeWrapper, { transform: [{ scale: checkBounceAnim }] }]}
+        >
+          <RoadmapCheckIcon size={22} />
+        </Animated.View>
+      )}
+
+      {isLocked && (
+        <Animated.View
+          style={[
+            styles.lockBadgeWrapperDesktop,
+            { transform: [{ translateX: lockShakeAnim }] },
+          ]}
+        >
+          <Feather name="lock" size={13} color="#64748b" />
+        </Animated.View>
+      )}
+    </View>
+  );
+
   return (
     <Pressable
       style={({ pressed }) => [
         styles.milestoneCardDesktop,
-        pressed && styles.milestoneCardPressed,
+        isLocked && styles.milestoneCardLocked,
+        isHovered && !isLocked && styles.milestoneCardHovered,
       ]}
-      onPress={onPress}
+      onPress={() => {
+        if (isLocked) {
+          triggerLockShake();
+        }
+        onPress();
+      }}
+      onHoverIn={() => setIsHovered(true)}
+      onHoverOut={() => setIsHovered(false)}
       accessibilityRole="button"
       accessibilityLabel={`Milestone ${item.number}: ${item.title}`}
     >
-      <View style={[styles.haloCircleDesktop, { backgroundColor: item.haloColor, borderColor: item.haloBorderColor || getBorderColor(item.id) }]}>
-        <View style={styles.innerIconCircleDesktop}>
-          <MilestoneIcon type={item.iconType} />
-        </View>
-
-        {item.status === 'completed' && (
-          <View style={styles.checkBadgeWrapper}>
-            <RoadmapCheckIcon size={22} />
-          </View>
-        )}
-      </View>
-
-      <View style={styles.milestoneTextCol}>
-        <View style={styles.numberBadgeRow}>
-          <Text style={[styles.milestoneNumber, { color: item.numberColor }]}>
-            {item.number}
-          </Text>
-          {item.status === 'completed' && (
-            <View style={styles.completedBadge}>
-              <Text style={styles.completedBadgeText}>COMPLETED</Text>
-            </View>
+      {({ pressed }) => (
+        <>
+          {isAvailable ? (
+            <ActiveBeaconHalo size={88} color={numberColor}>
+              {renderNodeContent(pressed)}
+            </ActiveBeaconHalo>
+          ) : (
+            renderNodeContent(pressed)
           )}
-        </View>
 
-        <Text style={styles.milestoneTitle} numberOfLines={2}>
-          {item.title}
-        </Text>
-        <Text style={styles.milestoneSessionTime}>{item.sessionTime}</Text>
-      </View>
+          <View style={styles.milestoneTextCol}>
+            <View style={styles.numberBadgeRow}>
+              <Text style={[styles.milestoneNumber, { color: numberColor }]}>
+                {item.number}
+              </Text>
+              {item.status === 'completed' ? (
+                <View style={styles.completedBadge}>
+                  <Text style={styles.completedBadgeText}>COMPLETED</Text>
+                </View>
+              ) : isLocked ? (
+                <View style={styles.lockedBadge}>
+                  <Feather name="lock" size={10} color="#64748b" style={{ marginRight: 3 }} />
+                  <Text style={styles.lockedBadgeText}>LOCKED</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.currentBadge}>
+                    <View style={styles.currentBadgeDot} />
+                    <Text style={styles.currentBadgeText}>CURRENT</Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.xpBadge,
+                      isHovered && { transform: [{ scale: 1.08 }] },
+                    ]}
+                  >
+                    <Feather name="award" size={11} color="#d97706" style={{ marginRight: 3 }} />
+                    <Text style={styles.xpBadgeText}>+{item.xpReward} XP</Text>
+                  </View>
+                </>
+              )}
+            </View>
+
+            <Text
+              style={[
+                styles.milestoneTitle,
+                isLocked && styles.milestoneTitleLocked,
+                isHovered && !isLocked && styles.milestoneTitleHovered,
+                pressed && !isLocked && { color: '#0040C1' },
+              ]}
+              numberOfLines={2}
+            >
+              {item.title}
+            </Text>
+            <Text style={[styles.milestoneSessionTime, isLocked && styles.milestoneSessionTimeLocked]}>
+              {item.sessionTime}
+            </Text>
+          </View>
+        </>
+      )}
     </Pressable>
   );
 }
@@ -741,96 +1529,297 @@ function MilestoneCardMobile({
   isLeft?: boolean;
   onPress: () => void;
 }) {
-  const borderColor = item.haloBorderColor || getBorderColor(item.id);
+  const isLocked = item.status === 'locked';
+  const isAvailable = item.status === 'in-progress';
+  const isCompleted = item.status === 'completed';
+  const haloBg = isLocked ? '#f1f5f9' : item.haloColor;
+  const borderColor = isLocked ? '#cbd5e1' : item.haloBorderColor || getBorderColor(item.id);
+  const numberColor = isLocked ? '#94a3b8' : item.numberColor;
+  const iconColor = isLocked ? '#94a3b8' : item.numberColor;
+
+  const [isHovered, setIsHovered] = useState(false);
+  const lockShakeAnim = React.useRef(new Animated.Value(0)).current;
+  const iconTiltAnim = React.useRef(new Animated.Value(0)).current;
+  const checkBounceAnim = React.useRef(new Animated.Value(1)).current;
+  const liveDotAnim = React.useRef(new Animated.Value(1)).current;
+
+  const triggerLockShake = () => {
+    Animated.sequence([
+      Animated.timing(lockShakeAnim, { toValue: -4, duration: 60, useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(lockShakeAnim, { toValue: 4, duration: 60, useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(lockShakeAnim, { toValue: -3, duration: 50, useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(lockShakeAnim, { toValue: 3, duration: 50, useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(lockShakeAnim, { toValue: 0, duration: 50, useNativeDriver: Platform.OS !== 'web' }),
+    ]).start();
+  };
+
+  React.useEffect(() => {
+    if (isAvailable) {
+      const liveLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(liveDotAnim, {
+            toValue: 1.5,
+            duration: 850,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+          Animated.timing(liveDotAnim, {
+            toValue: 1,
+            duration: 850,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+        ])
+      );
+      liveLoop.start();
+      return () => liveLoop.stop();
+    }
+  }, [isAvailable]);
+
+  React.useEffect(() => {
+    if (isHovered) {
+      if (isLocked) {
+        triggerLockShake();
+      } else {
+        Animated.sequence([
+          Animated.timing(iconTiltAnim, { toValue: 1, duration: 150, useNativeDriver: Platform.OS !== 'web' }),
+          Animated.timing(iconTiltAnim, { toValue: -1, duration: 150, useNativeDriver: Platform.OS !== 'web' }),
+          Animated.timing(iconTiltAnim, { toValue: 0, duration: 120, useNativeDriver: Platform.OS !== 'web' }),
+        ]).start();
+
+        if (isCompleted) {
+          Animated.sequence([
+            Animated.timing(checkBounceAnim, { toValue: 1.25, duration: 160, useNativeDriver: Platform.OS !== 'web' }),
+            Animated.timing(checkBounceAnim, { toValue: 1, duration: 140, useNativeDriver: Platform.OS !== 'web' }),
+          ]).start();
+        }
+      }
+    }
+  }, [isHovered]);
+
+  const iconRotate = iconTiltAnim.interpolate({
+    inputRange: [-1, 0, 1],
+    outputRange: ['-7deg', '0deg', '7deg'],
+  });
+
+  const renderNodeContent = (isPressed: boolean) => (
+    <View
+      style={[
+        styles.haloCircleMobile,
+        { backgroundColor: haloBg, borderColor },
+        isAvailable && styles.haloCircleAvailableMobile,
+        isHovered && !isLocked && styles.haloCircleHovered,
+        isAvailable && (Platform.OS === 'web'
+          ? ({ boxShadow: isHovered
+                ? `0 0 0 3.5px #FFFFFF, 0 0 0 6px ${numberColor}, 0 8px 22px ${numberColor}55`
+                : `0 0 0 2.5px #FFFFFF, 0 0 0 4.5px ${numberColor}, 0 4px 16px ${numberColor}45` } as any)
+          : {
+              shadowColor: numberColor,
+              shadowOffset: { width: 0, height: isHovered ? 5 : 3 },
+              shadowOpacity: isHovered ? 0.55 : 0.45,
+              shadowRadius: isHovered ? 12 : 8,
+              elevation: isHovered ? 7 : 5,
+            }),
+        !isLocked && (isPressed
+          ? { transform: [{ translateY: 2 }, { scale: 0.94 }] }
+          : isHovered
+          ? { transform: [{ translateY: -3 }, { scale: 1.05 }] }
+          : { transform: [{ translateY: 0 }, { scale: 1 }] }),
+      ]}
+    >
+      <Animated.View
+        style={[
+          styles.innerIconCircleMobile,
+          isLocked && styles.innerIconCircleLocked,
+          { transform: [{ rotate: iconRotate }] },
+        ]}
+      >
+        <MilestoneIcon type={item.iconType} size={24} customSvg={item.customSvg} color={iconColor} />
+      </Animated.View>
+
+      {item.status === 'completed' && (
+        <Animated.View
+          style={[styles.checkBadgeWrapperMobile, { transform: [{ scale: checkBounceAnim }] }]}
+        >
+          <RoadmapCheckIcon size={18} />
+        </Animated.View>
+      )}
+
+      {isLocked && (
+        <Animated.View
+          style={[
+            styles.lockBadgeWrapperMobile,
+            { transform: [{ translateX: lockShakeAnim }] },
+          ]}
+        >
+          <Feather name="lock" size={11} color="#64748b" />
+        </Animated.View>
+      )}
+    </View>
+  );
 
   return (
     <Pressable
       style={({ pressed }) => [
         styles.mobileMilestoneNode,
         isLeft ? styles.mobileMilestoneNodeLeft : styles.mobileMilestoneNodeRight,
-        pressed && styles.milestoneCardPressed,
+        isLocked && styles.mobileMilestoneNodeLocked,
+        isHovered && !isLocked && styles.milestoneCardHovered,
       ]}
-      onPress={onPress}
+      onPress={() => {
+        if (isLocked) {
+          triggerLockShake();
+        }
+        onPress();
+      }}
+      onHoverIn={() => setIsHovered(true)}
+      onHoverOut={() => setIsHovered(false)}
       accessibilityRole="button"
       accessibilityLabel={`Milestone ${item.number}: ${item.title}`}
     >
-      {/* LEFT ALIGNED: Avatar on Left, Text on Right */}
-      {isLeft ? (
+      {({ pressed }) => (
         <>
-          <View
-            style={[
-              styles.haloCircleMobile,
-              { backgroundColor: item.haloColor, borderColor },
-            ]}
-          >
-            <View style={styles.innerIconCircleMobile}>
-              <MilestoneIcon type={item.iconType} size={24} />
-            </View>
-
-            {item.status === 'completed' && (
-              <View style={styles.checkBadgeWrapperMobile}>
-                <RoadmapCheckIcon size={18} />
-              </View>
-            )}
-          </View>
-
-          <View style={[styles.mobileNodeTextCol, { marginLeft: 12 }]}>
-            <View style={styles.numberBadgeRowMobile}>
-              <Text style={[styles.milestoneNumberMobile, { color: item.numberColor }]}>
-                {item.number}
-              </Text>
-              {item.status === 'completed' && (
-                <View style={styles.completedBadge}>
-                  <Text style={styles.completedBadgeText}>COMPLETED</Text>
-                </View>
+          {/* LEFT ALIGNED: Avatar on Left, Text on Right */}
+          {isLeft ? (
+            <>
+              {isAvailable ? (
+                <ActiveBeaconHalo size={62} color={numberColor} showStartBadge={false}>
+                  {renderNodeContent(pressed)}
+                </ActiveBeaconHalo>
+              ) : (
+                renderNodeContent(pressed)
               )}
-            </View>
-            <Text style={styles.milestoneTitleMobile} numberOfLines={2}>
-              {item.title}
-            </Text>
-            <Text style={styles.milestoneSessionTimeMobile}>
-              {item.sessionTime}
-            </Text>
-          </View>
-        </>
-      ) : (
-        /* RIGHT ALIGNED: Text on Left, Avatar on Right */
-        <>
-          <View style={[styles.mobileNodeTextCol, { marginRight: 12, alignItems: 'flex-end' }]}>
-            <View style={[styles.numberBadgeRowMobile, { justifyContent: 'flex-end' }]}>
-              {item.status === 'completed' && (
-                <View style={styles.completedBadge}>
-                  <Text style={styles.completedBadgeText}>COMPLETED</Text>
+
+              <View style={[styles.mobileNodeTextCol, { marginLeft: 12 }]}>
+                <View style={styles.numberBadgeRowMobile}>
+                  <Text style={[styles.milestoneNumberMobile, { color: numberColor }]}>
+                    {item.number}
+                  </Text>
+                  {item.status === 'completed' ? (
+                    <View style={styles.completedBadge}>
+                      <Text style={styles.completedBadgeText}>COMPLETED</Text>
+                    </View>
+                  ) : isLocked ? (
+                    <View style={styles.lockedBadge}>
+                      <Feather name="lock" size={9} color="#64748b" style={{ marginRight: 2 }} />
+                      <Text style={styles.lockedBadgeText}>LOCKED</Text>
+                    </View>
+                  ) : (
+                    <>
+                      <View style={styles.currentBadge}>
+                        <Animated.View
+                          style={[
+                            styles.currentBadgeDot,
+                            { transform: [{ scale: liveDotAnim }] },
+                          ]}
+                        />
+                        <Text style={styles.currentBadgeText}>CURRENT</Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.xpBadge,
+                          isHovered && { transform: [{ scale: 1.08 }] },
+                        ]}
+                      >
+                        <Feather name="award" size={10} color="#d97706" style={{ marginRight: 2 }} />
+                        <Text style={styles.xpBadgeText}>+{item.xpReward} XP</Text>
+                      </View>
+                    </>
+                  )}
                 </View>
-              )}
-              <Text style={[styles.milestoneNumberMobile, { color: item.numberColor }]}>
-                {item.number}
-              </Text>
-            </View>
-            <Text style={[styles.milestoneTitleMobile, { textAlign: 'right' }]} numberOfLines={2}>
-              {item.title}
-            </Text>
-            <Text style={[styles.milestoneSessionTimeMobile, { textAlign: 'right' }]}>
-              {item.sessionTime}
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.haloCircleMobile,
-              { backgroundColor: item.haloColor, borderColor },
-            ]}
-          >
-            <View style={styles.innerIconCircleMobile}>
-              <MilestoneIcon type={item.iconType} size={24} />
-            </View>
-
-            {item.status === 'completed' && (
-              <View style={styles.checkBadgeWrapperMobile}>
-                <RoadmapCheckIcon size={18} />
+                <Text
+                  style={[
+                    styles.milestoneTitleMobile,
+                    isLocked && styles.milestoneTitleLocked,
+                    isHovered && !isLocked && styles.milestoneTitleHovered,
+                    pressed && !isLocked && { color: '#0040C1' },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {item.title}
+                </Text>
+                <Text
+                  style={[
+                    styles.milestoneSessionTimeMobile,
+                    isLocked && styles.milestoneSessionTimeLocked,
+                  ]}
+                >
+                  {item.sessionTime}
+                </Text>
               </View>
-            )}
-          </View>
+            </>
+          ) : (
+            /* RIGHT ALIGNED: Text on Left, Avatar on Right */
+            <>
+              <View style={[styles.mobileNodeTextCol, { marginRight: 12, alignItems: 'flex-end' }]}>
+                <View style={[styles.numberBadgeRowMobile, { justifyContent: 'flex-end' }]}>
+                  {item.status === 'completed' ? (
+                    <View style={styles.completedBadge}>
+                      <Text style={styles.completedBadgeText}>COMPLETED</Text>
+                    </View>
+                  ) : isLocked ? (
+                    <View style={styles.lockedBadge}>
+                      <Feather name="lock" size={9} color="#64748b" style={{ marginRight: 2 }} />
+                      <Text style={styles.lockedBadgeText}>LOCKED</Text>
+                    </View>
+                  ) : (
+                    <>
+                      <View style={styles.currentBadge}>
+                        <Animated.View
+                          style={[
+                            styles.currentBadgeDot,
+                            { transform: [{ scale: liveDotAnim }] },
+                          ]}
+                        />
+                        <Text style={styles.currentBadgeText}>CURRENT</Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.xpBadge,
+                          isHovered && { transform: [{ scale: 1.08 }] },
+                        ]}
+                      >
+                        <Feather name="award" size={10} color="#d97706" style={{ marginRight: 2 }} />
+                        <Text style={styles.xpBadgeText}>+{item.xpReward} XP</Text>
+                      </View>
+                    </>
+                  )}
+                  <Text style={[styles.milestoneNumberMobile, { color: numberColor }]}>
+                    {item.number}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.milestoneTitleMobile,
+                    { textAlign: 'right' },
+                    isLocked && styles.milestoneTitleLocked,
+                    isHovered && !isLocked && styles.milestoneTitleHovered,
+                    pressed && !isLocked && { color: '#0040C1' },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {item.title}
+                </Text>
+                <Text
+                  style={[
+                    styles.milestoneSessionTimeMobile,
+                    { textAlign: 'right' },
+                    isLocked && styles.milestoneSessionTimeLocked,
+                  ]}
+                >
+                  {item.sessionTime}
+                </Text>
+              </View>
+
+              {isAvailable ? (
+                <ActiveBeaconHalo size={62} color={numberColor} showStartBadge={false}>
+                  {renderNodeContent(pressed)}
+                </ActiveBeaconHalo>
+              ) : (
+                renderNodeContent(pressed)
+              )}
+            </>
+          )}
         </>
       )}
     </Pressable>
@@ -965,7 +1954,10 @@ const styles = StyleSheet.create({
     position: 'relative',
     borderWidth: 1.5,
     ...(Platform.OS === 'web'
-      ? ({ boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.04)' } as any)
+      ? ({
+          boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.04)',
+          transition: 'transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease',
+        } as any)
       : {
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 4 },
@@ -1025,7 +2017,10 @@ const styles = StyleSheet.create({
     position: 'relative',
     borderWidth: 1.5,
     ...(Platform.OS === 'web'
-      ? ({ boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.04)' } as any)
+      ? ({
+          boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.04)',
+          transition: 'transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease',
+        } as any)
       : {
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 4 },
@@ -1060,7 +2055,8 @@ const styles = StyleSheet.create({
   },
   mobileNodeTextCol: {
     flexShrink: 1,
-    maxWidth: 220,
+    flex: 1,
+    maxWidth: 210,
   },
   numberBadgeRowMobile: {
     flexDirection: 'row',
@@ -1080,7 +2076,7 @@ const styles = StyleSheet.create({
     lineHeight: 17.5,
   },
   milestoneSessionTimeMobile: {
-    fontFamily: Fonts.outfit.regular,
+    ...fontStyle('outfit', 'regular'),
     fontSize: 11,
     color: '#64748B',
     marginTop: 2,
@@ -1124,6 +2120,22 @@ const styles = StyleSheet.create({
     color: '#10B981',
     letterSpacing: 0.4,
   },
+  xpBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fffbeb',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#fde68a',
+  },
+  xpBadgeText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 9.5,
+    color: '#b45309',
+    letterSpacing: 0.2,
+  },
   milestoneTitle: {
     ...fontStyle('outfit', 'bold'),
     fontSize: 16.5,
@@ -1137,4 +2149,119 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
+  /* Locked State Visuals */
+  milestoneCardLocked: {
+    opacity: 0.65,
+  },
+  mobileMilestoneNodeLocked: {
+    opacity: 0.65,
+  },
+  innerIconCircleLocked: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+  },
+  lockBadgeWrapperDesktop: {
+    position: 'absolute',
+    bottom: -1,
+    right: -1,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0px 2px 6px rgba(0, 0, 0, 0.08)' } as any)
+      : { elevation: 2 }),
+  },
+  lockBadgeWrapperMobile: {
+    position: 'absolute',
+    bottom: -1,
+    right: -1,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0px 2px 6px rgba(0, 0, 0, 0.08)' } as any)
+      : { elevation: 2 }),
+  },
+  lockedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  lockedBadgeText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 9.5,
+    color: '#64748B',
+    letterSpacing: 0.3,
+  },
+  milestoneTitleLocked: {
+    color: '#64748B',
+  },
+  milestoneSessionTimeLocked: {
+    color: '#94A3B8',
+  },
+
+  /* Active Available Milestone Visuals */
+  haloCircleAvailable: {
+    borderWidth: 2,
+  },
+  haloCircleAvailableMobile: {
+    borderWidth: 2,
+  },
+  currentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    gap: 4,
+  },
+  currentBadgeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#0057FF',
+  },
+  currentBadgeText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 9.5,
+    color: '#0057FF',
+    letterSpacing: 0.4,
+  },
+
+  /* Hover & Spring Transitions */
+  haloCircleHovered: {
+    ...(Platform.OS === 'web'
+      ? ({
+          transition: 'transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease',
+        } as any)
+      : {}),
+  },
+  milestoneCardHovered: {
+    ...(Platform.OS === 'web'
+      ? ({
+          cursor: 'pointer',
+        } as any)
+      : {}),
+  },
+  milestoneTitleHovered: {
+    color: '#0057FF',
+  },
 });

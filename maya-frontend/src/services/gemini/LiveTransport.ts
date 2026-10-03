@@ -27,6 +27,12 @@ export interface RephraseSuggestionPayload {
   highlightWords: string[];
 }
 
+export interface RecordedObjectivePayload {
+  objectiveId: string;
+  status: 'mastered' | 'assisted' | 'struggling';
+  note?: string;
+}
+
 export interface LiveTransportCallbacks {
   onOpen?: () => void;
   onAudioChunk?: (base64Pcm: string) => void;
@@ -36,6 +42,7 @@ export interface LiveTransportCallbacks {
   onInterrupted?: () => void;
   onGrammarCorrection?: (correction: GrammarCorrectionPayload) => void;
   onRephraseSuggestion?: (suggestion: RephraseSuggestionPayload) => void;
+  onObjectiveRecorded?: (payload: RecordedObjectivePayload) => void;
   onConcludeCall?: (reason: string) => void;
   onUsageUpdate?: (tokens: {
     textIn: number;
@@ -62,7 +69,7 @@ export interface LiveTransportConfig {
   resumptionHandle?: string | null;
   greetingPrompt?: string;
   languageMode?: string;
-  sinhalaStyle?: 'balanced' | 'deep_guidance';
+  sinhalaStyle?: 'smart' | 'balanced' | 'deep_guidance';
   generationConfig?: GenerationConfig;
 }
 

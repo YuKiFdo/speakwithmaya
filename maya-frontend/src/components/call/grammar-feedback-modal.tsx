@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Modal,
   View,
@@ -148,7 +148,7 @@ const DEFAULT_FEEDBACK: GrammarFeedbackData = {
   correctedSentence: 'I go to the beach every weekend.',
   highlightedCorrection: 'the',
   whyExplanation: 'Use "the beach" because we usually refer to the beach as a specific place.',
-  autoDismissSeconds: 10,
+  autoDismissSeconds: 8,
 };
 
 export function GrammarFeedbackModal({
@@ -162,38 +162,169 @@ export function GrammarFeedbackModal({
 
   const initialSeconds = feedback.autoDismissSeconds ?? 10;
   const [countdown, setCountdown] = useState(initialSeconds);
+  const [internalVisible, setInternalVisible] = useState(visible);
 
-  // Slide animation for mobile bottom sheet / scale animation for desktop
-  const animValue = useRef(new Animated.Value(0)).current;
+  const isClosingRef = useRef(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Animation drivers
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+  const sheetTranslateY = useRef(new Animated.Value(450)).current;
+  const cardScaleAnim = useRef(new Animated.Value(0.92)).current;
+  const cardOpacityAnim = useRef(new Animated.Value(0)).current;
+
+  // Graceful animated close handler
+  const handleAnimatedClose = useCallback((notifyParent: boolean = true) => {
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    const useNative = Platform.OS !== 'web';
+
+    const closeAnimations: Animated.CompositeAnimation[] = [
+      // 1. Backdrop fade out (200ms)
+      Animated.timing(backdropAnim, {
+        toValue: 0,
+        duration: 200,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+    ];
+
+    if (isDesktop) {
+      // Desktop: Scale down slightly and fade out
+      closeAnimations.push(
+        Animated.timing(cardOpacityAnim, {
+          toValue: 0,
+          duration: 180,
+          easing: Easing.in(Easing.ease),
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(cardScaleAnim, {
+          toValue: 0.93,
+          duration: 200,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: useNative,
+        })
+      );
+    } else {
+      // Mobile: Slide bottom sheet down smoothly off screen
+      closeAnimations.push(
+        Animated.timing(sheetTranslateY, {
+          toValue: 450,
+          duration: 220,
+          easing: Easing.bezier(0.4, 0, 1, 1),
+          useNativeDriver: useNative,
+        })
+      );
+    }
+
+    Animated.parallel(closeAnimations).start(() => {
+      setInternalVisible(false);
+      isClosingRef.current = false;
+      if (notifyParent) {
+        onClose();
+      }
+    });
+  }, [backdropAnim, cardOpacityAnim, cardScaleAnim, sheetTranslateY, isDesktop, onClose]);
+
+  // Handle open / external close triggers
   useEffect(() => {
     if (visible) {
+      isClosingRef.current = false;
+      setInternalVisible(true);
       setCountdown(initialSeconds);
-      Animated.timing(animValue, {
-        toValue: 1,
-        duration: 250,
-        easing: Easing.out(Easing.ease),
-        useNativeDriver: Platform.OS !== 'web',
-      }).start();
 
-      const timer = setInterval(() => {
+      // Reset animation values for smooth entrance
+      backdropAnim.setValue(0);
+      sheetTranslateY.setValue(450);
+      cardScaleAnim.setValue(0.92);
+      cardOpacityAnim.setValue(0);
+
+      const useNative = Platform.OS !== 'web';
+
+      const openAnimations: Animated.CompositeAnimation[] = [
+        Animated.timing(backdropAnim, {
+          toValue: 1,
+          duration: 240,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: useNative,
+        }),
+      ];
+
+      if (isDesktop) {
+        openAnimations.push(
+          Animated.timing(cardOpacityAnim, {
+            toValue: 1,
+            duration: 220,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: useNative,
+          }),
+          Animated.timing(cardScaleAnim, {
+            toValue: 1,
+            duration: 260,
+            easing: Easing.bezier(0.16, 1, 0.3, 1),
+            useNativeDriver: useNative,
+          })
+        );
+      } else {
+        openAnimations.push(
+          Animated.timing(sheetTranslateY, {
+            toValue: 0,
+            duration: 280,
+            easing: Easing.bezier(0.16, 1, 0.3, 1),
+            useNativeDriver: useNative,
+          })
+        );
+      }
+
+      Animated.parallel(openAnimations).start();
+
+      // Start countdown
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = setInterval(() => {
         setCountdown((prev) => {
           if (prev <= 1) {
-            clearInterval(timer);
-            onClose();
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            handleAnimatedClose(true);
             return 0;
           }
           return prev - 1;
         });
       }, 1000);
 
-      return () => clearInterval(timer);
+      return () => {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+      };
     } else {
-      animValue.setValue(0);
+      // If parent turned off visible, run animated close before unmounting
+      if (internalVisible && !isClosingRef.current) {
+        handleAnimatedClose(false);
+      }
     }
-  }, [visible, initialSeconds, onClose, animValue]);
+  }, [
+    visible,
+    initialSeconds,
+    isDesktop,
+    handleAnimatedClose,
+    internalVisible,
+    backdropAnim,
+    sheetTranslateY,
+    cardScaleAnim,
+    cardOpacityAnim,
+  ]);
 
-  if (!visible) return null;
+  if (!internalVisible) return null;
 
   // Render sentence with highlighted token
   const renderSentenceWithHighlight = (
@@ -227,22 +358,12 @@ export function GrammarFeedbackModal({
     );
   };
 
-  const translateY = animValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [300, 0],
-  });
-
-  const scale = animValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.95, 1],
-  });
-
   return (
     <Modal
-      visible={visible}
+      visible={internalVisible}
       transparent
       animationType="none"
-      onRequestClose={onClose}
+      onRequestClose={() => handleAnimatedClose(true)}
     >
       <View
         style={[
@@ -250,19 +371,36 @@ export function GrammarFeedbackModal({
           isDesktop ? styles.desktopOverlay : styles.mobileOverlay,
         ]}
       >
-        {/* Backdrop touch area */}
-        <Pressable style={styles.backdropPressable} onPress={onClose} />
+        {/* Animated Backdrop */}
+        <Animated.View
+          style={[
+            styles.backdrop,
+            { opacity: backdropAnim },
+            Platform.OS === 'web' && ({ willChange: 'opacity' } as any),
+          ]}
+        >
+          <Pressable
+            style={styles.backdropPressable}
+            onPress={() => handleAnimatedClose(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Close feedback backdrop"
+          />
+        </Animated.View>
 
         {/* Modal Card / Bottom Sheet Container */}
         <Animated.View
           style={[
             styles.cardContainer,
             isDesktop ? styles.desktopCard : styles.mobileSheet,
-            {
-              transform: isDesktop
-                ? [{ scale }]
-                : [{ translateY }],
-            },
+            isDesktop
+              ? {
+                  opacity: cardOpacityAnim,
+                  transform: [{ scale: cardScaleAnim }],
+                }
+              : {
+                  transform: [{ translateY: sheetTranslateY }],
+                },
+            Platform.OS === 'web' && ({ willChange: 'transform, opacity' } as any),
           ]}
         >
           {/* Mobile Drag Handle */}
@@ -290,8 +428,11 @@ export function GrammarFeedbackModal({
             </View>
 
             <Pressable
-              style={styles.closeButton}
-              onPress={onClose}
+              style={({ pressed }) => [
+                styles.closeButton,
+                pressed && styles.closeButtonPressed,
+              ]}
+              onPress={() => handleAnimatedClose(true)}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Close feedback"
@@ -393,7 +534,7 @@ export function GrammarFeedbackModal({
               styles.ctaButton,
               pressed && styles.ctaButtonPressed,
             ]}
-            onPress={onClose}
+            onPress={() => handleAnimatedClose(true)}
             accessibilityRole="button"
             accessibilityLabel={`Got it, closing in ${countdown} seconds`}
           >
@@ -412,6 +553,13 @@ export function GrammarFeedbackModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
   },
   backdropPressable: {
@@ -513,6 +661,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#F1F5F9',
     alignItems: 'center',
     justifyContent: 'center',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  closeButtonPressed: {
+    backgroundColor: '#E2E8F0',
+    transform: [{ scale: 0.94 }],
   },
 
   // ── Section Block ──
@@ -673,6 +826,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
     ...Platform.select({
       web: { boxShadow: '0 4px 8px rgba(43, 91, 255, 0.25)' } as any,
       default: {

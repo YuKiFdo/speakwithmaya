@@ -39,6 +39,7 @@ export interface SessionHistoryRecord {
     highlightWords?: string[];
     timestamp?: string;
   }>;
+  roadmap_level_id?: string;
 }
 
 const getBackendBaseUrl = (): string => {
@@ -159,6 +160,7 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
             highlightWords: c.highlight_words || [],
             timestamp: c.created_at,
           })),
+          roadmap_level_id: s.roadmap_level_id,
         }));
       }
     } catch (err) {

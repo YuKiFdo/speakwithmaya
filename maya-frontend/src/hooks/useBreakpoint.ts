@@ -1,4 +1,4 @@
-import { useWindowDimensions } from 'react-native';
+import { useWindowDimensions, Platform } from 'react-native';
 import { Breakpoints } from '@/theme/tokens';
 
 export type BreakpointName = 'phone' | 'tablet' | 'desktop';
@@ -19,7 +19,17 @@ export interface BreakpointState {
  * Desktop: >= 1024 px
  */
 export function useBreakpoint(): BreakpointState {
-  const { width, height } = useWindowDimensions();
+  const dimensions = useWindowDimensions();
+
+  // On Web, use actual window dimensions immediately on mount to prevent mobile view flash
+  const width =
+    Platform.OS === 'web' && typeof window !== 'undefined' && window.innerWidth > 0
+      ? window.innerWidth
+      : dimensions.width;
+  const height =
+    Platform.OS === 'web' && typeof window !== 'undefined' && window.innerHeight > 0
+      ? window.innerHeight
+      : dimensions.height;
 
   const isPhone = width < Breakpoints.tabletMin;
   const isTablet = width >= Breakpoints.tabletMin && width <= Breakpoints.tabletMax;

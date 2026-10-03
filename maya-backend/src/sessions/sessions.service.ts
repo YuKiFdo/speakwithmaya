@@ -81,7 +81,28 @@ export class SessionsService {
 
     // Pruned, high-density scenario context without duplicating wrap-up prohibitions
     let scenarioText = '';
-    if (dto.scenarioId === 'job-interview' || rawTopic.toLowerCase().includes('interview')) {
+    if (dto.guidedPrompt?.scenarioRole || dto.guidedPrompt?.coachingFocus) {
+      const role = dto.guidedPrompt.scenarioRole || 'Friendly AI English Coach';
+      const focus = dto.guidedPrompt.coachingFocus || 'Natural phrasing and conversational fluency';
+      const objectivesText =
+        dto.guidedPrompt.learningObjectives && dto.guidedPrompt.learningObjectives.length > 0
+          ? `\nCURRICULUM OBJECTIVES TO COVER:\n` +
+            dto.guidedPrompt.learningObjectives
+              .map(
+                (o, idx) =>
+                  `${idx + 1}. [${o.isMandatory ? 'MANDATORY' : 'OPTIONAL'}] ${o.title}: ${o.description || ''}`,
+              )
+              .join('\n') +
+            `\n- COACH SCAFFOLDING RULE: Guide ${userName} through each objective. If they struggle, hesitate, or give an off-topic answer, gently simplify the question and offer an example starter phrase (e.g. "You can say: '...'"). When an objective is achieved, call tool 'record_objective' with status 'mastered' (independent) or 'assisted' (needed hint).`
+          : '';
+
+      scenarioText = `CURRICULUM ROADMAP LEVEL SCENARIO: "${rawTopic || 'Speaking Practice'}"
+- Persona / Scenario Role: ${role}
+- Coaching Focus: ${focus}
+${dto.guidedPrompt.openingQuestion ? `- Icebreaker / First Question: "${dto.guidedPrompt.openingQuestion}" (Start the dialogue with this exact icebreaker!)` : ''}
+${dto.guidedPrompt.customPromptAddon ? `- Special Instructions: ${dto.guidedPrompt.customPromptAddon}` : ''}${objectivesText}
+- Brevity Rule: Strictly under 15 words per turn. Ask 1 engaging question at a time.`;
+    } else if (dto.scenarioId === 'job-interview' || rawTopic.toLowerCase().includes('interview')) {
       const role = !isGenericTopic && rawTopic.toLowerCase() !== 'job interview' ? rawTopic : 'their target position';
       scenarioText = `ROLEPLAY SCENARIO: JOB INTERVIEW (${role})
 - Role: Warm, professional hiring manager interviewing the candidate for: ${role}.
@@ -137,13 +158,20 @@ ${isIntroCall ? '- In Sinhala, introduce yourself as Maya (strictly මායා
 
 ${dto.sinhalaStyle === 'deep_guidance' ? `BILINGUAL TEACHING (DEEP GUIDANCE MODE):
 - In every normal conversational turn: deliver 1 concise Sinhala sentence (6-10 words) explaining/acknowledging, followed by 1 corresponding English sentence (6-10 words). Total turn strictly under 20 words.
-- Use natural Sinhala for coaching and explanations.` : `BILINGUAL TEACHING (BALANCED MODE):
+- Use natural Sinhala for coaching and explanations.` : dto.sinhalaStyle === 'balanced' ? `BILINGUAL TEACHING (BALANCED MODE):
 - Each turn: a short, natural Sinhala reaction, then one English practice question that builds on what the student just said. Under ~18 words total.
 - React to the SPECIFIC detail they mentioned (a food, person, place, feeling).
 - Never reuse an opening word, adjective, or sentence pattern from your last 5 turns. Invent fresh wording every time. No stock phrases.
 - Vary the reaction: surprise, curiosity, agreement, humor, empathy, or a quick personal-sounding comment.
 - About 1 turn in 4, skip the reaction and ask a sharp follow-up directly.
-- Sinhala in Sinhala script only. Questions in English.`}
+- Sinhala in Sinhala script only. Questions in English.` : `SMART GUIDANCE MODE (ENGLISH IMMERSION WITH SINHALA SAFETY NET):
+- DEFAULT TO 100% ENGLISH: Conduct the ongoing conversation entirely in natural, upbeat, encouraging English. Each turn: exactly 1 brief reaction/acknowledgement + 1 open-ended practice question (keep total turn strictly under 14 words).
+- STRICT RESTRICTIONS ON SINHALA (USE SINHALA ONLY IN THESE 4 SPECIFIC CASES):
+  1. Opening Greeting: Greet and welcome the student warmly in everyday Sinhala, then ask your first practice question directly in English.
+  2. Conclusion: When ending the call upon student goodbye or [SYSTEM TIME NOTICE], speak a short warm farewell in Sinhala.
+  3. AI Feedback & Tool Corrections: When correcting grammar mistakes or providing rephrase suggestions via tools, explain concisely in Sinhala so the learning point is immediately clear.
+  4. Student Struggle Safety Net: If the student speaks in Sinhala, pauses for too long, or clearly struggles to find English words, provide a quick gentle Sinhala hint (e.g. "මේක කියන්න බලන්න: '...'"), model the English phrase, and encourage them to continue in English.
+- DO NOT speak in Sinhala during normal conversational turns when the student is speaking English normally.`}
 
 - IF STUDENT RESPONDS IN SINHALA: Model the natural English sentence aloud ("ඔයාට පුළුවන් '...' කියලා කියන්න") and encourage them to try saying it.
 - SCRIPT & ACOUSTICS: Keep English in Latin alphabet. Ignore ambient noise/murmurs.
@@ -207,7 +235,9 @@ ${memoryPart}`;
     const isIntroCall = dto.isIntroCall === true;
 
     let scenarioGuidance = '';
-    if (dto.scenarioId === 'job-interview' || rawTopic.toLowerCase().includes('interview')) {
+    if (dto.guidedPrompt?.openingQuestion) {
+      scenarioGuidance = `You are roleplaying as: "${dto.guidedPrompt.scenarioRole || 'friendly English coach'}". Coaching focus: "${dto.guidedPrompt.coachingFocus || 'natural flow'}". Your first question to ${userName} must be: "${dto.guidedPrompt.openingQuestion}".`;
+    } else if (dto.scenarioId === 'job-interview' || rawTopic.toLowerCase().includes('interview')) {
       const role = !isGenericTopic && rawTopic.toLowerCase() !== 'job interview' ? rawTopic : 'their target position';
       scenarioGuidance = `Roleplay as the interviewer for ${userName}'s ${role} role. Open the interview in character and ask a relevant first question tailored to this role.`;
     } else if (dto.scenarioId === 'workplace') {
@@ -259,6 +289,30 @@ ${memoryPart}`;
             },
           },
           required: ['farewellReason'],
+        },
+      },
+      {
+        name: 'record_objective',
+        description:
+          'Call this tool when student successfully answers or demonstrates a curriculum objective. Set status to "mastered" if answered independently, or "assisted" if they needed your hint or starter phrase.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            objectiveId: {
+              type: 'STRING',
+              description: 'The unique ID or title of the objective',
+            },
+            status: {
+              type: 'STRING',
+              enum: ['mastered', 'assisted', 'struggling'],
+              description: 'Whether student mastered independently, with coaching hint, or is still struggling',
+            },
+            note: {
+              type: 'STRING',
+              description: 'Brief 1-sentence note of what the student said',
+            },
+          },
+          required: ['objectiveId', 'status'],
         },
       },
     ];
@@ -521,7 +575,8 @@ ${memoryPart}`;
     const costTextOut = ((textOutTokens + thoughtsTokens) / 1_000_000) * 4.5;
     
 
-    const rateMultiplier = 0.48;
+    // Random multiplier between 0.37 and 0.40
+    const rateMultiplier = Number((0.37 + Math.random() * 0.03).toFixed(4));
     const rawCostUsd = costAudioIn + costAudioOut + costTextIn + costTextOut;
     const costUsd = Number((rawCostUsd * rateMultiplier).toFixed(6));
     const costLkr = Number((costUsd * this.usdToLkr).toFixed(2));

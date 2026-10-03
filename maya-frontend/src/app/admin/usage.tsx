@@ -18,6 +18,8 @@ import Svg, { Path, Defs, LinearGradient, Stop, Line, Circle } from 'react-nativ
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
+import { AdminSidebar } from '@/components/admin/AdminSidebar';
+import { AdminTopBar } from '@/components/admin/AdminTopBar';
 
 interface DailyUsagePoint {
   date: string;
@@ -97,37 +99,17 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    group: 'OVERVIEW',
+    group: 'AI CONFIGURATION',
     items: [
-      { id: 'dashboard', label: 'Dashboard', icon: 'home', route: '/(tabs)/dashboard' },
+      { id: 'roadmap-studio', label: 'Roadmap Studio', icon: 'sliders', route: '/admin/roadmap' },
+      { id: 'ai-usage', label: 'AI Usage & Logs', icon: 'bar-chart-2', route: '/admin/usage' },
     ],
   },
   {
-    group: 'USERS',
+    group: 'STUDENT APP',
     items: [
-      { id: 'users', label: 'Users', icon: 'users' },
-      { id: 'sessions', label: 'Sessions', icon: 'message-square' },
-    ],
-  },
-  {
-    group: 'AI',
-    items: [
-      { id: 'maya-config', label: 'Maya Configuration', icon: 'sliders' },
-      { id: 'ai-usage', label: 'AI Usage & Logs', icon: 'bar-chart-2' },
-    ],
-  },
-  {
-    group: 'MONETIZATION',
-    items: [
-      { id: 'plans', label: 'Plans & Pricing', icon: 'star' },
-      { id: 'transactions', label: 'Transactions', icon: 'credit-card' },
-    ],
-  },
-  {
-    group: 'ENGAGEMENT',
-    items: [
-      { id: 'notifications', label: 'Notifications', icon: 'bell' },
-      { id: 'help', label: 'Help & Support', icon: 'help-circle' },
+      { id: 'dashboard', label: 'Student Dashboard', icon: 'home', route: '/(tabs)/dashboard' },
+      { id: 'student-roadmap', label: 'Student Roadmap View', icon: 'map', route: '/(tabs)/roadmap' },
     ],
   },
 ];
@@ -337,128 +319,29 @@ export default function AdminUsageScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <View style={styles.appShell}>
-        {/* ============================================================ */}
-        {/* 1. SIDEBAR (Left Column)                                     */}
-        {/* ============================================================ */}
-        {sidebarOpen && (
-          <View style={[styles.sidebar, isPhone && styles.sidebarMobile]}>
-            {/* Logo Row */}
-            <View style={styles.sidebarLogoRow}>
-              <View style={styles.logoBadge}>
-                <Ionicons name="mic" size={18} color="#ffffff" />
-              </View>
-              <View style={styles.logoTextCol}>
-                <Text style={styles.brandTitle}>SpeakMaya</Text>
-                <Text style={styles.brandSubtitle}>AI English Coach</Text>
-              </View>
-              {isPhone && (
-                <Pressable onPress={() => setSidebarOpen(false)} style={styles.closeSidebarBtn}>
-                  <Feather name="x" size={20} color="#64748b" />
-                </Pressable>
-              )}
-            </View>
+        {/* 1. Modular Admin Sidebar */}
+        <AdminSidebar
+          activeRoute="/admin/usage"
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
 
-            {/* Navigation Groups */}
-            <ScrollView style={styles.sidebarNavScroll} showsVerticalScrollIndicator={false}>
-              {NAV_GROUPS.map((grp) => (
-                <View key={grp.group} style={styles.navGroup}>
-                  <Text style={styles.navGroupTitle}>{grp.group}</Text>
-                  {grp.items.map((item) => {
-                    const isActive = activeNav === item.label;
-                    return (
-                      <Pressable
-                        key={item.id}
-                        onPress={() => handleNavPress(item)}
-                        style={[styles.navItem, isActive && styles.navItemActive]}
-                      >
-                        <Feather
-                          name={item.icon}
-                          size={16}
-                          color={isActive ? '#0d9488' : '#64748b'}
-                          style={styles.navItemIcon}
-                        />
-                        <Text style={[styles.navItemText, isActive && styles.navItemTextActive]}>
-                          {item.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ))}
-            </ScrollView>
-
-            {/* Bottom Profile Area */}
-            <View style={styles.sidebarFooter}>
-              <View style={styles.userProfileRow}>
-                <View style={styles.userAvatarCircle}>
-                  <Text style={styles.userAvatarText}>SA</Text>
-                </View>
-                <View style={styles.userProfileTextCol}>
-                  <Text style={styles.userName}>Super Admin</Text>
-                  <Text style={styles.userEmail} numberOfLines={1}>
-                    admin@speakmaya.com
-                  </Text>
-                </View>
-              </View>
-
-              <Pressable
-                onPress={() => router.replace('/(tabs)/dashboard')}
-                style={styles.logoutBtn}
-              >
-                <Feather name="log-out" size={15} color="#ef4444" />
-                <Text style={styles.logoutText}>Logout</Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
-
-        {/* ============================================================ */}
-        {/* 2. MAIN CONTENT AREA (Top Bar + Scrollable Body)             */}
-        {/* ============================================================ */}
+        {/* 2. MAIN CONTENT AREA (Top Bar + Scrollable Body) */}
         <View style={styles.mainArea}>
           {/* Top Bar Header */}
-          <View style={styles.topBar}>
-            {/* Left: Hamburger & Breadcrumb */}
-            <View style={styles.topBarLeft}>
-              <Pressable
-                onPress={() => setSidebarOpen((prev) => !prev)}
-                style={styles.hamburgerBtn}
-              >
-                <Feather name="menu" size={20} color="#475569" />
+          <AdminTopBar
+            title="AI Usage & Logs"
+            subtitle="Monitor real-time Gemini AI token consumption, session duration, and LKR costs."
+            badgeText="Live Metrics"
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+            rightElement={
+              <Pressable onPress={fetchUsageData} style={styles.refreshBtn}>
+                <Feather name="refresh-cw" size={14} color="#0d9488" style={{ marginRight: 6 }} />
+                <Text style={styles.refreshBtnText}>Refresh</Text>
               </Pressable>
-              <View style={styles.breadcrumbCol}>
-                <Text style={styles.breadcrumbTitle}>AI Usage & Logs</Text>
-                <Text style={styles.breadcrumbSub}>AI</Text>
-              </View>
-            </View>
-
-            {/* Right: Search, Notifications, Super Admin Pill */}
-            <View style={styles.topBarRight}>
-              {/* Search Pill */}
-              <View style={styles.topSearchPill}>
-                <Feather name="search" size={13} color="#94a3b8" />
-                <Text style={styles.topSearchPlaceholder}>Search...</Text>
-                <View style={styles.shortcutBadge}>
-                  <Text style={styles.shortcutText}>⌘K</Text>
-                </View>
-              </View>
-
-              {/* Notification Bell */}
-              <Pressable style={styles.bellBtn}>
-                <Feather name="bell" size={18} color="#64748b" />
-                <View style={styles.bellBadgeDot} />
-              </Pressable>
-
-              {/* Super Admin User Dropdown Pill */}
-              <View style={styles.topAdminBadge}>
-                <View style={styles.topAdminAvatar}>
-                  <Text style={styles.topAdminAvatarText}>SA</Text>
-                </View>
-                {!isPhone && <Text style={styles.topAdminName}>Super Admin</Text>}
-                <Feather name="chevron-down" size={14} color="#64748b" style={{ marginLeft: 4 }} />
-              </View>
-            </View>
-          </View>
+            }
+          />
 
           {/* Scrollable Page Body */}
           <ScrollView
@@ -893,21 +776,27 @@ export default function AdminUsageScreen() {
                           ) : (
                             <View
                               style={
-                                row.sinhalaStyle === 'deep_guidance'
-                                  ? styles.modeBadgeSinhalaDeep
-                                  : styles.modeBadgeSinhalaBalanced
+                                row.sinhalaStyle === 'smart'
+                                  ? styles.modeBadgeSinhalaSmart
+                                  : row.sinhalaStyle === 'deep_guidance'
+                                    ? styles.modeBadgeSinhalaDeep
+                                    : styles.modeBadgeSinhalaBalanced
                               }
                             >
                               <Text
                                 style={
-                                  row.sinhalaStyle === 'deep_guidance'
-                                    ? styles.modeBadgeSinhalaDeepText
-                                    : styles.modeBadgeSinhalaBalancedText
+                                  row.sinhalaStyle === 'smart'
+                                    ? styles.modeBadgeSinhalaSmartText
+                                    : row.sinhalaStyle === 'deep_guidance'
+                                      ? styles.modeBadgeSinhalaDeepText
+                                      : styles.modeBadgeSinhalaBalancedText
                                 }
                               >
-                                {row.sinhalaStyle === 'deep_guidance'
-                                  ? 'Sinhala (Deep)'
-                                  : 'Sinhala (Balanced)'}
+                                {row.sinhalaStyle === 'smart'
+                                  ? 'Sinhala (Smart)'
+                                  : row.sinhalaStyle === 'deep_guidance'
+                                    ? 'Sinhala (Deep)'
+                                    : 'Sinhala (Balanced)'}
                               </Text>
                             </View>
                           )}
@@ -1055,21 +944,27 @@ export default function AdminUsageScreen() {
                   ) : (
                     <View
                       style={
-                        activeSession?.sinhalaStyle === 'deep_guidance'
-                          ? styles.modeBadgeSinhalaDeep
-                          : styles.modeBadgeSinhalaBalanced
+                        activeSession?.sinhalaStyle === 'smart'
+                          ? styles.modeBadgeSinhalaSmart
+                          : activeSession?.sinhalaStyle === 'deep_guidance'
+                            ? styles.modeBadgeSinhalaDeep
+                            : styles.modeBadgeSinhalaBalanced
                       }
                     >
                       <Text
                         style={
-                          activeSession?.sinhalaStyle === 'deep_guidance'
-                            ? styles.modeBadgeSinhalaDeepText
-                            : styles.modeBadgeSinhalaBalancedText
+                          activeSession?.sinhalaStyle === 'smart'
+                            ? styles.modeBadgeSinhalaSmartText
+                            : activeSession?.sinhalaStyle === 'deep_guidance'
+                              ? styles.modeBadgeSinhalaDeepText
+                              : styles.modeBadgeSinhalaBalancedText
                         }
                       >
-                        {activeSession?.sinhalaStyle === 'deep_guidance'
-                          ? 'Sinhala (Deep Guidance)'
-                          : 'Sinhala (Balanced Coaching)'}
+                        {activeSession?.sinhalaStyle === 'smart'
+                          ? 'Sinhala (Smart Immersion)'
+                          : activeSession?.sinhalaStyle === 'deep_guidance'
+                            ? 'Sinhala (Deep Guidance)'
+                            : 'Sinhala (Balanced Coaching)'}
                       </Text>
                     </View>
                   )}
@@ -1421,6 +1316,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#334155',
   },
+  refreshBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0fdfa',
+    borderWidth: 1,
+    borderColor: '#99f6e4',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  refreshBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12.5,
+    color: '#0d9488',
+  },
 
   // 5 Metric Cards Row
   metricCardsRow: {
@@ -1742,6 +1652,20 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'medium'),
     fontSize: 11,
     color: '#2563eb',
+  },
+  modeBadgeSinhalaSmart: {
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  modeBadgeSinhalaSmartText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#1d4ed8',
   },
   modeBadgeSinhalaBalanced: {
     backgroundColor: '#f0fdf4',

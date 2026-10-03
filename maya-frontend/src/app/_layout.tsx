@@ -1,7 +1,7 @@
 import { DarkTheme, DefaultTheme, ThemeProvider, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
@@ -13,11 +13,13 @@ import {
 } from '@expo-google-fonts/outfit';
 import {
   Inter_400Regular,
-  Inter_500Medium,
+  Inter_500Medium, 
   Inter_600SemiBold,
   Inter_700Bold,
   Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
+import { DesktopLoadingScreen } from '@/components/ui/desktop-loading-screen';
+
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -49,14 +51,24 @@ export default function RootLayout() {
     Inter_800ExtraBold,
   });
 
+  const [isAppReady, setIsAppReady] = useState(false);
+
   useEffect(() => {
-    if (fontsLoaded || fontError) {
+    // Settle DOM layout and prevent any millisecond mobile flicker on web refresh
+    const timer = setTimeout(() => {
+      setIsAppReady(true);
+    }, 850);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if ((fontsLoaded || fontError) && isAppReady) {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [fontsLoaded, fontError]);
+  }, [fontsLoaded, fontError, isAppReady]);
 
-  if (!fontsLoaded && !fontError) {
-    return null;
+  if ((!fontsLoaded && !fontError) || !isAppReady) {
+    return <DesktopLoadingScreen message="Loading SpeakwithMaya..." />;
   }
 
   return (

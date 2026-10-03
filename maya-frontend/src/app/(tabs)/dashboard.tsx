@@ -149,13 +149,13 @@ export default function DashboardScreen() {
   const handleStartSession = (config: CreateSessionConfig) => {
     setCreateSessionVisible(false);
     router.push({
-      pathname: '/onboarding/connecting',
+      pathname: '/onboarding/call',
       params: {
         ...params,
         duration: String(config.durationSeconds),
         durationMinutes: String(config.durationMinutes),
         languageMode: config.languageMode,
-        sinhalaStyle: config.sinhalaStyle || 'balanced',
+        sinhalaStyle: config.sinhalaStyle || 'smart',
         aiSuggestions: String(config.aiSuggestions),
         topic: config.topic,
         scenarioId: config.scenarioId || '',

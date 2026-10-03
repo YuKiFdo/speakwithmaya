@@ -240,6 +240,9 @@ export class ServerLiveTransport implements ILiveTransport {
           this.callbacks.onGrammarCorrection?.(msg.args);
         } else if (msg.name === 'show_rephrase_suggestion') {
           this.callbacks.onRephraseSuggestion?.(msg.args);
+        } else if (msg.name === 'record_objective') {
+          console.log(`[${getLogTimestamp()}] 🎯 [ServerLiveTransport] Objective recorded:`, msg.args);
+          this.callbacks.onObjectiveRecorded?.(msg.args);
         } else if (msg.name === 'conclude_call') {
           this.callbacks.onConcludeCall?.(msg.args?.farewellReason || 'Call completed');
         }

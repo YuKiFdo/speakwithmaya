@@ -27,6 +27,7 @@ import { fontStyle } from '@/theme/fonts';
 import { useLiveCall } from '@/hooks/useLiveCall';
 import { ConnectingView } from '@/components/call/connecting-view';
 import { MicrophonePermissionPopup } from '@/components/call/microphone-permission-popup';
+import { MissionReportModal } from '@/components/roadmap/mission-report-modal';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -40,11 +41,19 @@ export default function CallScreen() {
     duration?: string;
     durationMinutes?: string;
     languageMode?: 'sinhala' | 'english';
-    sinhalaStyle?: 'balanced' | 'deep_guidance';
+    sinhalaStyle?: 'smart' | 'balanced' | 'deep_guidance';
     aiSuggestions?: string;
     topic?: string;
     scenarioId?: string;
     scenarioTitle?: string;
+    roadmapLevelId?: string;
+    scenarioRole?: string;
+    coachingFocus?: string;
+    openingQuestion?: string;
+    customPromptAddon?: string;
+    levelNumber?: string;
+    targetSpeakingShare?: string;
+    learningObjectives?: string;
   }>();
 
   const { isPhone } = useBreakpoint();
@@ -57,10 +66,28 @@ export default function CallScreen() {
   const targetDuration = isNaN(durationSec) ? 300 : durationSec;
   const aiSug = params.aiSuggestions !== 'false';
   const langMode = params.languageMode === 'english' ? 'english' : 'sinhala';
-  const sinhalaStyle = params.sinhalaStyle === 'deep_guidance' ? 'deep_guidance' : 'balanced';
+  const sinhalaStyle =
+    params.sinhalaStyle === 'deep_guidance'
+      ? 'deep_guidance'
+      : params.sinhalaStyle === 'balanced'
+        ? 'balanced'
+        : 'smart';
   const effectiveTopic = params.topic || params.goal || 'General Speaking Practice';
   const effectiveUserName = (params.name || params.userName || '').trim() || 'Tharindu';
   const isIntro = params.isIntroCall === 'true';
+
+  const hasGuidedPrompt = Boolean(
+    params.scenarioRole || params.coachingFocus || params.openingQuestion || params.customPromptAddon,
+  );
+
+  let parsedObjectives = undefined;
+  if (params.learningObjectives) {
+    try {
+      parsedObjectives = JSON.parse(params.learningObjectives);
+    } catch (e) {
+      console.warn('[call.tsx] Could not parse learningObjectives param:', e);
+    }
+  }
 
   // Core Gemini Live Audio & Call Engine
   const liveCall = useLiveCall({
@@ -74,6 +101,19 @@ export default function CallScreen() {
     scenarioId: params.scenarioId,
     userName: effectiveUserName,
     isIntroCall: isIntro,
+    roadmapLevelId: params.roadmapLevelId,
+    levelNumber: params.levelNumber ? parseInt(params.levelNumber, 10) : undefined,
+    levelTitle: params.scenarioTitle || params.topic,
+    targetSpeakingShare: params.targetSpeakingShare ? parseInt(params.targetSpeakingShare, 10) : 40,
+    learningObjectives: parsedObjectives,
+    guidedPrompt: hasGuidedPrompt
+      ? {
+          scenarioRole: params.scenarioRole,
+          coachingFocus: params.coachingFocus,
+          openingQuestion: params.openingQuestion,
+          customPromptAddon: params.customPromptAddon,
+        }
+      : undefined,
   });
 
 
@@ -169,40 +209,17 @@ export default function CallScreen() {
   // Smooth cinematic entrance transition from ConnectingView into active CallScreen
   const [connectingVisible, setConnectingVisible] = useState(true);
   const connectingFadeAnim = useRef(new Animated.Value(1)).current;
-  const connectingScaleAnim = useRef(new Animated.Value(1.0)).current;
-  const callContentFadeAnim = useRef(new Animated.Value(0)).current;
-  const callContentScaleAnim = useRef(new Animated.Value(0.97)).current;
   const hasTransitionedRef = useRef(false);
 
   useEffect(() => {
     if (liveCall.status !== 'connecting' && liveCall.status !== 'idle' && !hasTransitionedRef.current) {
       hasTransitionedRef.current = true;
-      Animated.parallel([
-        Animated.timing(connectingFadeAnim, {
-          toValue: 0,
-          duration: 450,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(connectingScaleAnim, {
-          toValue: 1.04,
-          duration: 450,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(callContentFadeAnim, {
-          toValue: 1,
-          duration: 500,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(callContentScaleAnim, {
-          toValue: 1.0,
-          duration: 500,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]).start(() => {
+      Animated.timing(connectingFadeAnim, {
+        toValue: 0,
+        duration: 320,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start(() => {
         setConnectingVisible(false);
       });
     }
@@ -310,15 +327,7 @@ export default function CallScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Animated.View
-        style={[
-          styles.mainContentWrapper,
-          {
-            opacity: callContentFadeAnim,
-            transform: [{ scale: callContentScaleAnim }],
-          },
-        ]}
-      >
+      <View style={styles.mainContentWrapper}>
         <Pressable style={styles.fullScreenTouch}>
           <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
 
@@ -521,17 +530,15 @@ export default function CallScreen() {
           <AmbientGlow type="purple-bottom" opacity={purpleGlowAnim} />
         </View>
       </Pressable>
-    </Animated.View>
+    </View>
 
-      {/* Smooth connecting overlay with cinematic crossfade and entrance zoom */}
+      {/* Smooth connecting overlay with clean opacity crossfade */}
       {connectingVisible && (
         <Animated.View
           style={[
-            StyleSheet.absoluteFill,
             styles.connectingOverlay,
             {
               opacity: connectingFadeAnim,
-              transform: [{ scale: connectingScaleAnim }],
             },
           ]}
           pointerEvents={liveCall.status === 'connecting' ? 'auto' : 'none'}
@@ -557,6 +564,27 @@ export default function CallScreen() {
         onAllow={liveCall.requestMicrophoneAndStart}
         errorType={liveCall.permissionErrorType}
       />
+
+      {/* Post-Call Mission Report Modal for Curriculum Roadmap Levels */}
+      <MissionReportModal
+        visible={Boolean(liveCall.missionReport)}
+        report={liveCall.missionReport}
+        onContinue={() => {
+          liveCall.setMissionReport(null);
+          router.replace('/(tabs)/roadmap');
+        }}
+        onRetry={() => {
+          liveCall.setMissionReport(null);
+          router.replace({
+            pathname: '/onboarding/call',
+            params: { ...params },
+          });
+        }}
+        onViewHistory={() => {
+          liveCall.setMissionReport(null);
+          router.replace('/history');
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -575,8 +603,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   connectingOverlay: {
-    zIndex: 999,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: '#ffffff',
+    zIndex: 100,
+    ...(Platform.OS === 'web' ? ({ willChange: 'opacity' } as any) : {}),
   },
   fullScreenTouch: {
     flex: 1,

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { WebSocket, RawData } from 'ws';
-import { GoogleGenAI, Modality, ActivityHandling, StartSensitivity, EndSensitivity } from '@google/genai';
+import { GoogleGenAI, Modality, ActivityHandling } from '@google/genai';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { CreateSessionTokenDto } from '../sessions/dto/session.dto.js';
 
@@ -26,6 +26,7 @@ interface ClientSessionState {
   totalAudioOutTokens: number;
   totalTextOutTokens: number;
   totalThoughtsTokens: number;
+  rateMultiplier: number;
 }
 
 @WebSocketGateway({
@@ -59,6 +60,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       totalAudioOutTokens: 0,
       totalTextOutTokens: 0,
       totalThoughtsTokens: 0,
+      rateMultiplier: Number((0.37 + Math.random() * 0.03).toFixed(4)),
     };
     this.clients.set(client, state);
 
@@ -133,11 +135,15 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       case 'audio_stream_end': {
-        // Client signaled mic turned off / paused
+        // Client signaled mic turned off / paused.
+        // With manual VAD (disabled server VAD), audioStreamEnd is NOT used.
+        // Instead, activityEnd marks stream interruption per Gemini docs.
         try {
-          state.geminiSession?.sendRealtimeInput({
-            audioStreamEnd: true,
-          });
+          if (state.userSpeechActive) {
+            state.geminiSession?.sendRealtimeInput({ activityEnd: {} });
+            state.userSpeechActive = false;
+            this.logger.debug('[LiveGateway] 🛑 activityEnd sent (mic off/paused)');
+          }
         } catch (e: any) {
           // ignore
         }
@@ -154,7 +160,14 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!state?.geminiSession || !state.isConnectedToGemini) return;
 
     try {
-      state.userSpeechActive = true;
+      // Manual VAD: signal activityStart on the first chunk of a new speech burst.
+      // Gemini will not process audio until it receives this signal.
+      if (!state.userSpeechActive) {
+        state.userSpeechActive = true;
+        state.geminiSession.sendRealtimeInput({ activityStart: {} });
+        this.logger.debug('[LiveGateway] 🎙️ activityStart sent — user speech burst began');
+      }
+
       // Stream raw 16kHz PCM audio chunk to Gemini
       state.geminiSession.sendRealtimeInput({
         audio: {
@@ -171,36 +184,15 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!state.geminiSession || !state.isConnectedToGemini) return;
 
     try {
-      this.logger.log('[LiveGateway] 🚀 Turn Complete: Flushing trailing silence frames & signaling turnComplete to Gemini Live');
-      state.userSpeechActive = false;
+      this.logger.log('[LiveGateway] 🚀 Turn Complete: Sending activityEnd to Gemini Live');
 
-      // 1. Send 1 brief silence frame (80ms of zeros at 16kHz 16-bit mono) on the server.
-      // This gently bounds the audio packet without overwhelming Gemini's decoder with dead silence.
-      const silenceBytes = Buffer.alloc(1280 * 2, 0); // 80ms chunk of zeros
-      const silenceBase64 = silenceBytes.toString('base64');
-
-      state.geminiSession.sendRealtimeInput({
-        audio: {
-          data: silenceBase64,
-          mimeType: 'audio/pcm;rate=16000',
-        },
-      });
-
-      // 2. Dispatch turn completion to Gemini
-      // Official Gemini Live API: clientContent with turnComplete: true instructs Gemini
-      // to immediately stop waiting for more audio and synthesize response with the accumulated audio!
-      if (typeof state.geminiSession.conn?.send === 'function') {
-        state.geminiSession.conn.send(
-          JSON.stringify({
-            clientContent: {
-              turnComplete: true,
-            },
-          }),
-        );
-      } else if (typeof state.geminiSession.sendClientContent === 'function') {
-        state.geminiSession.sendClientContent({
-          turnComplete: true,
-        });
+      // Manual VAD: signal activityEnd so Gemini immediately processes all accumulated audio.
+      // This replaces the old approach of sending silence frames + clientContent.turnComplete
+      // which only affected text turns and was invisible to Gemini's audio pipeline.
+      if (state.userSpeechActive) {
+        state.geminiSession.sendRealtimeInput({ activityEnd: {} });
+        state.userSpeechActive = false;
+        this.logger.debug('[LiveGateway] 🛑 activityEnd sent — user speech burst ended');
       }
     } catch (err: any) {
       this.logger.error(`[LiveGateway] handleEndOfTurn error: ${err?.message}`);
@@ -247,11 +239,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           realtimeInputConfig: {
             activityHandling: ActivityHandling.NO_INTERRUPTION,
             automaticActivityDetection: {
-              disabled: false,
-              startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
-              endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-              prefixPaddingMs: 200,
-              silenceDurationMs: 600,
+              disabled: true,  // Manual VAD: we control turns via activityStart/activityEnd
             },
           },
           inputAudioTranscription: {
@@ -280,7 +268,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             );
 
             // Dispatch opening turn greeting prompt if fresh session
-            if (greetingPrompt && session && !state.hasDispatchedGreeting) {
+            const isFreshSession = !dto.isReconnect && !dto.memory;
+            if (isFreshSession && greetingPrompt && session && !state.hasDispatchedGreeting) {
               state.hasDispatchedGreeting = true;
               this.logger.log('[LiveGateway] Dispatching opening turn greeting prompt');
               session.sendClientContent({
@@ -292,6 +281,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 ],
                 turnComplete: true,
               });
+            } else if (!isFreshSession && !state.hasDispatchedGreeting) {
+              state.hasDispatchedGreeting = true;
+              this.logger.log('[LiveGateway] Reconnected session / existing memory present -> skipping opening greeting prompt');
             }
           },
 
@@ -325,7 +317,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       state.geminiSession = session;
 
       // If onopen fired before await returned and greeting wasn't sent yet
-      if (greetingPrompt && state.isConnectedToGemini && session && !state.hasDispatchedGreeting) {
+      const isFreshSession = !dto.isReconnect && !dto.memory;
+      if (isFreshSession && greetingPrompt && state.isConnectedToGemini && session && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         this.logger.log('[LiveGateway] Ensuring opening turn greeting prompt is dispatched');
         session.sendClientContent({
@@ -503,6 +496,15 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`,
             },
           });
+        } else if (fc.name === 'record_objective') {
+          functionResponses.push({
+            name: fc.name,
+            id: fc.id,
+            response: {
+              result: 'objective_recorded',
+              instruction: 'Objective recorded. Continue guiding student toward the next objective or topic naturally.',
+            },
+          });
         } else {
           functionResponses.push({
             name: fc.name,
@@ -613,7 +615,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         state.totalTextOutTokens +
         state.totalThoughtsTokens;
 
-      const rateMultiplier = 0.48;
+      const rateMultiplier = state.rateMultiplier || Number((0.37 + Math.random() * 0.03).toFixed(4));
       const rawCostUsd =
         (state.totalTextInTokens / 1_000_000) * 0.75 +
         (state.totalAudioInTokens / 1_000_000) * 3.0 +

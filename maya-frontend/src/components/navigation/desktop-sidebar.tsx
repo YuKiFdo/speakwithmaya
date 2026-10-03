@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, Pressable, useWindowDimensions } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, Pressable, useWindowDimensions, Platform } from 'react-native';
 import { Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
 import {
@@ -21,6 +22,78 @@ export interface DesktopSidebarProps {
   resetsInText?: string;
   onUpgrade?: () => void;
   onGetExtraTime?: () => void;
+}
+
+interface SidebarNavItemProps {
+  label: string;
+  icon: (active: boolean, isHovered: boolean) => React.ReactNode;
+  isActive: boolean;
+  isCompact?: boolean;
+  onPress: () => void;
+  badge?: React.ReactNode;
+  isUpgrade?: boolean;
+}
+
+function SidebarNavItem({
+  label,
+  icon,
+  isActive,
+  isCompact,
+  onPress,
+  badge,
+  isUpgrade,
+}: SidebarNavItemProps) {
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.navItem,
+        isCompact && styles.navItemCompact,
+        isActive && styles.navItemActive,
+        isHovered && !isActive && (isUpgrade ? styles.upgradeItemHovered : styles.navItemHovered),
+        pressed && styles.navItemPressed,
+      ]}
+      onPress={onPress}
+      onHoverIn={() => setIsHovered(true)}
+      onHoverOut={() => setIsHovered(false)}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: isActive }}
+    >
+      {/* Active Left Indicator Notch */}
+      <View
+        style={[
+          styles.activeIndicatorNotch,
+          isActive && styles.activeIndicatorNotchVisible,
+        ]}
+      />
+
+      {/* Icon with micro-scale on active/hover */}
+      <View
+        style={[
+          styles.navIconWrapper,
+          (isActive || isHovered) && styles.navIconWrapperActive,
+        ]}
+      >
+        {icon(isActive, isHovered)}
+      </View>
+
+      <Text
+        style={[
+          styles.navLabel,
+          isCompact && styles.navLabelCompact,
+          isActive && styles.navLabelActive,
+          isHovered && !isActive && styles.navLabelHovered,
+          isUpgrade && styles.upgradeLabel,
+        ]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+
+      {badge}
+    </Pressable>
+  );
 }
 
 export function DesktopSidebar({
@@ -60,137 +133,71 @@ export function DesktopSidebar({
           </Text>
         </View>
 
-        {/* Navigation Menu */}
+        {/* Navigation Menu with Interactive Tab Animations */}
         <View style={[styles.sidebarNav, isCompact && styles.sidebarNavCompact]}>
           {/* Home */}
-          <Pressable
-            style={[
-              styles.navItem,
-              isCompact && styles.navItemCompact,
-              activeTab === 'home' && styles.navItemActive,
-            ]}
+          <SidebarNavItem
+            label="Home"
+            icon={(active) => <HomeNavIcon active={active} size={isCompact ? 18 : 20} />}
+            isActive={activeTab === 'home'}
+            isCompact={isCompact}
             onPress={() => onSelectTab('home')}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeTab === 'home' }}
-          >
-            <HomeNavIcon active={activeTab === 'home'} size={isCompact ? 18 : 20} />
-            <Text
-              style={[
-                styles.navLabel,
-                isCompact && styles.navLabelCompact,
-                activeTab === 'home' && styles.navLabelActive,
-              ]}
-            >
-              Home
-            </Text>
-          </Pressable>
+          />
 
           {/* Roadmap */}
-          <Pressable
-            style={[
-              styles.navItem,
-              isCompact && styles.navItemCompact,
-              activeTab === 'roadmap' && styles.navItemActive,
-            ]}
+          <SidebarNavItem
+            label="Roadmap"
+            icon={(active) => <RoadmapNavIcon active={active} size={isCompact ? 18 : 20} />}
+            isActive={activeTab === 'roadmap'}
+            isCompact={isCompact}
             onPress={() => onSelectTab('roadmap')}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeTab === 'roadmap' }}
-          >
-            <RoadmapNavIcon active={activeTab === 'roadmap'} size={isCompact ? 18 : 20} />
-            <Text
-              style={[
-                styles.navLabel,
-                isCompact && styles.navLabelCompact,
-                activeTab === 'roadmap' && styles.navLabelActive,
-              ]}
-            >
-              Roadmap
-            </Text>
-          </Pressable>
+          />
 
           {/* History */}
-          <Pressable
-            style={[
-              styles.navItem,
-              isCompact && styles.navItemCompact,
-              activeTab === 'history' && styles.navItemActive,
-            ]}
+          <SidebarNavItem
+            label="History"
+            icon={(active) => <HistoryNavIcon active={active} size={isCompact ? 18 : 20} />}
+            isActive={activeTab === 'history'}
+            isCompact={isCompact}
             onPress={() => onSelectTab('history')}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeTab === 'history' }}
-          >
-            <HistoryNavIcon active={activeTab === 'history'} size={isCompact ? 18 : 20} />
-            <Text
-              style={[
-                styles.navLabel,
-                isCompact && styles.navLabelCompact,
-                activeTab === 'history' && styles.navLabelActive,
-              ]}
-            >
-              History
-            </Text>
-          </Pressable>
+          />
 
           {/* Account */}
-          <Pressable
-            style={[
-              styles.navItem,
-              isCompact && styles.navItemCompact,
-              activeTab === 'account' && styles.navItemActive,
-            ]}
+          <SidebarNavItem
+            label="Account"
+            icon={(active) => <AccountNavIcon active={active} size={isCompact ? 18 : 20} />}
+            isActive={activeTab === 'account'}
+            isCompact={isCompact}
             onPress={() => onSelectTab('account')}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeTab === 'account' }}
-          >
-            <AccountNavIcon active={activeTab === 'account'} size={isCompact ? 18 : 20} />
-            <Text
-              style={[
-                styles.navLabel,
-                isCompact && styles.navLabelCompact,
-                activeTab === 'account' && styles.navLabelActive,
-              ]}
-            >
-              Account
-            </Text>
-          </Pressable>
+          />
 
           {/* Upgrade to Pro (hidden when user is Pro) */}
           {!isPro && (
             <>
               <View style={[styles.sidebarDivider, isCompact && styles.sidebarDividerCompact]} />
 
-              <Pressable
-                style={[
-                  styles.upgradeItem,
-                  isCompact && styles.upgradeItemCompact,
-                  activeTab === 'upgrade' && styles.upgradeItemActive,
-                ]}
+              <SidebarNavItem
+                label="Upgrade to Pro"
+                icon={(active, hovered) => (
+                  <CrownNavIcon
+                    color={active ? '#2B5BFF' : hovered ? '#F59E0B' : '#D97706'}
+                    width={isCompact ? 18 : 20}
+                    height={isCompact ? 18 : 20}
+                  />
+                )}
+                isActive={activeTab === 'upgrade'}
+                isCompact={isCompact}
+                isUpgrade
                 onPress={() => {
                   if (onUpgrade) onUpgrade();
                   else onSelectTab('upgrade');
                 }}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: activeTab === 'upgrade' }}
-              >
-                <CrownNavIcon
-                  color={activeTab === 'upgrade' ? '#2B5BFF' : '#D97706'}
-                  width={isCompact ? 18 : 20}
-                  height={isCompact ? 18 : 20}
-                />
-                <Text
-                  style={[
-                    styles.upgradeLabel,
-                    isCompact && styles.upgradeLabelCompact,
-                    activeTab === 'upgrade' && styles.upgradeLabelActive,
-                  ]}
-                  numberOfLines={1}
-                >
-                  Upgrade to Pro
-                </Text>
-                <View style={styles.discountBadge}>
-                  <Text style={styles.discountBadgeText}>20% off</Text>
-                </View>
-              </Pressable>
+                badge={
+                  <View style={styles.discountBadge}>
+                    <Text style={styles.discountBadgeText}>20% off</Text>
+                  </View>
+                }
+              />
             </>
           )}
         </View>
@@ -274,6 +281,33 @@ const styles = StyleSheet.create({
   sidebarNav: {
     gap: 10,
   },
+  activeIndicatorNotch: {
+    position: 'absolute',
+    left: 0,
+    top: '50%',
+    width: 0,
+    height: 22,
+    marginTop: -11,
+    backgroundColor: '#2B5BFF',
+    borderTopRightRadius: 4,
+    borderBottomRightRadius: 4,
+    opacity: 0,
+    ...(Platform.OS === 'web'
+      ? ({ transition: 'all 0.18s cubic-bezier(0.34, 1.56, 0.64, 1)' } as any)
+      : {}),
+  },
+  activeIndicatorNotchVisible: {
+    width: 4,
+    opacity: 1,
+  },
+  navIconWrapper: {
+    ...(Platform.OS === 'web'
+      ? ({ transition: 'transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1)' } as any)
+      : {}),
+  },
+  navIconWrapperActive: {
+    transform: [{ scale: 1.1 }],
+  },
   navItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -285,14 +319,40 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 16,
     borderTopRightRadius: 0,
     borderBottomRightRadius: 0,
+    position: 'relative',
+    ...(Platform.OS === 'web'
+      ? ({
+          cursor: 'pointer',
+          transition: 'all 0.18s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        } as any)
+      : {}),
   },
   navItemActive: {
     backgroundColor: '#EDF3FF',
+    transform: [{ translateX: 2 }],
+  },
+  navItemHovered: {
+    backgroundColor: '#EEF2F6',
+    transform: [{ translateX: 3 }],
+  },
+  upgradeItemHovered: {
+    backgroundColor: '#FEF3C7',
+    transform: [{ translateX: 3 }],
+  },
+  navItemPressed: {
+    transform: [{ scale: 0.98 }],
+    opacity: 0.9,
   },
   navLabel: {
     ...fontStyle('outfit', 'semiBold'),
     fontSize: 15.5,
     color: '#64748b',
+    ...(Platform.OS === 'web'
+      ? ({ transition: 'color 0.15s ease' } as any)
+      : {}),
+  },
+  navLabelHovered: {
+    color: '#0F172A',
   },
   navLabelActive: {
     ...fontStyle('outfit', 'bold'),

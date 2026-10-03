@@ -4,11 +4,12 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { createAudioCapture } from '@/services/audio/AudioCapture';
 import { createAudioPlayer } from '@/services/audio/AudioPlayer';
-import { LiveTransport, ILiveTransport, GrammarCorrectionPayload, RephraseSuggestionPayload } from '@/services/gemini/LiveTransport';
+import { LiveTransport, ILiveTransport, GrammarCorrectionPayload, RephraseSuggestionPayload, RecordedObjectivePayload } from '@/services/gemini/LiveTransport';
 import { ServerLiveTransport } from '@/services/gemini/ServerLiveTransport';
 import { persistSessionRecord, SessionHistoryRecord, getAuthHeaders } from '@/services/supabase';
 import { GrammarFeedbackData } from '@/components/call/grammar-feedback-modal';
 import { MicPermissionErrorType } from '@/components/call/microphone-permission-popup';
+import { MissionReportData, MissionObjectiveResult } from '@/components/roadmap/mission-report-modal';
 import { getLogTimestamp } from '@/utils/time';
 
 // Default to true (Server-to-Server NestJS Gateway) unless explicitly set to 'false'
@@ -50,11 +51,28 @@ interface UseLiveCallOptions {
   level?: string;
   durationSeconds?: number;
   languageMode?: 'sinhala' | 'english';
-  sinhalaStyle?: 'balanced' | 'deep_guidance';
+  sinhalaStyle?: 'smart' | 'balanced' | 'deep_guidance';
   aiSuggestions?: boolean;
   scenarioId?: string;
   userName?: string;
   isIntroCall?: boolean;
+  roadmapLevelId?: string;
+  levelNumber?: number;
+  levelTitle?: string;
+  targetSpeakingShare?: number;
+  learningObjectives?: Array<{
+    id: string;
+    title: string;
+    description?: string;
+    isMandatory?: boolean;
+  }>;
+  onCallCompleted?: (report: MissionReportData) => void;
+  guidedPrompt?: {
+    scenarioRole?: string;
+    coachingFocus?: string;
+    openingQuestion?: string;
+    customPromptAddon?: string;
+  };
 }
 
 export function useLiveCall(options: UseLiveCallOptions = {}) {
@@ -71,6 +89,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const [modelVolume, setModelVolume] = useState<number>(0);
   const [isPermissionModalVisible, setIsPermissionModalVisible] = useState<boolean>(false);
   const [permissionErrorType, setPermissionErrorType] = useState<MicPermissionErrorType>(null);
+  const [missionReport, setMissionReport] = useState<MissionReportData | null>(null);
 
   const captureRef = useRef(createAudioCapture());
   const playerRef = useRef(createAudioPlayer());
@@ -89,6 +108,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     highlightWords: string[];
     timestamp: string;
   }>>([]);
+  const recordedObjectivesRef = useRef<Map<string, { status: 'mastered' | 'assisted' | 'struggling'; note?: string }>>(new Map());
+  const userSpeakingSecondsRef = useRef<number>(0);
+  const mayaSpeakingSecondsRef = useRef<number>(0);
   const statusRef = useRef<CallStatus>('idle');
   const secondsElapsedRef = useRef<number>(0);
   const tokensRef = useRef({ textIn: 0, audioIn: 0, audioOut: 0, textOut: 0, thoughtsTokens: 0, total: 0, costLkr: 0 });
@@ -101,6 +123,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const lastModelVolUpdateRef = useRef<number>(0);
   const lastModelVolValueRef = useRef<number>(0);
   const userChunksSentRef = useRef<number>(0);
+  const rateMultiplierRef = useRef<number>(Number((0.37 + Math.random() * 0.03).toFixed(4)));
   const endCallRef = useRef<((shouldNavigate?: boolean) => Promise<void>) | null>(null);
 
   const reconnectAttemptsRef = useRef<number>(0);
@@ -187,6 +210,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         turnsRef.current = [];
         correctionsRef.current = [];
         reconnectAttemptsRef.current = 0;
+        rateMultiplierRef.current = Number((0.37 + Math.random() * 0.03).toFixed(4));
         resumptionHandleRef.current = null;
         hasFinishedRef.current = false;
       }
@@ -256,6 +280,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
           if (!isBlocked && transportRef.current.isConnected()) {
             userChunksSentRef.current++;
+            // 16kHz PCM 16-bit mono = 32,000 bytes per second
+            userSpeakingSecondsRef.current += (pcm16.byteLength / 32000);
             transportRef.current.sendAudioChunk(pcm16);
           }
         },
@@ -314,6 +340,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         headers: authHeaders,
         body: JSON.stringify({
           sessionId: isReconnect ? sessionIdRef.current : undefined,
+          isReconnect,
           topic: options.topic,
           goal: options.goal,
           level: options.level,
@@ -324,6 +351,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           scenarioId: options.scenarioId,
           userName: options.userName,
           isIntroCall: options.isIntroCall,
+          roadmapLevelId: options.roadmapLevelId,
+          guidedPrompt: options.guidedPrompt,
           memory: rollingMemory || undefined,
         }),
       });
@@ -364,6 +393,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             scenarioId: options.scenarioId,
             userName: options.userName,
             isIntroCall: options.isIntroCall,
+            roadmapLevelId: options.roadmapLevelId,
+            guidedPrompt: options.guidedPrompt,
+            isReconnect,
             memory: rollingMemory || undefined,
           },
         },
@@ -400,6 +432,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
             isModelSpeakingRef.current = true;
             userChunksSentRef.current = 0;
+            // 24kHz PCM 16-bit mono = 48,000 bytes per second
+            const byteLen = Math.floor((base64.length * 3) / 4);
+            mayaSpeakingSecondsRef.current += (byteLen / 48000);
             // While Maya is delivering her farewell speech, keep resetting the safety timeout so it never cuts her off
             if (isConcludingRef.current && concludeTimerRef.current) {
               clearTimeout(concludeTimerRef.current);
@@ -539,7 +574,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               whyExplanation: payload.explanation,
               highlightedMistake: payload.highlightWords?.[0] || '',
               highlightedCorrection: payload.highlightWords?.[0] || '',
-              autoDismissSeconds: 10,
+              autoDismissSeconds: 8,
             });
             setFeedbackVisible(true);
           },
@@ -557,9 +592,16 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               correctedSentence: payload.moreNatural,
               whyExplanation: payload.explanation,
               highlightedCorrection: payload.highlightWords?.[0] || '',
-              autoDismissSeconds: 10,
+              autoDismissSeconds: 8,
             });
             setFeedbackVisible(true);
+          },
+          onObjectiveRecorded: (payload: RecordedObjectivePayload) => {
+            console.log('[useLiveCall] 🎯 Objective recorded by Maya coach:', payload.objectiveId, payload.status, payload.note);
+            recordedObjectivesRef.current.set(payload.objectiveId, {
+              status: payload.status,
+              note: payload.note,
+            });
           },
           onConcludeCall: (reason?: string) => {
             console.log(`[useLiveCall] 🏁 [Call Conclusion] conclude_call triggered (reason: "${reason || 'normal'}") -> waiting for farewell speech to complete`);
@@ -589,7 +631,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             // Text Out / Thoughts (Reasoning tokens): $4.50 per 1M tokens
             // USD to LKR conversion (configurable via EXPO_PUBLIC_USD_TO_LKR)
             const usdToLkr = Number(process.env.EXPO_PUBLIC_USD_TO_LKR) || 308.50;
-            const rateMultiplier = 0.48;
+            // Random multiplier between 0.37 and 0.40 per session
+            const rateMultiplier = rateMultiplierRef.current;
             const rawCostUsd =
               (textIn / 1_000_000) * 0.75 +
               (audioIn / 1_000_000) * 3.0 +
@@ -713,26 +756,141 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       console.warn('[useLiveCall] Error during call teardown:', err);
     }
 
-    // 2. Navigate to history screen only if explicitly requested (not on component unmount / Fast Refresh)
-    if (shouldNavigate) {
+    // 2. Calculate speaking share, curriculum objectives achievement, and multi-factor scores
+    const secs = secondsElapsedRef.current || 1;
+    const userSecs = Math.round(userSpeakingSecondsRef.current);
+    const mayaSecs = Math.round(mayaSpeakingSecondsRef.current);
+    const totalTalkSecs = userSecs + mayaSecs;
+    const userShare = totalTalkSecs > 0 ? Math.min(100, Math.round((userSecs / totalTalkSecs) * 100)) : 0;
+    const targetShare = options.targetSpeakingShare ?? 40;
+
+    const curriculumObjectives = options.learningObjectives || [];
+    const objectivesResult: MissionObjectiveResult[] = curriculumObjectives.map((obj) => {
+      const rec = recordedObjectivesRef.current.get(obj.id);
+      return {
+        id: obj.id,
+        title: obj.title,
+        description: obj.description,
+        isMandatory: obj.isMandatory !== false,
+        status: rec ? rec.status : 'incomplete',
+        note: rec?.note,
+      };
+    });
+
+    let objectiveScore = 100;
+    if (curriculumObjectives.length > 0) {
+      const totalPoints = objectivesResult.reduce((sum, o) => {
+        if (o.status === 'mastered') return sum + 100;
+        if (o.status === 'assisted') return sum + 80;
+        if (o.status === 'struggling') return sum + 40;
+        return sum + 0;
+      }, 0);
+      objectiveScore = Math.round(totalPoints / curriculumObjectives.length);
+    }
+
+    const grammarMistakes = correctionsRef.current.length;
+    const grammarScore = Math.max(50, Math.min(98, 92 - grammarMistakes * 4));
+    const fluencyScore = userShare >= targetShare
+      ? Math.min(95, 80 + Math.round((userShare - targetShare) / 2))
+      : Math.max(55, 75 - (targetShare - userShare));
+    const pronunciationScore = 85;
+
+    const overallScore = Math.min(
+      99,
+      Math.max(45, Math.round(objectiveScore * 0.45 + fluencyScore * 0.35 + grammarScore * 0.20))
+    );
+
+    const mandatoryFailed = objectivesResult.some((o) => o.isMandatory && o.status === 'incomplete');
+    const minPassingScore = 70;
+    const passed = !mandatoryFailed && overallScore >= minPassingScore;
+
+    let passReason = 'All core objectives achieved with great conversational flow!';
+    if (mandatoryFailed) {
+      passReason = 'Complete all mandatory curriculum checkpoints to unlock the next level.';
+    } else if (userShare < targetShare - 10) {
+      passReason = `Try speaking more! Aim for at least ${targetShare}% student speech next time.`;
+    } else if (overallScore < minPassingScore) {
+      passReason = `Score fell below ${minPassingScore}%. Review the corrections below and retry.`;
+    }
+
+    // 3. Handle Roadmap Session vs Free Practice
+    if (options.roadmapLevelId) {
+      const report: MissionReportData = {
+        roadmapLevelId: options.roadmapLevelId,
+        levelNumber: options.levelNumber,
+        levelTitle: options.levelTitle || options.topic,
+        topic: options.topic,
+        durationSeconds: secs,
+        targetDurationSeconds: options.durationSeconds || 300,
+        userSpeakingSeconds: userSecs,
+        userSpeakingShare: userShare,
+        targetSpeakingShare: targetShare,
+        overallScore,
+        fluencyScore,
+        grammarScore,
+        pronunciationScore,
+        passed,
+        passReason,
+        objectives: objectivesResult,
+        corrections: correctionsRef.current.map((c) => ({
+          studentSaid: c.studentSaid,
+          moreNatural: c.moreNatural,
+          explanation: c.explanation,
+        })),
+      };
+
+      setMissionReport(report);
+      if (options.onCallCompleted) {
+        options.onCallCompleted(report);
+      }
+
+      // If passed, immediately cache completed roadmap level ID for instant zero-jump unlock
+      if (passed) {
+        try {
+          if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+            const raw = window.localStorage.getItem('maya_cached_completed_levels');
+            const stored: string[] = raw ? JSON.parse(raw) : [];
+            const candidates = [
+              options.roadmapLevelId,
+              options.levelNumber ? `lvl-${options.levelNumber}` : null,
+              options.levelNumber ? `lvl-0${options.levelNumber}` : null,
+              options.levelNumber ? String(options.levelNumber) : null,
+            ].filter(Boolean) as string[];
+
+            let changed = false;
+            for (const c of candidates) {
+              if (!stored.includes(c)) {
+                stored.push(c);
+                changed = true;
+              }
+            }
+            if (changed) {
+              window.localStorage.setItem('maya_cached_completed_levels', JSON.stringify(stored));
+            }
+          }
+        } catch (e) {
+          console.warn('[useLiveCall] Error caching completed level:', e);
+        }
+      }
+    } else if (shouldNavigate) {
       router.replace('/history');
     }
 
-    // 3. Persist session history asynchronously in background (non-blocking)
-    const secs = secondsElapsedRef.current || 1;
+    // 4. Persist session history asynchronously in background (non-blocking)
     const finalRecord: SessionHistoryRecord = {
       id: sessionIdRef.current,
       start_time: new Date(Date.now() - secs * 1000).toISOString(),
       end_time: new Date().toISOString(),
       duration_seconds: secs,
       topic: options.topic || 'General Practice',
-      overall_score: 85,
-      fluency_score: 84,
-      grammar_score: correctionsRef.current.length > 2 ? 76 : 88,
-      pronunciation_score: 82,
+      overall_score: overallScore,
+      fluency_score: fluencyScore,
+      grammar_score: grammarScore,
+      pronunciation_score: pronunciationScore,
       status: 'completed',
       turns: [...turnsRef.current],
       corrections: [...correctionsRef.current],
+      roadmap_level_id: options.roadmapLevelId,
     };
 
     persistSessionRecord(finalRecord).catch((err) =>
@@ -851,6 +1009,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     resumeAudio,
     interrupt,
     sendTimeWrapupCue,
+    missionReport,
+    setMissionReport,
   };
 }
 

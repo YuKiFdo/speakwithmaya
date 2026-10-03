@@ -19,7 +19,7 @@ import { fontStyle } from '@/theme/fonts';
 
 export type SessionDurationMinutes = 5 | 10 | 15 | 30;
 export type LanguageHelpMode = 'sinhala' | 'english';
-export type SinhalaStyleMode = 'balanced' | 'deep_guidance';
+export type SinhalaStyleMode = 'smart' | 'balanced' | 'deep_guidance';
 
 export interface CreateSessionConfig {
   durationMinutes: SessionDurationMinutes;
@@ -126,7 +126,7 @@ export function CreateSessionModal({
   // Selected State
   const [selectedMinutes, setSelectedMinutes] = useState<SessionDurationMinutes>(5);
   const [languageMode, setLanguageMode] = useState<LanguageHelpMode>('sinhala');
-  const [sinhalaStyle, setSinhalaStyle] = useState<SinhalaStyleMode>('balanced');
+  const [sinhalaStyle, setSinhalaStyle] = useState<SinhalaStyleMode>('smart');
   const [stylePopupVisible, setStylePopupVisible] = useState<boolean>(false);
   const [aiSuggestions, setAiSuggestions] = useState<boolean>(true);
   const [topicText, setTopicText] = useState<string>(initialTopic);
@@ -533,31 +533,35 @@ export function CreateSessionModal({
                     >
                       <View style={styles.styleTriggerLeft}>
                         <Ionicons
-                          name={sinhalaStyle === 'balanced' ? 'sparkles' : 'book-outline'}
+                          name={sinhalaStyle === 'smart' ? 'bulb-outline' : sinhalaStyle === 'balanced' ? 'sparkles' : 'book-outline'}
                           size={13}
                           color="#2563EB"
                         />
                         <Text style={styles.styleTriggerLabel}>
                           Style:{' '}
                           <Text style={styles.styleTriggerValue}>
-                            {sinhalaStyle === 'balanced' ? 'Balanced' : 'Deep Guidance'}
+                            {sinhalaStyle === 'smart' ? 'Smart' : sinhalaStyle === 'balanced' ? 'Balanced' : 'Deep Guidance'}
                           </Text>
                         </Text>
                         <View
                           style={
-                            sinhalaStyle === 'balanced'
-                              ? styles.triggerMiniBadgeRec
-                              : styles.triggerMiniBadgeBeg
+                            sinhalaStyle === 'smart'
+                              ? styles.triggerMiniBadgeSmart
+                              : sinhalaStyle === 'balanced'
+                                ? styles.triggerMiniBadgeRec
+                                : styles.triggerMiniBadgeBeg
                           }
                         >
                           <Text
                             style={
-                              sinhalaStyle === 'balanced'
-                                ? styles.triggerMiniBadgeTextRec
-                                : styles.triggerMiniBadgeTextBeg
+                              sinhalaStyle === 'smart'
+                                ? styles.triggerMiniBadgeTextSmart
+                                : sinhalaStyle === 'balanced'
+                                  ? styles.triggerMiniBadgeTextRec
+                                  : styles.triggerMiniBadgeTextBeg
                             }
                           >
-                            {sinhalaStyle === 'balanced' ? 'Recommended' : 'Beginner'}
+                            {sinhalaStyle === 'smart' ? 'Recommended' : sinhalaStyle === 'balanced' ? 'Guided' : 'Beginner'}
                           </Text>
                         </View>
                       </View>
@@ -751,6 +755,50 @@ export function CreateSessionModal({
 
               {/* Options */}
               <View style={styles.subModalOptionsList}>
+                {/* Smart Option */}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.styleOptionCard,
+                    !isDesktop && styles.styleOptionCardMobile,
+                    sinhalaStyle === 'smart' && styles.styleOptionCardSelected,
+                    pressed && styles.btnPressed,
+                  ]}
+                  onPress={() => setSinhalaStyle('smart')}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: sinhalaStyle === 'smart' }}
+                >
+                  <View
+                    style={[
+                      styles.styleRadioCircle,
+                      !isDesktop && styles.styleRadioCircleMobile,
+                      sinhalaStyle === 'smart' && styles.styleRadioCircleSelected,
+                    ]}
+                  >
+                    {sinhalaStyle === 'smart' && (
+                      <View style={[styles.styleRadioDot, !isDesktop && styles.styleRadioDotMobile]} />
+                    )}
+                  </View>
+                  <View style={styles.styleOptionBody}>
+                    <View style={styles.styleOptionHeaderRow}>
+                      <Text
+                        style={[
+                          styles.styleOptionTitle,
+                          !isDesktop && styles.styleOptionTitleMobile,
+                          sinhalaStyle === 'smart' && styles.styleOptionTitleSelected,
+                        ]}
+                      >
+                        Smart (English Immersion)
+                      </Text>
+                      <View style={styles.smartBadge}>
+                        <Text style={[styles.smartBadgeText, !isDesktop && styles.badgeTextMobile]}>Recommended</Text>
+                      </View>
+                    </View>
+                    <Text style={[styles.styleOptionDesc, !isDesktop && styles.styleOptionDescMobile]}>
+                      Maya speaks purely in English for natural fluency. Sinhala is used only for greeting, farewell, grammar tips, and if you get stuck!
+                    </Text>
+                  </View>
+                </Pressable>
+
                 {/* Balanced Option */}
                 <Pressable
                   style={({ pressed }) => [
@@ -786,7 +834,7 @@ export function CreateSessionModal({
                         Balanced (සිංහල + English)
                       </Text>
                       <View style={styles.recommendedBadge}>
-                        <Text style={[styles.recommendedBadgeText, !isDesktop && styles.badgeTextMobile]}>Recommended</Text>
+                        <Text style={[styles.recommendedBadgeText, !isDesktop && styles.badgeTextMobile]}>Guided</Text>
                       </View>
                     </View>
                     <Text style={[styles.styleOptionDesc, !isDesktop && styles.styleOptionDescMobile]}>
@@ -1400,6 +1448,19 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'bold'),
     color: '#0F172A',
   },
+  triggerMiniBadgeSmart: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  triggerMiniBadgeTextSmart: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 9.5,
+    color: '#15803D',
+  },
   triggerMiniBadgeRec: {
     backgroundColor: '#EFF6FF',
     borderWidth: 1,
@@ -1665,6 +1726,19 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     lineHeight: 16,
     marginTop: 2,
+  },
+  smartBadge: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  smartBadgeText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 11,
+    color: '#15803D',
   },
   recommendedBadge: {
     backgroundColor: '#EFF6FF',

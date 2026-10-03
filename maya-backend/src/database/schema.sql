@@ -95,3 +95,45 @@ CREATE POLICY "Users access own grammar corrections" ON public.grammar_correctio
 
 CREATE POLICY "Users read own usage ledger" ON public.usage_ledger
   FOR SELECT USING (auth.uid() = user_id);
+
+-- 6. Roadmap Levels (Admin Configured Curriculum)
+CREATE TABLE IF NOT EXISTS public.roadmap_levels (
+  id TEXT PRIMARY KEY,
+  level_number INTEGER NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  topic TEXT DEFAULT '',
+  target_duration_minutes INTEGER DEFAULT 5,
+  icon_type TEXT DEFAULT 'chat',
+  number_color TEXT DEFAULT '#0057FF',
+  halo_color TEXT DEFAULT '#EFF6FF',
+  halo_border_color TEXT DEFAULT '#BFDBFE',
+  scenario_id TEXT DEFAULT 'general-practice',
+  guided_prompt JSONB DEFAULT '{}'::jsonb,
+  unlock_rule JSONB DEFAULT '{"type": "score", "minScore": 75}'::jsonb,
+  is_published BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. User Roadmap Progress
+CREATE TABLE IF NOT EXISTS public.user_roadmap_progress (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  level_id TEXT NOT NULL REFERENCES public.roadmap_levels(id) ON DELETE CASCADE,
+  status TEXT CHECK (status IN ('locked', 'unlocked', 'in_progress', 'completed')) DEFAULT 'locked',
+  best_score INTEGER DEFAULT 0,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, level_id)
+);
+
+ALTER TABLE public.roadmap_levels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_roadmap_progress ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Everyone can read published roadmap levels" ON public.roadmap_levels
+  FOR SELECT USING (is_published = true);
+
+CREATE POLICY "Users access own roadmap progress" ON public.user_roadmap_progress
+  FOR ALL USING (auth.uid() = user_id);
+
