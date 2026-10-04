@@ -48,6 +48,8 @@ interface SessionRecord {
   totalTokens: number;
   costUsd: number;
   costLkr: number;
+  costPerMinLkr?: number;
+  costPerMinUsd?: number;
   status: string;
   turnsCount: number;
   correctionsCount: number;
@@ -749,6 +751,7 @@ export default function AdminUsageScreen() {
                     <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Output Tokens</Text>
                     <Text style={[styles.th, { width: 95, textAlign: 'right' }]}>Total</Text>
                     <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Est. Cost</Text>
+                    <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Avg / Min</Text>
                     <Text style={[styles.th, { width: 90, textAlign: 'center' }]}>Status</Text>
                     <Text style={[styles.th, { width: 75, textAlign: 'center' }]}>Action</Text>
                   </View>
@@ -873,6 +876,20 @@ export default function AdminUsageScreen() {
                           {`LKR ${row.costLkr.toFixed(2)}`}
                         </Text>
 
+                        {/* Avg Min Cost */}
+                        <Text
+                          style={[
+                            styles.td,
+                            { width: 105, textAlign: 'right', color: '#0284c7', ...fontStyle('inter', 'semiBold') },
+                          ]}
+                        >
+                          {row.costPerMinLkr !== undefined && row.costPerMinLkr > 0
+                            ? `LKR ${row.costPerMinLkr.toFixed(2)}/m`
+                            : row.durationSeconds > 0
+                              ? `LKR ${(row.costLkr / (row.durationSeconds / 60)).toFixed(2)}/m`
+                              : `LKR ${row.costLkr.toFixed(2)}/m`}
+                        </Text>
+
                         {/* Status */}
                         <View style={[styles.td, { width: 90, alignItems: 'center' }]}>
                           <View style={styles.statusBadge}>
@@ -939,7 +956,13 @@ export default function AdminUsageScreen() {
                   <Text style={[styles.modalStatValue, { color: '#0d9488' }]}>
                     {activeSession ? `LKR ${activeSession.costLkr.toFixed(2)}` : 'LKR 0.00'}
                   </Text>
-                  <Text style={styles.modalStatSub}>${activeSession?.costUsd.toFixed(5)} USD</Text>
+                  <Text style={styles.modalStatSub}>
+                    ${activeSession?.costUsd.toFixed(5)} USD • LKR {(
+                      activeSession?.costPerMinLkr !== undefined && activeSession.costPerMinLkr > 0
+                        ? activeSession.costPerMinLkr
+                        : (activeSession?.costLkr || 0) / Math.max(0.1, (activeSession?.durationSeconds || 60) / 60)
+                    ).toFixed(2)}/min
+                  </Text>
                 </View>
                 <View style={styles.modalStatBox}>
                   <Text style={styles.modalStatLabel}>Total Tokens</Text>
@@ -1597,7 +1620,7 @@ const styles = StyleSheet.create({
 
   // Table Structure
   tableInner: {
-    minWidth: 1100,
+    minWidth: 1220,
   },
   tableHeaderRow: {
     flexDirection: 'row',

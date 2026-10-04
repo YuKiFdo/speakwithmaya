@@ -21,6 +21,8 @@ export interface UsageRecord {
   totalTokens: number;
   costUsd: number;
   costLkr: number;
+  costPerMinLkr: number;
+  costPerMinUsd: number;
   status: 'Success' | 'Failed' | 'In Progress';
   turnsCount: number;
   correctionsCount: number;
@@ -892,6 +894,8 @@ ${memoryPart}`;
               totalTokens,
               costUsd: Number(Number(row.cost_usd || 0).toFixed(6)),
               costLkr: Number(Number(row.cost_lkr || 0).toFixed(2)),
+              costPerMinLkr: durationSec > 0 ? Number(((row.cost_lkr || 0) / (durationSec / 60)).toFixed(2)) : 0,
+              costPerMinUsd: durationSec > 0 ? Number(((row.cost_usd || 0) / (durationSec / 60)).toFixed(4)) : 0,
               status: ((sess?.status === 'completed' ? 'Success' : 'In Progress') as 'Success' | 'In Progress'),
               turnsCount: turnsCountMap.get(row.session_id) || 0,
               correctionsCount: correctionsCountMap.get(row.session_id) || 0,
@@ -1152,6 +1156,8 @@ ${memoryPart}`;
       totalTokens: ledger?.total_tokens || 0,
       costUsd: Number(Number(ledger?.cost_usd || 0).toFixed(6)),
       costLkr: Number(Number(ledger?.cost_lkr || 0).toFixed(2)),
+      costPerMinLkr: durationSec > 0 ? Number(((ledger?.cost_lkr || 0) / (durationSec / 60)).toFixed(2)) : 0,
+      costPerMinUsd: durationSec > 0 ? Number(((ledger?.cost_usd || 0) / (durationSec / 60)).toFixed(4)) : 0,
       status: sess.status === 'completed' ? 'Success' : 'In Progress',
       turnsCount: mappedTurns.length,
       correctionsCount: mappedCorrections.length,
