@@ -40,6 +40,74 @@ export interface UsageRecord {
 const THARINDU_USER_ID = 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
 const THARINDU_NAME = 'Tharindu Fernando';
 
+const SRI_LANKA_TZ = 'Asia/Colombo';
+
+export function formatSriLankaDisplayDate(dateInput: Date | string | number): string {
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: SRI_LANKA_TZ,
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = formatter.formatToParts(d);
+  const month = parts.find((p) => p.type === 'month')?.value || '';
+  const day = parts.find((p) => p.type === 'day')?.value || '';
+  const hour = parts.find((p) => p.type === 'hour')?.value || '00';
+  const minute = parts.find((p) => p.type === 'minute')?.value || '00';
+  const second = parts.find((p) => p.type === 'second')?.value || '00';
+  return `${month} ${day}, ${hour}:${minute}:${second}`;
+}
+
+export function getSriLankaDateKey(dateInput: Date | string | number = new Date()): string {
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: SRI_LANKA_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+export function getSriLankaDateLabel(dateInput: Date | string | number): string {
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: SRI_LANKA_TZ,
+    month: 'short',
+    day: 'numeric',
+  }).format(d);
+}
+
+export function getSriLankaHour(dateInput: Date | string | number): number {
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return 0;
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: SRI_LANKA_TZ,
+    hour: 'numeric',
+    hourCycle: 'h23',
+  });
+  return parseInt(formatter.format(d), 10);
+}
+
+export function getSriLankaMonthYear(dateInput: Date | string | number = new Date()): { month: number; year: number } {
+  const d = new Date(dateInput);
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: SRI_LANKA_TZ,
+    month: 'numeric',
+    year: 'numeric',
+  });
+  const parts = formatter.formatToParts(d);
+  const month = parseInt(parts.find((p) => p.type === 'month')?.value || '1', 10) - 1;
+  const year = parseInt(parts.find((p) => p.type === 'year')?.value || '2026', 10);
+  return { month, year };
+}
+
 @Injectable()
 export class SessionsService {
   private readonly logger = new Logger(SessionsService.name);
@@ -798,8 +866,7 @@ ${memoryPart}`;
             const durationFormatted = `${(durationSec / 60).toFixed(1)}m`;
 
             const dateObj = new Date(row.created_at || sess?.created_at || Date.now());
-            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const displayDate = `${months[dateObj.getMonth()]} ${String(dateObj.getDate()).padStart(2, '0')}, ${dateObj.toTimeString().split(' ')[0]}`;
+            const displayDate = formatSriLankaDisplayDate(dateObj);
 
             const inputTokens = (row.audio_in_tokens || 0) + (row.text_in_tokens || 0);
             const outputTokens = (row.audio_out_tokens || 0) + (row.text_out_tokens || 0);
@@ -874,8 +941,7 @@ ${memoryPart}`;
       slots.forEach((s) => slotMap.set(s, { tokens: 0, minutes: 0, costLkr: 0, costUsd: 0, sessionsCount: 0 }));
 
       filtered.forEach((rec) => {
-        const d = new Date(rec.timestamp);
-        const hour = d.getHours();
+        const hour = getSriLankaHour(rec.timestamp);
         let closest = slots[0];
         let minDiff = 24;
         slots.forEach((s) => {
@@ -902,12 +968,11 @@ ${memoryPart}`;
       });
     } else if (range === '7d') {
       const days: { key: string; label: string }[] = [];
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       for (let i = 6; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        const label = i === 0 ? 'Today' : `${months[d.getMonth()]} ${d.getDate()}`;
+        const key = getSriLankaDateKey(d);
+        const label = i === 0 ? 'Today' : getSriLankaDateLabel(d);
         days.push({ key, label });
       }
 
@@ -915,8 +980,7 @@ ${memoryPart}`;
       days.forEach((d) => dayMap.set(d.key, { tokens: 0, minutes: 0, costLkr: 0, costUsd: 0, sessionsCount: 0 }));
 
       filtered.forEach((rec) => {
-        const d = new Date(rec.timestamp);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const key = getSriLankaDateKey(rec.timestamp);
         if (dayMap.has(key)) {
           const current = dayMap.get(key)!;
           current.tokens += rec.totalTokens;
@@ -936,12 +1000,11 @@ ${memoryPart}`;
     } else {
       // 30 days real data aggregation (last 30 days ending today)
       const days: { key: string; label: string }[] = [];
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       for (let i = 29; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        const label = i === 0 ? 'Today' : `${months[d.getMonth()]} ${d.getDate()}`;
+        const key = getSriLankaDateKey(d);
+        const label = i === 0 ? 'Today' : getSriLankaDateLabel(d);
         days.push({ key, label });
       }
 
@@ -949,8 +1012,7 @@ ${memoryPart}`;
       days.forEach((d) => dayMap.set(d.key, { tokens: 0, minutes: 0, costLkr: 0, costUsd: 0, sessionsCount: 0 }));
 
       filtered.forEach((rec) => {
-        const d = new Date(rec.timestamp);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const key = getSriLankaDateKey(rec.timestamp);
         if (dayMap.has(key)) {
           const current = dayMap.get(key)!;
           current.tokens += rec.totalTokens;
@@ -970,19 +1032,16 @@ ${memoryPart}`;
     }
 
     // Summary statistics from real data
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const thisMonth = now.getMonth();
-    const thisYear = now.getFullYear();
+    const todayStr = getSriLankaDateKey(new Date());
+    const { month: thisMonth, year: thisYear } = getSriLankaMonthYear(new Date());
 
     const todaySessions = filtered.filter((r) => {
-      const d = new Date(r.timestamp);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` === todayStr;
+      return getSriLankaDateKey(r.timestamp) === todayStr;
     });
 
     const monthSessions = filtered.filter((r) => {
-      const d = new Date(r.timestamp);
-      return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+      const { month: m, year: y } = getSriLankaMonthYear(r.timestamp);
+      return m === thisMonth && y === thisYear;
     });
 
     const minutesToday = Math.round(todaySessions.reduce((sum, r) => sum + r.durationSeconds, 0) / 60);
@@ -1060,8 +1119,7 @@ ${memoryPart}`;
     const durationFormatted = `${(durationSec / 60).toFixed(1)}m`;
 
     const dateObj = new Date(sess.created_at || Date.now());
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const displayDate = `${months[dateObj.getMonth()]} ${String(dateObj.getDate()).padStart(2, '0')}, ${dateObj.toTimeString().split(' ')[0]}`;
+    const displayDate = formatSriLankaDisplayDate(dateObj);
 
     const mappedTurns = (turns || []).map((t: any) => ({
       role: t.role,
