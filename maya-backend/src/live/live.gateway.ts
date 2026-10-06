@@ -7,6 +7,7 @@ import {
 import { Logger } from '@nestjs/common';
 import { WebSocket, RawData } from 'ws';
 import { GoogleGenAI, Modality, ActivityHandling } from '@google/genai';
+import OpusScript from 'opusscript';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { CreateSessionTokenDto } from '../sessions/dto/session.dto.js';
 
@@ -16,6 +17,9 @@ interface ClientSessionState {
   dto?: CreateSessionTokenDto;
   sessionId: string;
   isConnectedToGemini: boolean;
+  supportsOpus: boolean;
+  opusEncoder?: any;
+  opusPcmBuffer: Buffer;
   userSpeechActive: boolean;
   hasDispatchedGreeting: boolean;
   userTranscriptAccumulator: string;
@@ -80,6 +84,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       ws: client,
       sessionId,
       isConnectedToGemini: false,
+      supportsOpus: false,
+      opusEncoder: null,
+      opusPcmBuffer: Buffer.alloc(0),
       userSpeechActive: false,
       hasDispatchedGreeting: false,
       userTranscriptAccumulator: '',
@@ -199,6 +206,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           this.logger.debug(`[${sid}] Error closing Gemini session: ${e?.message}`);
         }
       }
+
+      state.opusEncoder = null;
+      state.opusPcmBuffer = Buffer.alloc(0);
     }
     this.clients.delete(client);
   }
@@ -322,6 +332,22 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           state.sessionId = message.options.sessionId;
         }
         state.dto = dto;
+
+        // Initialize Opus compression if client supports it (cuts downlink bandwidth from 512kbps to ~24kbps)
+        state.supportsOpus = !!message.supportsOpus;
+        if (state.supportsOpus) {
+          try {
+            state.opusEncoder = new OpusScript(24000, 1, OpusScript.Application.VOIP);
+            state.opusPcmBuffer = Buffer.alloc(0);
+            this.logger.log(`[${state.sessionId}] 🚀 Opus compression enabled for client downlink (24kHz VOIP, 20ms frames)`);
+            this.addSessionLog(state, 'opus_enabled');
+          } catch (e: any) {
+            this.logger.warn(`[${state.sessionId}] Failed to initialize Opus encoder: ${e?.message}`);
+            state.opusEncoder = null;
+            state.supportsOpus = false;
+          }
+        }
+
         this.addSessionLog(state, 'start_session', `topic=${dto.topic || 'General'} lang=${dto.languageMode || 'english'}`);
         await this.initGeminiLiveSession(client, state, dto);
         break;
@@ -644,12 +670,36 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             }));
           }
 
-          // Send base64 audio chunk to client (with backpressure check)
-          this.safeSendToClient(state, JSON.stringify({
-            type: 'audio',
-            data: part.inlineData.data,
-            mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000',
-          }));
+          if (state.supportsOpus && state.opusEncoder) {
+            // Compress 24kHz PCM to Opus (20ms frames = 480 samples = 960 bytes)
+            const chunkBuffer = Buffer.from(part.inlineData.data, 'base64');
+            state.opusPcmBuffer = Buffer.concat([state.opusPcmBuffer, chunkBuffer]);
+
+            const FRAME_SAMPLES = 480;
+            const FRAME_BYTES = FRAME_SAMPLES * 2; // 960 bytes
+
+            while (state.opusPcmBuffer.length >= FRAME_BYTES) {
+              const frame = state.opusPcmBuffer.subarray(0, FRAME_BYTES);
+              state.opusPcmBuffer = state.opusPcmBuffer.subarray(FRAME_BYTES);
+
+              try {
+                const opusPacket = state.opusEncoder.encode(frame, FRAME_SAMPLES);
+                this.safeSendToClient(state, JSON.stringify({
+                  type: 'audio_opus',
+                  data: opusPacket.toString('base64'),
+                }));
+              } catch (err: any) {
+                this.logger.warn(`[${state.sessionId}] Opus encode error: ${err?.message}`);
+              }
+            }
+          } else {
+            // Send legacy raw base64 PCM audio chunk to client (with backpressure check)
+            this.safeSendToClient(state, JSON.stringify({
+              type: 'audio',
+              data: part.inlineData.data,
+              mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000',
+            }));
+          }
         }
       }
     }
@@ -696,6 +746,23 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // 3. Turn Complete
     if (serverContent?.turnComplete) {
+      // Flush residual Opus buffer if partial frame was pending
+      if (state.supportsOpus && state.opusEncoder && state.opusPcmBuffer.length > 0) {
+        const FRAME_SAMPLES = 480;
+        const FRAME_BYTES = FRAME_SAMPLES * 2;
+        const padded = Buffer.alloc(FRAME_BYTES);
+        state.opusPcmBuffer.copy(padded, 0);
+        state.opusPcmBuffer = Buffer.alloc(0);
+
+        try {
+          const opusPacket = state.opusEncoder.encode(padded, FRAME_SAMPLES);
+          this.safeSendToClient(state, JSON.stringify({
+            type: 'audio_opus',
+            data: opusPacket.toString('base64'),
+          }));
+        } catch {}
+      }
+
       const userText = (state.userTranscriptAccumulator || state.lastStudentTranscript).trim();
       const modelText = state.modelTranscriptAccumulator.trim();
 

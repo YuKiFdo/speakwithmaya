@@ -86,6 +86,33 @@ export class WebAudioPlayer implements IAudioPlayer {
     }
   }
 
+  playFloat32Chunk(samples: Float32Array): void {
+    if (!this.playerNode || !samples || samples.length === 0) return;
+
+    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume().catch(() => {});
+    }
+
+    try {
+      // Calculate RMS for visual volume feedback
+      let sumSquares = 0;
+      for (let i = 0; i < samples.length; i++) {
+        sumSquares += samples[i] * samples[i];
+      }
+      const rms = Math.sqrt(sumSquares / samples.length);
+      const volume = Math.min(1, Math.max(0, rms * 5.0));
+      this.callbacks?.onVolumeChange?.(volume);
+
+      // Post Float32 samples directly to PCM player AudioWorklet
+      this.playerNode.port.postMessage({
+        type: 'audio',
+        samples,
+      });
+    } catch (err: any) {
+      this.callbacks?.onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
   flush(): void {
     this.playerNode?.port.postMessage({ type: 'flush' });
   }

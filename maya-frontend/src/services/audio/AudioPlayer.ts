@@ -12,6 +12,7 @@ export interface IAudioPlayer {
   init(callbacks?: AudioPlayerCallbacks): Promise<void>;
   resume(): Promise<void>;
   playPcmChunk(base64Pcm: string): void;
+  playFloat32Chunk?(samples: Float32Array): void;
   flush(): void;
   clear(): void; // Barge-in instant interruption
   stop(): Promise<void>;

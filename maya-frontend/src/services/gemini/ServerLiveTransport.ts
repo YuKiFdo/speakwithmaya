@@ -20,6 +20,7 @@ export class ServerLiveTransport implements ILiveTransport {
   private clientSessionId: string = '';
   private lastPingAt: number = 0;
   private backpressureWarningCount: number = 0;
+  private opusDecoder: any = null;
 
   constructor(backendWsUrl?: string) {
     if (backendWsUrl) {
@@ -39,6 +40,16 @@ export class ServerLiveTransport implements ILiveTransport {
     this.config = config;
     this.callbacks = callbacks;
     this.clientSessionId = `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+    // Initialize Opus decoder (VOIP mode, 24kHz, mono) for low-bandwidth 3G streaming
+    try {
+      const OpusScript = require('opusscript');
+      this.opusDecoder = new OpusScript(24000, 1, OpusScript.Application.VOIP, { wasm: false });
+      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport:${this.clientSessionId}] Opus decoder initialized (93% bandwidth compression)`);
+    } catch (e: any) {
+      console.warn(`[${getLogTimestamp()}] ⚠️ [ServerLiveTransport:${this.clientSessionId}] Opus decoder unavailable, using raw PCM fallback:`, e?.message);
+      this.opusDecoder = null;
+    }
 
     try {
       let targetWsUrl = this.backendWsUrl;
@@ -63,10 +74,12 @@ export class ServerLiveTransport implements ILiveTransport {
         console.log(`[${getLogTimestamp()}] ✅ [ServerLiveTransport:${this.clientSessionId}] WebSocket connected to NestJS Backend`);
         this.isOpen = true;
 
-        // Start Gemini session on backend
+        // Start Gemini session on backend with Opus capability flag
         this.ws?.send(
           JSON.stringify({
             type: 'start_session',
+            sessionId: config.sessionOptions?.sessionId || this.clientSessionId,
+            supportsOpus: !!this.opusDecoder,
             options: config.sessionOptions || {
               languageMode: config.languageMode,
               sinhalaStyle: config.sinhalaStyle,
@@ -200,6 +213,12 @@ export class ServerLiveTransport implements ILiveTransport {
       }
       this.ws = null;
     }
+    if (this.opusDecoder) {
+      try {
+        this.opusDecoder.delete?.();
+      } catch {}
+      this.opusDecoder = null;
+    }
   }
 
   isConnected(): boolean {
@@ -224,6 +243,29 @@ export class ServerLiveTransport implements ILiveTransport {
         // Downlink backpressure warning from NestJS gateway
         console.warn(`[${getLogTimestamp()}] ⚠️ [ServerLiveTransport:${this.clientSessionId}] Server slow connection warning (${msg.bufferedKB}KB buffered)`);
         this.callbacks.onSlowConnection?.(msg.bufferedKB);
+        break;
+
+      case 'audio_opus':
+        if (msg.data && this.opusDecoder) {
+          this.hasModelSpokenThisTurn = true;
+          try {
+            const binaryString = atob(msg.data);
+            const len = binaryString.length;
+            const opusBytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+              opusBytes[i] = binaryString.charCodeAt(i);
+            }
+            const decodedPcm = this.opusDecoder.decode(opusBytes);
+            const int16 = new Int16Array(decodedPcm.buffer, decodedPcm.byteOffset, decodedPcm.length / 2);
+            const float32 = new Float32Array(int16.length);
+            for (let i = 0; i < int16.length; i++) {
+              float32[i] = int16[i] < 0 ? int16[i] / 32768.0 : int16[i] / 32767.0;
+            }
+            this.callbacks.onAudioSamples?.(float32);
+          } catch (err: any) {
+            console.error(`[ServerLiveTransport:${this.clientSessionId}] Opus decode error:`, err);
+          }
+        }
         break;
 
       case 'audio':

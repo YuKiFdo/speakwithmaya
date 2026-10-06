@@ -279,6 +279,22 @@ export class NativeAudioPlayer implements IAudioPlayer {
     this.callbacks?.onVolumeChange?.(0);
   }
 
+  playFloat32Chunk(samples: Float32Array): void {
+    if (!samples || samples.length === 0) return;
+    const len = samples.length;
+    const int16 = new Int16Array(len);
+    for (let i = 0; i < len; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      int16[i] = s < 0 ? s * 32768 : s * 32767;
+    }
+    const bytes = new Uint8Array(int16.buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    this.playPcmChunk(btoa(binary));
+  }
+
   async stop(): Promise<void> {
     this.clear();
   }

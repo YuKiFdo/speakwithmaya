@@ -36,6 +36,7 @@ export interface RecordedObjectivePayload {
 export interface LiveTransportCallbacks {
   onOpen?: () => void;
   onAudioChunk?: (base64Pcm: string) => void;
+  onAudioSamples?: (samples: Float32Array) => void;
   onOutputTranscript?: (text: string) => void;
   onInputTranscript?: (text: string) => void;
   onTurnComplete?: () => void;

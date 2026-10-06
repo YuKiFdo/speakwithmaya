@@ -442,6 +442,38 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             console.warn('[useLiveCall] Received server GoAway notice (timeLeft:', timeLeft, '). Proactively preparing reconnect...');
             scheduleReconnect();
           },
+          onAudioSamples: (samples: Float32Array) => {
+            if (hasFinishedRef.current || statusRef.current === 'ended') return;
+            isModelSpeakingRef.current = true;
+            userChunksSentRef.current = 0;
+
+            // Turn response arrived: clear timer and record turnaround latency
+            if (responseTimeoutRef.current) {
+              clearTimeout(responseTimeoutRef.current);
+              responseTimeoutRef.current = null;
+            }
+            if (turnStartTimeRef.current) {
+              const elapsed = Date.now() - turnStartTimeRef.current;
+              setLastTurnLatencyMs(elapsed);
+              turnStartTimeRef.current = null;
+            }
+            setIsSlowResponse(false);
+
+            // 24kHz Float32 mono = 24,000 samples per second
+            mayaSpeakingSecondsRef.current += (samples.length / 24000);
+
+            if (isConcludingRef.current && concludeTimerRef.current) {
+              clearTimeout(concludeTimerRef.current);
+              concludeTimerRef.current = setTimeout(() => {
+                if (isConcludingRef.current) {
+                  console.log('[useLiveCall] Safety timeout reached for conclude_call -> ending call');
+                  isConcludingRef.current = false;
+                  endCallRef.current?.(true);
+                }
+              }, 12000);
+            }
+            playerRef.current.playFloat32Chunk?.(samples);
+          },
           onAudioChunk: (base64) => {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
             isModelSpeakingRef.current = true;
