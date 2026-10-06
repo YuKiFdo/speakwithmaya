@@ -942,7 +942,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
               result: 'objective_recorded',
               allObjectivesCompleted: isAllCompleted,
               instruction: isAllCompleted
-                ? 'All milestones for this level are now complete! In your current spoken turn: warmly congratulate the student ("You\'ve completed all our milestones for this level!"), and ask if they would like to conclude and save their progress, or speak goodbye.'
+                ? 'All milestones for this level are now complete! In your current spoken turn: warmly congratulate the student in natural spoken everyday Sinhala (කතා කරන බසින්, strictly NOT bookish/written Sinhala): "නියමයි! ඔයා මේ ලෙවල් එකේ milestones ඔක්කොම complete කළා! දැන් අපි call එක wrap up කරලා save කරමුද?", and if they agree or say goodbye, call conclude_call.'
                 : 'Objective successfully recorded. In your current spoken turn: give ONE brief validation sentence (under 5 words), and immediately ask a question pivoting to the next objective. Keep your total turn under 15 words.',
             },
           });
