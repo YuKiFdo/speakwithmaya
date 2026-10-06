@@ -202,8 +202,8 @@ export class SessionsService {
   1. DO NOT ask endless small-talk sub-questions on the final topic!
   2. ALWAYS congratulate ${userName} in warm, natural spoken everyday Sinhala (කතා කරන බසින්, strictly NO stiff bookish/written grammar like 'ඔබ සම්පූර්ණ කර ඇත'):
      Say: "නියමයි ${userName}! ඔයා මේ ලෙවල් එකේ milestones ඔක්කොම complete කළා!"
-  3. Then ask if they would like to conclude and save: "දැන් අපි call එක wrap up කරලා save කරමුද?"
-  4. If they agree to finish, say thank you, or speak goodbye, immediately call tool 'conclude_call'.
+  3. If ${userName} has NOT yet asked to wrap up: ask "දැන් අපි call එක wrap up කරලා save කරමුද?"
+  4. If ${userName} ALREADY asked to wrap up, leave, or says goodbye (e.g. "Can we wrap up now?"): DO NOT ask a question! Speak a warm closing farewell: "නියමයි ${userName}! ඔයාගේ progress එක save වුණා. සුභ දවසක්! Goodbye!" and immediately call tool 'conclude_call'.
 - SCAFFOLDING RULE: If they struggle or hesitate, gently simplify and give a starter phrase ("You can say: '...'"). Then record as status "assisted" and move forward.
 - EXACT OBJECTIVE ID: When calling tool 'record_objective', ALWAYS use the exact objective ID specified above.`;
       }

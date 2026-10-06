@@ -184,6 +184,21 @@ const DEFAULT_LEVELS: RoadmapLevelEntity[] = [
       coachingFocus: 'Prepositions of place and descriptive sensory adjectives (bustling, peaceful, scenic).',
       openingQuestion: 'Which town or city do you live in? What is your favorite thing about living there?',
     },
+    learningObjectives: [
+      {
+        id: 'obj_hometown_places',
+        title: 'Describe Your Hometown & Landmarks',
+        description: 'Mentions town or city name and at least one local landmark, nature spot, or attraction',
+        isMandatory: true,
+      },
+      {
+        id: 'obj_sensory_adjectives',
+        title: 'Sensory & Descriptive Words',
+        description: 'Uses descriptive words for the area (peaceful, bustling, scenic, green)',
+        isMandatory: true,
+      },
+    ],
+    targetSpeakingShare: 40,
     unlockRule: {
       type: 'score',
       minScore: 75,
@@ -211,6 +226,21 @@ const DEFAULT_LEVELS: RoadmapLevelEntity[] = [
       coachingFocus: 'Polite small talk questions, active listening reactions, and continuing conversations smoothly.',
       openingQuestion: 'Nice to meet you! Are you also attending the workshop today? What department are you in?',
     },
+    learningObjectives: [
+      {
+        id: 'obj_public_greeting',
+        title: 'Polite Professional Greeting',
+        description: 'Introduces themselves politely in a public or event setting',
+        isMandatory: true,
+      },
+      {
+        id: 'obj_smalltalk_exchange',
+        title: 'Small Talk & Follow-up Question',
+        description: 'Shares role or interest and asks Maya a polite conversational follow-up',
+        isMandatory: true,
+      },
+    ],
+    targetSpeakingShare: 40,
     unlockRule: {
       type: 'score',
       minScore: 75,
@@ -238,6 +268,21 @@ const DEFAULT_LEVELS: RoadmapLevelEntity[] = [
       coachingFocus: 'Directional phrases: "turn right at the corner", "straight ahead", "opposite to", "next to".',
       openingQuestion: 'Excuse me, you look like you are searching for somewhere. Where are you trying to get to?',
     },
+    learningObjectives: [
+      {
+        id: 'obj_ask_destination',
+        title: 'Ask for a Location / Landmark',
+        description: 'Asks how to get to a specific place clearly and politely',
+        isMandatory: true,
+      },
+      {
+        id: 'obj_directional_prepositions',
+        title: 'Understand & Confirm Directions',
+        description: 'Uses or confirms directional phrases (straight ahead, turn left, opposite)',
+        isMandatory: true,
+      },
+    ],
+    targetSpeakingShare: 40,
     unlockRule: {
       type: 'score',
       minScore: 75,

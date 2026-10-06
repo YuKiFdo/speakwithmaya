@@ -887,8 +887,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             response: {
               result: 'concluding',
               instruction: isSinhala
-                ? 'Student is leaving. Speak a warm, friendly farewell aloud in Sinhala and English (under 15 words) wishing them well, then stop speaking.'
-                : 'Student is leaving. Speak a short warm friendly farewell aloud (under 15 words) wishing them well, then stop speaking.',
+                ? 'Student is leaving or call is ending now. In natural spoken everyday Sinhala, speak a warm closing farewell statement (never ask a question): "නියමයි! ඔයාගේ progress එක save වුණා. සුභ දවසක්! Goodbye!" then stop speaking.'
+                : 'Student is leaving or call is ending now. Speak a short warm friendly farewell statement (never ask a question) wishing them well, then stop speaking.',
             },
           });
         } else if (fc.name === 'show_grammar_correction') {
