@@ -368,6 +368,32 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         break;
       }
 
+      case 'time_wrapup_cue': {
+        this.logger.log(`[${state.sessionId}] ⏰ Time wrapup cue received from client`);
+        this.addSessionLog(state, 'time_wrapup_cue');
+        if (state.geminiSession && state.isConnectedToGemini) {
+          try {
+            state.geminiSession.sendClientContent({
+              turns: [
+                {
+                  role: 'user',
+                  parts: [
+                    {
+                      text: `[SYSTEM TIME NOTICE: The practice session time has ended. Right now, in your current spoken turn, wrap up naturally: share 1 short encouraging observation about how they did today, thank them warmly, speak your cheerful goodbye aloud, and then call conclude_call. Keep your farewell brief (under 15 seconds of speech).]`,
+                    },
+                  ],
+                },
+              ],
+              turnComplete: true,
+            });
+            this.logger.log(`[${state.sessionId}] ⏰ Time wrapup cue dispatched to Gemini Live`);
+          } catch (e: any) {
+            this.logger.warn(`[${state.sessionId}] Failed to send time wrapup cue to Gemini: ${e?.message}`);
+          }
+        }
+        break;
+      }
+
       default:
         this.logger.warn(`[${state.sessionId}] Unknown message type: ${message.type}`);
     }
