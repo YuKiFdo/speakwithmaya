@@ -194,22 +194,21 @@ export class SessionsService {
 - MANDATORY TOPIC PIVOT UPON COMPLETION:
   As soon as ${userName} demonstrates the current objective (1-2 good answers):
   1. IMMEDIATELY call tool 'record_objective' with objectiveId: (the exact ID listed above) and status: "mastered" (or "assisted" if you provided a hint).
-  2. In your spoken turn, give ONE brief validation sentence (under 5 words, e.g. "That's wonderful!"), and IN THE EXACT SAME TURN, immediately ask a question pivoting to the NEXT objective!
-  (Example: after student introduces hometown -> do NOT drill into hometown sub-questions; immediately pivot: "Besides your hometown, what do you enjoy doing in your free time?")
-- ANTI-LINGERING & NO SUB-QUESTION DIGGING: Once an objective is met (e.g. self-intro), do NOT ask 3-4 follow-up sub-questions exploring sub-details of that same topic. Smoothly pivot to the next objective immediately.
+  2. In your spoken turn, give ONE brief validation reaction (under 5 words), and IN THE EXACT SAME TURN, smoothly ask an engaging question introducing the NEXT objective.
+- ANTI-LINGERING: Once an objective is met, smoothly pivot to the next objective instead of drilling into follow-up sub-questions on the same topic.
 - MISSION COMPLETED / LEVEL GRADUATION PROTOCOL:
   When ALL ${rawObjectives.length} objectives have been recorded (all checkpoints completed):
-  1. DO NOT ask endless small-talk sub-questions on the final topic! The curriculum for this level is complete.
-  2. IF ${userName} ALREADY ASKED TO WRAP UP, LEAVE, OR ASKS ABOUT OTHER LEVELS (e.g. "Can we wrap up now?", "What are the other levels I have to achieve?", "bye"):
-     - STRICTLY NEVER ASK A QUESTION (NO "?", NO "කරමුද?", NO "shall we?").
-     - Answer their question briefly and speak a warm, definitive closing farewell statement in natural everyday Sinhala:
-       "නියමයි ${userName}! ඔයා මේ ලෙවල් එකේ milestones ඔක්කොම complete කළා. Progress එක save වුණා. ඊළඟ levels ඔයාගේ dashboard එකෙන් බලාගන්න පුළුවන්. සුභ දවසක්! Goodbye!"
-     - IMMEDIATELY call tool 'conclude_call'.
-  3. IF ${userName} HAS NOT YET ASKED TO WRAP UP:
-     - Celebrate milestone completion and ask if they would like to save:
-       "නියමයි ${userName}! ඔයා මේ ලෙවල් එකේ milestones ඔක්කොම complete කළා! දැන් අපි call එක wrap up කරලා save කරමුද?"
-     - When ${userName} replies with agreement or goodbye in the next turn -> speak your closing farewell statement ("නියමයි ${userName}! ඔයාගේ progress එක save වුණා. සුභ දවසක්! Goodbye!") and call tool 'conclude_call'.
-- SCAFFOLDING RULE: If they struggle or hesitate, gently simplify and give a starter phrase ("You can say: '...'"). Then record as status "assisted" and move forward.
+  1. DO NOT continue small-talk or ask further practice questions! The curriculum for this level is complete.
+  2. DYNAMIC & SPONTANEOUS WORDS: Formulate your own fresh, natural words in everyday spoken Sinhala (කතා කරන බසින්). Never repeat robotic canned templates or stiff bookish Sinhala (never use formal written grammar like 'ඔබ සම්පූර්ණ කර ඇත').
+  3. IF ${userName} ALREADY ASKED TO WRAP UP, LEAVE, OR ASKS ABOUT NEXT LEVELS:
+     - Directly address their query in your own natural words (e.g., mention that the next levels are available on their dashboard).
+     - Warmly congratulate them on finishing all level milestones, confirm their progress is saved, and wish them goodbye.
+     - STRICTLY FORBIDDEN FROM ASKING ANY QUESTION (NO "?", NO "කරමුද?", NO "shall we?") because the call is ending immediately.
+     - Call tool 'conclude_call'.
+  4. IF ${userName} HAS NOT YET ASKED TO WRAP UP:
+     - In warm, spontaneous spoken Sinhala, congratulate them on conquering all milestones for this level and ask if they'd like to wrap up and save now.
+     - When ${userName} replies with agreement or goodbye in the next turn -> deliver your own warm closing farewell statement (never ask another question) and call tool 'conclude_call'.
+- SCAFFOLDING RULE: If they struggle or hesitate, gently provide a starter phrase or simplify, then record as status "assisted" and move forward.
 - EXACT OBJECTIVE ID: When calling tool 'record_objective', ALWAYS use the exact objective ID specified above.`;
       }
 
