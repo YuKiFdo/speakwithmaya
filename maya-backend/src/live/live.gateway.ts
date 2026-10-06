@@ -54,8 +54,8 @@ interface ClientSessionState {
 const BACKPRESSURE_THRESHOLD = 128 * 1024;
 // Heartbeat interval: 10 seconds
 const HEARTBEAT_INTERVAL_MS = 10_000;
-// Heartbeat timeout: 15 seconds without pong
-const HEARTBEAT_TIMEOUT_MS = 15_000;
+// Heartbeat timeout: 30 seconds without pong (gives 3 heartbeat cycles grace period)
+const HEARTBEAT_TIMEOUT_MS = 30_000;
 
 @WebSocketGateway({
   path: '/live-session',
@@ -124,8 +124,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           // Text / JSON message
           const text = data.toString('utf-8');
 
-          // Handle pong responses from client heartbeat
-          if (text === 'pong') {
+          // Handle pong responses from client heartbeat (plain text, JSON, or whitespace)
+          const trimmed = text.trim();
+          if (trimmed === 'pong' || trimmed === '{"type":"pong"}' || trimmed.includes('"pong"')) {
             state.lastPongAt = Date.now();
             return;
           }
@@ -219,7 +220,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.addSessionLog(state, 'heartbeat_timeout', `${Math.round(sincePong / 1000)}s since last pong`);
         this.stopHeartbeat(state);
         try {
-          client.close(1001, 'Heartbeat timeout');
+          client.close(4008, 'Heartbeat timeout');
         } catch {}
         return;
       }
@@ -391,6 +392,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             this.logger.warn(`[${state.sessionId}] Failed to send time wrapup cue to Gemini: ${e?.message}`);
           }
         }
+        break;
+      }
+
+      case 'pong': {
+        state.lastPongAt = Date.now();
         break;
       }
 

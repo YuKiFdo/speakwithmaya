@@ -710,18 +710,17 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               responseTimeoutRef.current = null;
             }
             setIsSlowResponse(false);
-            const isCleanExit =
-              code === 1000 ||
-              code === 1001 ||
+            const isIntentionalExit =
               hasFinishedRef.current ||
               isConcludingRef.current ||
               statusRef.current === 'ended';
 
-            if (isCleanExit) {
-              console.log('[useLiveCall] Session closed cleanly (code:', code, '), no reconnect scheduled');
+            if (isIntentionalExit) {
+              console.log('[useLiveCall] Session closed intentionally (code:', code, '), no reconnect scheduled');
               setStatus('ended');
               statusRef.current = 'ended';
             } else {
+              console.log(`[useLiveCall] ⚠️ Connection dropped unexpectedly (code: ${code}, reason: ${reason || 'none'}) -> entering reconnecting state`);
               if (code === 1011 || code === 1007) {
                 resumptionHandleRef.current = null;
               }
