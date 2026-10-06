@@ -148,6 +148,13 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const hasFinishedRef = useRef<boolean>(false);
   const hasSentMidSessionCueRef = useRef<boolean>(false);
 
+  const optionsRef = useRef(options);
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
+
+  const sessionStartTimeRef = useRef<number | null>(null);
+
   // Sync state to refs for non-stale callback access
   useEffect(() => {
     statusRef.current = status;
@@ -162,43 +169,55 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   }, [tokens]);
 
   // Session seconds counter & mid-session curriculum pacing check
+  // Uses monotonic wall-clock delta to prevent drift or freeze on component re-render
   useEffect(() => {
     if (status === 'listening' || status === 'speaking') {
+      if (sessionStartTimeRef.current === null) {
+        sessionStartTimeRef.current = Date.now() - secondsElapsedRef.current * 1000;
+      }
       if (!timerRef.current) {
         timerRef.current = setInterval(() => {
-          setSecondsElapsed((prev) => {
-            const next = prev + 1;
-            secondsElapsedRef.current = next;
+          if (sessionStartTimeRef.current === null) return;
+          const actualElapsed = Math.floor((Date.now() - sessionStartTimeRef.current) / 1000);
+          secondsElapsedRef.current = actualElapsed;
+          setSecondsElapsed(actualElapsed);
 
-            // Check curriculum pacing: at ~45% of session time, if second objective hasn't started, prompt Maya
-            const totalDuration = options.durationSeconds || 300;
-            const curriculumObjectives = options.learningObjectives || options.guidedPrompt?.learningObjectives || [];
-            if (
-              !hasSentMidSessionCueRef.current &&
-              curriculumObjectives.length > 1 &&
-              next >= Math.floor(totalDuration * 0.45)
-            ) {
-              const secondObj = curriculumObjectives[1];
-              const isRecorded =
-                recordedObjectivesRef.current.has(secondObj.id) ||
-                recordedObjectivesRef.current.has(secondObj.id.toLowerCase()) ||
-                recordedObjectivesRef.current.has(secondObj.title) ||
-                recordedObjectivesRef.current.has(secondObj.title.toLowerCase());
-              if (!isRecorded) {
-                hasSentMidSessionCueRef.current = true;
-                console.log(`[useLiveCall] 🎯 Mid-session threshold reached (${next}s/${totalDuration}s) -> sending curriculum pacing cue for "${secondObj.title}"`);
-                transportRef.current.sendCurriculumPacingCue?.(secondObj.id, secondObj.title);
-              }
+          // Check curriculum pacing: at ~45% of session time, if second objective hasn't started, prompt Maya
+          const totalDuration = optionsRef.current.durationSeconds || 300;
+          const curriculumObjectives =
+            optionsRef.current.learningObjectives ||
+            optionsRef.current.guidedPrompt?.learningObjectives ||
+            [];
+          if (
+            !hasSentMidSessionCueRef.current &&
+            curriculumObjectives.length > 1 &&
+            actualElapsed >= Math.floor(totalDuration * 0.45)
+          ) {
+            const secondObj = curriculumObjectives[1];
+            const isRecorded =
+              recordedObjectivesRef.current.has(secondObj.id) ||
+              recordedObjectivesRef.current.has(secondObj.id.toLowerCase()) ||
+              recordedObjectivesRef.current.has(secondObj.title) ||
+              recordedObjectivesRef.current.has(secondObj.title.toLowerCase());
+            if (!isRecorded) {
+              hasSentMidSessionCueRef.current = true;
+              console.log(
+                `[useLiveCall] 🎯 Mid-session threshold reached (${actualElapsed}s/${totalDuration}s) -> sending curriculum pacing cue for "${secondObj.title}"`,
+              );
+              transportRef.current.sendCurriculumPacingCue?.(secondObj.id, secondObj.title);
             }
-
-            return next;
-          });
-        }, 1000);
+          }
+        }, 500);
       }
     } else {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
+      }
+      if (status === 'reconnecting') {
+        // preserve sessionStartTimeRef so reconnection does not lose elapsed time
+      } else if (status === 'ended' || status === 'idle') {
+        sessionStartTimeRef.current = null;
       }
     }
     return () => {
@@ -207,7 +226,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         timerRef.current = null;
       }
     };
-  }, [status, options.durationSeconds, options.learningObjectives, options.guidedPrompt]);
+  }, [status]);
 
   const scheduleReconnect = useCallback(() => {
     if (statusRef.current === 'ended' || isConcludingRef.current) return;
@@ -254,6 +273,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         hasFinishedRef.current = false;
         hasSpokenFarewellRef.current = false;
         hasSentMidSessionCueRef.current = false;
+        sessionStartTimeRef.current = null;
+        secondsElapsedRef.current = 0;
+        setSecondsElapsed(0);
       }
 
       // 1. Initialize Audio Player

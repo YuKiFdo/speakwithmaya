@@ -58,6 +58,7 @@ interface ClientSessionState {
     detail?: string;
   }>;
   connectedAt: number;
+  recordedObjectives?: Set<string>;
 }
 
 // Backpressure threshold: 128 KB of queued data
@@ -121,6 +122,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Session diagnostics
       sessionLog: [{ ts: Date.now(), event: 'client_connected' }],
       connectedAt: Date.now(),
+      recordedObjectives: new Set<string>(),
     };
     this.clients.set(client, state);
 
@@ -920,13 +922,28 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             },
           });
         } else if (fc.name === 'record_objective') {
+          const rawId = String(args.objectiveId || '').trim();
+          if (rawId && state.recordedObjectives) {
+            state.recordedObjectives.add(rawId.toLowerCase());
+          }
+
+          const allObjectives =
+            state.dto?.guidedPrompt?.learningObjectives ||
+            state.dto?.learningObjectives ||
+            [];
+          const isAllCompleted =
+            allObjectives.length > 0 &&
+            Boolean(state.recordedObjectives && state.recordedObjectives.size >= allObjectives.length);
+
           functionResponses.push({
             name: fc.name,
             id: fc.id,
             response: {
               result: 'objective_recorded',
-              instruction:
-                'Objective successfully recorded. In your current spoken turn: give ONE brief validation sentence (under 5 words), and immediately ask a question pivoting to the next objective. Keep your total turn under 15 words.',
+              allObjectivesCompleted: isAllCompleted,
+              instruction: isAllCompleted
+                ? 'All milestones for this level are now complete! In your current spoken turn: warmly congratulate the student ("You\'ve completed all our milestones for this level!"), and ask if they would like to conclude and save their progress, or speak goodbye.'
+                : 'Objective successfully recorded. In your current spoken turn: give ONE brief validation sentence (under 5 words), and immediately ask a question pivoting to the next objective. Keep your total turn under 15 words.',
             },
           });
         } else {
