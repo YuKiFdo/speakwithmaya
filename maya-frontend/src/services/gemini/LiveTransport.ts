@@ -84,6 +84,7 @@ export interface ILiveTransport {
   sendAudioStreamEnd(): void;
   sendInterrupted(): void;
   sendTimeWrapupCue(remainingSeconds?: number): void;
+  sendCurriculumPacingCue?(nextObjectiveId?: string, nextObjectiveTitle?: string): void;
   close(): void;
   isConnected(): boolean;
   getResumptionHandle?(): string | null;
@@ -375,6 +376,31 @@ export class LiveTransport implements ILiveTransport {
       },
     };
     this.ws.send(JSON.stringify(cueMsg));
+  }
+
+  sendCurriculumPacingCue(nextObjectiveId?: string, nextObjectiveTitle?: string) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    console.log(`[${getLogTimestamp()}] 🎯 [LiveTransport] Dispatching curriculum pacing cue for "${nextObjectiveTitle || 'next objective'}" (${nextObjectiveId || ''})`);
+    const cueMsg = {
+      clientContent: {
+        turns: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: `[PEDAGOGICAL PACING NOTICE: Session time is progressing. In your very next spoken turn, smoothly conclude the previous topic in under 5 words, and ask an engaging question pivoting directly to the next objective: "${nextObjectiveTitle || 'the next objective'}" (ID: "${nextObjectiveId || ''}"). Remember to keep your turn strictly under 15 words.]`,
+              },
+            ],
+          },
+        ],
+        turnComplete: true,
+      },
+    };
+    try {
+      this.ws.send(JSON.stringify(cueMsg));
+    } catch (e) {
+      console.warn('[LiveTransport] Failed to send curriculum pacing cue:', e);
+    }
   }
 
   private sendContinueAfterFeedback() {

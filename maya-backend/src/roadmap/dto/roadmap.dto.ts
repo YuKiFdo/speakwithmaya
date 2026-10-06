@@ -54,6 +54,10 @@ export class LearningObjectiveDto {
   @IsOptional()
   @IsBoolean()
   isMandatory?: boolean = true;
+
+  @IsOptional()
+  @IsNumber()
+  targetTurns?: number;
 }
 
 export class CreateRoadmapLevelDto {

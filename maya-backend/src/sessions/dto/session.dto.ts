@@ -25,6 +25,7 @@ export class GuidedPromptDto {
     title: string;
     description?: string;
     isMandatory?: boolean;
+    targetTurns?: number;
   }>;
 }
 
@@ -85,6 +86,16 @@ export class CreateSessionTokenDto {
 
   @IsOptional()
   isReconnect?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  learningObjectives?: Array<{
+    id: string;
+    title: string;
+    description?: string;
+    isMandatory?: boolean;
+    targetTurns?: number;
+  }>;
 
   @IsOptional()
   @ValidateNested()

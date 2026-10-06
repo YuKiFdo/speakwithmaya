@@ -87,6 +87,7 @@ export interface LearningObjective {
   title: string;
   description?: string;
   isMandatory?: boolean;
+  targetTurns?: number;
 }
 
 export interface GuidedPrompt {
@@ -1422,6 +1423,33 @@ export default function AdminRoadmapScreen() {
                         💡 Tip: Maya speaks this opening line to kick off the session and invites the student to respond.
                       </Text>
                     </View>
+
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={styles.subFieldLabel}>3. Coaching Focus & Pedagogical Emphasis</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        value={formCoachingFocus}
+                        onChangeText={setFormCoachingFocus}
+                        placeholder="e.g. Descriptive adjectives for personality and appearance (kind, hardworking, energetic)."
+                      />
+                      <Text style={styles.fieldHelper}>
+                        Directs Maya's feedback toward specific vocabulary, grammar patterns, or fluency goals.
+                      </Text>
+                    </View>
+
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={styles.subFieldLabel}>4. Custom System Prompt Add-on (Optional)</Text>
+                      <TextInput
+                        style={[styles.textInput, { minHeight: 60 }]}
+                        value={formCustomPromptAddon}
+                        onChangeText={setFormCustomPromptAddon}
+                        placeholder="e.g. If the student hesitates, offer a gentle starter phrase. Praise their confidence."
+                        multiline
+                      />
+                      <Text style={styles.fieldHelper}>
+                        Custom behavioral nuances or rules injected into Maya's live coaching instructions.
+                      </Text>
+                    </View>
                   </View>
                 </View>
               )}
@@ -1584,6 +1612,37 @@ export default function AdminRoadmapScreen() {
                             }}
                             placeholder="Criteria / hint (e.g. Student uses 'Could I please get...' and specifies size)"
                           />
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, flexWrap: 'wrap', gap: 6 }}>
+                            <Text style={[styles.fieldHelper, { marginRight: 4, marginTop: 0 }]}>
+                              Target Budget:
+                            </Text>
+                            {[undefined, 3, 4, 5, 6].map((turns) => {
+                              const isSelected = obj.targetTurns === turns;
+                              return (
+                                <Pressable
+                                  key={turns === undefined ? 'auto' : turns}
+                                  onPress={() => {
+                                    const updated = [...formObjectives];
+                                    updated[index] = { ...updated[index], targetTurns: turns };
+                                    setFormObjectives(updated);
+                                  }}
+                                  style={[
+                                    styles.turnBudgetPill,
+                                    isSelected && styles.turnBudgetPillActive,
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.turnBudgetPillText,
+                                      isSelected && styles.turnBudgetPillTextActive,
+                                    ]}
+                                  >
+                                    {turns === undefined ? 'Auto (~3-5)' : `${turns} turns`}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
                         </View>
                       ))
                     )}
@@ -3106,6 +3165,27 @@ const styles = StyleSheet.create({
   },
   scorePillTextActive: {
     color: '#ffffff',
+  },
+  turnBudgetPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#ffffff',
+  },
+  turnBudgetPillActive: {
+    backgroundColor: '#0d9488',
+    borderColor: '#0d9488',
+  },
+  turnBudgetPillText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#475569',
+  },
+  turnBudgetPillTextActive: {
+    color: '#ffffff',
+    ...fontStyle('inter', 'bold'),
   },
   publishToggleRow: {
     flexDirection: 'row',

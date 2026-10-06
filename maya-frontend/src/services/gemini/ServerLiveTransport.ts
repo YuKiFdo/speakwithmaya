@@ -263,6 +263,22 @@ export class ServerLiveTransport implements ILiveTransport {
     }
   }
 
+  sendCurriculumPacingCue(nextObjectiveId?: string, nextObjectiveTitle?: string): void {
+    if (!this.isOpen || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    try {
+      console.log(`[${getLogTimestamp()}] 🎯 [ServerLiveTransport] Sending curriculum pacing cue for "${nextObjectiveTitle}" (${nextObjectiveId})`);
+      this.ws.send(
+        JSON.stringify({
+          type: 'curriculum_pacing_cue',
+          nextObjectiveId: nextObjectiveId || '',
+          nextObjectiveTitle: nextObjectiveTitle || '',
+        }),
+      );
+    } catch (e) {
+      // ignore
+    }
+  }
+
   close(): void {
     this.isOpen = false;
     if (this.ws) {

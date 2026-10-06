@@ -106,12 +106,13 @@ export default function CallScreen() {
     levelTitle: params.scenarioTitle || params.topic,
     targetSpeakingShare: params.targetSpeakingShare ? parseInt(params.targetSpeakingShare, 10) : 40,
     learningObjectives: parsedObjectives,
-    guidedPrompt: hasGuidedPrompt
+    guidedPrompt: (hasGuidedPrompt || parsedObjectives)
       ? {
           scenarioRole: params.scenarioRole,
           coachingFocus: params.coachingFocus,
           openingQuestion: params.openingQuestion,
           customPromptAddon: params.customPromptAddon,
+          learningObjectives: parsedObjectives,
         }
       : undefined,
   });

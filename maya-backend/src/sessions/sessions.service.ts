@@ -1,6 +1,7 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, Optional } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto } from './dto/session.dto.js';
+import { RoadmapService } from '../roadmap/roadmap.service.js';
 import { randomUUID } from 'node:crypto';
 
 export interface UsageRecord {
@@ -133,7 +134,9 @@ export class SessionsService {
   private readonly activeSessions = new Map<string, { userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string }>();
   private readonly recentDiagnostics = new Map<string, SessionDiagnosticsRecord>();
 
-  constructor() {
+  constructor(
+    @Optional() private readonly roadmapService?: RoadmapService,
+  ) {
     this.geminiApiKey = process.env.GEMINI_API_KEY;
     this.liveModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
 
@@ -165,26 +168,44 @@ export class SessionsService {
 
     // Pruned, high-density scenario context without duplicating wrap-up prohibitions
     let scenarioText = '';
-    if (dto.guidedPrompt?.scenarioRole || dto.guidedPrompt?.coachingFocus) {
-      const role = dto.guidedPrompt.scenarioRole || 'Friendly AI English Coach';
-      const focus = dto.guidedPrompt.coachingFocus || 'Natural phrasing and conversational fluency';
-      const objectivesText =
-        dto.guidedPrompt.learningObjectives && dto.guidedPrompt.learningObjectives.length > 0
-          ? `\nCURRICULUM OBJECTIVES TO COVER:\n` +
-            dto.guidedPrompt.learningObjectives
-              .map(
-                (o, idx) =>
-                  `${idx + 1}. [${o.isMandatory ? 'MANDATORY' : 'OPTIONAL'}] ${o.title}: ${o.description || ''}`,
-              )
-              .join('\n') +
-            `\n- COACH SCAFFOLDING RULE: Guide ${userName} through each objective. If they struggle, hesitate, or give an off-topic answer, gently simplify the question and offer an example starter phrase (e.g. "You can say: '...'"). When an objective is achieved, call tool 'record_objective' with status 'mastered' (independent) or 'assisted' (needed hint).`
-          : '';
+    const rawObjectives = dto.guidedPrompt?.learningObjectives || dto.learningObjectives || [];
+    if (dto.guidedPrompt?.scenarioRole || dto.guidedPrompt?.coachingFocus || rawObjectives.length > 0) {
+      const role = dto.guidedPrompt?.scenarioRole || 'Friendly AI English Coach';
+      const focus = dto.guidedPrompt?.coachingFocus || 'Natural phrasing and conversational fluency';
+
+      let objectivesText = '';
+      if (rawObjectives.length > 0) {
+        const durationSec = dto.durationSeconds || 300;
+        const totalEstTurns = Math.max(6, Math.floor(durationSec / 22));
+        const defaultTurnsPerObj = Math.max(2, Math.floor((totalEstTurns - 2) / rawObjectives.length));
+
+        objectivesText =
+          `\n\nCURRICULUM OBJECTIVES TO COVER (${rawObjectives.length} Total):\n` +
+          rawObjectives
+            .map((o, idx) => {
+              const objTurns = o.targetTurns || defaultTurnsPerObj;
+              const id = o.id || `obj_${idx + 1}`;
+              return `${idx + 1}. [${o.isMandatory !== false ? 'MANDATORY' : 'OPTIONAL'}] ID: "${id}" | Title: "${o.title}" | Target Budget: ~${objTurns} turns\n   Description: ${o.description || 'Guide student to speak naturally about this topic.'}`;
+            })
+            .join('\n') +
+          `\n\nACTIVE CURRICULUM PACING & TOPIC STEERING PROTOCOL:
+- PEDAGOGICAL MISSION: You must systematically cover ALL ${rawObjectives.length} objectives within this ${Math.round(durationSec / 60)}-minute session.
+- STRICT TOPIC BUDGET: Spend at most ~${defaultTurnsPerObj} conversational turns per objective. Do NOT linger on a single topic!
+- MANDATORY TOPIC PIVOT UPON COMPLETION:
+  As soon as ${userName} demonstrates the current objective (1-2 good answers):
+  1. IMMEDIATELY call tool 'record_objective' with objectiveId: (the exact ID listed above) and status: "mastered" (or "assisted" if you provided a hint).
+  2. In your spoken turn, give ONE brief validation sentence (under 5 words, e.g. "That's wonderful!"), and IN THE SAME TURN, immediately ask a question pivoting to the NEXT objective!
+  (Example: transitioning from Family to Friends -> "Your brother sounds great! What about your close friends — how would you describe your best friend?")
+- ANTI-LINGERING RULE: Never spend more than ~${defaultTurnsPerObj + 1} turns on a single topic. If the student has answered 2 questions on the current topic, smoothly pivot to the next objective immediately even if their answer was brief.
+- SCAFFOLDING RULE: If they struggle or hesitate, gently simplify and give a starter phrase ("You can say: '...'"). Then record as status "assisted" and move forward.
+- EXACT OBJECTIVE ID: When calling tool 'record_objective', ALWAYS use the exact objective ID specified above.`;
+      }
 
       scenarioText = `CURRICULUM ROADMAP LEVEL SCENARIO: "${rawTopic || 'Speaking Practice'}"
 - Persona / Scenario Role: ${role}
 - Coaching Focus: ${focus}
-${dto.guidedPrompt.openingQuestion ? `- Icebreaker / First Question: "${dto.guidedPrompt.openingQuestion}" (Start the dialogue with this exact icebreaker!)` : ''}
-${dto.guidedPrompt.customPromptAddon ? `- Special Instructions: ${dto.guidedPrompt.customPromptAddon}` : ''}${objectivesText}
+${dto.guidedPrompt?.openingQuestion ? `- Icebreaker / First Question: "${dto.guidedPrompt.openingQuestion}" (Start the dialogue with this exact icebreaker!)` : ''}
+${dto.guidedPrompt?.customPromptAddon ? `- Special Instructions: ${dto.guidedPrompt.customPromptAddon}` : ''}${objectivesText}
 - Brevity Rule: Strictly under 15 words per turn. Ask 1 engaging question at a time.`;
     } else if (dto.scenarioId === 'job-interview' || rawTopic.toLowerCase().includes('interview')) {
       const role = !isGenericTopic && rawTopic.toLowerCase() !== 'job interview' ? rawTopic : 'their target position';
@@ -505,6 +526,42 @@ ${memoryPart}`;
   }
 
   async createSessionToken(userId: string = 'guest-user', dto: CreateSessionTokenDto) {
+    // 1. Enrich from roadmap DB if roadmapLevelId provided and guidedPrompt/learningObjectives not fully populated
+    if (dto.roadmapLevelId && this.roadmapService) {
+      try {
+        const level = await this.roadmapService.getLevelById(dto.roadmapLevelId);
+        if (level) {
+          if (!dto.guidedPrompt) dto.guidedPrompt = {};
+          if (!dto.guidedPrompt.scenarioRole && level.guidedPrompt?.scenarioRole) {
+            dto.guidedPrompt.scenarioRole = level.guidedPrompt.scenarioRole;
+          }
+          if (!dto.guidedPrompt.coachingFocus && level.guidedPrompt?.coachingFocus) {
+            dto.guidedPrompt.coachingFocus = level.guidedPrompt.coachingFocus;
+          }
+          if (!dto.guidedPrompt.openingQuestion && level.guidedPrompt?.openingQuestion) {
+            dto.guidedPrompt.openingQuestion = level.guidedPrompt.openingQuestion;
+          }
+          if (!dto.guidedPrompt.customPromptAddon && level.guidedPrompt?.customPromptAddon) {
+            dto.guidedPrompt.customPromptAddon = level.guidedPrompt.customPromptAddon;
+          }
+          if (!dto.guidedPrompt.learningObjectives?.length && level.learningObjectives?.length) {
+            dto.guidedPrompt.learningObjectives = level.learningObjectives;
+          }
+          if (!dto.topic && level.topic) {
+            dto.topic = level.topic;
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Could not load roadmap level ${dto.roadmapLevelId} for session token: ${err?.message}`);
+      }
+    }
+
+    // 2. Fallback: if root-level learningObjectives provided, copy to guidedPrompt
+    if (!dto.guidedPrompt?.learningObjectives?.length && dto.learningObjectives?.length) {
+      if (!dto.guidedPrompt) dto.guidedPrompt = {};
+      dto.guidedPrompt.learningObjectives = dto.learningObjectives;
+    }
+
     const isReconnect = Boolean(dto.sessionId);
     const sessionId = dto.sessionId || randomUUID();
     const isSinhala = dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';

@@ -65,6 +65,7 @@ interface UseLiveCallOptions {
     title: string;
     description?: string;
     isMandatory?: boolean;
+    targetTurns?: number;
   }>;
   onCallCompleted?: (report: MissionReportData) => void;
   guidedPrompt?: {
@@ -72,6 +73,13 @@ interface UseLiveCallOptions {
     coachingFocus?: string;
     openingQuestion?: string;
     customPromptAddon?: string;
+    learningObjectives?: Array<{
+      id: string;
+      title: string;
+      description?: string;
+      isMandatory?: boolean;
+      targetTurns?: number;
+    }>;
   };
 }
 
@@ -138,6 +146,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const reconnectTimerRef = useRef<any>(null);
   const resumptionHandleRef = useRef<string | null>(null);
   const hasFinishedRef = useRef<boolean>(false);
+  const hasSentMidSessionCueRef = useRef<boolean>(false);
 
   // Sync state to refs for non-stale callback access
   useEffect(() => {
@@ -152,7 +161,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     tokensRef.current = tokens;
   }, [tokens]);
 
-  // Session seconds counter
+  // Session seconds counter & mid-session curriculum pacing check
   useEffect(() => {
     if (status === 'listening' || status === 'speaking') {
       if (!timerRef.current) {
@@ -160,6 +169,28 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           setSecondsElapsed((prev) => {
             const next = prev + 1;
             secondsElapsedRef.current = next;
+
+            // Check curriculum pacing: at ~45% of session time, if second objective hasn't started, prompt Maya
+            const totalDuration = options.durationSeconds || 300;
+            const curriculumObjectives = options.learningObjectives || options.guidedPrompt?.learningObjectives || [];
+            if (
+              !hasSentMidSessionCueRef.current &&
+              curriculumObjectives.length > 1 &&
+              next >= Math.floor(totalDuration * 0.45)
+            ) {
+              const secondObj = curriculumObjectives[1];
+              const isRecorded =
+                recordedObjectivesRef.current.has(secondObj.id) ||
+                recordedObjectivesRef.current.has(secondObj.id.toLowerCase()) ||
+                recordedObjectivesRef.current.has(secondObj.title) ||
+                recordedObjectivesRef.current.has(secondObj.title.toLowerCase());
+              if (!isRecorded) {
+                hasSentMidSessionCueRef.current = true;
+                console.log(`[useLiveCall] 🎯 Mid-session threshold reached (${next}s/${totalDuration}s) -> sending curriculum pacing cue for "${secondObj.title}"`);
+                transportRef.current.sendCurriculumPacingCue?.(secondObj.id, secondObj.title);
+              }
+            }
+
             return next;
           });
         }, 1000);
@@ -176,7 +207,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         timerRef.current = null;
       }
     };
-  }, [status]);
+  }, [status, options.durationSeconds, options.learningObjectives, options.guidedPrompt]);
 
   const scheduleReconnect = useCallback(() => {
     if (statusRef.current === 'ended' || isConcludingRef.current) return;
@@ -222,6 +253,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         resumptionHandleRef.current = null;
         hasFinishedRef.current = false;
         hasSpokenFarewellRef.current = false;
+        hasSentMidSessionCueRef.current = false;
       }
 
       // 1. Initialize Audio Player
@@ -350,6 +382,16 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         .map((t) => `${t.role === 'user' ? 'Student' : 'Maya'}: ${t.text}`)
         .join('\n');
 
+      const effectiveObjectives = options.learningObjectives || options.guidedPrompt?.learningObjectives;
+      const effectiveGuidedPrompt = options.guidedPrompt
+        ? {
+            ...options.guidedPrompt,
+            learningObjectives: options.guidedPrompt.learningObjectives || effectiveObjectives,
+          }
+        : effectiveObjectives
+          ? { learningObjectives: effectiveObjectives }
+          : undefined;
+
       const backendBaseUrl = getBackendBaseUrl();
       const authHeaders = await getAuthHeaders();
       const res = await fetch(`${backendBaseUrl}/v1/session-token`, {
@@ -369,7 +411,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           userName: options.userName,
           isIntroCall: options.isIntroCall,
           roadmapLevelId: options.roadmapLevelId,
-          guidedPrompt: options.guidedPrompt,
+          guidedPrompt: effectiveGuidedPrompt,
+          learningObjectives: effectiveObjectives,
           memory: rollingMemory || undefined,
         }),
       });
@@ -412,7 +455,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             userName: options.userName,
             isIntroCall: options.isIntroCall,
             roadmapLevelId: options.roadmapLevelId,
-            guidedPrompt: options.guidedPrompt,
+            guidedPrompt: effectiveGuidedPrompt,
+            learningObjectives: effectiveObjectives,
             isReconnect,
             memory: rollingMemory || undefined,
           },
@@ -689,6 +733,13 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               status: payload.status,
               note: payload.note,
             });
+            const normKey = payload.objectiveId.trim().toLowerCase();
+            if (normKey !== payload.objectiveId) {
+              recordedObjectivesRef.current.set(normKey, {
+                status: payload.status,
+                note: payload.note,
+              });
+            }
           },
           onConcludeCall: (reason?: string) => {
             console.log(`[useLiveCall] 🏁 [Call Conclusion] conclude_call triggered (reason: "${reason || 'normal'}") -> waiting for farewell speech to complete`);
@@ -892,9 +943,18 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     const userShare = totalTalkSecs > 0 ? Math.min(100, Math.round((userSecs / totalTalkSecs) * 100)) : 0;
     const targetShare = options.targetSpeakingShare ?? 40;
 
-    const curriculumObjectives = options.learningObjectives || [];
+    const curriculumObjectives = options.learningObjectives || options.guidedPrompt?.learningObjectives || [];
     const objectivesResult: MissionObjectiveResult[] = curriculumObjectives.map((obj) => {
-      const rec = recordedObjectivesRef.current.get(obj.id);
+      const rec =
+        recordedObjectivesRef.current.get(obj.id) ||
+        recordedObjectivesRef.current.get(obj.id.toLowerCase()) ||
+        recordedObjectivesRef.current.get(obj.title) ||
+        recordedObjectivesRef.current.get(obj.title.toLowerCase()) ||
+        Array.from(recordedObjectivesRef.current.entries()).find(([k]) =>
+          k.toLowerCase().includes(obj.id.toLowerCase()) ||
+          obj.title.toLowerCase().includes(k.toLowerCase()) ||
+          k.toLowerCase().includes(obj.title.toLowerCase())
+        )?.[1];
       return {
         id: obj.id,
         title: obj.title,
@@ -1114,6 +1174,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     transportRef.current.sendTimeWrapupCue(remainingSeconds);
   }, []);
 
+  const sendCurriculumPacingCue = useCallback((nextObjectiveId?: string, nextObjectiveTitle?: string) => {
+    transportRef.current.sendCurriculumPacingCue?.(nextObjectiveId, nextObjectiveTitle);
+  }, []);
+
   return {
     status,
     secondsElapsed,
@@ -1137,6 +1201,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     resumeAudio,
     interrupt,
     sendTimeWrapupCue,
+    sendCurriculumPacingCue,
     missionReport,
     setMissionReport,
     isSlowResponse,

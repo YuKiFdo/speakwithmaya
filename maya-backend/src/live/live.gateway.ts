@@ -437,6 +437,34 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         break;
       }
 
+      case 'curriculum_pacing_cue': {
+        const nextTitle = message.nextObjectiveTitle || 'the next objective';
+        const nextId = message.nextObjectiveId || '';
+        this.logger.log(`[${state.sessionId}] 🎯 Curriculum pacing cue received from client -> target: "${nextTitle}" (${nextId})`);
+        this.addSessionLog(state, 'curriculum_pacing_cue', `${nextTitle} (${nextId})`);
+        if (state.geminiSession && state.isConnectedToGemini) {
+          try {
+            state.geminiSession.sendClientContent({
+              turns: [
+                {
+                  role: 'user',
+                  parts: [
+                    {
+                      text: `[PEDAGOGICAL PACING NOTICE: Session time is progressing. In your very next spoken turn, smoothly conclude the previous topic in under 5 words, and ask an engaging question pivoting directly to the next objective: "${nextTitle}" (ID: "${nextId}"). Remember to keep your turn strictly under 15 words.]`,
+                    },
+                  ],
+                },
+              ],
+              turnComplete: true,
+            });
+            this.logger.log(`[${state.sessionId}] 🎯 Curriculum pacing cue dispatched to Gemini Live`);
+          } catch (e: any) {
+            this.logger.warn(`[${state.sessionId}] Failed to send curriculum pacing cue to Gemini: ${e?.message}`);
+          }
+        }
+        break;
+      }
+
       case 'pong': {
         state.lastPongAt = Date.now();
         break;
@@ -897,7 +925,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             id: fc.id,
             response: {
               result: 'objective_recorded',
-              instruction: 'Objective recorded. Continue guiding student toward the next objective or topic naturally.',
+              instruction:
+                'Objective successfully recorded. In your current spoken turn: give ONE brief validation sentence (under 5 words), and immediately ask a question pivoting to the next objective. Keep your total turn under 15 words.',
             },
           });
         } else {
