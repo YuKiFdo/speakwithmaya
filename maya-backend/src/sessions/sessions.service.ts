@@ -199,11 +199,16 @@ export class SessionsService {
 - ANTI-LINGERING & NO SUB-QUESTION DIGGING: Once an objective is met (e.g. self-intro), do NOT ask 3-4 follow-up sub-questions exploring sub-details of that same topic. Smoothly pivot to the next objective immediately.
 - MISSION COMPLETED / LEVEL GRADUATION PROTOCOL:
   When ALL ${rawObjectives.length} objectives have been recorded (all checkpoints completed):
-  1. DO NOT ask endless small-talk sub-questions on the final topic!
-  2. ALWAYS congratulate ${userName} in warm, natural spoken everyday Sinhala (කතා කරන බසින්, strictly NO stiff bookish/written grammar like 'ඔබ සම්පූර්ණ කර ඇත'):
-     Say: "නියමයි ${userName}! ඔයා මේ ලෙවල් එකේ milestones ඔක්කොම complete කළා!"
-  3. If ${userName} has NOT yet asked to wrap up: ask "දැන් අපි call එක wrap up කරලා save කරමුද?"
-  4. If ${userName} ALREADY asked to wrap up, leave, or says goodbye (e.g. "Can we wrap up now?"): DO NOT ask a question! Speak a warm closing farewell: "නියමයි ${userName}! ඔයාගේ progress එක save වුණා. සුභ දවසක්! Goodbye!" and immediately call tool 'conclude_call'.
+  1. DO NOT ask endless small-talk sub-questions on the final topic! The curriculum for this level is complete.
+  2. IF ${userName} ALREADY ASKED TO WRAP UP, LEAVE, OR ASKS ABOUT OTHER LEVELS (e.g. "Can we wrap up now?", "What are the other levels I have to achieve?", "bye"):
+     - STRICTLY NEVER ASK A QUESTION (NO "?", NO "කරමුද?", NO "shall we?").
+     - Answer their question briefly and speak a warm, definitive closing farewell statement in natural everyday Sinhala:
+       "නියමයි ${userName}! ඔයා මේ ලෙවල් එකේ milestones ඔක්කොම complete කළා. Progress එක save වුණා. ඊළඟ levels ඔයාගේ dashboard එකෙන් බලාගන්න පුළුවන්. සුභ දවසක්! Goodbye!"
+     - IMMEDIATELY call tool 'conclude_call'.
+  3. IF ${userName} HAS NOT YET ASKED TO WRAP UP:
+     - Celebrate milestone completion and ask if they would like to save:
+       "නියමයි ${userName}! ඔයා මේ ලෙවල් එකේ milestones ඔක්කොම complete කළා! දැන් අපි call එක wrap up කරලා save කරමුද?"
+     - When ${userName} replies with agreement or goodbye in the next turn -> speak your closing farewell statement ("නියමයි ${userName}! ඔයාගේ progress එක save වුණා. සුභ දවසක්! Goodbye!") and call tool 'conclude_call'.
 - SCAFFOLDING RULE: If they struggle or hesitate, gently simplify and give a starter phrase ("You can say: '...'"). Then record as status "assisted" and move forward.
 - EXACT OBJECTIVE ID: When calling tool 'record_objective', ALWAYS use the exact objective ID specified above.`;
       }
@@ -294,10 +299,9 @@ CONVERSATION & SESSION PACING RULES:
 - BREVITY: Audio voice tutor, not a lecturer. 1-2 short sentences (maximum 15-25 words). Student must do 80% of talking.
 - NO ECHOING: Never repeat back what the student said. Ask open-ended questions.
 - SESSION DURATION (5 TO 15 MINUTES) & CALL CONCLUSION:
-  * NEVER say farewell, goodbye, or call 'conclude_call' on your own initiative. Continue the conversation until:
-    1. Student explicitly says goodbye / leaves (e.g. "bye", "goodbye", "enough for today", "athii", "yanna one").
-    2. OR you receive a [SYSTEM TIME NOTICE] message.
-  * When concluding upon departure or [SYSTEM TIME NOTICE]: speak a short warm farewell aloud (under 15s) and call 'conclude_call'.
+  * NEVER say farewell, goodbye, or call 'conclude_call' on your own initiative without student departure, student wrap-up request, time notice, or completion of all milestones.
+  * When concluding (upon student departure, request to wrap up, or [SYSTEM TIME NOTICE]): speak a short warm definitive farewell aloud (under 15s) and call 'conclude_call'.
+  * STRICT CONCLUSION MANDATE: In any turn where you call 'conclude_call', your spoken words MUST be a final closing farewell statement. NEVER ask a question (no "?", no "shall we?", no "කරමුද?") because the call terminates immediately.
 
 ${sinhalaToolsInstruction}
 
@@ -326,10 +330,9 @@ CONVERSATION & TEACHING RULES:
 - NO ECHOING: Never repeat back what the student said.
 - INAUDIBLE / CUT-OFF SPEECH: If student's speech is cut off, silent, or unintelligible, NEVER invent or hallucinate topics, stories, or random facts. Politely ask them to repeat ("Sorry, I didn't quite catch that. Could you say that again?").
 - SESSION DURATION (5 TO 15 MINUTES) & CALL CONCLUSION:
-  * NEVER say farewell, goodbye, or call 'conclude_call' on your own initiative. Continue the conversation until:
-    1. Student explicitly says goodbye / leaves.
-    2. OR you receive a [SYSTEM TIME NOTICE] message.
-  * When concluding upon departure or [SYSTEM TIME NOTICE]: speak a short warm farewell aloud (under 15s) and call 'conclude_call'.
+  * NEVER say farewell, goodbye, or call 'conclude_call' on your own initiative without student departure, student wrap-up request, time notice, or completion of all milestones.
+  * When concluding upon departure, student wrap-up request, or [SYSTEM TIME NOTICE]: speak a short warm definitive farewell aloud (under 15s) and call 'conclude_call'.
+  * STRICT CONCLUSION MANDATE: In any turn where you call 'conclude_call', your spoken words MUST be a final closing farewell statement. NEVER ask a question (no "?", no "shall we?", no "කරමුද?") because the call terminates immediately.
 
 ${englishToolsInstruction}
 
@@ -392,13 +395,13 @@ ${memoryPart}`;
     const functions: any[] = [
       {
         name: 'conclude_call',
-        description: 'End session ONLY when student explicitly says goodbye (bye/gotta go) or on system time notice.',
+        description: 'Terminate the session when student wants to wrap up, leaves, or all milestones are completed. MANDATORY: Your spoken response MUST be a definitive closing farewell statement. STRICTLY NEVER ask a question (no "?", no "shall we?", no "කරමුද?") because the call terminates immediately.',
         parameters: {
           type: 'OBJECT',
           properties: {
             farewellReason: {
               type: 'STRING',
-              description: 'Departure phrase spoken by student or time-limit-reached',
+              description: 'Departure phrase spoken by student, student wrap-up request, or milestones completed',
             },
           },
           required: ['farewellReason'],

@@ -887,8 +887,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             response: {
               result: 'concluding',
               instruction: isSinhala
-                ? 'Student is leaving or call is ending now. In natural spoken everyday Sinhala, speak a warm closing farewell statement (never ask a question): "නියමයි! ඔයාගේ progress එක save වුණා. සුභ දවසක්! Goodbye!" then stop speaking.'
-                : 'Student is leaving or call is ending now. Speak a short warm friendly farewell statement (never ask a question) wishing them well, then stop speaking.',
+                ? 'The call is terminating now. In natural spoken everyday Sinhala, speak a final closing farewell statement (STRICTLY NEVER ASK A QUESTION, NO QUESTION MARKS, NO "කරමුද?"): "නියමයි! ඔයාගේ progress එක save වුණා. ඊළඟ levels dashboard එකෙන් බලාගන්න පුළුවන්. සුභ දවසක්! Goodbye!" then stop speaking.'
+                : 'The call is terminating now. Speak a short warm friendly farewell statement (STRICTLY NEVER ASK A QUESTION): "Great job! Your progress has been saved. You can check the next levels on your dashboard. Have a wonderful day! Goodbye!" then stop speaking.',
             },
           });
         } else if (fc.name === 'show_grammar_correction') {
@@ -942,7 +942,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
               result: 'objective_recorded',
               allObjectivesCompleted: isAllCompleted,
               instruction: isAllCompleted
-                ? 'All milestones for this level are now complete! In your current spoken turn: warmly congratulate the student in natural spoken everyday Sinhala (කතා කරන බසින්, strictly NOT bookish/written Sinhala): "නියමයි! ඔයා මේ ලෙවල් එකේ milestones ඔක්කොම complete කළා! දැන් අපි call එක wrap up කරලා save කරමුද?", and if they agree or say goodbye, call conclude_call.'
+                ? 'All milestones for this level are now complete! In your current spoken turn: if the student ALREADY asked to wrap up, leave, or says goodbye, speak a definitive farewell statement (STRICTLY NEVER ASK A QUESTION) and call conclude_call. If they have NOT yet asked to wrap up, ask in natural spoken Sinhala: "නියමයි! ඔයා මේ ලෙවල් එකේ milestones ඔක්කොම complete කළා! දැන් අපි call එක wrap up කරලා save කරමුද?".'
                 : 'Objective successfully recorded. In your current spoken turn: give ONE brief validation sentence (under 5 words), and immediately ask a question pivoting to the next objective. Keep your total turn under 15 words.',
             },
           });
