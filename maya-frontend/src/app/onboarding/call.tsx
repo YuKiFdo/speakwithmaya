@@ -170,7 +170,7 @@ export default function CallScreen() {
 
   const isCallActive = liveCall.status === 'speaking' || liveCall.status === 'listening';
   const isCallReconnecting = liveCall.status === 'reconnecting' || connection.isReconnecting;
-  const isCallConnectionLost = connection.isLost && liveCall.status !== 'ended';
+  const isCallConnectionLost = (connection.isLost || !connection.isOnline) && liveCall.status !== 'ended';
   const isSlowNetwork = liveCall.isSlowResponse || connection.isWeak;
 
   const isSessionEndingNear = (remainingSeconds <= 30 && liveCall.secondsElapsed > 0) || isFarewellPhase;

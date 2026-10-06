@@ -805,17 +805,19 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         state.lastStudentTranscript = '';
         state.modelTranscriptAccumulator = '';
         state.hasModelSpokenThisTurn = false;
+        this.safeSendToClient(state, JSON.stringify({
+          type: 'turn_complete',
+        }));
       } else {
         // Intermediate turn completion (e.g. handshake/tool call/user acoustic closure)
         this.logger.log(
           `[${state.sessionId}] ⏳ [Turn Handshake Completed] Student transcription accumulated: "${userText || '(awaiting recognition)'}". Model audio generation in progress...`
         );
         this.addSessionLog(state, 'turn_handshake', `user="${userText?.slice(0, 80)}"`);
+        this.safeSendToClient(state, JSON.stringify({
+          type: 'turn_handshake',
+        }));
       }
-
-      this.safeSendToClient(state, JSON.stringify({
-        type: 'turn_complete',
-      }));
     }
 
     // 4. Interrupted Event

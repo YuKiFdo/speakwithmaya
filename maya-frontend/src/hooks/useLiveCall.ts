@@ -122,6 +122,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const secondsElapsedRef = useRef<number>(0);
   const tokensRef = useRef({ textIn: 0, audioIn: 0, audioOut: 0, textOut: 0, thoughtsTokens: 0, total: 0, costLkr: 0 });
   const isConcludingRef = useRef<boolean>(false);
+  const hasSpokenFarewellRef = useRef<boolean>(false);
   const concludeTimerRef = useRef<any>(null);
   const isModelSpeakingRef = useRef<boolean>(false);
   const echoHangoverUntilRef = useRef<number>(0);
@@ -220,6 +221,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         rateMultiplierRef.current = Number((0.37 + Math.random() * 0.03).toFixed(4));
         resumptionHandleRef.current = null;
         hasFinishedRef.current = false;
+        hasSpokenFarewellRef.current = false;
       }
 
       // 1. Initialize Audio Player
@@ -232,8 +234,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             echoHangoverUntilRef.current = Date.now() + 300;
             setModelVolume(0);
 
-            // If session conclusion was requested, cleanly end call now that Maya finished her farewell speech
-            if (isConcludingRef.current) {
+            // If session conclusion was requested AND Maya has actually delivered her farewell audio, cleanly end call
+            if (isConcludingRef.current && hasSpokenFarewellRef.current) {
               console.log('[useLiveCall] Maya finished speaking farewell message -> ending call now');
               isConcludingRef.current = false;
               if (concludeTimerRef.current) {
@@ -464,6 +466,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             // 24kHz Float32 mono = 24,000 samples per second
             mayaSpeakingSecondsRef.current += (samples.length / 24000);
 
+            if (isConcludingRef.current) {
+              hasSpokenFarewellRef.current = true;
+            }
+
             if (isConcludingRef.current && concludeTimerRef.current) {
               clearTimeout(concludeTimerRef.current);
               concludeTimerRef.current = setTimeout(() => {
@@ -480,6 +486,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
             isModelSpeakingRef.current = true;
             userChunksSentRef.current = 0;
+
+            if (isConcludingRef.current) {
+              hasSpokenFarewellRef.current = true;
+            }
 
             // Turn response arrived: clear timer and record turnaround latency
             if (responseTimeoutRef.current) {
@@ -582,19 +592,23 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             }
             activeRoleRef.current = null;
 
-            // If Gemini called conclude_call and this turn completed without Maya speaking audio:
-            if (isConcludingRef.current && !isModelSpeakingRef.current) {
-              console.log('[useLiveCall] Conclude turn completed without audio -> ending call cleanly');
-              if (concludeTimerRef.current) {
-                clearTimeout(concludeTimerRef.current);
-                concludeTimerRef.current = null;
-              }
-              setTimeout(() => {
-                if (isConcludingRef.current) {
-                  isConcludingRef.current = false;
-                  endCallRef.current?.();
+            // If Gemini called conclude_call:
+            if (isConcludingRef.current) {
+              if (hasSpokenFarewellRef.current) {
+                console.log('[useLiveCall] Maya finished speaking her farewell turn -> concluding call cleanly');
+                if (concludeTimerRef.current) {
+                  clearTimeout(concludeTimerRef.current);
+                  concludeTimerRef.current = null;
                 }
-              }, 1200);
+                setTimeout(() => {
+                  if (isConcludingRef.current) {
+                    isConcludingRef.current = false;
+                    endCallRef.current?.(true);
+                  }
+                }, 1500);
+              } else {
+                console.log('[useLiveCall] Conclude tool call handshake completed; waiting for Maya spoken farewell audio');
+              }
             }
           },
           onInterrupted: () => {

@@ -1299,7 +1299,126 @@ export default function AdminUsageScreen() {
               </Pressable>
             </View>
 
-            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+            {/* Pin KPI Telemetry Cards directly beneath header */}
+            {logsData && !logsLoading ? (
+              <View style={styles.logsKpiRow}>
+                {/* 1. Avg Latency */}
+                <View style={styles.logsKpiCard}>
+                  <Text style={styles.logsKpiLabel}>Avg Turn Latency</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                    <Text
+                      style={[
+                        styles.logsKpiValue,
+                        {
+                          color:
+                            logsData.avgLatencyMs > 4000
+                              ? '#ef4444'
+                              : logsData.avgLatencyMs > 2500
+                                ? '#f59e0b'
+                                : '#10b981',
+                        },
+                      ]}
+                    >
+                      {logsData.avgLatencyMs.toLocaleString()} ms
+                    </Text>
+                    <View
+                      style={[
+                        styles.latencyPill,
+                        {
+                          backgroundColor:
+                            logsData.avgLatencyMs > 4000
+                              ? '#fef2f2'
+                              : logsData.avgLatencyMs > 2500
+                                ? '#fffbeb'
+                                : '#ecfdf5',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.latencyPillText,
+                          {
+                            color:
+                              logsData.avgLatencyMs > 4000
+                                ? '#b91c1c'
+                                : logsData.avgLatencyMs > 2500
+                                  ? '#b45309'
+                                  : '#047857',
+                          },
+                        ]}
+                      >
+                        {logsData.avgLatencyMs > 4000
+                          ? '🔴 Slow'
+                          : logsData.avgLatencyMs > 2500
+                            ? '🟡 Moderate'
+                            : '🟢 Normal'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* 2. Max Latency */}
+                <View style={styles.logsKpiCard}>
+                  <Text style={styles.logsKpiLabel}>Max Turn Latency</Text>
+                  <Text
+                    style={[
+                      styles.logsKpiValue,
+                      {
+                        color:
+                          logsData.maxLatencyMs > 8000
+                            ? '#ef4444'
+                            : logsData.maxLatencyMs > 4000
+                              ? '#f59e0b'
+                              : '#0f172a',
+                      },
+                    ]}
+                  >
+                    {logsData.maxLatencyMs.toLocaleString()} ms
+                  </Text>
+                </View>
+
+                {/* 3. Slow Turns (Over 3s) */}
+                <View style={styles.logsKpiCard}>
+                  <Text style={styles.logsKpiLabel}>Slow Turns (Over 3s)</Text>
+                  <Text
+                    style={[
+                      styles.logsKpiValue,
+                      { color: logsData.slowTurnsCount > 0 ? '#ea580c' : '#0f172a' },
+                    ]}
+                  >
+                    {logsData.slowTurnsCount} / {logsData.turnsCount}
+                  </Text>
+                </View>
+
+                {/* 4. Backpressure */}
+                <View style={styles.logsKpiCard}>
+                  <Text style={styles.logsKpiLabel}>Backpressure Alerts</Text>
+                  <Text
+                    style={[
+                      styles.logsKpiValue,
+                      { color: logsData.backpressureWarnings > 0 ? '#ef4444' : '#0f172a' },
+                    ]}
+                  >
+                    {logsData.backpressureWarnings}
+                  </Text>
+                </View>
+
+                {/* 5. Errors */}
+                <View style={styles.logsKpiCard}>
+                  <Text style={styles.logsKpiLabel}>Recorded Errors</Text>
+                  <Text
+                    style={[
+                      styles.logsKpiValue,
+                      { color: logsData.errorCount > 0 ? '#ef4444' : '#0f172a' },
+                    ]}
+                  >
+                    {logsData.errorCount}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            <ScrollView style={styles.modalLogsScrollView} contentContainerStyle={styles.modalLogsBodyContent} showsVerticalScrollIndicator={true}>
               {logsLoading ? (
                 <View style={styles.logsLoadingContainer}>
                   <ActivityIndicator size="large" color="#0d9488" />
@@ -1307,123 +1426,6 @@ export default function AdminUsageScreen() {
                 </View>
               ) : logsData ? (
                 <>
-                  {/* KPI Telemetry Cards */}
-                  <View style={styles.logsKpiRow}>
-                    {/* 1. Avg Latency */}
-                    <View style={styles.logsKpiCard}>
-                      <Text style={styles.logsKpiLabel}>Avg Turn Latency</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                        <Text
-                          style={[
-                            styles.logsKpiValue,
-                            {
-                              color:
-                                logsData.avgLatencyMs > 4000
-                                  ? '#ef4444'
-                                  : logsData.avgLatencyMs > 2500
-                                    ? '#f59e0b'
-                                    : '#10b981',
-                            },
-                          ]}
-                        >
-                          {logsData.avgLatencyMs.toLocaleString()} ms
-                        </Text>
-                        <View
-                          style={[
-                            styles.latencyPill,
-                            {
-                              backgroundColor:
-                                logsData.avgLatencyMs > 4000
-                                  ? '#fef2f2'
-                                  : logsData.avgLatencyMs > 2500
-                                    ? '#fffbeb'
-                                    : '#ecfdf5',
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.latencyPillText,
-                              {
-                                color:
-                                  logsData.avgLatencyMs > 4000
-                                    ? '#b91c1c'
-                                    : logsData.avgLatencyMs > 2500
-                                      ? '#b45309'
-                                      : '#047857',
-                              },
-                            ]}
-                          >
-                            {logsData.avgLatencyMs > 4000
-                              ? '🔴 Slow'
-                              : logsData.avgLatencyMs > 2500
-                                ? '🟡 Moderate'
-                                : '🟢 Normal'}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    {/* 2. Max Latency */}
-                    <View style={styles.logsKpiCard}>
-                      <Text style={styles.logsKpiLabel}>Max Turn Latency</Text>
-                      <Text
-                        style={[
-                          styles.logsKpiValue,
-                          {
-                            color:
-                              logsData.maxLatencyMs > 8000
-                                ? '#ef4444'
-                                : logsData.maxLatencyMs > 4000
-                                  ? '#f59e0b'
-                                  : '#0f172a',
-                          },
-                        ]}
-                      >
-                        {logsData.maxLatencyMs.toLocaleString()} ms
-                      </Text>
-                    </View>
-
-                    {/* 3. Slow Turns (Over 3s) */}
-                    <View style={styles.logsKpiCard}>
-                      <Text style={styles.logsKpiLabel}>Slow Turns (Over 3s)</Text>
-                      <Text
-                        style={[
-                          styles.logsKpiValue,
-                          { color: logsData.slowTurnsCount > 0 ? '#ea580c' : '#0f172a' },
-                        ]}
-                      >
-                        {logsData.slowTurnsCount} / {logsData.turnsCount}
-                      </Text>
-                    </View>
-
-                    {/* 4. Backpressure */}
-                    <View style={styles.logsKpiCard}>
-                      <Text style={styles.logsKpiLabel}>Backpressure Alerts</Text>
-                      <Text
-                        style={[
-                          styles.logsKpiValue,
-                          { color: logsData.backpressureWarnings > 0 ? '#ef4444' : '#0f172a' },
-                        ]}
-                      >
-                        {logsData.backpressureWarnings}
-                      </Text>
-                    </View>
-
-                    {/* 5. Errors */}
-                    <View style={styles.logsKpiCard}>
-                      <Text style={styles.logsKpiLabel}>Recorded Errors</Text>
-                      <Text
-                        style={[
-                          styles.logsKpiValue,
-                          { color: logsData.errorCount > 0 ? '#ef4444' : '#0f172a' },
-                        ]}
-                      >
-                        {logsData.errorCount}
-                      </Text>
-                    </View>
-                  </View>
-
                   {/* Filter inside logs */}
                   <View style={styles.logsFilterRow}>
                     <Text style={styles.modalSectionTitle}>
@@ -2594,13 +2596,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 16,
     width: '100%',
-    maxWidth: 820,
-    maxHeight: '88%',
+    maxWidth: 860,
+    maxHeight: '90%',
+    height: '86%',
     shadowColor: '#000',
     shadowOpacity: 0.18,
     shadowRadius: 24,
     elevation: 24,
     overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  modalLogsScrollView: {
+    flex: 1,
+  },
+  modalLogsBodyContent: {
+    paddingBottom: 24,
   },
   logsBadge: {
     backgroundColor: '#f0fdfa',
@@ -2629,19 +2640,22 @@ const styles = StyleSheet.create({
   logsKpiRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 10,
     paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 14,
+    paddingVertical: 14,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
   },
   logsKpiCard: {
     flex: 1,
-    minWidth: 130,
+    minWidth: 120,
     backgroundColor: '#f8fafc',
     borderWidth: 1,
-    borderColor: '#f1f5f9',
+    borderColor: '#e2e8f0',
     borderRadius: 10,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   logsKpiLabel: {
     ...fontStyle('inter', 'medium'),

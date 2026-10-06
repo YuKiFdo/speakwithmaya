@@ -28,6 +28,8 @@ export class ServerLiveTransport implements ILiveTransport {
   private hasModelSpokenThisTurn: boolean = false;
   private clientSessionId: string = '';
   private lastPingAt: number = 0;
+  private lastPongAt: number = Date.now();
+  private offlineHandler: (() => void) | null = null;
   private backpressureWarningCount: number = 0;
   private opusDecoder: any = null;
   private pingInterval: any = null;
@@ -97,20 +99,58 @@ export class ServerLiveTransport implements ILiveTransport {
           }),
         );
 
+        this.lastPongAt = Date.now();
         this.callbacks.onOpen?.();
 
-        // Start ping probing every 5 seconds to measure RTT and network quality
+        // Browser offline event listener for immediate disconnect detection on web
+        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+          if (this.offlineHandler) {
+            window.removeEventListener('offline', this.offlineHandler);
+          }
+          this.offlineHandler = () => {
+            console.warn(`[${getLogTimestamp()}] 🔌 [ServerLiveTransport:${this.clientSessionId}] Browser offline event detected — closing socket`);
+            if (this.isOpen && this.ws) {
+              try {
+                this.ws.close(1006, 'Network offline');
+              } catch {}
+              this.isOpen = false;
+              this.callbacks.onClose?.(1006, 'Network offline');
+            }
+          };
+          window.addEventListener('offline', this.offlineHandler);
+        }
+
+        // Active heartbeat probing every 3 seconds to measure RTT and guard against silent socket drop
         if (this.pingInterval) clearInterval(this.pingInterval);
         this.pingInterval = setInterval(() => {
           if (this.isOpen && this.ws?.readyState === WebSocket.OPEN) {
+            // If no pong or message received for > 7000ms, socket is dead (e.g. Wi-Fi turned off)
+            const timeSinceLastPong = Date.now() - this.lastPongAt;
+            if (timeSinceLastPong > 7000) {
+              console.warn(
+                `[${getLogTimestamp()}] ⚠️ [ServerLiveTransport:${this.clientSessionId}] Heartbeat timeout (${timeSinceLastPong}ms without response) -> forcing reconnect`,
+              );
+              if (this.pingInterval) {
+                clearInterval(this.pingInterval);
+                this.pingInterval = null;
+              }
+              try {
+                this.ws.close(1006, 'Heartbeat timeout');
+              } catch {}
+              this.isOpen = false;
+              this.callbacks.onClose?.(1006, 'Heartbeat timeout');
+              return;
+            }
+
             try {
               this.ws.send(JSON.stringify({ type: 'client_ping', ts: Date.now() }));
             } catch {}
           }
-        }, 5000);
+        }, 3000);
       };
 
       this.ws.onmessage = (event) => {
+        this.lastPongAt = Date.now();
         if (typeof event.data === 'string') {
           try {
             // Heartbeat ping handling: respond immediately
@@ -237,6 +277,10 @@ export class ServerLiveTransport implements ILiveTransport {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
     }
+    if (this.offlineHandler && typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      window.removeEventListener('offline', this.offlineHandler);
+      this.offlineHandler = null;
+    }
     if (this.opusDecoder) {
       try {
         this.opusDecoder.delete?.();
@@ -270,6 +314,7 @@ export class ServerLiveTransport implements ILiveTransport {
         break;
 
       case 'client_pong': {
+        this.lastPongAt = Date.now();
         if (typeof msg.ts === 'number') {
           const rtt = Math.max(0, Date.now() - msg.ts);
           const buffered = this.ws?.bufferedAmount || 0;
@@ -284,6 +329,10 @@ export class ServerLiveTransport implements ILiveTransport {
         }
         break;
       }
+
+      case 'turn_handshake':
+        console.log(`[${getLogTimestamp()}] ⏳ [ServerLiveTransport:${this.clientSessionId}] Turn handshake received from server`);
+        break;
 
       case 'audio_opus':
         if (msg.data && this.opusDecoder) {
