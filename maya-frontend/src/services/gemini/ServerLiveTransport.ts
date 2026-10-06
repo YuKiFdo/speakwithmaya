@@ -1,9 +1,18 @@
+import { Buffer } from 'buffer';
 import { getLogTimestamp } from '@/utils/time';
 import type {
   ILiveTransport,
   LiveTransportCallbacks,
   LiveTransportConfig,
 } from './LiveTransport';
+
+// Ensure Buffer is globally accessible for third-party libraries (like opusscript) in browser environments
+if (typeof globalThis !== 'undefined' && !(globalThis as any).Buffer) {
+  (globalThis as any).Buffer = Buffer;
+}
+if (typeof window !== 'undefined' && !(window as any).Buffer) {
+  (window as any).Buffer = Buffer;
+}
 
 // Backpressure threshold for client audio upload: 64 KB
 const CLIENT_BACKPRESSURE_THRESHOLD = 64 * 1024;
