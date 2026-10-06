@@ -8,6 +8,7 @@ export class WebAudioCapture implements IAudioCapture {
   private workletNode: AudioWorkletNode | null = null;
   private recording: boolean = false;
   private callbacks: AudioCaptureCallbacks | null = null;
+  private networkQuality: 'good' | 'fair' | 'poor' = 'good';
 
   async start(callbacks: AudioCaptureCallbacks): Promise<void> {
     if (this.recording) return;
@@ -86,8 +87,10 @@ export class WebAudioCapture implements IAudioCapture {
           const volume = rms < noiseFloor ? 0 : Math.min(1, Math.max(0, (rms - noiseFloor) * 7.5));
           this.callbacks?.onVolumeChange?.(volume);
 
-          // Client-Side VAD & Silence Gate (prevent false triggers on breathing/fan noise < 0.040)
-          const speechThreshold = Math.max(0.040, noiseFloor * 2.5);
+          // Client-Side VAD & Silence Gate: adapts dynamically to network quality to avoid spurious 3G uploads
+          const multiplier = this.networkQuality === 'poor' ? 3.0 : 2.5;
+          const minThreshold = this.networkQuality === 'poor' ? 0.052 : 0.040;
+          const speechThreshold = Math.max(minThreshold, noiseFloor * multiplier);
 
           if (rms >= speechThreshold) {
             if (!isSpeaking) {
@@ -183,6 +186,10 @@ export class WebAudioCapture implements IAudioCapture {
 
   isRecording(): boolean {
     return this.recording;
+  }
+
+  setNetworkQuality(quality: 'good' | 'fair' | 'poor'): void {
+    this.networkQuality = quality;
   }
 }
 

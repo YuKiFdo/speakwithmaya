@@ -219,6 +219,10 @@ export class NativeAudioCapture implements IAudioCapture {
   isRecording(): boolean {
     return this.isRec;
   }
+
+  setNetworkQuality(_quality: 'good' | 'fair' | 'poor'): void {
+    // Native audio handles noise suppression via OS audio HAL
+  }
 }
 
 export const createAudioCapture = (): IAudioCapture => new NativeAudioCapture();

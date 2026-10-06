@@ -13,6 +13,7 @@ export interface IAudioPlayer {
   resume(): Promise<void>;
   playPcmChunk(base64Pcm: string): void;
   playFloat32Chunk?(samples: Float32Array): void;
+  setJitterBuffer?(targetMs: number): void;
   flush(): void;
   clear(): void; // Barge-in instant interruption
   stop(): Promise<void>;

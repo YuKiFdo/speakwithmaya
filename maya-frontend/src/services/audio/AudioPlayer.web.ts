@@ -117,6 +117,14 @@ export class WebAudioPlayer implements IAudioPlayer {
     this.playerNode?.port.postMessage({ type: 'flush' });
   }
 
+  setJitterBuffer(targetMs: number): void {
+    const prebufferSamples = Math.round((targetMs / 1000) * 24000);
+    this.playerNode?.port.postMessage({
+      type: 'set_jitter_buffer',
+      prebufferSamples,
+    });
+  }
+
   clear(): void {
     // Instant interruption / barge-in (< 300ms)
     this.playing = false;

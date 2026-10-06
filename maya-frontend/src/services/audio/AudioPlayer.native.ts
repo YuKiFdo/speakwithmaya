@@ -295,6 +295,10 @@ export class NativeAudioPlayer implements IAudioPlayer {
     this.playPcmChunk(btoa(binary));
   }
 
+  setJitterBuffer(_targetMs: number): void {
+    // Native expo-audio playlist manages hardware jitter buffers automatically
+  }
+
   async stop(): Promise<void> {
     this.clear();
   }

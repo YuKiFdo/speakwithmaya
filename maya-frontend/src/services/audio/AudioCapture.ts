@@ -15,6 +15,7 @@ export interface IAudioCapture {
   start(callbacks: AudioCaptureCallbacks): Promise<void>;
   stop(): Promise<void>;
   isRecording(): boolean;
+  setNetworkQuality?(quality: 'good' | 'fair' | 'poor'): void;
 }
 
 export const createAudioCapture = (): IAudioCapture => {

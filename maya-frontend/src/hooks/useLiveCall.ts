@@ -92,6 +92,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const [missionReport, setMissionReport] = useState<MissionReportData | null>(null);
   const [isSlowResponse, setIsSlowResponse] = useState<boolean>(false);
   const [lastTurnLatencyMs, setLastTurnLatencyMs] = useState<number | null>(null);
+  const [networkQuality, setNetworkQuality] = useState<'good' | 'fair' | 'poor'>('good');
+  const [networkRttMs, setNetworkRttMs] = useState<number>(0);
 
   const captureRef = useRef(createAudioCapture());
   const playerRef = useRef(createAudioPlayer());
@@ -770,6 +772,22 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               console.warn(`[useLiveCall] ⏱️ High turn latency reported: ${turnLatencyMs}ms (Avg: ${avgLatencyMs}ms)`);
             }
           },
+          onNetworkQualityChange: (quality: 'good' | 'fair' | 'poor', rtt: number) => {
+            setNetworkQuality(quality);
+            setNetworkRttMs(rtt);
+            if (quality === 'poor') {
+              setIsSlowResponse(true);
+              playerRef.current.setJitterBuffer?.(350);
+              captureRef.current.setNetworkQuality?.('poor');
+            } else if (quality === 'fair') {
+              playerRef.current.setJitterBuffer?.(250);
+              captureRef.current.setNetworkQuality?.('fair');
+            } else {
+              setIsSlowResponse(false);
+              playerRef.current.setJitterBuffer?.(150);
+              captureRef.current.setNetworkQuality?.('good');
+            }
+          },
         },
       );
     } catch (err: any) {
@@ -1109,6 +1127,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     setMissionReport,
     isSlowResponse,
     lastTurnLatencyMs,
+    networkQuality,
+    networkRttMs,
   };
 }
 

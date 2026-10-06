@@ -7,9 +7,15 @@ import {
 import { Logger } from '@nestjs/common';
 import { WebSocket, RawData } from 'ws';
 import { GoogleGenAI, Modality, ActivityHandling } from '@google/genai';
-import OpusScript from 'opusscript';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { CreateSessionTokenDto } from '../sessions/dto/session.dto.js';
+
+let OpusScriptClass: any = null;
+import('opusscript')
+  .then((mod) => {
+    OpusScriptClass = mod.default || mod;
+  })
+  .catch(() => {});
 
 interface ClientSessionState {
   ws: WebSocket;
@@ -235,9 +241,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      // Send ping
+      // Send ping with server timestamp for client RTT calculation
       try {
-        client.send(JSON.stringify({ type: 'ping' }));
+        client.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
       } catch {}
     }, HEARTBEAT_INTERVAL_MS);
   }
@@ -337,10 +343,20 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         state.supportsOpus = !!message.supportsOpus;
         if (state.supportsOpus) {
           try {
-            state.opusEncoder = new OpusScript(24000, 1, OpusScript.Application.VOIP);
-            state.opusPcmBuffer = Buffer.alloc(0);
-            this.logger.log(`[${state.sessionId}] 🚀 Opus compression enabled for client downlink (24kHz VOIP, 20ms frames)`);
-            this.addSessionLog(state, 'opus_enabled');
+            if (!OpusScriptClass) {
+              const mod = await import('opusscript').catch(() => null);
+              if (mod) OpusScriptClass = mod.default || mod;
+            }
+            if (OpusScriptClass) {
+              state.opusEncoder = new OpusScriptClass(24000, 1, OpusScriptClass.Application.VOIP);
+              state.opusPcmBuffer = Buffer.alloc(0);
+              this.logger.log(`[${state.sessionId}] 🚀 Opus compression enabled for client downlink (24kHz VOIP, 20ms frames)`);
+              this.addSessionLog(state, 'opus_enabled');
+            } else {
+              this.logger.warn(`[${state.sessionId}] Opus module unavailable in runtime, falling back to raw PCM`);
+              state.opusEncoder = null;
+              state.supportsOpus = false;
+            }
           } catch (e: any) {
             this.logger.warn(`[${state.sessionId}] Failed to initialize Opus encoder: ${e?.message}`);
             state.opusEncoder = null;
@@ -423,6 +439,16 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       case 'pong': {
         state.lastPongAt = Date.now();
+        break;
+      }
+
+      case 'client_ping': {
+        state.lastPongAt = Date.now();
+        this.safeSendToClient(state, JSON.stringify({
+          type: 'client_pong',
+          ts: message.ts,
+          serverTime: Date.now(),
+        }));
         break;
       }
 

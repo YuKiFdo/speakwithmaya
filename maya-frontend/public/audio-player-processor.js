@@ -23,6 +23,11 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
       const msg = event.data;
       if (!msg) return;
 
+      if (msg.type === 'set_jitter_buffer' && typeof msg.prebufferSamples === 'number') {
+        this.prebufferTarget = Math.max(1200, Math.min(12000, msg.prebufferSamples));
+        return;
+      }
+
       if (msg.type === 'audio' && msg.samples) {
         const samples = msg.samples;
         if (samples.length > 0) {

@@ -60,6 +60,7 @@ export interface LiveTransportCallbacks {
   onClose?: (code: number, reason: string) => void;
   onSlowConnection?: (bufferedKB: number) => void;
   onLatencyUpdate?: (latencyMs: number, avgLatencyMs: number) => void;
+  onNetworkQualityChange?: (quality: 'good' | 'fair' | 'poor', rttMs: number) => void;
 }
 
 export interface LiveTransportConfig {

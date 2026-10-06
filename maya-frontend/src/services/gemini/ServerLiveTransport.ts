@@ -21,6 +21,7 @@ export class ServerLiveTransport implements ILiveTransport {
   private lastPingAt: number = 0;
   private backpressureWarningCount: number = 0;
   private opusDecoder: any = null;
+  private pingInterval: any = null;
 
   constructor(backendWsUrl?: string) {
     if (backendWsUrl) {
@@ -88,6 +89,16 @@ export class ServerLiveTransport implements ILiveTransport {
         );
 
         this.callbacks.onOpen?.();
+
+        // Start ping probing every 5 seconds to measure RTT and network quality
+        if (this.pingInterval) clearInterval(this.pingInterval);
+        this.pingInterval = setInterval(() => {
+          if (this.isOpen && this.ws?.readyState === WebSocket.OPEN) {
+            try {
+              this.ws.send(JSON.stringify({ type: 'client_ping', ts: Date.now() }));
+            } catch {}
+          }
+        }, 5000);
       };
 
       this.ws.onmessage = (event) => {
@@ -213,6 +224,10 @@ export class ServerLiveTransport implements ILiveTransport {
       }
       this.ws = null;
     }
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
     if (this.opusDecoder) {
       try {
         this.opusDecoder.delete?.();
@@ -244,6 +259,22 @@ export class ServerLiveTransport implements ILiveTransport {
         console.warn(`[${getLogTimestamp()}] ⚠️ [ServerLiveTransport:${this.clientSessionId}] Server slow connection warning (${msg.bufferedKB}KB buffered)`);
         this.callbacks.onSlowConnection?.(msg.bufferedKB);
         break;
+
+      case 'client_pong': {
+        if (typeof msg.ts === 'number') {
+          const rtt = Math.max(0, Date.now() - msg.ts);
+          const buffered = this.ws?.bufferedAmount || 0;
+          const quality: 'good' | 'fair' | 'poor' =
+            rtt > 450 || buffered > 48000
+              ? 'poor'
+              : rtt > 220 || buffered > 16000
+                ? 'fair'
+                : 'good';
+
+          this.callbacks.onNetworkQualityChange?.(quality, rtt);
+        }
+        break;
+      }
 
       case 'audio_opus':
         if (msg.data && this.opusDecoder) {
