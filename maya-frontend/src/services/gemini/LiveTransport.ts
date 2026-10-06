@@ -57,6 +57,8 @@ export interface LiveTransportCallbacks {
   onGoAway?: (timeLeft: string) => void;
   onError?: (err: Error) => void;
   onClose?: (code: number, reason: string) => void;
+  onSlowConnection?: (bufferedKB: number) => void;
+  onLatencyUpdate?: (latencyMs: number, avgLatencyMs: number) => void;
 }
 
 export interface LiveTransportConfig {

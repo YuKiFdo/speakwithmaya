@@ -169,30 +169,36 @@ export default function CallScreen() {
   }, []);
 
   const isCallActive = liveCall.status === 'speaking' || liveCall.status === 'listening';
-  const isReconnecting = !isCallActive && (liveCall.status === 'reconnecting' || connection.isReconnecting);
-  const isConnectionLost = !isCallActive && connection.isLost && liveCall.status !== 'ended';
+  const isCallReconnecting = liveCall.status === 'reconnecting' || connection.isReconnecting;
+  const isCallConnectionLost = connection.isLost && liveCall.status !== 'ended';
+  const isSlowNetwork = liveCall.isSlowResponse || connection.isWeak;
 
   const isSessionEndingNear = (remainingSeconds <= 30 && liveCall.secondsElapsed > 0) || isFarewellPhase;
 
   // Priority:
-  // 1. Critical connection alerts (reconnecting / connection lost)
-  // 2. Session ending countdown & farewell wrap-up (takes top priority as time nears end)
-  // 3. Ambient network notices (weak connection, connection restored)
-  const activeToastPreset: ToastPillPreset | null = isReconnecting
-    ? 'reconnecting'
-    : isConnectionLost
+  // 1. Critical connection alerts (connection lost / reconnecting) - active throughout the session
+  // 2. Slow network / delayed response warning (>3.5s waiting for Maya response or backpressure)
+  // 3. Session ending countdown & farewell wrap-up (takes top priority as time nears end)
+  // 4. Ambient network notices (weak connection, connection restored)
+  const activeToastPreset: ToastPillPreset | null = isCallConnectionLost
     ? 'connection-lost'
+    : isCallReconnecting
+    ? 'reconnecting'
+    : liveCall.isSlowResponse
+    ? 'slow-connection'
     : isSessionEndingNear
     ? 'session-ends'
     : connection.toastPreset;
 
-  const displayedStatusText = isConnectionLost
+  const displayedStatusText = isCallConnectionLost
     ? 'Connection lost'
-    : isReconnecting
+    : isCallReconnecting
     ? 'Reconnecting...'
     : liveCall.status === 'ended'
     ? 'Session ended'
-    : (!isCallActive && connection.isWeak)
+    : liveCall.isSlowResponse
+    ? 'Waiting for Maya...'
+    : connection.isWeak
     ? 'Weak connection'
     : liveCall.status === 'speaking'
     ? 'Speaking..'
@@ -412,9 +418,9 @@ export default function CallScreen() {
                     <View
                       style={[
                         styles.statusDot,
-                        isConnectionLost
+                        isCallConnectionLost
                           ? styles.statusDotRed
-                          : isReconnecting || (!isCallActive && connection.isWeak)
+                          : isCallReconnecting || isSlowNetwork
                           ? styles.statusDotOrange
                           : styles.statusDotGreen,
                       ]}
@@ -427,9 +433,9 @@ export default function CallScreen() {
                   <Text
                     style={[
                       styles.stateLabel,
-                      isConnectionLost
+                      isCallConnectionLost
                         ? styles.stateLabelLost
-                        : isReconnecting || (!isCallActive && connection.isWeak)
+                        : isCallReconnecting || isSlowNetwork
                         ? styles.stateLabelWarning
                         : liveCall.status === 'speaking'
                         ? styles.stateLabelSpeaking
@@ -475,9 +481,9 @@ export default function CallScreen() {
                     <View
                       style={[
                         styles.statusDot,
-                        isConnectionLost
+                        isCallConnectionLost
                           ? styles.statusDotRed
-                          : isReconnecting || (!isCallActive && connection.isWeak)
+                          : isCallReconnecting || isSlowNetwork
                           ? styles.statusDotOrange
                           : styles.statusDotGreen,
                       ]}
@@ -490,9 +496,9 @@ export default function CallScreen() {
                   <Text
                     style={[
                       styles.stateLabelDesktop,
-                      isConnectionLost
+                      isCallConnectionLost
                         ? styles.stateLabelLost
-                        : isReconnecting || (!isCallActive && connection.isWeak)
+                        : isCallReconnecting || isSlowNetwork
                         ? styles.stateLabelWarning
                         : liveCall.status === 'speaking'
                         ? styles.stateLabelSpeaking

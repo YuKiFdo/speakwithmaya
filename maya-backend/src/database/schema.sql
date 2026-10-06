@@ -137,3 +137,25 @@ CREATE POLICY "Everyone can read published roadmap levels" ON public.roadmap_lev
 CREATE POLICY "Users access own roadmap progress" ON public.user_roadmap_progress
   FOR ALL USING (auth.uid() = user_id);
 
+-- 8. Session Diagnostics & Network Performance Logs
+CREATE TABLE IF NOT EXISTS public.session_diagnostics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id TEXT NOT NULL,
+  duration_seconds INTEGER DEFAULT 0,
+  turns_count INTEGER DEFAULT 0,
+  avg_latency_ms INTEGER DEFAULT 0,
+  max_latency_ms INTEGER DEFAULT 0,
+  slow_turns_count INTEGER DEFAULT 0,
+  backpressure_warnings INTEGER DEFAULT 0,
+  error_count INTEGER DEFAULT 0,
+  events JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.session_diagnostics ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service role access session diagnostics" ON public.session_diagnostics;
+CREATE POLICY "Service role access session diagnostics" ON public.session_diagnostics
+  FOR ALL USING (true);
+
+

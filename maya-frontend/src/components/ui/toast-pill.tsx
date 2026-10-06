@@ -227,6 +227,7 @@ export type ToastPillPreset =
   | 'move-closer'
   | 'couldnt-hear'
   | 'weak-connection'
+  | 'slow-connection'
   | 'reconnecting'
   | 'noise-detected'
   | 'quiet-place'
@@ -273,6 +274,11 @@ export const TOAST_PRESET_CONFIGS: Record<ToastPillPreset, ToastPillConfig> = {
   'weak-connection': {
     variant: 'warning',
     text: 'Weak connection',
+    icon: (color) => <ToastWifiWeakIcon color={color} size={15} />,
+  },
+  'slow-connection': {
+    variant: 'warning',
+    text: 'Slow connection, waiting for Maya...',
     icon: (color) => <ToastWifiWeakIcon color={color} size={15} />,
   },
   'reconnecting': {

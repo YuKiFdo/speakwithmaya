@@ -64,6 +64,17 @@ export class SessionsController {
     return this.sessionsService.getSessionDetail(sessionId);
   }
 
+  @Get('sessions/:id/diagnostics')
+  async getSessionDiagnostics(@Param('id') sessionId: string) {
+    const diag = await this.sessionsService.getSessionDiagnostics(sessionId);
+    return diag || { message: 'No diagnostics found for session', sessionId };
+  }
+
+  @Get('admin/diagnostics')
+  async getRecentDiagnostics() {
+    return this.sessionsService.getAllRecentDiagnostics();
+  }
+
   @Get('admin/usage')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async getUsage(@Query() query: QueryUsageDto) {

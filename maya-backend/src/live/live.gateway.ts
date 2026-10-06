@@ -14,6 +14,7 @@ interface ClientSessionState {
   ws: WebSocket;
   geminiSession?: any;
   dto?: CreateSessionTokenDto;
+  sessionId: string;
   isConnectedToGemini: boolean;
   userSpeechActive: boolean;
   hasDispatchedGreeting: boolean;
@@ -27,7 +28,34 @@ interface ClientSessionState {
   totalTextOutTokens: number;
   totalThoughtsTokens: number;
   rateMultiplier: number;
+
+  // Latency tracking: measures time from activityEnd to first Gemini audio response
+  turnEndTimestamp: number | null;
+  awaitingGeminiResponse: boolean;
+  turnLatencies: number[];
+
+  // Heartbeat
+  heartbeatInterval: ReturnType<typeof setInterval> | null;
+  lastPongAt: number;
+
+  // Backpressure tracking
+  backpressureWarningCount: number;
+
+  // Session diagnostics log
+  sessionLog: Array<{
+    ts: number;
+    event: string;
+    detail?: string;
+  }>;
+  connectedAt: number;
 }
+
+// Backpressure threshold: 128 KB of queued data
+const BACKPRESSURE_THRESHOLD = 128 * 1024;
+// Heartbeat interval: 10 seconds
+const HEARTBEAT_INTERVAL_MS = 10_000;
+// Heartbeat timeout: 15 seconds without pong
+const HEARTBEAT_TIMEOUT_MS = 15_000;
 
 @WebSocketGateway({
   path: '/live-session',
@@ -45,9 +73,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleConnection(client: WebSocket) {
-    this.logger.log('[LiveGateway] Client connected over WebSocket');
+    const sessionId = `gw-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    this.logger.log(`[${sessionId}] Client connected over WebSocket`);
+
     const state: ClientSessionState = {
       ws: client,
+      sessionId,
       isConnectedToGemini: false,
       userSpeechActive: false,
       hasDispatchedGreeting: false,
@@ -61,8 +92,27 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       totalTextOutTokens: 0,
       totalThoughtsTokens: 0,
       rateMultiplier: Number((0.37 + Math.random() * 0.03).toFixed(4)),
+
+      // Latency tracking
+      turnEndTimestamp: null,
+      awaitingGeminiResponse: false,
+      turnLatencies: [],
+
+      // Heartbeat
+      heartbeatInterval: null,
+      lastPongAt: Date.now(),
+
+      // Backpressure
+      backpressureWarningCount: 0,
+
+      // Session diagnostics
+      sessionLog: [{ ts: Date.now(), event: 'client_connected' }],
+      connectedAt: Date.now(),
     };
     this.clients.set(client, state);
+
+    // Start ping/pong heartbeat with client
+    this.startHeartbeat(client, state);
 
     client.on('message', async (data: RawData, isBinary: boolean) => {
       try {
@@ -73,31 +123,192 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         } else {
           // Text / JSON message
           const text = data.toString('utf-8');
+
+          // Handle pong responses from client heartbeat
+          if (text === 'pong') {
+            state.lastPongAt = Date.now();
+            return;
+          }
+
           const message = JSON.parse(text);
           await this.handleClientMessage(client, message);
         }
       } catch (err: any) {
-        this.logger.error(`[LiveGateway] Error processing client message: ${err?.message}`);
+        this.logger.error(`[${state.sessionId}] Error processing client message: ${err?.message}`);
+        this.addSessionLog(state, 'client_message_error', err?.message);
       }
     });
 
     client.on('error', (err) => {
-      this.logger.error(`[LiveGateway] Client socket error: ${err.message}`);
+      this.logger.error(`[${state.sessionId}] Client socket error: ${err.message}`);
+      this.addSessionLog(state, 'client_socket_error', err.message);
+    });
+
+    client.on('close', (code, reason) => {
+      this.addSessionLog(state, 'client_socket_closed', `code=${code} reason=${reason?.toString() || ''}`);
     });
   }
 
   async handleDisconnect(client: WebSocket) {
-    this.logger.log('[LiveGateway] Client disconnected');
     const state = this.clients.get(client);
-    if (state?.geminiSession) {
-      try {
-        await state.geminiSession.close();
-      } catch (e: any) {
-        this.logger.debug(`[LiveGateway] Error closing Gemini session: ${e?.message}`);
+    const sid = state?.sessionId || 'unknown';
+    this.logger.log(`[${sid}] Client disconnected`);
+
+    if (state) {
+      // Stop heartbeat
+      this.stopHeartbeat(state);
+
+      // Print session diagnostics summary
+      this.printSessionSummary(state);
+
+      // Persist session diagnostics to DB and in-memory store
+      const durationMs = Date.now() - state.connectedAt;
+      const durationSec = Math.round(durationMs / 1000);
+      const avgLatency = state.turnLatencies.length > 0
+        ? Math.round(state.turnLatencies.reduce((s, v) => s + v, 0) / state.turnLatencies.length)
+        : 0;
+      const maxLatency = state.turnLatencies.length > 0
+        ? Math.round(Math.max(...state.turnLatencies))
+        : 0;
+      const slowTurns = state.turnLatencies.filter((l) => l > 3000).length;
+      const errorEvents = state.sessionLog.filter((e) =>
+        e.event.includes('error') || e.event.includes('timeout') || e.event.includes('backpressure'),
+      );
+
+      this.sessionsService
+        .saveSessionDiagnostics({
+          sessionId: state.sessionId,
+          durationSeconds: durationSec,
+          turnsCount: state.turnLatencies.length,
+          avgLatencyMs: avgLatency,
+          maxLatencyMs: maxLatency,
+          slowTurnsCount: slowTurns,
+          backpressureWarnings: state.backpressureWarningCount,
+          errorCount: errorEvents.length,
+          events: state.sessionLog,
+        })
+        .catch((e: any) => {
+          this.logger.warn(`[${sid}] Failed to save diagnostics: ${e?.message}`);
+        });
+
+      if (state.geminiSession) {
+        try {
+          await state.geminiSession.close();
+        } catch (e: any) {
+          this.logger.debug(`[${sid}] Error closing Gemini session: ${e?.message}`);
+        }
       }
     }
     this.clients.delete(client);
   }
+
+  // ─── HEARTBEAT ───────────────────────────────────────────────────────────────
+
+  private startHeartbeat(client: WebSocket, state: ClientSessionState) {
+    state.lastPongAt = Date.now();
+    state.heartbeatInterval = setInterval(() => {
+      if (client.readyState !== WebSocket.OPEN) {
+        this.stopHeartbeat(state);
+        return;
+      }
+
+      // Check if we got a pong since last ping
+      const sincePong = Date.now() - state.lastPongAt;
+      if (sincePong > HEARTBEAT_TIMEOUT_MS) {
+        this.logger.warn(`[${state.sessionId}] ❌ Heartbeat timeout — no pong for ${Math.round(sincePong / 1000)}s → closing stale client`);
+        this.addSessionLog(state, 'heartbeat_timeout', `${Math.round(sincePong / 1000)}s since last pong`);
+        this.stopHeartbeat(state);
+        try {
+          client.close(1001, 'Heartbeat timeout');
+        } catch {}
+        return;
+      }
+
+      // Send ping
+      try {
+        client.send(JSON.stringify({ type: 'ping' }));
+      } catch {}
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  private stopHeartbeat(state: ClientSessionState) {
+    if (state.heartbeatInterval) {
+      clearInterval(state.heartbeatInterval);
+      state.heartbeatInterval = null;
+    }
+  }
+
+  // ─── SESSION LOGGING ─────────────────────────────────────────────────────────
+
+  private addSessionLog(state: ClientSessionState, event: string, detail?: string) {
+    state.sessionLog.push({ ts: Date.now(), event, detail });
+    // Cap log at 500 entries to prevent memory issues in long sessions
+    if (state.sessionLog.length > 500) {
+      state.sessionLog = state.sessionLog.slice(-400);
+    }
+  }
+
+  private printSessionSummary(state: ClientSessionState) {
+    const durationMs = Date.now() - state.connectedAt;
+    const durationSec = Math.round(durationMs / 1000);
+    const avgLatency = state.turnLatencies.length > 0
+      ? Math.round(state.turnLatencies.reduce((s, v) => s + v, 0) / state.turnLatencies.length)
+      : 0;
+    const maxLatency = state.turnLatencies.length > 0
+      ? Math.round(Math.max(...state.turnLatencies))
+      : 0;
+    const slowTurns = state.turnLatencies.filter(l => l > 3000).length;
+
+    const errorEvents = state.sessionLog.filter(e =>
+      e.event.includes('error') || e.event.includes('timeout') || e.event.includes('backpressure')
+    );
+
+    this.logger.log(
+      `[${state.sessionId}] 📊 SESSION SUMMARY\n` +
+      `   Duration: ${durationSec}s | Turns: ${state.turnLatencies.length} | Backpressure warnings: ${state.backpressureWarningCount}\n` +
+      `   Latency → Avg: ${avgLatency}ms | Max: ${maxLatency}ms | Slow turns (>3s): ${slowTurns}\n` +
+      `   Errors/warnings: ${errorEvents.length} events\n` +
+      `   ${errorEvents.length > 0 ? 'Events: ' + errorEvents.map(e => `[${new Date(e.ts).toISOString()}] ${e.event}: ${e.detail || ''}`).join(' | ') : 'No errors recorded'}`
+    );
+  }
+
+  // ─── SAFE SEND WITH BACKPRESSURE ─────────────────────────────────────────────
+
+  private safeSendToClient(state: ClientSessionState, data: string) {
+    const { ws } = state;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Check backpressure: if too much data is queued, log warning
+    const buffered = ws.bufferedAmount || 0;
+    if (buffered > BACKPRESSURE_THRESHOLD) {
+      state.backpressureWarningCount++;
+      // Log every 10th occurrence to avoid log spam
+      if (state.backpressureWarningCount % 10 === 1) {
+        this.logger.warn(
+          `[${state.sessionId}] ⚠️ Client WS backpressure: ${Math.round(buffered / 1024)}KB queued ` +
+          `(warning #${state.backpressureWarningCount})`
+        );
+        this.addSessionLog(state, 'backpressure_warning', `${Math.round(buffered / 1024)}KB queued`);
+      }
+
+      // Notify client of slow connection
+      try {
+        ws.send(JSON.stringify({
+          type: 'slow_connection',
+          bufferedKB: Math.round(buffered / 1024),
+        }));
+      } catch {}
+    }
+
+    try {
+      ws.send(data);
+    } catch (err: any) {
+      this.logger.error(`[${state.sessionId}] Send to client failed: ${err?.message}`);
+      this.addSessionLog(state, 'send_error', err?.message);
+    }
+  }
+
+  // ─── MESSAGE HANDLERS ────────────────────────────────────────────────────────
 
   private async handleClientMessage(client: WebSocket, message: any) {
     const state = this.clients.get(client);
@@ -106,7 +317,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     switch (message.type) {
       case 'start_session': {
         const dto: CreateSessionTokenDto = message.options || {};
+        if (message.options?.sessionId) {
+          state.sessionId = message.options.sessionId;
+        }
         state.dto = dto;
+        this.addSessionLog(state, 'start_session', `topic=${dto.topic || 'General'} lang=${dto.languageMode || 'english'}`);
         await this.initGeminiLiveSession(client, state, dto);
         break;
       }
@@ -122,6 +337,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       case 'turn_complete': {
         // User speech turn ended -> flush trailing silence and signal Gemini
+        this.addSessionLog(state, 'user_turn_complete');
         await this.handleEndOfTurn(state);
         break;
       }
@@ -129,7 +345,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       case 'interrupt': {
         // User barge-in signal
         if (state.geminiSession) {
-          this.logger.log('[LiveGateway] User barge-in interrupt signal received');
+          this.logger.log(`[${state.sessionId}] User barge-in interrupt signal received`);
+          this.addSessionLog(state, 'user_interrupt');
         }
         break;
       }
@@ -142,7 +359,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           if (state.userSpeechActive) {
             state.geminiSession?.sendRealtimeInput({ activityEnd: {} });
             state.userSpeechActive = false;
-            this.logger.debug('[LiveGateway] 🛑 activityEnd sent (mic off/paused)');
+            this.logger.debug(`[${state.sessionId}] 🛑 activityEnd sent (mic off/paused)`);
+            this.addSessionLog(state, 'activity_end_mic_pause');
           }
         } catch (e: any) {
           // ignore
@@ -151,7 +369,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       default:
-        this.logger.warn(`[LiveGateway] Unknown message type: ${message.type}`);
+        this.logger.warn(`[${state.sessionId}] Unknown message type: ${message.type}`);
     }
   }
 
@@ -165,7 +383,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!state.userSpeechActive) {
         state.userSpeechActive = true;
         state.geminiSession.sendRealtimeInput({ activityStart: {} });
-        this.logger.debug('[LiveGateway] 🎙️ activityStart sent — user speech burst began');
+        this.logger.debug(`[${state.sessionId}] 🎙️ activityStart sent — user speech burst began`);
+        this.addSessionLog(state, 'activity_start');
       }
 
       // Stream raw 16kHz PCM audio chunk to Gemini
@@ -176,7 +395,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
       });
     } catch (err: any) {
-      this.logger.error(`[LiveGateway] sendRealtimeInput error: ${err?.message}`);
+      this.logger.error(`[${state.sessionId}] sendRealtimeInput error: ${err?.message}`);
+      this.addSessionLog(state, 'gemini_send_error', err?.message);
     }
   }
 
@@ -184,7 +404,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!state.geminiSession || !state.isConnectedToGemini) return;
 
     try {
-      this.logger.log('[LiveGateway] 🚀 Turn Complete: Sending activityEnd to Gemini Live');
+      this.logger.log(`[${state.sessionId}] 🚀 Turn Complete: Sending activityEnd to Gemini Live`);
 
       // Manual VAD: signal activityEnd so Gemini immediately processes all accumulated audio.
       // This replaces the old approach of sending silence frames + clientContent.turnComplete
@@ -192,10 +412,16 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (state.userSpeechActive) {
         state.geminiSession.sendRealtimeInput({ activityEnd: {} });
         state.userSpeechActive = false;
-        this.logger.debug('[LiveGateway] 🛑 activityEnd sent — user speech burst ended');
+        this.logger.debug(`[${state.sessionId}] 🛑 activityEnd sent — user speech burst ended`);
+        this.addSessionLog(state, 'activity_end_turn');
+
+        // Start latency measurement: record when we sent activityEnd
+        state.turnEndTimestamp = Date.now();
+        state.awaitingGeminiResponse = true;
       }
     } catch (err: any) {
-      this.logger.error(`[LiveGateway] handleEndOfTurn error: ${err?.message}`);
+      this.logger.error(`[${state.sessionId}] handleEndOfTurn error: ${err?.message}`);
+      this.addSessionLog(state, 'end_of_turn_error', err?.message);
     }
   }
 
@@ -214,7 +440,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const greetingPrompt = this.sessionsService.generateGreetingPrompt(dto);
       const voiceName = isSinhala ? 'Callirrhoe' : 'Aoede';
 
-      this.logger.log(`[LiveGateway] Connecting to Gemini Live API (${this.liveModel})...`);
+      this.logger.log(`[${state.sessionId}] Connecting to Gemini Live API (${this.liveModel})...`);
+      this.addSessionLog(state, 'gemini_connecting', `model=${this.liveModel}`);
 
       let session: any = null;
 
@@ -255,23 +482,28 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
         callbacks: {
           onopen: () => {
-            this.logger.log('[LiveGateway] ✅ Connected to Gemini Live API');
+            this.logger.log(`[${state.sessionId}] ✅ Connected to Gemini Live API`);
             state.isConnectedToGemini = true;
+            this.addSessionLog(state, 'gemini_connected');
 
             // Notify client that session is ready
-            client.send(
-              JSON.stringify({
-                type: 'ready',
-                model: this.liveModel,
-                voiceName,
-              }),
-            );
+            this.safeSendToClient(state, JSON.stringify({
+              type: 'ready',
+              model: this.liveModel,
+              voiceName,
+            }));
 
             // Dispatch opening turn greeting prompt if fresh session
             const isFreshSession = !dto.isReconnect && !dto.memory;
             if (isFreshSession && greetingPrompt && session && !state.hasDispatchedGreeting) {
               state.hasDispatchedGreeting = true;
-              this.logger.log('[LiveGateway] Dispatching opening turn greeting prompt');
+              this.logger.log(`[${state.sessionId}] Dispatching opening turn greeting prompt`);
+              this.addSessionLog(state, 'greeting_dispatched');
+
+              // Start latency timer for greeting response
+              state.turnEndTimestamp = Date.now();
+              state.awaitingGeminiResponse = true;
+
               session.sendClientContent({
                 turns: [
                   {
@@ -283,7 +515,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
               });
             } else if (!isFreshSession && !state.hasDispatchedGreeting) {
               state.hasDispatchedGreeting = true;
-              this.logger.log('[LiveGateway] Reconnected session / existing memory present -> skipping opening greeting prompt');
+              this.logger.log(`[${state.sessionId}] Reconnected session / existing memory present -> skipping opening greeting prompt`);
+              this.addSessionLog(state, 'greeting_skipped_reconnect');
             }
           },
 
@@ -292,24 +525,22 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           },
 
           onerror: (err: any) => {
-            this.logger.error(`[LiveGateway] Gemini Live error: ${err?.message || err}`);
-            client.send(
-              JSON.stringify({
-                type: 'error',
-                message: err?.message || 'Gemini Live error',
-              }),
-            );
+            this.logger.error(`[${state.sessionId}] Gemini Live error: ${err?.message || err}`);
+            this.addSessionLog(state, 'gemini_error', err?.message || String(err));
+            this.safeSendToClient(state, JSON.stringify({
+              type: 'error',
+              message: err?.message || 'Gemini Live error',
+            }));
           },
 
           onclose: (e: any) => {
-            this.logger.log(`[LiveGateway] Gemini Live closed: ${e?.reason || 'Normal'}`);
+            this.logger.log(`[${state.sessionId}] Gemini Live closed: ${e?.reason || 'Normal'}`);
             state.isConnectedToGemini = false;
-            client.send(
-              JSON.stringify({
-                type: 'closed',
-                reason: e?.reason,
-              }),
-            );
+            this.addSessionLog(state, 'gemini_closed', e?.reason || 'Normal');
+            this.safeSendToClient(state, JSON.stringify({
+              type: 'closed',
+              reason: e?.reason,
+            }));
           },
         },
       });
@@ -320,7 +551,13 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const isFreshSession = !dto.isReconnect && !dto.memory;
       if (isFreshSession && greetingPrompt && state.isConnectedToGemini && session && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
-        this.logger.log('[LiveGateway] Ensuring opening turn greeting prompt is dispatched');
+        this.logger.log(`[${state.sessionId}] Ensuring opening turn greeting prompt is dispatched`);
+        this.addSessionLog(state, 'greeting_dispatched_fallback');
+
+        // Start latency timer for greeting response
+        state.turnEndTimestamp = Date.now();
+        state.awaitingGeminiResponse = true;
+
         session.sendClientContent({
           turns: [
             {
@@ -332,13 +569,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
       }
     } catch (err: any) {
-      this.logger.error(`[LiveGateway] Failed to connect to Gemini Live: ${err?.message}`, err?.stack);
-      client.send(
-        JSON.stringify({
-          type: 'error',
-          message: `Failed to initialize Gemini Live: ${err?.message}`,
-        }),
-      );
+      this.logger.error(`[${state.sessionId}] Failed to connect to Gemini Live: ${err?.message}`, err?.stack);
+      this.addSessionLog(state, 'gemini_connect_failed', err?.message);
+      this.safeSendToClient(state, JSON.stringify({
+        type: 'error',
+        message: `Failed to initialize Gemini Live: ${err?.message}`,
+      }));
     }
   }
 
@@ -355,14 +591,33 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       for (const part of serverContent.modelTurn.parts) {
         if (part.inlineData?.data) {
           state.hasModelSpokenThisTurn = true;
-          // Send base64 audio chunk to client
-          client.send(
-            JSON.stringify({
-              type: 'audio',
-              data: part.inlineData.data,
-              mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000',
-            }),
-          );
+
+          // Latency measurement: first audio chunk after activityEnd
+          if (state.awaitingGeminiResponse && state.turnEndTimestamp) {
+            const latencyMs = Date.now() - state.turnEndTimestamp;
+            state.turnLatencies.push(latencyMs);
+            state.awaitingGeminiResponse = false;
+
+            const severity = latencyMs > 8000 ? '🔴' : latencyMs > 3000 ? '🟡' : '🟢';
+            this.logger.log(`[${state.sessionId}] ${severity} Turn latency: ${latencyMs}ms (Gemini thinking time)`);
+            this.addSessionLog(state, 'turn_latency', `${latencyMs}ms`);
+
+            // Forward latency measurement to client
+            this.safeSendToClient(state, JSON.stringify({
+              type: 'latency',
+              turnLatencyMs: latencyMs,
+              avgLatencyMs: Math.round(
+                state.turnLatencies.reduce((s, v) => s + v, 0) / state.turnLatencies.length
+              ),
+            }));
+          }
+
+          // Send base64 audio chunk to client (with backpressure check)
+          this.safeSendToClient(state, JSON.stringify({
+            type: 'audio',
+            data: part.inlineData.data,
+            mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000',
+          }));
         }
       }
     }
@@ -372,25 +627,39 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const text = serverContent.outputTranscription.text;
       state.modelTranscriptAccumulator += text;
       state.hasModelSpokenThisTurn = true;
-      client.send(
-        JSON.stringify({
-          type: 'output_transcript',
-          text,
-        }),
-      );
+
+      // Also count as first response if we were awaiting
+      if (state.awaitingGeminiResponse && state.turnEndTimestamp) {
+        const latencyMs = Date.now() - state.turnEndTimestamp;
+        state.turnLatencies.push(latencyMs);
+        state.awaitingGeminiResponse = false;
+        this.logger.log(`[${state.sessionId}] Turn latency (transcript): ${latencyMs}ms`);
+        this.addSessionLog(state, 'turn_latency_transcript', `${latencyMs}ms`);
+
+        this.safeSendToClient(state, JSON.stringify({
+          type: 'latency',
+          turnLatencyMs: latencyMs,
+          avgLatencyMs: Math.round(
+            state.turnLatencies.reduce((s, v) => s + v, 0) / state.turnLatencies.length
+          ),
+        }));
+      }
+
+      this.safeSendToClient(state, JSON.stringify({
+        type: 'output_transcript',
+        text,
+      }));
     }
 
     if (serverContent?.inputTranscription?.text) {
       const text = serverContent.inputTranscription.text;
       state.userTranscriptAccumulator += text;
       state.lastStudentTranscript += text;
-      this.logger.log(`[LiveGateway] 📝 [Student Said Chunk]: "${text}"`);
-      client.send(
-        JSON.stringify({
-          type: 'input_transcript',
-          text,
-        }),
-      );
+      this.logger.log(`[${state.sessionId}] 📝 [Student Said Chunk]: "${text}"`);
+      this.safeSendToClient(state, JSON.stringify({
+        type: 'input_transcript',
+        text,
+      }));
     }
 
     // 3. Turn Complete
@@ -401,10 +670,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Only print turn complete summary when the model actually responded or when user turn finished
       if (state.hasModelSpokenThisTurn || modelText) {
         this.logger.log(
-          `[LiveGateway] 🤖 [Model Turn Complete]\n` +
+          `[${state.sessionId}] 🤖 [Model Turn Complete]\n` +
           `   🗣️ User Said: "${userText || '(untranscribed / audio speech)'}"\n` +
           `   💬 Maya Replied: "${modelText || '(audio only)'}"`
         );
+        this.addSessionLog(state, 'model_turn_complete', `user="${userText?.slice(0, 80)}" maya="${modelText?.slice(0, 80)}"`);
         // Turn fully complete: clear accumulators for the next conversational exchange
         state.userTranscriptAccumulator = '';
         state.lastStudentTranscript = '';
@@ -413,27 +683,26 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       } else {
         // Intermediate turn completion (e.g. handshake/tool call/user acoustic closure)
         this.logger.log(
-          `[LiveGateway] ⏳ [Turn Handshake Completed] Student transcription accumulated: "${userText || '(awaiting recognition)'}". Model audio generation in progress...`
+          `[${state.sessionId}] ⏳ [Turn Handshake Completed] Student transcription accumulated: "${userText || '(awaiting recognition)'}". Model audio generation in progress...`
         );
+        this.addSessionLog(state, 'turn_handshake', `user="${userText?.slice(0, 80)}"`);
       }
 
-      client.send(
-        JSON.stringify({
-          type: 'turn_complete',
-        }),
-      );
+      this.safeSendToClient(state, JSON.stringify({
+        type: 'turn_complete',
+      }));
     }
 
     // 4. Interrupted Event
     if (serverContent?.interrupted) {
-      this.logger.log(`[LiveGateway] ⚡ [Interrupted] User voice interrupted model response`);
+      this.logger.log(`[${state.sessionId}] ⚡ [Interrupted] User voice interrupted model response`);
       state.modelTranscriptAccumulator = '';
       state.hasModelSpokenThisTurn = false;
-      client.send(
-        JSON.stringify({
-          type: 'interrupted',
-        }),
-      );
+      state.awaitingGeminiResponse = false;
+      this.addSessionLog(state, 'model_interrupted');
+      this.safeSendToClient(state, JSON.stringify({
+        type: 'interrupted',
+      }));
     }
 
     // 5. Function Calling / Tools
@@ -444,16 +713,15 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       for (const fc of response.toolCall.functionCalls) {
         const args = (fc.args || {}) as any;
-        this.logger.log(`[LiveGateway] 🛠️ Tool Call invoked: ${fc.name}`);
+        this.logger.log(`[${state.sessionId}] 🛠️ Tool Call invoked: ${fc.name}`);
+        this.addSessionLog(state, 'tool_call', fc.name);
 
         // Forward to client so UI displays grammar card or farewell
-        client.send(
-          JSON.stringify({
-            type: 'tool_call',
-            name: fc.name,
-            args: fc.args,
-          }),
-        );
+        this.safeSendToClient(state, JSON.stringify({
+          type: 'tool_call',
+          name: fc.name,
+          args: fc.args,
+        }));
 
         if (fc.name === 'conclude_call') {
           functionResponses.push({
@@ -624,21 +892,19 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const costUsd = Number((rawCostUsd * rateMultiplier).toFixed(6));
       const costLkr = Number((costUsd * 308.50).toFixed(2));
 
-      client.send(
-        JSON.stringify({
-          type: 'usage',
-          usage: {
-            textIn: state.totalTextInTokens,
-            audioIn: state.totalAudioInTokens,
-            audioOut: state.totalAudioOutTokens,
-            textOut: state.totalTextOutTokens,
-            thoughtsTokens: state.totalThoughtsTokens,
-            total,
-            costUsd,
-            costLkr,
-          },
-        }),
-      );
+      this.safeSendToClient(state, JSON.stringify({
+        type: 'usage',
+        usage: {
+          textIn: state.totalTextInTokens,
+          audioIn: state.totalAudioInTokens,
+          audioOut: state.totalAudioOutTokens,
+          textOut: state.totalTextOutTokens,
+          thoughtsTokens: state.totalThoughtsTokens,
+          total,
+          costUsd,
+          costLkr,
+        },
+      }));
     }
   }
 }

@@ -5,6 +5,9 @@ import type {
   LiveTransportConfig,
 } from './LiveTransport';
 
+// Backpressure threshold for client audio upload: 64 KB
+const CLIENT_BACKPRESSURE_THRESHOLD = 64 * 1024;
+
 export class ServerLiveTransport implements ILiveTransport {
   private ws: WebSocket | null = null;
   private callbacks: LiveTransportCallbacks = {};
@@ -14,6 +17,9 @@ export class ServerLiveTransport implements ILiveTransport {
   private userTranscriptAccumulator: string = '';
   private modelTranscriptAccumulator: string = '';
   private hasModelSpokenThisTurn: boolean = false;
+  private clientSessionId: string = '';
+  private lastPingAt: number = 0;
+  private backpressureWarningCount: number = 0;
 
   constructor(backendWsUrl?: string) {
     if (backendWsUrl) {
@@ -32,6 +38,7 @@ export class ServerLiveTransport implements ILiveTransport {
   ): void {
     this.config = config;
     this.callbacks = callbacks;
+    this.clientSessionId = `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
     try {
       let targetWsUrl = this.backendWsUrl;
@@ -48,12 +55,12 @@ export class ServerLiveTransport implements ILiveTransport {
         }
       }
 
-      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport] Connecting to NestJS Gateway: ${targetWsUrl}`);
+      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport:${this.clientSessionId}] Connecting to NestJS Gateway: ${targetWsUrl}`);
       this.ws = new WebSocket(targetWsUrl);
       this.ws.binaryType = 'arraybuffer';
 
       this.ws.onopen = () => {
-        console.log(`[${getLogTimestamp()}] ✅ [ServerLiveTransport] WebSocket connected to NestJS Backend`);
+        console.log(`[${getLogTimestamp()}] ✅ [ServerLiveTransport:${this.clientSessionId}] WebSocket connected to NestJS Backend`);
         this.isOpen = true;
 
         // Start Gemini session on backend
@@ -73,21 +80,33 @@ export class ServerLiveTransport implements ILiveTransport {
       this.ws.onmessage = (event) => {
         if (typeof event.data === 'string') {
           try {
+            // Heartbeat ping handling: respond immediately
+            if (event.data === 'ping') {
+              this.ws?.send('pong');
+              return;
+            }
+
             const msg = JSON.parse(event.data);
+            if (msg.type === 'ping') {
+              this.lastPingAt = Date.now();
+              this.ws?.send('pong');
+              return;
+            }
+
             this.handleServerMessage(msg);
           } catch (e: any) {
-            console.error('[ServerLiveTransport] Parse error:', e);
+            console.error(`[ServerLiveTransport:${this.clientSessionId}] Parse error:`, e);
           }
         }
       };
 
       this.ws.onerror = (evt: any) => {
-        console.error('[ServerLiveTransport] Socket error:', evt);
+        console.error(`[ServerLiveTransport:${this.clientSessionId}] Socket error:`, evt);
         this.callbacks.onError?.(new Error('ServerLiveTransport socket error'));
       };
 
       this.ws.onclose = (evt: CloseEvent) => {
-        console.log(`[ServerLiveTransport] Socket closed (code: ${evt.code})`);
+        console.log(`[${getLogTimestamp()}] 🔌 [ServerLiveTransport:${this.clientSessionId}] Socket closed (code: ${evt.code}, reason: ${evt.reason || 'none'})`);
         this.isOpen = false;
         this.callbacks.onClose?.(evt.code, evt.reason);
       };
@@ -99,24 +118,35 @@ export class ServerLiveTransport implements ILiveTransport {
   sendAudioChunk(pcm16: ArrayBuffer): void {
     if (!this.isOpen || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     try {
+      // Backpressure check on outgoing mic audio: detect slow upload pipe
+      const buffered = this.ws.bufferedAmount || 0;
+      if (buffered > CLIENT_BACKPRESSURE_THRESHOLD) {
+        this.backpressureWarningCount++;
+        if (this.backpressureWarningCount % 20 === 1) {
+          const kb = Math.round(buffered / 1024);
+          console.warn(`[${getLogTimestamp()}] ⚠️ [ServerLiveTransport:${this.clientSessionId}] Upload backpressure: ${kb}KB audio queued in socket`);
+          this.callbacks.onSlowConnection?.(kb);
+        }
+      }
+
       // Send raw binary PCM audio buffer directly to NestJS gateway
       this.ws.send(pcm16);
     } catch (err: any) {
-      console.error('[ServerLiveTransport] Send audio error:', err);
+      console.error(`[ServerLiveTransport:${this.clientSessionId}] Send audio error:`, err);
     }
   }
 
   sendEndOfTurn(): void {
     if (!this.isOpen || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     try {
-      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport] User speech ended — signaling turn_complete to server`);
+      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport:${this.clientSessionId}] User speech ended — signaling turn_complete to server`);
       this.ws.send(
         JSON.stringify({
           type: 'turn_complete',
         }),
       );
     } catch (err: any) {
-      console.error('[ServerLiveTransport] Send end-of-turn error:', err);
+      console.error(`[ServerLiveTransport:${this.clientSessionId}] Send end-of-turn error:`, err);
     }
   }
 
@@ -179,7 +209,21 @@ export class ServerLiveTransport implements ILiveTransport {
   private handleServerMessage(msg: any): void {
     switch (msg.type) {
       case 'ready':
-        console.log(`[${getLogTimestamp()}] 🤖 [ServerLiveTransport] Gemini session ready via Backend (Model: ${msg.model})`);
+        console.log(`[${getLogTimestamp()}] 🤖 [ServerLiveTransport:${this.clientSessionId}] Gemini session ready via Backend (Model: ${msg.model})`);
+        break;
+
+      case 'latency':
+        // Latency report from NestJS gateway
+        if (typeof msg.turnLatencyMs === 'number') {
+          console.log(`[${getLogTimestamp()}] ⏱️ [ServerLiveTransport:${this.clientSessionId}] Turn latency: ${msg.turnLatencyMs}ms (Avg: ${msg.avgLatencyMs}ms)`);
+          this.callbacks.onLatencyUpdate?.(msg.turnLatencyMs, msg.avgLatencyMs);
+        }
+        break;
+
+      case 'slow_connection':
+        // Downlink backpressure warning from NestJS gateway
+        console.warn(`[${getLogTimestamp()}] ⚠️ [ServerLiveTransport:${this.clientSessionId}] Server slow connection warning (${msg.bufferedKB}KB buffered)`);
+        this.callbacks.onSlowConnection?.(msg.bufferedKB);
         break;
 
       case 'audio':
@@ -200,7 +244,7 @@ export class ServerLiveTransport implements ILiveTransport {
       case 'input_transcript':
         if (msg.text) {
           this.userTranscriptAccumulator += msg.text;
-          console.log(`[${getLogTimestamp()}] 📝 [ServerLiveTransport] Student Said: "${msg.text}"`);
+          console.log(`[${getLogTimestamp()}] 📝 [ServerLiveTransport:${this.clientSessionId}] Student Said: "${msg.text}"`);
           this.callbacks.onInputTranscript?.(msg.text);
         }
         break;
@@ -211,7 +255,7 @@ export class ServerLiveTransport implements ILiveTransport {
 
         if (this.hasModelSpokenThisTurn || modelReplied) {
           console.log(
-            `[${getLogTimestamp()}] ✅ [ServerLiveTransport] Turn Complete\n` +
+            `[${getLogTimestamp()}] ✅ [ServerLiveTransport:${this.clientSessionId}] Turn Complete\n` +
             `   🗣️ Student: "${studentSaid || '(untranscribed speech)'}"\n` +
             `   💬 Maya: "${modelReplied || '(audio stream)'}"`
           );
@@ -220,7 +264,7 @@ export class ServerLiveTransport implements ILiveTransport {
           this.hasModelSpokenThisTurn = false;
         } else {
           console.log(
-            `[${getLogTimestamp()}] ⏳ [ServerLiveTransport] Turn handshake complete: Student speech queued ("${studentSaid || 'audio streaming'}"). Waiting for Maya response...`
+            `[${getLogTimestamp()}] ⏳ [ServerLiveTransport:${this.clientSessionId}] Turn handshake complete: Student speech queued ("${studentSaid || 'audio streaming'}"). Waiting for Maya response...`
           );
         }
 
@@ -229,7 +273,7 @@ export class ServerLiveTransport implements ILiveTransport {
       }
 
       case 'interrupted':
-        console.log(`[${getLogTimestamp()}] ⚡ [ServerLiveTransport] Interrupted by student voice`);
+        console.log(`[${getLogTimestamp()}] ⚡ [ServerLiveTransport:${this.clientSessionId}] Interrupted by student voice`);
         this.modelTranscriptAccumulator = '';
         this.hasModelSpokenThisTurn = false;
         this.callbacks.onInterrupted?.();
@@ -241,7 +285,7 @@ export class ServerLiveTransport implements ILiveTransport {
         } else if (msg.name === 'show_rephrase_suggestion') {
           this.callbacks.onRephraseSuggestion?.(msg.args);
         } else if (msg.name === 'record_objective') {
-          console.log(`[${getLogTimestamp()}] 🎯 [ServerLiveTransport] Objective recorded:`, msg.args);
+          console.log(`[${getLogTimestamp()}] 🎯 [ServerLiveTransport:${this.clientSessionId}] Objective recorded:`, msg.args);
           this.callbacks.onObjectiveRecorded?.(msg.args);
         } else if (msg.name === 'conclude_call') {
           this.callbacks.onConcludeCall?.(msg.args?.farewellReason || 'Call completed');
@@ -255,6 +299,7 @@ export class ServerLiveTransport implements ILiveTransport {
         break;
 
       case 'error':
+        console.error(`[${getLogTimestamp()}] ❌ [ServerLiveTransport:${this.clientSessionId}] Server error: ${msg.message}`);
         this.callbacks.onError?.(new Error(msg.message || 'Server error'));
         break;
 

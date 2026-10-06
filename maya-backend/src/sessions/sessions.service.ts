@@ -39,6 +39,19 @@ export interface UsageRecord {
   sinhalaStyle?: string;
 }
 
+export interface SessionDiagnosticsRecord {
+  sessionId: string;
+  durationSeconds: number;
+  turnsCount: number;
+  avgLatencyMs: number;
+  maxLatencyMs: number;
+  slowTurnsCount: number;
+  backpressureWarnings: number;
+  errorCount: number;
+  events: Array<{ ts: number; event: string; detail?: string }>;
+  createdAt?: string;
+}
+
 const THARINDU_USER_ID = 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
 const THARINDU_NAME = 'Tharindu Fernando';
 
@@ -118,6 +131,7 @@ export class SessionsService {
   private readonly liveModel: string;
   private readonly usdToLkr = Number(process.env.USD_TO_LKR) || 308.50;
   private readonly activeSessions = new Map<string, { userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string }>();
+  private readonly recentDiagnostics = new Map<string, SessionDiagnosticsRecord>();
 
   constructor() {
     this.geminiApiKey = process.env.GEMINI_API_KEY;
@@ -1170,6 +1184,7 @@ ${memoryPart}`;
       turns: mappedTurns,
       grammarCorrections: mappedCorrections,
       topic: sess.topic || 'Speaking Practice',
+      diagnostics: await this.getSessionDiagnostics(sessionId),
     };
   }
 
@@ -1231,6 +1246,121 @@ ${memoryPart}`;
       this.logger.error(`Error in getUserSessions: ${e instanceof Error ? e.message : String(e)}`);
       return [];
     }
+  }
+
+  // ─── SESSION DIAGNOSTICS & TELEMETRY ──────────────────────────────────────────
+
+  async saveSessionDiagnostics(record: SessionDiagnosticsRecord): Promise<void> {
+    const formattedRecord: SessionDiagnosticsRecord = {
+      ...record,
+      createdAt: record.createdAt || new Date().toISOString(),
+    };
+
+    // 1. In-memory buffer (capped at 100 recent sessions)
+    this.recentDiagnostics.set(record.sessionId, formattedRecord);
+    if (this.recentDiagnostics.size > 100) {
+      const oldestKey = this.recentDiagnostics.keys().next().value;
+      if (oldestKey) this.recentDiagnostics.delete(oldestKey);
+    }
+
+    // 2. Persist to Supabase DB if client is connected
+    if (this.supabase) {
+      try {
+        const { error } = await this.supabase.from('session_diagnostics').insert({
+          session_id: record.sessionId,
+          duration_seconds: record.durationSeconds,
+          turns_count: record.turnsCount,
+          avg_latency_ms: record.avgLatencyMs,
+          max_latency_ms: record.maxLatencyMs,
+          slow_turns_count: record.slowTurnsCount,
+          backpressure_warnings: record.backpressureWarnings,
+          error_count: record.errorCount,
+          events: record.events,
+        });
+
+        if (error) {
+          this.logger.warn(`[${record.sessionId}] Failed to insert diagnostics into Supabase: ${error.message}`);
+        } else {
+          this.logger.log(`[${record.sessionId}] 💾 Session diagnostics saved to database successfully`);
+        }
+      } catch (err: any) {
+        this.logger.warn(`[${record.sessionId}] Error persisting diagnostics to Supabase: ${err?.message}`);
+      }
+    }
+  }
+
+  async getSessionDiagnostics(sessionId: string): Promise<SessionDiagnosticsRecord | null> {
+    // Check in-memory ring-buffer first
+    if (this.recentDiagnostics.has(sessionId)) {
+      return this.recentDiagnostics.get(sessionId)!;
+    }
+
+    // Check Supabase if connected
+    if (this.supabase) {
+      try {
+        const { data, error } = await this.supabase
+          .from('session_diagnostics')
+          .select('*')
+          .eq('session_id', sessionId)
+          .maybeSingle();
+
+        if (error) {
+          this.logger.warn(`Failed to fetch diagnostics for session ${sessionId}: ${error.message}`);
+          return null;
+        }
+
+        if (data) {
+          return {
+            sessionId: data.session_id,
+            durationSeconds: data.duration_seconds,
+            turnsCount: data.turns_count,
+            avgLatencyMs: data.avg_latency_ms,
+            maxLatencyMs: data.max_latency_ms,
+            slowTurnsCount: data.slow_turns_count,
+            backpressureWarnings: data.backpressure_warnings,
+            errorCount: data.error_count,
+            events: data.events,
+            createdAt: data.created_at,
+          };
+        }
+      } catch (err: any) {
+        this.logger.warn(`Error querying session diagnostics: ${err?.message}`);
+      }
+    }
+
+    return null;
+  }
+
+  async getAllRecentDiagnostics(): Promise<SessionDiagnosticsRecord[]> {
+    // If Supabase is connected, fetch recent 50 from DB
+    if (this.supabase) {
+      try {
+        const { data, error } = await this.supabase
+          .from('session_diagnostics')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (!error && data && data.length > 0) {
+          return data.map((d) => ({
+            sessionId: d.session_id,
+            durationSeconds: d.duration_seconds,
+            turnsCount: d.turns_count,
+            avgLatencyMs: d.avg_latency_ms,
+            maxLatencyMs: d.max_latency_ms,
+            slowTurnsCount: d.slow_turns_count,
+            backpressureWarnings: d.backpressure_warnings,
+            errorCount: d.error_count,
+            events: d.events,
+            createdAt: d.created_at,
+          }));
+        }
+      } catch (err: any) {
+        // Fallback to in-memory
+      }
+    }
+
+    return Array.from(this.recentDiagnostics.values()).reverse();
   }
 }
 

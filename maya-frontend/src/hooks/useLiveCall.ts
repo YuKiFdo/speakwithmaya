@@ -90,10 +90,15 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const [isPermissionModalVisible, setIsPermissionModalVisible] = useState<boolean>(false);
   const [permissionErrorType, setPermissionErrorType] = useState<MicPermissionErrorType>(null);
   const [missionReport, setMissionReport] = useState<MissionReportData | null>(null);
+  const [isSlowResponse, setIsSlowResponse] = useState<boolean>(false);
+  const [lastTurnLatencyMs, setLastTurnLatencyMs] = useState<number | null>(null);
 
   const captureRef = useRef(createAudioCapture());
   const playerRef = useRef(createAudioPlayer());
   const transportRef = useRef<ILiveTransport>(USE_SERVER_LIVE ? new ServerLiveTransport() : new LiveTransport());
+
+  const turnStartTimeRef = useRef<number | null>(null);
+  const responseTimeoutRef = useRef<any>(null);
 
   const timerRef = useRef<any>(null);
   const sessionIdRef = useRef<string>(`session-${Date.now()}`);
@@ -297,6 +302,14 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           if (!isBlocked && userChunksSentRef.current >= 4 && transportRef.current.isConnected()) {
             transportRef.current.sendEndOfTurn();
             userChunksSentRef.current = 0;
+
+            // Start round-trip timer for turn response: if no response in 3.5s, warn UI
+            turnStartTimeRef.current = Date.now();
+            if (responseTimeoutRef.current) clearTimeout(responseTimeoutRef.current);
+            responseTimeoutRef.current = setTimeout(() => {
+              console.warn('[useLiveCall] ⚠️ Response delay > 3.5s — waiting for Maya response');
+              setIsSlowResponse(true);
+            }, 3500);
           } else if (userChunksSentRef.current < 4) {
             // Discard transient mic click or throat clear without signaling turn complete
             userChunksSentRef.current = 0;
@@ -383,6 +396,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           languageMode: tokenData.languageMode || options.languageMode,
           sinhalaStyle: (tokenData.sinhalaStyle as any) || options.sinhalaStyle || 'balanced',
           sessionOptions: {
+            sessionId: sessionIdRef.current,
             topic: options.topic,
             goal: options.goal,
             level: options.level,
@@ -432,6 +446,19 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
             isModelSpeakingRef.current = true;
             userChunksSentRef.current = 0;
+
+            // Turn response arrived: clear timer and record turnaround latency
+            if (responseTimeoutRef.current) {
+              clearTimeout(responseTimeoutRef.current);
+              responseTimeoutRef.current = null;
+            }
+            if (turnStartTimeRef.current) {
+              const elapsed = Date.now() - turnStartTimeRef.current;
+              setLastTurnLatencyMs(elapsed);
+              turnStartTimeRef.current = null;
+            }
+            setIsSlowResponse(false);
+
             // 24kHz PCM 16-bit mono = 48,000 bytes per second
             const byteLen = Math.floor((base64.length * 3) / 4);
             mayaSpeakingSecondsRef.current += (byteLen / 48000);
@@ -451,6 +478,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           onOutputTranscript: (text) => {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
             isModelSpeakingRef.current = true;
+            if (responseTimeoutRef.current) {
+              clearTimeout(responseTimeoutRef.current);
+              responseTimeoutRef.current = null;
+            }
+            setIsSlowResponse(false);
             if (activeRoleRef.current !== 'model') {
               if (currentModelTextRef.current.trim()) {
                 setPreviousSubtitles(currentModelTextRef.current.trim());
@@ -539,6 +571,13 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             }
 
             // Instant barge-in: flush player buffer (< 300ms)
+            if (responseTimeoutRef.current) {
+              clearTimeout(responseTimeoutRef.current);
+              responseTimeoutRef.current = null;
+            }
+            turnStartTimeRef.current = null;
+            setIsSlowResponse(false);
+
             isModelSpeakingRef.current = false;
             echoHangoverUntilRef.current = 0;
             playerRef.current.clear();
@@ -655,12 +694,22 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onError: (err: Error) => {
             console.error('[LiveTransport Error]:', err);
+            if (responseTimeoutRef.current) {
+              clearTimeout(responseTimeoutRef.current);
+              responseTimeoutRef.current = null;
+            }
+            setIsSlowResponse(false);
             if (statusRef.current !== 'ended' && !isConcludingRef.current) {
               setStatus('reconnecting');
             }
           },
           onClose: (code?: number, reason?: string) => {
             console.log('[LiveTransport Closed]:', code, reason);
+            if (responseTimeoutRef.current) {
+              clearTimeout(responseTimeoutRef.current);
+              responseTimeoutRef.current = null;
+            }
+            setIsSlowResponse(false);
             const isCleanExit =
               code === 1000 ||
               code === 1001 ||
@@ -678,6 +727,16 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               }
               setStatus('reconnecting');
               scheduleReconnect();
+            }
+          },
+          onSlowConnection: (bufferedKB: number) => {
+            console.warn(`[useLiveCall] ⚠️ Slow connection reported by transport (${bufferedKB}KB buffered)`);
+            setIsSlowResponse(true);
+          },
+          onLatencyUpdate: (turnLatencyMs: number, avgLatencyMs: number) => {
+            setLastTurnLatencyMs(turnLatencyMs);
+            if (turnLatencyMs > 4000) {
+              console.warn(`[useLiveCall] ⏱️ High turn latency reported: ${turnLatencyMs}ms (Avg: ${avgLatencyMs}ms)`);
             }
           },
         },
@@ -742,6 +801,12 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
+    if (responseTimeoutRef.current) {
+      clearTimeout(responseTimeoutRef.current);
+      responseTimeoutRef.current = null;
+    }
+    turnStartTimeRef.current = null;
+    setIsSlowResponse(false);
     reconnectAttemptsRef.current = 0;
     isConcludingRef.current = false;
     resumptionHandleRef.current = null;
@@ -1011,6 +1076,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     sendTimeWrapupCue,
     missionReport,
     setMissionReport,
+    isSlowResponse,
+    lastTurnLatencyMs,
   };
 }
 

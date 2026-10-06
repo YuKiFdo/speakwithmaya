@@ -69,6 +69,20 @@ interface SessionRecord {
   topic?: string;
   languageMode?: string;
   sinhalaStyle?: string;
+  diagnostics?: SessionDiagnosticsData;
+}
+
+export interface SessionDiagnosticsData {
+  sessionId: string;
+  durationSeconds: number;
+  turnsCount: number;
+  avgLatencyMs: number;
+  maxLatencyMs: number;
+  slowTurnsCount: number;
+  backpressureWarnings: number;
+  errorCount: number;
+  events: Array<{ ts: number; event: string; detail?: string }>;
+  createdAt?: string;
 }
 
 interface UsageResponse {
@@ -169,6 +183,17 @@ export default function AdminUsageScreen() {
   const [activeSession, setActiveSession] = useState<SessionRecord | null>(null);
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
 
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [showPageSizeMenu, setShowPageSizeMenu] = useState<boolean>(false);
+
+  // Diagnostics & Logs Modal States
+  const [activeLogsSession, setActiveLogsSession] = useState<SessionRecord | null>(null);
+  const [logsData, setLogsData] = useState<SessionDiagnosticsData | null>(null);
+  const [logsLoading, setLogsLoading] = useState<boolean>(false);
+  const [logsFilter, setLogsFilter] = useState<string>('');
+
   // Fetch usage data from backend
   const fetchUsageData = async () => {
     try {
@@ -204,6 +229,64 @@ export default function AdminUsageScreen() {
     }, 350);
     return () => clearTimeout(handler);
   }, [searchQuery]);
+
+  // Fetch diagnostics for activeLogsSession
+  useEffect(() => {
+    if (!activeLogsSession) {
+      setLogsData(null);
+      setLogsFilter('');
+      return;
+    }
+
+    const fetchDiag = async () => {
+      try {
+        setLogsLoading(true);
+        const baseUrl = getBackendBaseUrl();
+        const res = await fetch(`${baseUrl}/v1/sessions/${activeLogsSession.id}/diagnostics`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json && !json.message) {
+            setLogsData(json);
+          } else {
+            setLogsData(null);
+          }
+        }
+      } catch (e) {
+        console.warn('[AdminUsage] Error fetching diagnostics:', e);
+      } finally {
+        setLogsLoading(false);
+      }
+    };
+
+    fetchDiag();
+  }, [activeLogsSession]);
+
+  // Comprehensive client-side search filtering
+  const filteredSessions = useMemo(() => {
+    if (!data?.sessions) return [];
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return data.sessions;
+    return data.sessions.filter((row) => {
+      const matchCode = (row.sessionCode || '').toLowerCase().includes(q);
+      const matchId = (row.id || '').toLowerCase().includes(q);
+      const matchUser = (row.user?.name || '').toLowerCase().includes(q);
+      const matchTopic = (row.topic || '').toLowerCase().includes(q);
+      const matchModel = (row.model || '').toLowerCase().includes(q);
+      const matchLang = (row.languageMode || '').toLowerCase().includes(q);
+      return matchCode || matchId || matchUser || matchTopic || matchModel || matchLang;
+    });
+  }, [data?.sessions, searchQuery]);
+
+  // Reset to page 1 when search or filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedRange, selectedStatus, selectedModel, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredSessions.length / pageSize));
+  const paginatedSessions = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredSessions.slice(start, start + pageSize);
+  }, [filteredSessions, currentPage, pageSize]);
 
   // Adjust sidebar on viewport resize
   useEffect(() => {
@@ -255,8 +338,8 @@ export default function AdminUsageScreen() {
         val >= 1000
           ? `${(val / 1000).toFixed(val % 1000 === 0 ? 0 : 1)}k`
           : val > 0
-          ? `${val}m`
-          : '0m';
+            ? `${val}m`
+            : '0m';
       ticks.push({ val, label });
     }
     return { chartMax: max, yTicks: ticks };
@@ -461,10 +544,10 @@ export default function AdminUsageScreen() {
                       range === 'today'
                         ? 'Today'
                         : range === '7d'
-                        ? '7 Days'
-                        : range === '30d'
-                        ? '30 Days'
-                        : 'Custom';
+                          ? '7 Days'
+                          : range === '30d'
+                            ? '30 Days'
+                            : 'Custom';
                     return (
                       <Pressable
                         key={range}
@@ -485,36 +568,36 @@ export default function AdminUsageScreen() {
                 style={styles.svgWrapper}
                 {...(Platform.OS === 'web'
                   ? {
-                      onPointerMove: (e: any) => {
-                        const locX = e.nativeEvent?.offsetX ?? e.nativeEvent?.locationX;
-                        if (typeof locX === 'number') {
-                          handleChartPointer(locX);
-                        }
-                      },
-                      onPointerLeave: () => {
-                        setSelectedPointIndex(null);
-                      },
-                    }
+                    onPointerMove: (e: any) => {
+                      const locX = e.nativeEvent?.offsetX ?? e.nativeEvent?.locationX;
+                      if (typeof locX === 'number') {
+                        handleChartPointer(locX);
+                      }
+                    },
+                    onPointerLeave: () => {
+                      setSelectedPointIndex(null);
+                    },
+                  }
                   : {
-                      onTouchStart: (e: any) => {
-                        const locX = e.nativeEvent?.locationX;
-                        if (typeof locX === 'number') {
-                          handleChartPointer(locX);
-                        }
-                      },
-                      onTouchMove: (e: any) => {
-                        const locX = e.nativeEvent?.locationX;
-                        if (typeof locX === 'number') {
-                          handleChartPointer(locX);
-                        }
-                      },
-                      onTouchEnd: () => {
-                        setSelectedPointIndex(null);
-                      },
-                      onTouchCancel: () => {
-                        setSelectedPointIndex(null);
-                      },
-                    })}
+                    onTouchStart: (e: any) => {
+                      const locX = e.nativeEvent?.locationX;
+                      if (typeof locX === 'number') {
+                        handleChartPointer(locX);
+                      }
+                    },
+                    onTouchMove: (e: any) => {
+                      const locX = e.nativeEvent?.locationX;
+                      if (typeof locX === 'number') {
+                        handleChartPointer(locX);
+                      }
+                    },
+                    onTouchEnd: () => {
+                      setSelectedPointIndex(null);
+                    },
+                    onTouchCancel: () => {
+                      setSelectedPointIndex(null);
+                    },
+                  })}
               >
                 {loading && !data ? (
                   <View style={styles.chartLoading}>
@@ -753,7 +836,7 @@ export default function AdminUsageScreen() {
                     <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Est. Cost</Text>
                     <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Avg / Min</Text>
                     <Text style={[styles.th, { width: 90, textAlign: 'center' }]}>Status</Text>
-                    <Text style={[styles.th, { width: 75, textAlign: 'center' }]}>Action</Text>
+                    <Text style={[styles.th, { width: 145, textAlign: 'center' }]}>Actions</Text>
                   </View>
 
                   {/* Table Body */}
@@ -762,12 +845,12 @@ export default function AdminUsageScreen() {
                       <ActivityIndicator size="small" color="#0d9488" />
                       <Text style={styles.tableLoadingText}>Loading usage records from database...</Text>
                     </View>
-                  ) : !data?.sessions || data.sessions.length === 0 ? (
+                  ) : !paginatedSessions || paginatedSessions.length === 0 ? (
                     <View style={styles.tableEmptyRow}>
                       <Text style={styles.tableEmptyText}>No sessions found matching filters</Text>
                     </View>
                   ) : (
-                    data.sessions.map((row, idx) => (
+                    paginatedSessions.map((row, idx) => (
                       <View
                         key={row.id || idx}
                         style={[styles.tableDataRow, idx % 2 === 1 && styles.tableDataRowAlt]}
@@ -897,13 +980,20 @@ export default function AdminUsageScreen() {
                           </View>
                         </View>
 
-                        {/* Action Detail */}
-                        <View style={[styles.td, { width: 75, alignItems: 'center' }]}>
+                        {/* Action Detail & Logs */}
+                        <View style={[styles.td, { width: 145, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 }]}>
                           <Pressable
                             onPress={() => setActiveSession(row)}
                             style={styles.detailBtn}
                           >
                             <Text style={styles.detailBtnText}>Detail</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => setActiveLogsSession(row)}
+                            style={styles.logsBtn}
+                          >
+                            <Feather name="activity" size={12} color="#0d9488" style={{ marginRight: 4 }} />
+                            <Text style={styles.logsBtnText}>Logs</Text>
                           </Pressable>
                         </View>
                       </View>
@@ -911,6 +1001,116 @@ export default function AdminUsageScreen() {
                   )}
                 </View>
               </ScrollView>
+
+              {/* Pagination Controls Footer */}
+              <View style={styles.paginationRow}>
+                <View style={styles.paginationInfoCol}>
+                  <Text style={styles.paginationInfoText}>
+                    Showing{' '}
+                    <Text style={styles.paginationInfoBold}>
+                      {filteredSessions.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
+                    </Text>{' '}
+                    to{' '}
+                    <Text style={styles.paginationInfoBold}>
+                      {Math.min(currentPage * pageSize, filteredSessions.length)}
+                    </Text>{' '}
+                    of <Text style={styles.paginationInfoBold}>{filteredSessions.length}</Text> sessions
+                  </Text>
+
+                  <View style={styles.pageSizeContainer}>
+                    <Text style={styles.pageSizeLabel}>Per page:</Text>
+                    <Pressable
+                      onPress={() => setShowPageSizeMenu(!showPageSizeMenu)}
+                      style={styles.pageSizeDropdownBtn}
+                    >
+                      <Text style={styles.pageSizeDropdownText}>{pageSize}</Text>
+                      <Feather name="chevron-down" size={13} color="#64748b" />
+                    </Pressable>
+                    {showPageSizeMenu && (
+                      <View style={styles.pageSizePopover}>
+                        {[10, 25, 50].map((sz) => (
+                          <Pressable
+                            key={sz}
+                            onPress={() => {
+                              setPageSize(sz);
+                              setShowPageSizeMenu(false);
+                              setCurrentPage(1);
+                            }}
+                            style={[
+                              styles.pageSizeOption,
+                              pageSize === sz && styles.pageSizeOptionActive,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.pageSizeOptionText,
+                                pageSize === sz && styles.pageSizeOptionTextActive,
+                              ]}
+                            >
+                              {sz}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </View>
+
+                {/* Page Navigation */}
+                <View style={styles.pageNavControls}>
+                  <Pressable
+                    onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                    style={[styles.pageNavBtn, currentPage <= 1 && styles.pageNavBtnDisabled]}
+                  >
+                    <Feather name="chevron-left" size={15} color={currentPage <= 1 ? '#cbd5e1' : '#334155'} />
+                    <Text style={[styles.pageNavBtnText, currentPage <= 1 && styles.pageNavBtnTextDisabled]}>
+                      Prev
+                    </Text>
+                  </Pressable>
+
+                  <View style={styles.pageNumbersRow}>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                      .map((p, idx, arr) => {
+                        const prev = arr[idx - 1];
+                        const isGap = prev && p - prev > 1;
+                        return (
+                          <React.Fragment key={p}>
+                            {isGap && <Text style={styles.pageEllipsis}>...</Text>}
+                            <Pressable
+                              onPress={() => setCurrentPage(p)}
+                              style={[
+                                styles.pageNumberBtn,
+                                currentPage === p && styles.pageNumberBtnActive,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.pageNumberText,
+                                  currentPage === p && styles.pageNumberTextActive,
+                                ]}
+                              >
+                                {p}
+                              </Text>
+                            </Pressable>
+                          </React.Fragment>
+                        );
+                      })}
+                  </View>
+
+                  <Pressable
+                    onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    style={[styles.pageNavBtn, currentPage >= totalPages && styles.pageNavBtnDisabled]}
+                  >
+                    <Text style={[styles.pageNavBtnText, currentPage >= totalPages && styles.pageNavBtnTextDisabled]}>
+                      Next
+                    </Text>
+                    <Feather name="chevron-right" size={15} color={currentPage >= totalPages ? '#cbd5e1' : '#334155'} />
+                  </Pressable>
+                </View>
+              </View>
             </View>
           </ScrollView>
         </View>
@@ -986,7 +1186,7 @@ export default function AdminUsageScreen() {
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>Practice Topic / Scenario</Text>
                 <Text style={styles.modalTopicText}>{activeSession?.topic || 'Speaking Practice'}</Text>
-                
+
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 10 }}>
                   <Text style={styles.modalStatLabel}>Language Mode:</Text>
                   {activeSession?.languageMode === 'english' ? (
@@ -1047,6 +1247,287 @@ export default function AdminUsageScreen() {
                       <Text style={styles.turnText}>{t.text}</Text>
                     </View>
                   ))}
+                </View>
+              )}
+
+              {/* Check Logs Button inside Detail Modal */}
+              <View style={styles.modalFooterActions}>
+                <Pressable
+                  onPress={() => {
+                    const s = activeSession;
+                    setActiveSession(null);
+                    setActiveLogsSession(s);
+                  }}
+                  style={styles.modalCheckLogsBtn}
+                >
+                  <Feather name="activity" size={15} color="#ffffff" style={{ marginRight: 6 }} />
+                  <Text style={styles.modalCheckLogsBtnText}>Check Network & Diagnostics Logs</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ============================================================ */}
+      {/* 4. SESSION DIAGNOSTICS & TELEMETRY LOGS MODAL                */}
+      {/* ============================================================ */}
+      <Modal
+        visible={!!activeLogsSession}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setActiveLogsSession(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalContentLogs}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <View>
+                <View style={styles.modalTitleRow}>
+                  <Text style={styles.modalTitle}>Session Logs & Diagnostics</Text>
+                  <View style={styles.logsBadge}>
+                    <Text style={styles.logsBadgeText}>{activeLogsSession?.sessionCode}</Text>
+                  </View>
+                </View>
+                <Text style={styles.modalSub}>
+                  ID: {activeLogsSession?.id} • {formatSriLankaDateTime(activeLogsSession?.displayDate, activeLogsSession?.timestamp)}
+                </Text>
+              </View>
+
+              <Pressable onPress={() => setActiveLogsSession(null)} style={styles.modalCloseBtn}>
+                <Ionicons name="close" size={20} color="#64748b" />
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {logsLoading ? (
+                <View style={styles.logsLoadingContainer}>
+                  <ActivityIndicator size="large" color="#0d9488" />
+                  <Text style={styles.logsLoadingText}>Loading session network diagnostics and event logs...</Text>
+                </View>
+              ) : logsData ? (
+                <>
+                  {/* KPI Telemetry Cards */}
+                  <View style={styles.logsKpiRow}>
+                    {/* 1. Avg Latency */}
+                    <View style={styles.logsKpiCard}>
+                      <Text style={styles.logsKpiLabel}>Avg Turn Latency</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                        <Text
+                          style={[
+                            styles.logsKpiValue,
+                            {
+                              color:
+                                logsData.avgLatencyMs > 4000
+                                  ? '#ef4444'
+                                  : logsData.avgLatencyMs > 2500
+                                    ? '#f59e0b'
+                                    : '#10b981',
+                            },
+                          ]}
+                        >
+                          {logsData.avgLatencyMs.toLocaleString()} ms
+                        </Text>
+                        <View
+                          style={[
+                            styles.latencyPill,
+                            {
+                              backgroundColor:
+                                logsData.avgLatencyMs > 4000
+                                  ? '#fef2f2'
+                                  : logsData.avgLatencyMs > 2500
+                                    ? '#fffbeb'
+                                    : '#ecfdf5',
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.latencyPillText,
+                              {
+                                color:
+                                  logsData.avgLatencyMs > 4000
+                                    ? '#b91c1c'
+                                    : logsData.avgLatencyMs > 2500
+                                      ? '#b45309'
+                                      : '#047857',
+                              },
+                            ]}
+                          >
+                            {logsData.avgLatencyMs > 4000
+                              ? '🔴 Slow'
+                              : logsData.avgLatencyMs > 2500
+                                ? '🟡 Moderate'
+                                : '🟢 Normal'}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* 2. Max Latency */}
+                    <View style={styles.logsKpiCard}>
+                      <Text style={styles.logsKpiLabel}>Max Turn Latency</Text>
+                      <Text
+                        style={[
+                          styles.logsKpiValue,
+                          {
+                            color:
+                              logsData.maxLatencyMs > 8000
+                                ? '#ef4444'
+                                : logsData.maxLatencyMs > 4000
+                                  ? '#f59e0b'
+                                  : '#0f172a',
+                          },
+                        ]}
+                      >
+                        {logsData.maxLatencyMs.toLocaleString()} ms
+                      </Text>
+                    </View>
+
+                    {/* 3. Slow Turns (Over 3s) */}
+                    <View style={styles.logsKpiCard}>
+                      <Text style={styles.logsKpiLabel}>Slow Turns (Over 3s)</Text>
+                      <Text
+                        style={[
+                          styles.logsKpiValue,
+                          { color: logsData.slowTurnsCount > 0 ? '#ea580c' : '#0f172a' },
+                        ]}
+                      >
+                        {logsData.slowTurnsCount} / {logsData.turnsCount}
+                      </Text>
+                    </View>
+
+                    {/* 4. Backpressure */}
+                    <View style={styles.logsKpiCard}>
+                      <Text style={styles.logsKpiLabel}>Backpressure Alerts</Text>
+                      <Text
+                        style={[
+                          styles.logsKpiValue,
+                          { color: logsData.backpressureWarnings > 0 ? '#ef4444' : '#0f172a' },
+                        ]}
+                      >
+                        {logsData.backpressureWarnings}
+                      </Text>
+                    </View>
+
+                    {/* 5. Errors */}
+                    <View style={styles.logsKpiCard}>
+                      <Text style={styles.logsKpiLabel}>Recorded Errors</Text>
+                      <Text
+                        style={[
+                          styles.logsKpiValue,
+                          { color: logsData.errorCount > 0 ? '#ef4444' : '#0f172a' },
+                        ]}
+                      >
+                        {logsData.errorCount}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Filter inside logs */}
+                  <View style={styles.logsFilterRow}>
+                    <Text style={styles.modalSectionTitle}>
+                      Session Event Timeline ({logsData.events?.length || 0})
+                    </Text>
+                    <View style={styles.logsSearchInputWrapper}>
+                      <Feather name="search" size={14} color="#94a3b8" />
+                      <TextInput
+                        placeholder="Filter events..."
+                        placeholderTextColor="#94a3b8"
+                        value={logsFilter}
+                        onChangeText={setLogsFilter}
+                        style={styles.logsSearchInput}
+                      />
+                    </View>
+                  </View>
+
+                  {/* Timeline Events List */}
+                  <View style={styles.timelineList}>
+                    {(logsData.events || [])
+                      .filter((e) => {
+                        if (!logsFilter) return true;
+                        const lf = logsFilter.toLowerCase();
+                        return (
+                          (e.event || '').toLowerCase().includes(lf) ||
+                          (e.detail || '').toLowerCase().includes(lf)
+                        );
+                      })
+                      .map((item, idx) => {
+                        const eventDate = new Date(item.ts);
+                        const timeStr = !isNaN(eventDate.getTime())
+                          ? eventDate.toLocaleTimeString('en-US', { hour12: false }) +
+                          '.' +
+                          String(eventDate.getMilliseconds()).padStart(3, '0')
+                          : `+${idx}s`;
+
+                        const isError =
+                          item.event.includes('error') || item.event.includes('timeout');
+                        const isWarning =
+                          item.event.includes('backpressure') || item.event.includes('slow');
+                        const isLatency = item.event.includes('latency');
+
+                        return (
+                          <View
+                            key={idx}
+                            style={[styles.timelineItem, isError && styles.timelineItemError]}
+                          >
+                            <Text style={styles.timelineTimestamp}>{timeStr}</Text>
+                            <View
+                              style={[
+                                styles.timelineBadge,
+                                isError
+                                  ? styles.timelineBadgeError
+                                  : isWarning
+                                    ? styles.timelineBadgeWarning
+                                    : isLatency
+                                      ? styles.timelineBadgeLatency
+                                      : styles.timelineBadgeDefault,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.timelineBadgeText,
+                                  isError
+                                    ? styles.timelineBadgeTextError
+                                    : isWarning
+                                      ? styles.timelineBadgeTextWarning
+                                      : isLatency
+                                        ? styles.timelineBadgeTextLatency
+                                        : styles.timelineBadgeTextDefault,
+                                ]}
+                              >
+                                {item.event}
+                              </Text>
+                            </View>
+                            {item.detail ? (
+                              <Text style={styles.timelineDetailText} numberOfLines={2}>
+                                {item.detail}
+                              </Text>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                  </View>
+                </>
+              ) : (
+                <View style={styles.logsEmptyContainer}>
+                  <Feather name="info" size={32} color="#0d9488" style={{ marginBottom: 12 }} />
+                  <Text style={styles.logsEmptyTitle}>No Telemetry Records Available</Text>
+                  <Text style={styles.logsEmptySub}>
+                    Live performance metrics were not recorded for this session. Full audio token usage and conversation speech turns can be viewed in the Session Detail view.
+                  </Text>
+                  {activeLogsSession?.turns && activeLogsSession.turns.length > 0 && (
+                    <Pressable
+                      onPress={() => {
+                        const s = activeLogsSession;
+                        setActiveLogsSession(null);
+                        setActiveSession(s);
+                      }}
+                      style={styles.viewDetailFromLogsBtn}
+                    >
+                      <Text style={styles.viewDetailFromLogsBtnText}>View Session Detail & Turns</Text>
+                    </Pressable>
+                  )}
                 </View>
               )}
             </ScrollView>
@@ -1945,5 +2426,387 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'regular'),
     fontSize: 13,
     color: '#0f172a',
+  },
+  logsBtn: {
+    backgroundColor: '#f0fdfa',
+    borderWidth: 1,
+    borderColor: '#ccfbf1',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  logsBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#0d9488',
+  },
+  paginationRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  paginationInfoCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    flexWrap: 'wrap',
+  },
+  paginationInfoText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#64748b',
+  },
+  paginationInfoBold: {
+    ...fontStyle('inter', 'semiBold'),
+    color: '#0f172a',
+  },
+  pageSizeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    position: 'relative',
+  },
+  pageSizeLabel: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#64748b',
+  },
+  pageSizeDropdownBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  pageSizeDropdownText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 12,
+    color: '#334155',
+  },
+  pageSizePopover: {
+    position: 'absolute',
+    bottom: 28,
+    left: 50,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 10,
+    zIndex: 999,
+    minWidth: 54,
+  },
+  pageSizeOption: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  pageSizeOptionActive: {
+    backgroundColor: '#f0fdfa',
+  },
+  pageSizeOptionText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#334155',
+    textAlign: 'center',
+  },
+  pageSizeOptionTextActive: {
+    ...fontStyle('inter', 'semiBold'),
+    color: '#0d9488',
+  },
+  pageNavControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pageNavBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  pageNavBtnDisabled: {
+    backgroundColor: '#f8fafc',
+    borderColor: '#f1f5f9',
+  },
+  pageNavBtnText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 12,
+    color: '#334155',
+  },
+  pageNavBtnTextDisabled: {
+    color: '#cbd5e1',
+  },
+  pageNumbersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  pageNumberBtn: {
+    minWidth: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 6,
+  },
+  pageNumberBtnActive: {
+    backgroundColor: '#0d9488',
+    borderColor: '#0d9488',
+  },
+  pageNumberText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 12,
+    color: '#334155',
+  },
+  pageNumberTextActive: {
+    ...fontStyle('inter', 'semiBold'),
+    color: '#ffffff',
+  },
+  pageEllipsis: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#94a3b8',
+    paddingHorizontal: 2,
+  },
+  modalContentLogs: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 820,
+    maxHeight: '88%',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 24,
+    overflow: 'hidden',
+  },
+  logsBadge: {
+    backgroundColor: '#f0fdfa',
+    borderWidth: 1,
+    borderColor: '#99f6e4',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  logsBadgeText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#0d9488',
+  },
+  logsLoadingContainer: {
+    paddingVertical: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+  },
+  logsLoadingText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#64748b',
+  },
+  logsKpiRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    paddingBottom: 14,
+  },
+  logsKpiCard: {
+    flex: 1,
+    minWidth: 130,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+    borderRadius: 10,
+    padding: 12,
+  },
+  logsKpiLabel: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  logsKpiValue: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 18,
+    marginTop: 4,
+  },
+  latencyPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  latencyPillText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 10,
+  },
+  logsFilterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: 8,
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  logsSearchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    minWidth: 180,
+    gap: 6,
+  },
+  logsSearchInput: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#0f172a',
+    padding: 0,
+  },
+  timelineList: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    gap: 8,
+  },
+  timelineItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    gap: 10,
+  },
+  timelineItemError: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fee2e2',
+  },
+  timelineTimestamp: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#94a3b8',
+    minWidth: 70,
+  },
+  timelineBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  timelineBadgeDefault: {
+    backgroundColor: '#e2e8f0',
+  },
+  timelineBadgeLatency: {
+    backgroundColor: '#e0f2fe',
+  },
+  timelineBadgeWarning: {
+    backgroundColor: '#fef3c7',
+  },
+  timelineBadgeError: {
+    backgroundColor: '#fee2e2',
+  },
+  timelineBadgeText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+  },
+  timelineBadgeTextDefault: {
+    color: '#475569',
+  },
+  timelineBadgeTextLatency: {
+    color: '#0284c7',
+  },
+  timelineBadgeTextWarning: {
+    color: '#b45309',
+  },
+  timelineBadgeTextError: {
+    color: '#b91c1c',
+  },
+  timelineDetailText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#334155',
+    flex: 1,
+  },
+  logsEmptyContainer: {
+    paddingVertical: 50,
+    paddingHorizontal: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logsEmptyTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 16,
+    color: '#0f172a',
+    marginBottom: 6,
+  },
+  logsEmptySub: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 19,
+    maxWidth: 420,
+    marginBottom: 16,
+  },
+  viewDetailFromLogsBtn: {
+    backgroundColor: '#0d9488',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  viewDetailFromLogsBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#ffffff',
+  },
+  modalFooterActions: {
+    paddingTop: 16,
+    paddingBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    alignItems: 'center',
+  },
+  modalCheckLogsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0d9488',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  modalCheckLogsBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#ffffff',
   },
 });
