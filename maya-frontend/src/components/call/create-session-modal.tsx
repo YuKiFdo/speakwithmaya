@@ -358,7 +358,7 @@ export function CreateSessionModal({
               showsVerticalScrollIndicator={false}
               bounces={false}
               overScrollMode="never"
-              scrollEnabled={isDesktop || isScrollNeeded}
+              scrollEnabled={true}
             >
               {/* SECTION 1: Practice Time */}
               <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
@@ -825,10 +825,12 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 16,
-    paddingTop: 18,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 18,
-    maxHeight: '94%',
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 28,
+    height: '84%',
+    maxHeight: 680,
+    minHeight: 520,
   },
 
   /* Header */
@@ -896,8 +898,7 @@ const styles = StyleSheet.create({
     maxHeight: 600,
   },
   scrollAreaMobile: {
-    flexGrow: 0,
-    flexShrink: 0,
+    flex: 1,
     maxHeight: undefined,
   },
   scrollContent: {
@@ -905,8 +906,8 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   scrollContentMobile: {
-    gap: 10,
-    paddingBottom: 2,
+    gap: 12,
+    paddingBottom: 8,
   },
 
   /* Section Containers */
