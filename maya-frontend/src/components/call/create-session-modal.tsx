@@ -483,69 +483,69 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: '100%',
-    maxWidth: 720,
+    maxWidth: 620,
     alignItems: 'center',
     justifyContent: 'center',
   },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 28,
+    backgroundColor: '#F8FBFF',
+    borderRadius: 24,
     width: '100%',
-    paddingHorizontal: 28,
-    paddingTop: 26,
-    paddingBottom: 24,
+    paddingHorizontal: 22,
+    paddingTop: 18,
+    paddingBottom: 18,
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 24px 60px -12px rgba(15, 23, 42, 0.28), 0 0 1px rgba(15, 23, 42, 0.1)',
+          boxShadow: '0 20px 50px -12px rgba(15, 23, 42, 0.25), 0 0 1px rgba(15, 23, 42, 0.1)',
         } as any)
       : {
           shadowColor: '#0F172A',
-          shadowOffset: { width: 0, height: 16 },
-          shadowOpacity: 0.22,
-          shadowRadius: 28,
-          elevation: 16,
+          shadowOffset: { width: 0, height: 14 },
+          shadowOpacity: 0.2,
+          shadowRadius: 24,
+          elevation: 14,
         }),
   },
   cardDesktop: {
-    maxWidth: 720,
+    maxWidth: 580,
   },
   cardMobile: {
     maxWidth: '100%',
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: 20,
+    paddingHorizontal: 14,
+    paddingTop: 16,
+    paddingBottom: 16,
   },
 
   /* Header */
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 14,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
     flex: 1,
   },
   avatarCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#2B5BFF',
     justifyContent: 'center',
     alignItems: 'center',
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 8px 18px rgba(43, 91, 255, 0.35)',
+          boxShadow: '0 6px 14px rgba(43, 91, 255, 0.3)',
         } as any)
       : {
           shadowColor: '#2B5BFF',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.3,
-          shadowRadius: 8,
-          elevation: 5,
+          shadowOffset: { width: 0, height: 3 },
+          shadowOpacity: 0.25,
+          shadowRadius: 6,
+          elevation: 4,
         }),
   },
   headerTextGroup: {
@@ -553,7 +553,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 22,
+    fontSize: 19,
     color: '#0F172A',
     letterSpacing: -0.3,
   },
@@ -562,14 +562,14 @@ const styles = StyleSheet.create({
   },
   headerSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 13,
+    fontSize: 12,
     color: '#64748B',
-    marginTop: 2,
+    marginTop: 1,
   },
   closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#F1F5F9',
     justifyContent: 'center',
     alignItems: 'center',
@@ -578,31 +578,48 @@ const styles = StyleSheet.create({
 
   /* Scrollable Area */
   scrollArea: {
-    maxHeight: 620,
+    maxHeight: 560,
   },
   scrollContent: {
-    gap: 16,
-    paddingBottom: 6,
+    gap: 10,
+    paddingBottom: 4,
   },
 
   /* Section Containers */
   sectionContainer: {
-    borderWidth: 1.5,
+    width: '100%',
+    borderRadius: 14,
+    borderWidth: 0.63,
     borderColor: '#F1F5F9',
-    borderRadius: 20,
-    padding: 18,
+    borderTopWidth: 0.63,
+    borderTopColor: '#F1F5F9',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
     backgroundColor: '#FFFFFF',
+    alignSelf: 'center',
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow:
+            '0px 0.63px 1.25px -0.63px rgba(0, 0, 0, 0.08), 0px 0.63px 1.88px 0px rgba(0, 0, 0, 0.08)',
+        } as any)
+      : {
+          shadowColor: '#000000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.06,
+          shadowRadius: 2,
+          elevation: 1,
+        }),
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
+    gap: 10,
+    marginBottom: 9,
   },
   sectionIconBadge: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -611,29 +628,29 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 15.5,
+    fontSize: 13.5,
     color: '#0F172A',
   },
   sectionSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 12.5,
+    fontSize: 11.5,
     color: '#64748B',
-    marginTop: 1,
+    marginTop: 0.5,
   },
 
   /* Duration Options (Section 1) */
   durationRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   durationRowMobile: {
-    gap: 8,
+    gap: 6,
   },
   durationCard: {
     flex: 1,
-    height: 82,
-    borderRadius: 16,
-    borderWidth: 1.5,
+    height: 64,
+    borderRadius: 12,
+    borderWidth: 1.2,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
@@ -646,27 +663,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 0 0 1px #2B5BFF, 0 4px 14px rgba(43, 91, 255, 0.12)',
+          boxShadow: '0 0 0 1px #2B5BFF, 0 3px 10px rgba(43, 91, 255, 0.12)',
         } as any)
       : {
           shadowColor: '#2B5BFF',
           shadowOffset: { width: 0, height: 2 },
           shadowOpacity: 0.2,
-          shadowRadius: 6,
-          elevation: 3,
+          shadowRadius: 5,
+          elevation: 2,
         }),
   },
   cardTopRightBadges: {
     position: 'absolute',
-    top: 6,
-    right: 8,
+    top: 5,
+    right: 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
   },
   durationMinutesText: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 17,
+    fontSize: 15,
     color: '#0F172A',
   },
   durationMinutesTextSelected: {
@@ -674,9 +691,9 @@ const styles = StyleSheet.create({
   },
   durationTierText: {
     ...fontStyle('inter', 'medium'),
-    fontSize: 12,
+    fontSize: 11,
     color: '#64748B',
-    marginTop: 3,
+    marginTop: 2,
   },
   durationTierSelected: {
     color: '#2B5BFF',
@@ -688,24 +705,24 @@ const styles = StyleSheet.create({
   /* 3-Column Choice Row (Sections 2 & 3) */
   threeColRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   threeColRowMobile: {
     flexDirection: 'column',
-    gap: 8,
+    gap: 6,
   },
   choiceCard: {
     flex: 1,
-    minHeight: 74,
-    borderRadius: 16,
-    borderWidth: 1.5,
+    minHeight: 58,
+    borderRadius: 12,
+    borderWidth: 1.2,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
   choiceCardSelected: {
@@ -713,20 +730,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 0 0 1px #2B5BFF, 0 4px 14px rgba(43, 91, 255, 0.12)',
+          boxShadow: '0 0 0 1px #2B5BFF, 0 3px 10px rgba(43, 91, 255, 0.12)',
         } as any)
       : {
           shadowColor: '#2B5BFF',
           shadowOffset: { width: 0, height: 2 },
           shadowOpacity: 0.2,
-          shadowRadius: 6,
-          elevation: 3,
+          shadowRadius: 5,
+          elevation: 2,
         }),
   },
   choiceIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -735,7 +752,7 @@ const styles = StyleSheet.create({
   },
   choiceTitle: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 13.5,
+    fontSize: 12.5,
     color: '#0F172A',
   },
   choiceTitleSelected: {
@@ -743,27 +760,27 @@ const styles = StyleSheet.create({
   },
   choiceSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#64748B',
-    lineHeight: 14.5,
-    marginTop: 2,
+    lineHeight: 13.5,
+    marginTop: 1.5,
   },
 
   /* Bottom Actions Bar */
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    marginTop: 20,
-    paddingTop: 16,
+    gap: 10,
+    marginTop: 14,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
   },
   cancelBtn: {
     flex: 1,
-    height: 52,
-    borderRadius: 14,
-    borderWidth: 1.5,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1.2,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
@@ -772,34 +789,34 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: {
     ...fontStyle('inter', 'semiBold'),
-    fontSize: 14,
+    fontSize: 13.5,
     color: '#0F172A',
   },
   startBtn: {
     flex: 2,
-    height: 52,
-    borderRadius: 14,
+    height: 44,
+    borderRadius: 12,
     backgroundColor: '#2B5BFF',
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     ...(Platform.OS === 'web'
       ? ({
           cursor: 'pointer',
-          boxShadow: '0 8px 22px rgba(43, 91, 255, 0.35)',
+          boxShadow: '0 6px 16px rgba(43, 91, 255, 0.32)',
         } as any)
       : {
           shadowColor: '#2B5BFF',
-          shadowOffset: { width: 0, height: 5 },
-          shadowOpacity: 0.35,
-          shadowRadius: 10,
-          elevation: 6,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3,
+          shadowRadius: 8,
+          elevation: 5,
         }),
   },
   startBtnText: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 14.5,
+    fontSize: 13.5,
     color: '#FFFFFF',
   },
   startBtnPressed: {
