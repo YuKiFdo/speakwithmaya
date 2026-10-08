@@ -358,7 +358,7 @@ export function CreateSessionModal({
               showsVerticalScrollIndicator={false}
               bounces={false}
               overScrollMode="never"
-              scrollEnabled={true}
+              scrollEnabled={!isDesktop ? windowHeight < 560 : true}
             >
               {/* SECTION 1: Practice Time */}
               <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
@@ -794,6 +794,7 @@ const styles = StyleSheet.create({
   modalContainerMobile: {
     maxWidth: '100%',
     width: '100%',
+    height: '100%',
     justifyContent: 'flex-end',
   },
   card: {
@@ -825,12 +826,11 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 18,
-    paddingTop: 20,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 28,
-    height: '84%',
-    maxHeight: 680,
-    minHeight: 520,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    height: '92%',
+    maxHeight: '95%',
   },
 
   /* Header */
@@ -838,7 +838,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -900,14 +900,20 @@ const styles = StyleSheet.create({
   scrollAreaMobile: {
     flex: 1,
     maxHeight: undefined,
+    ...(Platform.OS === 'web'
+      ? ({
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
+        } as any)
+      : {}),
   },
   scrollContent: {
     gap: 12,
     paddingBottom: 6,
   },
   scrollContentMobile: {
-    gap: 12,
-    paddingBottom: 8,
+    gap: 10,
+    paddingBottom: 4,
   },
 
   /* Section Containers */
@@ -978,7 +984,7 @@ const styles = StyleSheet.create({
   },
   durationCard: {
     flex: 1,
-    height: 72,
+    height: 66,
     borderRadius: 14,
     borderWidth: 1.2,
     borderColor: '#E2E8F0',
@@ -1165,13 +1171,13 @@ const styles = StyleSheet.create({
   /* Mobile Summary Card */
   summaryCard: {
     width: '100%',
-    minHeight: 62,
+    minHeight: 56,
     borderRadius: 14,
     borderWidth: 1.2,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
