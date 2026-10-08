@@ -29,8 +29,8 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
 
   // Dynamic bottom padding to ensure Quick Tips card comes up above gesture bars and mobile browser chrome
   const bottomPadding = Math.max(
-    insets.bottom + 16,
-    Platform.select({ web: 40, ios: 34, default: 28 })
+    insets.bottom + 24,
+    Platform.select({ web: 64, ios: 52, default: 44 })
   );
 
   // Dynamic hero animation size: scales with screen height to fill vertical gap,
@@ -606,7 +606,7 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 3,
     marginTop: 'auto',
-    marginBottom: Platform.select({ web: 6, ios: 4, default: 4 }),
+    marginBottom: Platform.select({ web: 10, ios: 8, default: 6 }),
   },
   tipsHeader: {
     ...fontStyle('outfit', 'bold'),
