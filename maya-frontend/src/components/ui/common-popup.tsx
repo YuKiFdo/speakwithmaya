@@ -32,6 +32,7 @@ export type PopupPreset =
   | 'practice-complete'
   | 'level-up'
   | 'get-extra-time'
+  | 'level-locked'
   | 'custom';
 
 export interface CommonPopupProps {
@@ -82,6 +83,7 @@ const PRESET_IMAGES = {
   'unlock-premium': require('@/assets/images/mayacrown.png'),
   'daily-limit': require('@/assets/images/mayaclock.png'),
   'practice-complete': require('@/assets/images/mayathumb.png'),
+  'level-locked': require('@/assets/images/mayacrown.png'),
 };
 
 /**
@@ -278,11 +280,21 @@ export function CommonPopup({
     if (!finalBtnText) finalBtnText = 'Awesome!';
     if (finalBtnIcon === undefined) finalBtnIcon = 'none';
     if (finalShowArrow === undefined) finalShowArrow = false;
-  } else if (resolvedPreset === 'get-extra-time') {
-    if (!finalTitle) finalTitle = 'Keep the conversation going!';
-    if (!finalHighlight) finalHighlight = 'going!';
+  } else if (resolvedPreset === 'level-locked') {
+    if (!finalTitle) {
+      finalTitle = 'Level Locked';
+      finalHighlight = 'Locked';
+    }
     if (!finalSubtitle) {
-      finalSubtitle = `You've used ${minutesUsed ?? 320} of ${minutesTotal ?? 600} minutes this month. Get extra minutes and continue practicing with Maya.`;
+      finalSubtitle = levelNumber
+        ? `Complete Level ${Math.max(1, levelNumber - 1)} first to unlock this session and keep moving forward!`
+        : 'Complete the previous level first to unlock this session and continue your journey.';
+    }
+    if (!finalBtnText) finalBtnText = 'Got It';
+    if (finalBtnIcon === undefined) finalBtnIcon = 'none';
+    if (finalShowArrow === undefined) finalShowArrow = true;
+    if (finalFooterText === undefined) {
+      finalFooterText = 'Complete each lesson step-by-step to build your speaking fluency.';
     }
     if (finalShowClose === undefined) finalShowClose = true;
   }
