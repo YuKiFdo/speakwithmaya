@@ -632,7 +632,7 @@ INSTRUCTIONS:
           .eq('user_id', userId)
           .order('level_number', { ascending: true });
 
-        if (!error && data && data.length > 0) {
+        if (!error && Array.isArray(data)) {
           return data.map((d: any) => ({
             id: d.id,
             userId: d.user_id,

@@ -667,7 +667,8 @@ STRICT RESTRICTIONS:
     throw new UnauthorizedException('Invalid or expired authentication token');
   }
 
-  async enrichRoadmapDto(dto: CreateSessionTokenDto): Promise<void> {
+  async enrichRoadmapDto(dto: CreateSessionTokenDto, userId?: string): Promise<void> {
+    const targetUserId = userId || THARINDU_USER_ID;
     if (dto.roadmapLevelId && this.roadmapService) {
       try {
         let level: any = null;
@@ -698,7 +699,39 @@ STRICT RESTRICTIONS:
           if (!dto.passingScorePercent && level.passingScorePercent) {
             dto.passingScorePercent = level.passingScorePercent;
           }
-          this.logger.log(`[Roadmap Enrich] Loaded level "${level.title}" (${level.id}) with ${level.practicePoints?.length || 0} practice points`);
+
+          // If this is a Week Review / Consolidation level, fetch actual past mistakes from Supabase DB
+          const isReviewLevel =
+            level.isWeekReview ||
+            level.levelNumber === 7 ||
+            (level.title && level.title.toLowerCase().includes('review')) ||
+            (dto.topic && dto.topic.toLowerCase().includes('review'));
+
+          if (isReviewLevel && this.supabase) {
+            try {
+              const { data: pastCorrections, error: corrErr } = await this.supabase
+                .from('grammar_corrections')
+                .select('student_said, more_natural, explanation, created_at, sessions!inner(user_id)')
+                .eq('sessions.user_id', targetUserId)
+                .order('created_at', { ascending: false })
+                .limit(4);
+
+              if (!corrErr && pastCorrections && pastCorrections.length > 0) {
+                const dynamicMistakeTasks = pastCorrections.map(
+                  (c: any) =>
+                    `Redo past mistake: Student said "${c.student_said}" -> Say natural: "${c.more_natural}" (${c.explanation || 'Fix grammar & phrasing'})`,
+                );
+                dto.practicePoints = dynamicMistakeTasks;
+                this.logger.log(
+                  `[Roadmap Review] Injected ${dynamicMistakeTasks.length} real past mistakes from Supabase into ${level.title} for user ${targetUserId}`,
+                );
+              }
+            } catch (queryErr: any) {
+              this.logger.debug(`Could not query past mistakes from Supabase: ${queryErr?.message}`);
+            }
+          }
+
+          this.logger.log(`[Roadmap Enrich] Loaded level "${level.title}" (${level.id}) with ${dto.practicePoints?.length || 0} practice points`);
         } else {
           this.logger.warn(`Could not find roadmap level matching ${dto.roadmapLevelId}`);
         }
@@ -719,7 +752,8 @@ STRICT RESTRICTIONS:
   }
 
   async createSessionToken(userId: string = 'guest-user', dto: CreateSessionTokenDto) {
-    await this.enrichRoadmapDto(dto);
+    const resolvedUserId = userId !== 'guest-user' && userId !== 'auth-user' ? userId : THARINDU_USER_ID;
+    await this.enrichRoadmapDto(dto, resolvedUserId);
 
     const isReconnect = Boolean(dto.sessionId);
     const sessionId = dto.sessionId || randomUUID();
@@ -800,7 +834,6 @@ STRICT RESTRICTIONS:
     }
 
     // Persist new session record in Supabase assigned to Tharindu (only on new session, not reconnect)
-    const resolvedUserId = userId !== 'guest-user' && userId !== 'auth-user' ? userId : THARINDU_USER_ID;
 
     if (this.supabase && !isReconnect) {
       try {

@@ -68,69 +68,10 @@ export interface MilestoneItem {
 
 let cachedRoadmapMilestones: MilestoneItem[] | null = null;
 
-function getInitialCompletedLevelIds(): Set<string> {
-  const set = new Set<string>();
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-    try {
-      const raw = window.localStorage.getItem('maya_cached_completed_levels');
-      if (raw) {
-        const arr = JSON.parse(raw);
-        if (Array.isArray(arr)) {
-          arr.forEach((id: string) => set.add(id));
-        }
-      }
-    } catch {}
-  }
-  return set;
-}
-
 function getInitialMilestones(): MilestoneItem[] {
-  const baseList =
-    cachedRoadmapMilestones && cachedRoadmapMilestones.length > 0
-      ? cachedRoadmapMilestones
-      : [];
-
-  const completedIds = getInitialCompletedLevelIds();
-  if (completedIds.size === 0) {
-    return baseList;
-  }
-
-  // Pre-seed completed level numbers from cached completed IDs
-  const completedLevelNumbers = new Set<number>();
-  baseList.forEach((lvl, idx) => {
-    const num = lvl.levelNumber ?? idx + 1;
-    if (
-      completedIds.has(lvl.id) ||
-      completedIds.has(`lvl-${num}`) ||
-      completedIds.has(`lvl-0${num}`) ||
-      completedIds.has(String(num))
-    ) {
-      completedLevelNumbers.add(num);
-      completedIds.add(lvl.id);
-    }
-  });
-
-  return baseList.map((lvl, idx) => {
-    const levelNum = lvl.levelNumber ?? idx + 1;
-    const prevLvl = idx > 0 ? baseList[idx - 1] : null;
-    const prevNum = prevLvl ? (prevLvl.levelNumber ?? idx) : null;
-
-    const isThisLevelCompleted =
-      completedIds.has(lvl.id) ||
-      completedLevelNumbers.has(levelNum);
-
-    const isPrevLevelCompleted =
-      levelNum === 1 ||
-      (prevNum !== null && completedLevelNumbers.has(prevNum)) ||
-      (prevLvl !== null && completedIds.has(prevLvl.id)) ||
-      completedLevelNumbers.has(levelNum - 1);
-
-    const status: 'completed' | 'in-progress' | 'locked' = isThisLevelCompleted
-      ? 'completed'
-      : (levelNum === 1 || isPrevLevelCompleted ? 'in-progress' : 'locked');
-
-    return { ...lvl, status };
-  });
+  return cachedRoadmapMilestones && cachedRoadmapMilestones.length > 0
+    ? cachedRoadmapMilestones
+    : [];
 }
 
 export default function RoadmapScreen() {
@@ -168,25 +109,11 @@ export default function RoadmapScreen() {
 
       const sourceLevels = backendLevels;
 
-      // Determine which levels the student has genuinely completed
-      const completedLevelIds = getInitialCompletedLevelIds();
+      // Determine which levels the student has genuinely completed (Authoritative source: Supabase DB)
+      const completedLevelIds = new Set<string>();
       const completedLevelNumbers = new Set<number>();
 
-      // 1. Pre-seed completed level numbers from cached storage
-      sourceLevels.forEach((lvl: any, idx: number) => {
-        const lvlNum = lvl.levelNumber ?? idx + 1;
-        if (
-          completedLevelIds.has(lvl.id) ||
-          completedLevelIds.has(`lvl-${lvlNum}`) ||
-          completedLevelIds.has(`lvl-0${lvlNum}`) ||
-          completedLevelIds.has(String(lvlNum))
-        ) {
-          completedLevelNumbers.add(lvlNum);
-          completedLevelIds.add(lvl.id);
-        }
-      });
-
-      // 2. Fetch real user level completions directly from user_roadmap_progress backend table
+      // 1. Fetch real user level completions directly from user_roadmap_progress backend table (Supabase DB)
       if (progressRes && progressRes.ok) {
         try {
           const progressData = await progressRes.json();
@@ -199,24 +126,18 @@ export default function RoadmapScreen() {
         } catch {}
       }
 
-      // 3. Cross-reference with completed sessions recorded in backend
+      // 2. Cross-reference with completed sessions recorded in Supabase sessions table
       if (Array.isArray(sessions)) {
         sessions.forEach((s: any) => {
-          if (s.status === 'completed') {
-            if (s.roadmap_level_id) {
-              completedLevelIds.add(s.roadmap_level_id);
-            }
-            // Match against level topic/title or roadmap_level_id
+          if (s.status === 'completed' && s.roadmap_level_id) {
+            completedLevelIds.add(s.roadmap_level_id);
             sourceLevels.forEach((lvl: any, idx: number) => {
               const lvlNum = lvl.levelNumber ?? idx + 1;
-              const lvlTopic = (lvl.topic || '').trim().toLowerCase();
-              const lvlTitle = (lvl.title || '').trim().toLowerCase();
-              const sTopic = (s.topic || '').trim().toLowerCase();
               if (
                 s.roadmap_level_id === lvl.id ||
                 s.roadmap_level_id === `lvl-${lvlNum}` ||
                 s.roadmap_level_id === `lvl-0${lvlNum}` ||
-                (sTopic && (sTopic === lvlTopic || sTopic === lvlTitle))
+                s.roadmap_level_id === String(lvlNum)
               ) {
                 completedLevelIds.add(lvl.id);
                 completedLevelNumbers.add(lvlNum);
@@ -279,15 +200,6 @@ export default function RoadmapScreen() {
       });
 
       cachedRoadmapMilestones = mappedMilestones;
-      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-        try {
-          window.localStorage.setItem(
-            'maya_cached_completed_levels',
-            JSON.stringify(Array.from(completedLevelIds)),
-          );
-        } catch {}
-      }
-
       setMilestones(mappedMilestones);
     } catch (e) {
       console.warn('[Roadmap] Error fetching dynamic roadmap data:', e);
@@ -297,6 +209,12 @@ export default function RoadmapScreen() {
   };
 
   useEffect(() => {
+    // Clean up any old cached storage so Supabase DB is always the sole authority
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.removeItem('maya_cached_completed_levels');
+      } catch {}
+    }
     fetchRoadmapData();
   }, []);
 

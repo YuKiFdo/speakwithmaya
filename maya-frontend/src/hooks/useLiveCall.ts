@@ -782,18 +782,6 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             console.log('[useLiveCall] 🏆 Level evaluation completed:', evaluation);
             evaluationResultRef.current = evaluation;
             setEvaluationResult(evaluation);
-            if (evaluation.isPassed && options.roadmapLevelId) {
-              if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-                try {
-                  const raw = window.localStorage.getItem('maya_cached_completed_levels');
-                  const stored = raw ? JSON.parse(raw) : [];
-                  if (Array.isArray(stored) && !stored.includes(options.roadmapLevelId)) {
-                    stored.push(options.roadmapLevelId);
-                    window.localStorage.setItem('maya_cached_completed_levels', JSON.stringify(stored));
-                  }
-                } catch {}
-              }
-            }
           },
           onObjectiveRecorded: (payload: RecordedObjectivePayload) => {
             console.log('[useLiveCall] 🎯 Objective recorded by Maya coach:', payload.objectiveId, payload.status, payload.note);
@@ -1157,34 +1145,6 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       options.onCallCompleted(report);
     }
 
-    // If passed, immediately cache completed roadmap level ID for instant zero-jump unlock
-    if (options.roadmapLevelId && passed) {
-      try {
-        if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-          const raw = window.localStorage.getItem('maya_cached_completed_levels');
-          const stored: string[] = raw ? JSON.parse(raw) : [];
-          const candidates = [
-            options.roadmapLevelId,
-            options.levelNumber ? `lvl-${options.levelNumber}` : null,
-            options.levelNumber ? `lvl-0${options.levelNumber}` : null,
-            options.levelNumber ? String(options.levelNumber) : null,
-          ].filter(Boolean) as string[];
-
-          let changed = false;
-          for (const c of candidates) {
-            if (!stored.includes(c)) {
-              stored.push(c);
-              changed = true;
-            }
-          }
-          if (changed) {
-            window.localStorage.setItem('maya_cached_completed_levels', JSON.stringify(stored));
-          }
-        }
-      } catch (e) {
-        console.warn('[useLiveCall] Error caching completed level:', e);
-      }
-    }
 
     // 4. Persist session history asynchronously in background (non-blocking)
     const finalRecord: SessionHistoryRecord = {
