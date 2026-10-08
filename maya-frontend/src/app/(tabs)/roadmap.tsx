@@ -289,7 +289,7 @@ export default function RoadmapScreen() {
   const xRight = Math.max(860, trackWidth - 40);
   const R = 90;
   const desktopYStart = 200;
-  const desktopRowStep = 260;
+  const desktopRowStep = 225;
   const lastIdx = milestones.length - 1;
   const finalR = Math.max(0, Math.floor(lastIdx / 2));
   const finalCol = lastIdx >= 0 ? lastIdx % 2 : 0;
