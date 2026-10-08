@@ -39,9 +39,9 @@ export default function SessionCompleteScreen() {
 
   // Dynamic avatar size: scales with screen height to fill vertical space nicely
   const avatarSize = useMemo(() => {
-    // Proportional to screen height, balanced between 195px and 265px
-    const scaled = Math.round(windowHeight * 0.27);
-    return Math.min(265, Math.max(195, scaled));
+    // Proportional to screen height, enlarged to fill gap nicely while keeping button clearance
+    const scaled = Math.round(windowHeight * 0.305);
+    return Math.min(295, Math.max(210, scaled));
   }, [windowHeight]);
 
   const parseReportFromParams = (): ExtendedSessionReport => {
@@ -397,8 +397,8 @@ const styles = StyleSheet.create({
   avatarSection: {
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 2,
-    marginBottom: 4,
+    marginTop: 4,
+    marginBottom: 6,
   },
   avatarGlowCircle: {
     position: 'absolute',
@@ -456,7 +456,7 @@ const styles = StyleSheet.create({
     width: '100%',
     flexDirection: 'row',
     gap: 12,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   pillStatCard: {
     flex: 1,
