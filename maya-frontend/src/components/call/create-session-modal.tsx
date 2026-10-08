@@ -483,20 +483,20 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: '100%',
-    maxWidth: 620,
+    maxWidth: 670,
     alignItems: 'center',
     justifyContent: 'center',
   },
   card: {
-    backgroundColor: '#F8FBFF',
-    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 26,
     width: '100%',
-    paddingHorizontal: 22,
-    paddingTop: 18,
-    paddingBottom: 18,
+    paddingHorizontal: 25,
+    paddingTop: 22,
+    paddingBottom: 22,
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 20px 50px -12px rgba(15, 23, 42, 0.25), 0 0 1px rgba(15, 23, 42, 0.1)',
+          boxShadow: '0 22px 55px -12px rgba(15, 23, 42, 0.26), 0 0 1px rgba(15, 23, 42, 0.1)',
         } as any)
       : {
           shadowColor: '#0F172A',
@@ -507,13 +507,13 @@ const styles = StyleSheet.create({
         }),
   },
   cardDesktop: {
-    maxWidth: 580,
+    maxWidth: 630,
   },
   cardMobile: {
     maxWidth: '100%',
-    paddingHorizontal: 14,
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingHorizontal: 15,
+    paddingTop: 18,
+    paddingBottom: 18,
   },
 
   /* Header */
@@ -521,24 +521,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 13,
     flex: 1,
   },
   avatarCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#2B5BFF',
     justifyContent: 'center',
     alignItems: 'center',
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 6px 14px rgba(43, 91, 255, 0.3)',
+          boxShadow: '0 6px 16px rgba(43, 91, 255, 0.32)',
         } as any)
       : {
           shadowColor: '#2B5BFF',
@@ -553,7 +553,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 19,
+    fontSize: 20.5,
     color: '#0F172A',
     letterSpacing: -0.3,
   },
@@ -562,14 +562,14 @@ const styles = StyleSheet.create({
   },
   headerSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 12,
+    fontSize: 12.5,
     color: '#64748B',
     marginTop: 1,
   },
   closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: '#F1F5F9',
     justifyContent: 'center',
     alignItems: 'center',
@@ -578,23 +578,23 @@ const styles = StyleSheet.create({
 
   /* Scrollable Area */
   scrollArea: {
-    maxHeight: 560,
+    maxHeight: 600,
   },
   scrollContent: {
-    gap: 10,
-    paddingBottom: 4,
+    gap: 12,
+    paddingBottom: 6,
   },
 
   /* Section Containers */
   sectionContainer: {
     width: '100%',
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 0.63,
     borderColor: '#F1F5F9',
     borderTopWidth: 0.63,
     borderTopColor: '#F1F5F9',
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
     backgroundColor: '#FFFFFF',
     alignSelf: 'center',
     ...(Platform.OS === 'web'
@@ -613,13 +613,13 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 9,
+    gap: 11,
+    marginBottom: 11,
   },
   sectionIconBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -628,28 +628,28 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 13.5,
+    fontSize: 14.5,
     color: '#0F172A',
   },
   sectionSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 11.5,
+    fontSize: 12,
     color: '#64748B',
-    marginTop: 0.5,
+    marginTop: 1,
   },
 
   /* Duration Options (Section 1) */
   durationRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
   durationRowMobile: {
-    gap: 6,
+    gap: 7,
   },
   durationCard: {
     flex: 1,
-    height: 64,
-    borderRadius: 12,
+    height: 72,
+    borderRadius: 14,
     borderWidth: 1.2,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
@@ -663,7 +663,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 0 0 1px #2B5BFF, 0 3px 10px rgba(43, 91, 255, 0.12)',
+          boxShadow: '0 0 0 1px #2B5BFF, 0 3px 12px rgba(43, 91, 255, 0.12)',
         } as any)
       : {
           shadowColor: '#2B5BFF',
@@ -676,14 +676,14 @@ const styles = StyleSheet.create({
   cardTopRightBadges: {
     position: 'absolute',
     top: 5,
-    right: 6,
+    right: 7,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
   },
   durationMinutesText: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 15,
+    fontSize: 16,
     color: '#0F172A',
   },
   durationMinutesTextSelected: {
@@ -691,7 +691,7 @@ const styles = StyleSheet.create({
   },
   durationTierText: {
     ...fontStyle('inter', 'medium'),
-    fontSize: 11,
+    fontSize: 11.5,
     color: '#64748B',
     marginTop: 2,
   },
@@ -705,24 +705,24 @@ const styles = StyleSheet.create({
   /* 3-Column Choice Row (Sections 2 & 3) */
   threeColRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 9,
   },
   threeColRowMobile: {
     flexDirection: 'column',
-    gap: 6,
+    gap: 7,
   },
   choiceCard: {
     flex: 1,
-    minHeight: 58,
-    borderRadius: 12,
+    minHeight: 65,
+    borderRadius: 14,
     borderWidth: 1.2,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 9,
-    paddingVertical: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 9,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
   choiceCardSelected: {
@@ -730,7 +730,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 0 0 1px #2B5BFF, 0 3px 10px rgba(43, 91, 255, 0.12)',
+          boxShadow: '0 0 0 1px #2B5BFF, 0 3px 12px rgba(43, 91, 255, 0.12)',
         } as any)
       : {
           shadowColor: '#2B5BFF',
@@ -741,9 +741,9 @@ const styles = StyleSheet.create({
         }),
   },
   choiceIconCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 33,
+    height: 33,
+    borderRadius: 16.5,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -752,7 +752,7 @@ const styles = StyleSheet.create({
   },
   choiceTitle: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 12.5,
+    fontSize: 13,
     color: '#0F172A',
   },
   choiceTitleSelected: {
@@ -760,9 +760,9 @@ const styles = StyleSheet.create({
   },
   choiceSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 10.5,
+    fontSize: 10.8,
     color: '#64748B',
-    lineHeight: 13.5,
+    lineHeight: 14,
     marginTop: 1.5,
   },
 
@@ -770,16 +770,16 @@ const styles = StyleSheet.create({
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginTop: 14,
-    paddingTop: 12,
+    gap: 12,
+    marginTop: 16,
+    paddingTop: 14,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
   },
   cancelBtn: {
     flex: 1,
-    height: 44,
-    borderRadius: 12,
+    height: 48,
+    borderRadius: 13,
     borderWidth: 1.2,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
@@ -789,22 +789,22 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: {
     ...fontStyle('inter', 'semiBold'),
-    fontSize: 13.5,
+    fontSize: 14,
     color: '#0F172A',
   },
   startBtn: {
     flex: 2,
-    height: 44,
-    borderRadius: 12,
+    height: 48,
+    borderRadius: 13,
     backgroundColor: '#2B5BFF',
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 6,
+    gap: 7,
     ...(Platform.OS === 'web'
       ? ({
           cursor: 'pointer',
-          boxShadow: '0 6px 16px rgba(43, 91, 255, 0.32)',
+          boxShadow: '0 6px 18px rgba(43, 91, 255, 0.32)',
         } as any)
       : {
           shadowColor: '#2B5BFF',
@@ -816,7 +816,7 @@ const styles = StyleSheet.create({
   },
   startBtnText: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 13.5,
+    fontSize: 14,
     color: '#FFFFFF',
   },
   startBtnPressed: {
