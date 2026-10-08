@@ -35,14 +35,16 @@ export default function SessionCompleteScreen() {
   }>();
 
   const { isPhone } = useBreakpoint();
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
-  // Dynamic avatar size: scales with screen height to fill vertical space nicely
+  // Dynamic avatar size: scales with screen height to fill vertical gap, safely bounded by width
   const avatarSize = useMemo(() => {
-    // Proportional to screen height, enlarged to fill gap nicely while keeping button clearance
-    const scaled = Math.round(windowHeight * 0.305);
-    return Math.min(295, Math.max(210, scaled));
-  }, [windowHeight]);
+    // Proportional to screen height (~38.5%) to close the empty gap above action buttons
+    const heightBased = Math.round(windowHeight * 0.385);
+    // Width constraint: ensure avatar stays within safe horizontal bounds
+    const maxSafeWidth = Math.round(windowWidth - 56);
+    return Math.min(340, maxSafeWidth, Math.max(220, heightBased));
+  }, [windowHeight, windowWidth]);
 
   const parseReportFromParams = (): ExtendedSessionReport => {
     let parsedCallParams: any = undefined;
