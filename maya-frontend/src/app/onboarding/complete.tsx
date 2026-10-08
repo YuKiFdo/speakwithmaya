@@ -6,6 +6,8 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
+  useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -33,6 +35,14 @@ export default function SessionCompleteScreen() {
   }>();
 
   const { isPhone } = useBreakpoint();
+  const { height: windowHeight } = useWindowDimensions();
+
+  // Dynamic avatar size: scales with screen height to fill vertical space nicely
+  const avatarSize = useMemo(() => {
+    // Proportional to screen height, comfortably between 210px (compact) and 310px (tall devices)
+    const scaled = Math.round(windowHeight * 0.31);
+    return Math.min(310, Math.max(210, scaled));
+  }, [windowHeight]);
 
   const parseReportFromParams = (): ExtendedSessionReport => {
     let parsedCallParams: any = undefined;
@@ -181,131 +191,141 @@ export default function SessionCompleteScreen() {
           style={styles.scrollArea}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          bounces={false}
         >
-          {/* Top Maya Avatar with Soft Radial Background Aura */}
-          <View style={styles.avatarSection}>
-            <View
-              style={[
-                styles.avatarGlowCircle,
-                isPassed ? styles.avatarGlowPassed : styles.avatarGlowRetry,
-              ]}
-            />
-            <Image
-              source={avatarSource}
-              style={styles.avatarImage}
-              resizeMode="contain"
-              accessibilityLabel={isPassed ? 'Maya celebrating' : 'Maya encouraging you to try again'}
-            />
-            {/* White gradient fade blend at bottom to dissolve into surface */}
-            <View style={styles.imageBottomFade} pointerEvents="none">
-              <Svg width="100%" height="100%" preserveAspectRatio="none">
-                <Defs>
-                  <LinearGradient
-                    id="whiteFadeBlendComplete"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <Stop offset="0%" stopColor="#ffffff" stopOpacity="0" />
-                    <Stop offset="60%" stopColor="#ffffff" stopOpacity="0.8" />
-                    <Stop offset="100%" stopColor="#ffffff" stopOpacity="1" />
-                  </LinearGradient>
-                </Defs>
-                <Rect x="0" y="0" width="100%" height="100%" fill="url(#whiteFadeBlendComplete)" />
-              </Svg>
-            </View>
-          </View>
-
-          {/* Heading and Subtitle */}
-          <View style={styles.titleSection}>
-            <Text style={styles.title}>{titleText}</Text>
-            <Text style={styles.subtitle}>{report?.feedbackEnglish}</Text>
-            {/* {!isGeneral && report?.feedbackEnglish && report?.feedbackSinhala ? (
-              <Text style={styles.secondarySubtitle}>{report.feedbackEnglish}</Text>
-            ) : null} */}
-          </View>
-
-          {/* Row 1: Talk Time & XP Earned Pill Cards */}
-          <View style={styles.rowOneStats}>
-            {/* Talk Time */}
-            <View style={styles.pillStatCard}>
-              <View style={styles.clockIconBadge}>
-                <Ionicons name="time-outline" size={20} color="#2563EB" />
-              </View>
-              <View style={styles.statTexts}>
-                <Text style={styles.statValueBold}>{talkMins} min</Text>
-                <Text style={styles.statLabelMuted}>Talk time</Text>
-              </View>
-            </View>
-
-            {/* XP Earned */}
-            <View style={styles.pillStatCard}>
-              <View style={styles.starIconBadge}>
-                <Ionicons name="star" size={18} color="#EAB308" />
-              </View>
-              <View style={styles.statTexts}>
-                <Text style={styles.statValueBold}>+{xpEarned} XP</Text>
-                <Text style={styles.statLabelMuted}>Earned today</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Row 2: 3-Metric Summary Card (Session Time | Sentences | Score) */}
-          <View style={styles.threeMetricCard}>
-            {/* Column 1: Session Time */}
-            <View style={styles.metricColumn}>
-              <View style={styles.metricIconBadge}>
-                <Ionicons name="time-outline" size={17} color="#3B82F6" />
-              </View>
-              <Text style={styles.metricValueText}>{formattedSessionTime}</Text>
-              <Text style={styles.metricLabelText}>Session time</Text>
-            </View>
-
-            {/* Divider Line */}
-            <View style={styles.metricDivider} />
-
-            {/* Column 2: Sentences Spoken */}
-            <View style={styles.metricColumn}>
-              <View style={styles.metricIconBadge}>
-                <Ionicons name="chatbubble-ellipses-outline" size={17} color="#3B82F6" />
-              </View>
-              <Text style={styles.metricValueText}>{sentencesCount}</Text>
-              <Text style={styles.metricLabelText}>Sentences</Text>
-            </View>
-
-            {/* Divider Line */}
-            <View style={styles.metricDivider} />
-
-            {/* Column 3: Score % */}
-            <View style={styles.metricColumn}>
+          {/* Top Content (Avatar, Title, Metrics) */}
+          <View style={styles.topContentGroup}>
+            {/* Top Maya Avatar with Soft Radial Background Aura */}
+            <View style={[styles.avatarSection, { width: avatarSize + 20, height: avatarSize }]}>
               <View
                 style={[
-                  styles.metricIconBadge,
-                  !isPassed && !isGeneral && styles.metricIconBadgeRetry,
+                  styles.avatarGlowCircle,
+                  isPassed ? styles.avatarGlowPassed : styles.avatarGlowRetry,
+                  {
+                    width: Math.round(avatarSize * 0.85),
+                    height: Math.round(avatarSize * 0.85),
+                    borderRadius: Math.round(avatarSize * 0.85) / 2,
+                    top: Math.round(avatarSize * 0.08),
+                  },
                 ]}
+              />
+              <Image
+                source={avatarSource}
+                style={[styles.avatarImage, { width: avatarSize, height: avatarSize }]}
+                resizeMode="contain"
+                accessibilityLabel={isPassed ? 'Maya celebrating' : 'Maya encouraging you to try again'}
+              />
+              {/* White gradient fade blend at bottom to dissolve into surface */}
+              <View
+                style={[styles.imageBottomFade, { height: Math.round(avatarSize * 0.24) }]}
+                pointerEvents="none"
               >
-                <Ionicons
-                  name="star"
-                  size={17}
-                  color={isPassed || isGeneral ? '#3B82F6' : '#D97706'}
-                />
+                <Svg width="100%" height="100%" preserveAspectRatio="none">
+                  <Defs>
+                    <LinearGradient
+                      id="whiteFadeBlendComplete"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <Stop offset="0%" stopColor="#ffffff" stopOpacity="0" />
+                      <Stop offset="60%" stopColor="#ffffff" stopOpacity="0.8" />
+                      <Stop offset="100%" stopColor="#ffffff" stopOpacity="1" />
+                    </LinearGradient>
+                  </Defs>
+                  <Rect x="0" y="0" width="100%" height="100%" fill="url(#whiteFadeBlendComplete)" />
+                </Svg>
               </View>
-              <Text
-                style={[
-                  styles.metricValueText,
-                  !isPassed && !isGeneral && styles.metricValueTextRetry,
-                ]}
-              >
-                {overallScore}%
-              </Text>
-              <Text style={styles.metricLabelText}>
-                {isGeneral ? 'Fluency Score' : 'Roleplay Score'}
-              </Text>
+            </View>
+
+            {/* Heading and Subtitle */}
+            <View style={styles.titleSection}>
+              <Text style={styles.title}>{titleText}</Text>
+              <Text style={styles.subtitle}>{report?.feedbackEnglish || subtitleText}</Text>
+            </View>
+
+            {/* Row 1: Talk Time & XP Earned Pill Cards */}
+            <View style={styles.rowOneStats}>
+              {/* Talk Time */}
+              <View style={styles.pillStatCard}>
+                <View style={styles.clockIconBadge}>
+                  <Ionicons name="time-outline" size={20} color="#2563EB" />
+                </View>
+                <View style={styles.statTexts}>
+                  <Text style={styles.statValueBold}>{talkMins} min</Text>
+                  <Text style={styles.statLabelMuted}>Talk time</Text>
+                </View>
+              </View>
+
+              {/* XP Earned */}
+              <View style={styles.pillStatCard}>
+                <View style={styles.starIconBadge}>
+                  <Ionicons name="star" size={18} color="#EAB308" />
+                </View>
+                <View style={styles.statTexts}>
+                  <Text style={styles.statValueBold}>+{xpEarned} XP</Text>
+                  <Text style={styles.statLabelMuted}>Earned today</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Row 2: 3-Metric Summary Card (Session Time | Sentences | Score) */}
+            <View style={styles.threeMetricCard}>
+              {/* Column 1: Session Time */}
+              <View style={styles.metricColumn}>
+                <View style={styles.metricIconBadge}>
+                  <Ionicons name="time-outline" size={17} color="#3B82F6" />
+                </View>
+                <Text style={styles.metricValueText}>{formattedSessionTime}</Text>
+                <Text style={styles.metricLabelText}>Session time</Text>
+              </View>
+
+              {/* Divider Line */}
+              <View style={styles.metricDivider} />
+
+              {/* Column 2: Sentences Spoken */}
+              <View style={styles.metricColumn}>
+                <View style={styles.metricIconBadge}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={17} color="#3B82F6" />
+                </View>
+                <Text style={styles.metricValueText}>{sentencesCount}</Text>
+                <Text style={styles.metricLabelText}>Sentences</Text>
+              </View>
+
+              {/* Divider Line */}
+              <View style={styles.metricDivider} />
+
+              {/* Column 3: Score % */}
+              <View style={styles.metricColumn}>
+                <View
+                  style={[
+                    styles.metricIconBadge,
+                    !isPassed && !isGeneral && styles.metricIconBadgeRetry,
+                  ]}
+                >
+                  <Ionicons
+                    name="star"
+                    size={17}
+                    color={isPassed || isGeneral ? '#3B82F6' : '#D97706'}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.metricValueText,
+                    !isPassed && !isGeneral && styles.metricValueTextRetry,
+                  ]}
+                >
+                  {overallScore}%
+                </Text>
+                <Text style={styles.metricLabelText}>
+                  {isGeneral ? 'Fluency Score' : 'Roleplay Score'}
+                </Text>
+              </View>
             </View>
           </View>
 
-          {/* Action Buttons */}
+          {/* Action Buttons (Pinned at Bottom) */}
           <View style={styles.actionButtonsContainer}>
             {/* Primary Action Button */}
             <Pressable
@@ -358,26 +378,26 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 40,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 16 : 24,
+    alignItems: 'center',
+    flexGrow: 1,
+    justifyContent: 'space-between',
+  },
+  topContentGroup: {
+    width: '100%',
     alignItems: 'center',
   },
 
   /* Avatar Presentation */
   avatarSection: {
-    width: 220,
-    height: 200,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 8,
+    marginTop: 4,
+    marginBottom: 6,
   },
   avatarGlowCircle: {
     position: 'absolute',
-    width: 170,
-    height: 170,
-    borderRadius: 85,
-    top: 15,
   },
   avatarGlowPassed: {
     backgroundColor: '#EFF6FF',
@@ -386,22 +406,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#FEF3C7',
   },
   avatarImage: {
-    width: 200,
-    height: 200,
+    alignSelf: 'center',
   },
   imageBottomFade: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: 52,
     pointerEvents: 'none',
   },
 
   /* Title & Subtitle */
   titleSection: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
     paddingHorizontal: 3,
   },
   title: {
@@ -491,7 +509,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
   },
   metricColumn: {
     flex: 1,
@@ -533,7 +551,9 @@ const styles = StyleSheet.create({
   actionButtonsContainer: {
     width: '100%',
     gap: 12,
-    marginBottom: 16,
+    marginTop: 'auto',
+    paddingTop: 16,
+    marginBottom: 8,
   },
   primaryButton: {
     width: '100%',
