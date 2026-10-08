@@ -87,6 +87,20 @@ export default function RoadmapScreen() {
   const [lockedTargetLevel, setLockedTargetLevel] = useState<MilestoneItem | null>(null);
   const [selectedMission, setSelectedMission] = useState<MilestoneItem | null>(null);
 
+  const lastActivePopupRef = useRef<PopupPreset>('level-locked');
+  const lastLockedTargetRef = useRef<MilestoneItem | null>(null);
+
+  if (activePopup) {
+    lastActivePopupRef.current = activePopup;
+  }
+  if (lockedTargetLevel) {
+    lastLockedTargetRef.current = lockedTargetLevel;
+  }
+
+  const effectivePopup = activePopup || lastActivePopupRef.current;
+  const effectiveLockedLevel = lockedTargetLevel || lastLockedTargetRef.current;
+  const isLevelLocked = effectivePopup === 'level-locked';
+
   const [milestones, setMilestones] = useState<MilestoneItem[]>(getInitialMilestones);
   const [isLoadingLevels, setIsLoadingLevels] = useState<boolean>(!cachedRoadmapMilestones);
 
@@ -1042,48 +1056,46 @@ export default function RoadmapScreen() {
         {/* ==================================================================== */}
         <CommonPopup
           visible={activePopup !== null}
-          preset={activePopup || 'unlock-premium'}
-          levelNumber={lockedTargetLevel?.levelNumber}
-          title={activePopup === 'level-locked' ? 'Level Locked' : undefined}
-          titleHighlight={activePopup === 'level-locked' ? 'Locked' : undefined}
+          preset={effectivePopup}
+          levelNumber={effectiveLockedLevel?.levelNumber}
+          title={isLevelLocked ? 'Level Locked' : undefined}
+          titleHighlight={isLevelLocked ? 'Locked' : undefined}
           subtitle={
-            activePopup === 'level-locked' && lockedTargetLevel
-              ? `Complete Level ${Math.max(1, (lockedTargetLevel.levelNumber ?? 2) - 1)} first to unlock this session and keep moving forward on your journey.`
+            isLevelLocked && effectiveLockedLevel
+              ? `Complete Level ${Math.max(1, (effectiveLockedLevel.levelNumber ?? 2) - 1)} first to unlock this session and keep moving forward on your journey.`
               : undefined
           }
           primaryButtonText={
-            activePopup === 'level-locked'
+            isLevelLocked
               ? currentActiveLevel
                 ? `Go to Level ${currentActiveLevel.levelNumber}`
                 : 'Got It'
               : undefined
           }
-          primaryButtonIcon={activePopup === 'level-locked' ? 'play' : undefined}
+          primaryButtonIcon={isLevelLocked ? 'play' : undefined}
           showPrimaryArrow={true}
           footerText={
-            activePopup === 'level-locked'
+            isLevelLocked
               ? 'Complete each lesson step-by-step to build your speaking fluency.'
               : undefined
           }
           onClose={() => {
             setActivePopup(null);
-            setLockedTargetLevel(null);
           }}
           onPrimaryPress={() => {
-            if (activePopup === 'unlock-premium') {
+            const popupToActOn = activePopup || lastActivePopupRef.current;
+            if (popupToActOn === 'unlock-premium') {
               router.push('/upgrade');
-            } else if (activePopup === 'level-locked') {
+            } else if (popupToActOn === 'level-locked') {
               if (currentActiveLevel) {
                 setSelectedMission(currentActiveLevel);
               }
             }
             setActivePopup(null);
-            setLockedTargetLevel(null);
           }}
           onFooterButtonPress={() => {
             router.push('/upgrade');
             setActivePopup(null);
-            setLockedTargetLevel(null);
           }}
         />
 
