@@ -176,8 +176,8 @@ export function CreateSessionModal({
     }
     Animated.timing(modalAnim, {
       toValue: 0,
-      duration: 180,
-      easing: Easing.out(Easing.ease),
+      duration: 230,
+      easing: Easing.in(Easing.cubic),
       useNativeDriver: Platform.OS !== 'web',
     }).start(() => {
       onClose();
@@ -198,8 +198,8 @@ export function CreateSessionModal({
   const closePicker = (callback?: () => void) => {
     Animated.timing(pickerAnim, {
       toValue: 0,
-      duration: 170,
-      easing: Easing.out(Easing.ease),
+      duration: 200,
+      easing: Easing.in(Easing.cubic),
       useNativeDriver: Platform.OS !== 'web',
     }).start(() => {
       setPickerModal(null);
@@ -304,7 +304,7 @@ export function CreateSessionModal({
                   {
                     translateY: modalAnim.interpolate({
                       inputRange: [0, 1],
-                      outputRange: [380, 0],
+                      outputRange: [Math.max(windowHeight, 850), 0],
                     }),
                   },
                 ],
@@ -626,7 +626,7 @@ export function CreateSessionModal({
                         {
                           translateY: pickerAnim.interpolate({
                             inputRange: [0, 1],
-                            outputRange: [320, 0],
+                            outputRange: [500, 0],
                           }),
                         },
                       ],
@@ -773,7 +773,6 @@ export function CreateSessionModal({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
@@ -784,6 +783,7 @@ const styles = StyleSheet.create({
   },
   backdropTouchArea: {
     ...(StyleSheet.absoluteFill as any),
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
   },
   modalContainer: {
     width: '100%',
