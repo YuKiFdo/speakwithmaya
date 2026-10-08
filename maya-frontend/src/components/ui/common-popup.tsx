@@ -83,7 +83,7 @@ const PRESET_IMAGES = {
   'unlock-premium': require('@/assets/images/mayacrown.png'),
   'daily-limit': require('@/assets/images/mayaclock.png'),
   'practice-complete': require('@/assets/images/mayathumb.png'),
-  'level-locked': require('@/assets/images/mayacrown.png'),
+  'level-locked': require('@/assets/images/mayalocked.png'),
 };
 
 /**
