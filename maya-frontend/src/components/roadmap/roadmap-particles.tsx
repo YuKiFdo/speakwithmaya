@@ -1,15 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import Svg, { Circle, Path } from 'react-native-svg';
+import { Path } from 'react-native-svg';
 
 export interface PathSegment {
   type: 'line' | 'arc';
   len: number;
-  // Line
   x1?: number;
   y1?: number;
   x2?: number;
   y2?: number;
-  // Arc
   cx?: number;
   cy?: number;
   r?: number;
@@ -39,7 +37,6 @@ export function buildDesktopPathSegments(
     const yNext = desktopYStart + (r + 1) * desktopRowStep;
 
     if (i % 2 === 0) {
-      // Connect milestones on the same row
       const targetX = r % 2 === 0 ? col2X : col1X;
       const len = Math.abs(targetX - currX);
       if (len > 0) {
@@ -48,7 +45,6 @@ export function buildDesktopPathSegments(
       currX = targetX;
       currY = yRow;
     } else {
-      // U-turn loop to next row
       if (r % 2 === 0) {
         // Going Right
         const l1 = Math.abs(xRight - R - currX);
@@ -144,7 +140,6 @@ export function buildMobilePathSegments(
   const segments: PathSegment[] = [];
   const clampedTarget = Math.max(1, targetIdx);
 
-  // First horizontal line
   const l0 = Math.abs(mobileIconRightX - mobileIconLeftX);
   segments.push({
     type: 'line',
@@ -161,7 +156,6 @@ export function buildMobilePathSegments(
     const isLastStep = i === clampedTarget - 2;
 
     if (i % 2 === 0) {
-      // Right turn semi-circle
       const arcLen = Math.PI * mobileR;
       segments.push({
         type: 'arc',
@@ -183,7 +177,6 @@ export function buildMobilePathSegments(
         });
       }
     } else {
-      // Left turn semi-circle
       const arcLen = Math.PI * mobileR;
       segments.push({
         type: 'arc',
@@ -211,53 +204,17 @@ export function buildMobilePathSegments(
   return { segments, totalLen };
 }
 
-export function getPointOnPath(segments: PathSegment[], totalLen: number, progressRatio: number): { x: number; y: number } {
-  if (segments.length === 0 || totalLen <= 0) return { x: 0, y: 0 };
-  const normalizedT = Math.max(0, Math.min(1, progressRatio));
-  let rem = normalizedT * totalLen;
-
-  for (const s of segments) {
-    if (rem <= s.len) {
-      const u = s.len > 0 ? rem / s.len : 0;
-      if (s.type === 'line') {
-        const x1 = s.x1 ?? 0;
-        const y1 = s.y1 ?? 0;
-        const x2 = s.x2 ?? 0;
-        const y2 = s.y2 ?? 0;
-        return { x: x1 + u * (x2 - x1), y: y1 + u * (y2 - y1) };
-      } else {
-        const cx = s.cx ?? 0;
-        const cy = s.cy ?? 0;
-        const r = s.r ?? 0;
-        const a1 = s.a1 ?? 0;
-        const a2 = s.a2 ?? 0;
-        const ang = a1 + u * (a2 - a1);
-        return { x: cx + r * Math.cos(ang), y: cy + r * Math.sin(ang) };
-      }
-    }
-    rem -= s.len;
-  }
-
-  const last = segments[segments.length - 1];
-  if (last.type === 'line') {
-    return { x: last.x2 ?? 0, y: last.y2 ?? 0 };
-  } else {
-    const cx = last.cx ?? 0;
-    const cy = last.cy ?? 0;
-    const r = last.r ?? 0;
-    const a2 = last.a2 ?? 0;
-    return { x: cx + r * Math.cos(a2), y: cy + r * Math.sin(a2) };
-  }
-}
-
 interface RoadmapGlowParticlesProps {
-  segments: PathSegment[];
   totalLen: number;
   svgPath: string;
+  segments?: PathSegment[];
 }
 
+/**
+ * Modern Linear / Vercel / Magic UI Style Animated Light Beam
+ * A continuous, luminous laser pulse traveling seamlessly down the roadmap track
+ */
 export const RoadmapGlowParticles: React.FC<RoadmapGlowParticlesProps> = ({
-  segments,
   totalLen,
   svgPath,
 }) => {
@@ -268,9 +225,8 @@ export const RoadmapGlowParticles: React.FC<RoadmapGlowParticlesProps> = ({
   useEffect(() => {
     if (totalLen <= 0) return;
 
-    // Smooth continuous 60fps loop that wraps smoothly from 0 to 1
-    // Total cycle: 4.5 seconds for complete loop across the entire path
-    const loopDuration = 4500;
+    // Smooth 3.2s loop across the path
+    const loopDuration = 3200;
 
     const animate = () => {
       const now = Date.now();
@@ -291,84 +247,56 @@ export const RoadmapGlowParticles: React.FC<RoadmapGlowParticlesProps> = ({
     };
   }, [totalLen]);
 
-  if (totalLen <= 0) return null;
+  if (totalLen <= 0 || !svgPath) return null;
 
-  // We render 3 traveling glowing particles evenly spaced around the path loop
-  const particleFractions = [0, 0.33, 0.66];
-  // Calculate stroke-dashoffset for continuous flowing particle stream
-  const dashOffset = -(animProgress * 180);
+  // Beam length: aerodynamic 180-220px light pulse
+  const beamLen = Math.round(Math.min(240, Math.max(140, totalLen * 0.18)));
+  const gapLen = totalLen + beamLen;
+
+  // Staggered light pulses traveling smoothly down the path
+  const pulses = [0, 0.5];
 
   return (
     <>
-      {/* 1. Continuous flowing energy dotted stream along the path */}
-      {svgPath ? (
-        <Path
-          d={svgPath}
-          stroke="#60A5FA"
-          strokeWidth="2.5"
-          strokeDasharray="4, 16"
-          strokeDashoffset={dashOffset}
-          fill="none"
-          strokeLinecap="round"
-          opacity={0.7}
-        />
-      ) : null}
-
-      {/* 2. Traveling Glowing Energy Particles (Core + Halos + Comet Sparks) */}
-      {particleFractions.map((fraction, idx) => {
-        const pProgress = (animProgress + fraction) % 1;
-        const pt = getPointOnPath(segments, totalLen, pProgress);
-
-        // Trailing sparks behind the particle
-        const trail1Progress = (pProgress - 0.018 + 1) % 1;
-        const trail1 = getPointOnPath(segments, totalLen, trail1Progress);
-
-        const trail2Progress = (pProgress - 0.035 + 1) % 1;
-        const trail2 = getPointOnPath(segments, totalLen, trail2Progress);
+      {pulses.map((pulseOffset, idx) => {
+        const progress = (animProgress + pulseOffset) % 1;
+        const offset = -(progress * (totalLen + beamLen)) + beamLen;
 
         return (
-          <React.Fragment key={`glow-particle-${idx}`}>
-            {/* Comet tail spark 2 */}
-            <Circle
-              cx={trail2.x}
-              cy={trail2.y}
-              r={1.6}
-              fill="#BFDBFE"
-              opacity={0.4}
+          <React.Fragment key={`light-beam-${idx}`}>
+            {/* 1. Outer Soft Glowing Aura (Diffuses softly into track groove) */}
+            <Path
+              d={svgPath}
+              stroke="rgba(96, 165, 250, 0.40)"
+              strokeWidth="9"
+              strokeDasharray={`${beamLen * 1.15} ${gapLen}`}
+              strokeDashoffset={offset - beamLen * 0.08}
+              fill="none"
+              strokeLinecap="round"
             />
 
-            {/* Comet tail spark 1 */}
-            <Circle
-              cx={trail1.x}
-              cy={trail1.y}
-              r={2.4}
-              fill="#93C5FD"
-              opacity={0.65}
+            {/* 2. Vibrant Cyan-Blue Core Beam */}
+            <Path
+              d={svgPath}
+              stroke="#3B82F6"
+              strokeWidth="4.5"
+              strokeDasharray={`${beamLen} ${gapLen}`}
+              strokeDashoffset={offset}
+              fill="none"
+              strokeLinecap="round"
+              opacity={0.9}
             />
 
-            {/* Outer soft ambient glowing halo */}
-            <Circle
-              cx={pt.x}
-              cy={pt.y}
-              r={11}
-              fill="rgba(96, 165, 250, 0.30)"
-            />
-
-            {/* Vibrant cyan-blue particle glow */}
-            <Circle
-              cx={pt.x}
-              cy={pt.y}
-              r={5.5}
-              fill="#3B82F6"
-              opacity={0.85}
-            />
-
-            {/* Bright white star center */}
-            <Circle
-              cx={pt.x}
-              cy={pt.y}
-              r={2.6}
-              fill="#FFFFFF"
+            {/* 3. Intense Pure White Laser Center */}
+            <Path
+              d={svgPath}
+              stroke="#FFFFFF"
+              strokeWidth="2.2"
+              strokeDasharray={`${beamLen * 0.65} ${gapLen}`}
+              strokeDashoffset={offset + beamLen * 0.18}
+              fill="none"
+              strokeLinecap="round"
+              opacity={0.95}
             />
           </React.Fragment>
         );
