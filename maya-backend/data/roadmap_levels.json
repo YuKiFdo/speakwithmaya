@@ -6,7 +6,7 @@
     "description": "Introduce yourself: name, hometown, just talk.",
     "topic": "Spoken Practice",
     "xpReward": 100,
-    "iconType": "chat",
+    "iconType": "robot",
     "numberColor": "#0057FF",
     "haloColor": "#EFF6FF",
     "haloBorderColor": "#BFDBFE",
@@ -24,7 +24,7 @@
     "passingScorePercent": 75,
     "isPublished": true,
     "createdAt": "2026-10-08T04:47:42.54+00:00",
-    "updatedAt": "2026-10-08T05:38:13.12+00:00"
+    "updatedAt": "2026-10-08T05:48:26.385+00:00"
   },
   {
     "id": "lvl-muz241x1",
@@ -33,7 +33,7 @@
     "description": "Describe your daily routine in simple present tense, step by step.",
     "topic": "Spoken Practice",
     "xpReward": 100,
-    "iconType": "chat",
+    "iconType": "wave",
     "numberColor": "#9333EA",
     "haloColor": "#FAF5FF",
     "haloBorderColor": "#E9D5FF",
@@ -51,6 +51,60 @@
     "passingScorePercent": 75,
     "isPublished": true,
     "createdAt": "2026-10-08T04:49:04.693+00:00",
-    "updatedAt": "2026-10-08T05:38:45.625+00:00"
+    "updatedAt": "2026-10-08T05:48:21.778+00:00"
+  },
+  {
+    "id": "lvl-muz47tkz",
+    "levelNumber": 3,
+    "title": "Family and friends",
+    "description": "Describe 2-3 people close to you and what makes them special.",
+    "topic": "Spoken Practice",
+    "xpReward": 100,
+    "iconType": "family",
+    "numberColor": "#E11D48",
+    "haloColor": "#FFF1F2",
+    "haloBorderColor": "#FECDD3",
+    "scenarioId": "general-practice",
+    "customSvg": "",
+    "practicePoints": [
+      "Talking about your family and close friends",
+      "Describing people’s personality and appearance",
+      "Sharing what makes someone special to you",
+      "Talking about relationships and shared experiences",
+      "Using simple adjectives naturally",
+      "Asking and answering questions about people you know"
+    ],
+    "canonicalContent": "Lesson: Family and friends\n\nWhat you’ll practice:\n- Talking about your family and close friends\n- Describing people’s personality and appearance\n- Sharing what makes someone special to you\n- Talking about relationships and shared experiences\n- Using simple adjectives naturally\n- Asking and answering questions about people you know",
+    "passingScorePercent": 75,
+    "isPublished": true,
+    "createdAt": "2026-10-08T05:47:59.747+00:00",
+    "updatedAt": "2026-10-08T05:48:13.789+00:00"
+  },
+  {
+    "id": "lvl-muz49kcb",
+    "levelNumber": 4,
+    "title": "Likes and dislikes",
+    "description": "Talk about hobbies, favorite food, and things you enjoy or avoid.",
+    "topic": "Spoken Practice",
+    "xpReward": 100,
+    "iconType": "directions",
+    "numberColor": "#16A34A",
+    "haloColor": "#F0FDF4",
+    "haloBorderColor": "#BBF7D0",
+    "scenarioId": "general-practice",
+    "customSvg": "",
+    "practicePoints": [
+      "Talking about your hobbies and interests",
+      "Saying what you like and dislike",
+      "Talking about favorite foods and activities",
+      "Explaining why you enjoy or avoid something",
+      "Using “I like,” “I love,” “I don’t like,” and “I prefer” naturally",
+      "Asking and answering questions about preferences"
+    ],
+    "canonicalContent": "Lesson: Likes and dislikes\n\nWhat you’ll practice:\n- Talking about your hobbies and interests\n- Saying what you like and dislike\n- Talking about favorite foods and activities\n- Explaining why you enjoy or avoid something\n- Using “I like,” “I love,” “I don’t like,” and “I prefer” naturally\n- Asking and answering questions about preferences",
+    "passingScorePercent": 75,
+    "isPublished": true,
+    "createdAt": "2026-10-08T05:49:21.083+00:00",
+    "updatedAt": "2026-10-08T05:49:21.083+00:00"
   }
 ]

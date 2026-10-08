@@ -289,12 +289,12 @@ export default function RoadmapScreen() {
   const xRight = Math.max(860, trackWidth - 40);
   const R = 90;
   const desktopYStart = 200;
-  const desktopRowStep = 180;
+  const desktopRowStep = 260;
   const lastIdx = milestones.length - 1;
   const finalR = Math.max(0, Math.floor(lastIdx / 2));
   const finalCol = lastIdx >= 0 ? lastIdx % 2 : 0;
   const desktopRowCount = finalR + 1;
-  const desktopTrackHeight = desktopYStart + finalR * desktopRowStep + 90;
+  const desktopTrackHeight = desktopYStart + finalR * desktopRowStep + 100;
 
   // Symmetrically distribute column 1 and column 2 across the full container width:
   const col1X = Math.round(xLeft + (xRight - xLeft) * 0.16);
@@ -317,7 +317,11 @@ export default function RoadmapScreen() {
           desktopSvgPath += ` L ${targetX} ${yRow}`;
         } else {
           const yNext = desktopYStart + (r + 1) * desktopRowStep;
-          desktopSvgPath += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext}`;
+          if (desktopRowStep > 2 * R) {
+            desktopSvgPath += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight} ${yRow + R} L ${xRight} ${yNext - R} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext}`;
+          } else {
+            desktopSvgPath += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext}`;
+          }
         }
       } else if (r % 2 === 1) {
         if (isFinalRow) {
@@ -325,7 +329,11 @@ export default function RoadmapScreen() {
           desktopSvgPath += ` L ${targetX} ${yRow}`;
         } else {
           const yNext = desktopYStart + (r + 1) * desktopRowStep;
-          desktopSvgPath += ` L ${xLeft + R} ${yRow} A ${R} ${R} 0 0 0 ${xLeft + R} ${yNext}`;
+          if (desktopRowStep > 2 * R) {
+            desktopSvgPath += ` L ${xLeft + R} ${yRow} A ${R} ${R} 0 0 0 ${xLeft} ${yRow + R} L ${xLeft} ${yNext - R} A ${R} ${R} 0 0 0 ${xLeft + R} ${yNext}`;
+          } else {
+            desktopSvgPath += ` L ${xLeft + R} ${yRow} A ${R} ${R} 0 0 0 ${xLeft + R} ${yNext}`;
+          }
         }
       } else {
         if (isFinalRow) {
@@ -333,7 +341,11 @@ export default function RoadmapScreen() {
           desktopSvgPath += ` L ${targetX} ${yRow}`;
         } else {
           const yNext = desktopYStart + (r + 1) * desktopRowStep;
-          desktopSvgPath += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext}`;
+          if (desktopRowStep > 2 * R) {
+            desktopSvgPath += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight} ${yRow + R} L ${xRight} ${yNext - R} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext}`;
+          } else {
+            desktopSvgPath += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext}`;
+          }
         }
       }
     }
