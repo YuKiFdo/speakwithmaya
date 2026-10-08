@@ -39,9 +39,9 @@ export default function SessionCompleteScreen() {
 
   // Dynamic avatar size: scales with screen height to fill vertical space nicely
   const avatarSize = useMemo(() => {
-    // Proportional to screen height, comfortably between 210px (compact) and 310px (tall devices)
-    const scaled = Math.round(windowHeight * 0.31);
-    return Math.min(310, Math.max(210, scaled));
+    // Proportional to screen height, balanced between 195px and 265px
+    const scaled = Math.round(windowHeight * 0.27);
+    return Math.min(265, Math.max(195, scaled));
   }, [windowHeight]);
 
   const parseReportFromParams = (): ExtendedSessionReport => {
@@ -378,8 +378,12 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 24,
-    paddingTop: 8,
-    paddingBottom: Platform.OS === 'ios' ? 16 : 24,
+    paddingTop: 6,
+    paddingBottom: Platform.select({
+      web: 42,
+      ios: 36,
+      default: 34,
+    }),
     alignItems: 'center',
     flexGrow: 1,
     justifyContent: 'space-between',
@@ -393,8 +397,8 @@ const styles = StyleSheet.create({
   avatarSection: {
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 4,
-    marginBottom: 6,
+    marginTop: 2,
+    marginBottom: 4,
   },
   avatarGlowCircle: {
     position: 'absolute',
@@ -419,7 +423,7 @@ const styles = StyleSheet.create({
   /* Title & Subtitle */
   titleSection: {
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
     paddingHorizontal: 3,
   },
   title: {
@@ -509,7 +513,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   metricColumn: {
     flex: 1,
@@ -552,8 +556,12 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: 12,
     marginTop: 'auto',
-    paddingTop: 16,
-    marginBottom: 8,
+    paddingTop: 12,
+    marginBottom: Platform.select({
+      web: 16,
+      ios: 10,
+      default: 10,
+    }),
   },
   primaryButton: {
     width: '100%',
