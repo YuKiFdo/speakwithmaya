@@ -96,7 +96,7 @@ export interface LiveTransportConfig {
   resumptionHandle?: string | null;
   greetingPrompt?: string;
   languageMode?: string;
-  sinhalaStyle?: 'smart' | 'balanced' | 'deep_guidance';
+  sinhalaStyle?: 'balanced' | 'deep_guidance';
   generationConfig?: GenerationConfig;
 }
 

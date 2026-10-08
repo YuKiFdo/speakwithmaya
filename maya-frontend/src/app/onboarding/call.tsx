@@ -42,7 +42,7 @@ export default function CallScreen() {
     duration?: string;
     durationMinutes?: string;
     languageMode?: 'sinhala' | 'english';
-    sinhalaStyle?: 'smart' | 'balanced' | 'deep_guidance';
+    sinhalaStyle?: 'balanced' | 'deep_guidance';
     aiSuggestions?: string;
     topic?: string;
     scenarioId?: string;
@@ -65,12 +65,10 @@ export default function CallScreen() {
   const targetDuration = isNaN(durationSec) ? 300 : durationSec;
   const aiSug = params.aiSuggestions !== 'false';
   const langMode = params.languageMode === 'english' ? 'english' : 'sinhala';
-  const sinhalaStyle =
+  const sinhalaStyle: 'balanced' | 'deep_guidance' =
     params.sinhalaStyle === 'deep_guidance'
       ? 'deep_guidance'
-      : params.sinhalaStyle === 'balanced'
-        ? 'balanced'
-        : 'smart';
+      : 'balanced';
   const effectiveTopic = params.topic || params.goal || 'General Speaking Practice';
   const effectiveUserName = (params.name || params.userName || '').trim() || 'Tharindu';
   const isIntro = params.isIntroCall === 'true';

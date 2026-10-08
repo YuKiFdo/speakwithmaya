@@ -60,7 +60,7 @@ interface UseLiveCallOptions {
   level?: string;
   durationSeconds?: number;
   languageMode?: 'sinhala' | 'english';
-  sinhalaStyle?: 'smart' | 'balanced' | 'deep_guidance';
+  sinhalaStyle?: 'balanced' | 'deep_guidance';
   aiSuggestions?: boolean;
   scenarioId?: string;
   userName?: string;

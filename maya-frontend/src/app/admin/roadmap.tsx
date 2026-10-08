@@ -567,7 +567,7 @@ export default function AdminRoadmapScreen() {
         duration: '300',
         durationMinutes: '5',
         languageMode: 'english',
-        sinhalaStyle: 'smart',
+        sinhalaStyle: 'balanced',
         aiSuggestions: 'true',
         practicePoints: JSON.stringify(lvl.practicePoints || []),
         canonicalContent: lvl.canonicalContent || '',
