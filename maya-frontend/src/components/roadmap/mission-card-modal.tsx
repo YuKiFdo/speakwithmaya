@@ -4,6 +4,7 @@ import {
   Text,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Animated,
   Easing,
@@ -212,279 +213,291 @@ export function MissionCardModal({
             },
           ]}
         >
-          {/* Close button with interactive hover & press */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.closeButton,
-              isCloseHovered && styles.closeButtonHovered,
-              pressed && styles.closeButtonPressed,
-            ]}
-            onPress={handleAnimatedClose}
-            onHoverIn={() => setIsCloseHovered(true)}
-            onHoverOut={() => setIsCloseHovered(false)}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel="Close mission preview"
-          >
-            <Feather name="x" size={19} color={isCloseHovered ? '#0F172A' : '#64748B'} />
-          </Pressable>
-
-          {/* Top Header Badge & Level Number */}
-          <View style={styles.topBadgeRow}>
-            <View
-              style={[
-                styles.levelTag,
-                {
-                  backgroundColor: isCompleted ? '#ECFDF5' : item.haloColor,
-                  borderColor: isCompleted ? '#A7F3D0' : item.haloBorderColor || '#BFDBFE',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.levelTagText,
-                  { color: isCompleted ? '#059669' : themeColor },
-                ]}
-              >
-                LEVEL {item.number} {isCompleted ? '✓' : ''}
-              </Text>
-            </View>
-
-            {isCompleted ? (
-              <View style={styles.completedBadgePill}>
-                <Feather name="check" size={12} color="#059669" style={{ marginRight: 4 }} />
-                <Text style={styles.completedBadgeText}>COMPLETED</Text>
-              </View>
-            ) : null}
-
-            <View style={styles.xpRewardPill}>
-              <Feather name="award" size={13} color="#D97706" style={{ marginRight: 4 }} />
-              <Text style={styles.xpRewardText}>
-                {isCompleted ? `+${item.xpReward} XP Earned` : `+${item.xpReward} XP`}
-              </Text>
-            </View>
-          </View>
-
-          {/* Icon Halo & Title Section */}
-          <View style={styles.heroSection}>
-            <View
-              style={[
-                styles.iconHalo,
-                {
-                  backgroundColor: isCompleted ? '#ECFDF5' : item.haloColor,
-                  borderColor: isCompleted ? '#6EE7B7' : item.haloBorderColor || '#BFDBFE',
-                },
-              ]}
-            >
-              <View style={styles.iconInner}>
-                <MissionIcon
-                  type={item.iconType}
-                  customSvg={item.customSvg}
-                  color={isCompleted ? '#059669' : themeColor}
-                  size={36}
-                />
-              </View>
-              {isCompleted ? (
-                <View style={styles.completedIconCheckBadge}>
-                  <Feather name="check" size={11} color="#FFFFFF" />
-                </View>
-              ) : null}
-            </View>
-
-            <Text style={styles.missionTitle} numberOfLines={2}>
-              {item.title}
-            </Text>
-            {item.topic ? (
-              <Text style={styles.missionTopic}>
-                Topic: <Text style={{ color: '#0F172A', ...fontStyle('outfit', 'semiBold') }}>{item.topic}</Text>
-              </Text>
-            ) : null}
-
-            {isCompleted ? (
-              <View style={styles.masteredRibbon}>
-                <Feather name="check-circle" size={13} color="#059669" style={{ marginRight: 5 }} />
-                <Text style={styles.masteredRibbonText}>Level Cleared & Mastered!</Text>
-              </View>
-            ) : null}
-          </View>
-
-          {/* Mission Details Cards */}
-          <View style={styles.metaBoxContainer}>
-            <View style={styles.metaBox}>
-              <Feather
-                name={isCompleted ? 'check-circle' : 'award'}
-                size={16}
-                color={isCompleted ? '#059669' : '#0057FF'}
-              />
-              <View style={{ marginLeft: 8 }}>
-                <Text style={styles.metaLabel}>{isCompleted ? 'Status' : 'Pass Requirement'}</Text>
-                <Text style={[styles.metaValue, isCompleted && { color: '#059669' }]}>
-                  {isCompleted ? 'Completed ✓' : `≥ ${item.passingScorePercent || 75}% Score`}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.metaDivider} />
-
-            <View style={styles.metaBox}>
-              <Feather
-                name="zap"
-                size={16}
-                color={isCompleted ? '#D97706' : '#10B981'}
-              />
-              <View style={{ marginLeft: 8 }}>
-                <Text style={styles.metaLabel}>{isCompleted ? 'XP Reward' : 'XP Reward'}</Text>
-                <Text style={[styles.metaValue, isCompleted && { color: '#D97706' }]}>
-                  {isCompleted ? `+${item.xpReward} XP Collected` : `+${item.xpReward || 100} XP`}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Practice Points Preview / What you'll practice */}
-          {(() => {
-            const points = (item.practicePoints && item.practicePoints.length > 0)
-              ? item.practicePoints
-              : (item.canonicalContent ? parseCanonicalLessonContent(item.canonicalContent).practicePoints : []);
-            if (points.length === 0) return null;
-
-            return (
+          {/* Header Row: Badges on left + Close button on right */}
+          <View style={styles.cardHeader}>
+            <View style={styles.topBadgeRow}>
               <View
                 style={[
-                  styles.objectivesPreviewCard,
-                  isCompleted && styles.objectivesPreviewCardCompleted,
+                  styles.levelTag,
+                  {
+                    backgroundColor: isCompleted ? '#ECFDF5' : item.haloColor,
+                    borderColor: isCompleted ? '#A7F3D0' : item.haloBorderColor || '#BFDBFE',
+                  },
                 ]}
               >
-                <View style={styles.objectivesPreviewHeader}>
-                  <Feather
-                    name={isCompleted ? 'check-circle' : 'target'}
-                    size={13}
-                    color="#059669"
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text style={styles.objectivesPreviewTitle}>
-                    {isCompleted ? 'Points Mastered' : "What You'll Practice"}
-                  </Text>
-                </View>
-                <View style={styles.objectivesPillsRow}>
-                  {points.map((pt: string, idx: number) => (
-                    <View key={`pt-${idx}`} style={styles.objectivePill}>
-                      <Text style={styles.objectivePillText} numberOfLines={2}>
-                        {isCompleted ? '✓ ' : '• '}{pt}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            );
-          })()}
-
-          {/* Maya Coach Speech Preview Bubble */}
-          <View
-            style={[
-              styles.coachSpeechContainer,
-              isCompleted && styles.coachSpeechContainerCompleted,
-            ]}
-          >
-            <Image
-              source={require('@/assets/images/maya-avatar.png')}
-              style={styles.coachAvatar}
-              resizeMode="cover"
-            />
-            <View style={styles.speechBubble}>
-              <Text style={styles.speechText}>
-                {isCompleted
-                  ? `"Awesome job mastering this lesson, ${userName}! You've already cleared this topic. Replay it anytime to sharpen your fluency, or keep your momentum going on the next level!"`
-                  : `Hi ${userName}! Let's practice speaking naturally together in English. I'll guide you step by step!`}
-              </Text>
-            </View>
-          </View>
-
-          {/* Action Buttons: Context-Aware for Completed vs In-Progress */}
-          {isCompleted ? (
-            <View style={styles.completedActionsContainer}>
-              {nextItem && nextItem.status !== 'locked' ? (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.primaryNextButton,
-                    pressed && styles.btnPressed,
+                <Text
+                  style={[
+                    styles.levelTagText,
+                    { color: isCompleted ? '#059669' : themeColor },
                   ]}
-                  onPress={() => {
-                    if (onNextLevel) {
-                      onNextLevel(nextItem);
-                    } else {
-                      handleStart(nextItem);
-                    }
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Continue to next level ${nextItem.number}`}
                 >
-                  <Feather name="arrow-right-circle" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-                  <Text style={styles.primaryNextButtonText}>
-                    CONTINUE TO LEVEL {nextItem.number}
-                  </Text>
-                  <Feather name="arrow-right" size={17} color="#FFFFFF" style={{ marginLeft: 6 }} />
-                </Pressable>
+                  LEVEL {item.number} {isCompleted ? '✓' : ''}
+                </Text>
+              </View>
+
+              {isCompleted ? (
+                <View style={styles.completedBadgePill}>
+                  <Feather name="check" size={11} color="#059669" style={{ marginRight: 3 }} />
+                  <Text style={styles.completedBadgeText}>COMPLETED</Text>
+                </View>
               ) : null}
 
-              <View style={styles.completedSecondaryRow}>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.reviewPracticeButton,
-                    (!nextItem || nextItem.status === 'locked') && styles.reviewPracticeButtonFull,
-                    pressed && styles.btnPressed,
-                    isStarting && styles.startButtonStarting,
-                  ]}
-                  onPress={() => handleStart(item)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Practice this level again"
-                >
-                  <Feather name="rotate-ccw" size={16} color="#0057FF" style={{ marginRight: 6 }} />
-                  <Text style={styles.reviewPracticeButtonText}>
-                    {isStarting ? 'CONNECTING...' : 'PRACTICE AGAIN (REVIEW)'}
-                  </Text>
-                </Pressable>
-
-                {onViewHistory ? (
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.historyButton,
-                      pressed && styles.btnPressed,
-                    ]}
-                    onPress={onViewHistory}
-                    accessibilityRole="button"
-                    accessibilityLabel="View call history and transcript"
-                  >
-                    <Feather name="file-text" size={15} color="#475569" style={{ marginRight: 6 }} />
-                    <Text style={styles.historyButtonText}>History</Text>
-                  </Pressable>
-                ) : null}
+              <View style={styles.xpRewardPill}>
+                <Feather name="award" size={12} color="#D97706" style={{ marginRight: 3 }} />
+                <Text style={styles.xpRewardText}>
+                  {isCompleted ? `+${item.xpReward} XP Earned` : `+${item.xpReward} XP`}
+                </Text>
               </View>
             </View>
-          ) : (
+
+            {/* Close button with interactive hover & press */}
             <Pressable
               style={({ pressed }) => [
-                styles.startButton,
-                { backgroundColor: themeColor },
-                isStartBtnHovered && styles.startButtonHovered,
-                pressed && styles.startButtonPressed,
-                isStarting && styles.startButtonStarting,
+                styles.closeButton,
+                isCloseHovered && styles.closeButtonHovered,
+                pressed && styles.closeButtonPressed,
               ]}
-              onPress={() => handleStart(item)}
-              onHoverIn={() => setIsStartBtnHovered(true)}
-              onHoverOut={() => setIsStartBtnHovered(false)}
+              onPress={handleAnimatedClose}
+              onHoverIn={() => setIsCloseHovered(true)}
+              onHoverOut={() => setIsCloseHovered(false)}
+              hitSlop={12}
               accessibilityRole="button"
-              accessibilityLabel={`Start Level ${item.number} practice with Maya`}
+              accessibilityLabel="Close mission preview"
             >
-              <Feather name="mic" size={19} color="#FFFFFF" style={{ marginRight: 8 }} />
-              <Text style={styles.startButtonText}>
-                {isStarting ? 'CONNECTING...' : 'START PRACTICE'}
-              </Text>
-              <Animated.View style={{ transform: [{ translateX: arrowNudgeAnim }] }}>
-                <Feather name="arrow-right" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
-              </Animated.View>
+              <Feather name="x" size={18} color={isCloseHovered ? '#0F172A' : '#64748B'} />
             </Pressable>
-          )}
+          </View>
+
+          {/* Scrollable Body Content */}
+          <ScrollView
+            style={styles.scrollBody}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            {/* Icon Halo & Title Section */}
+            <View style={styles.heroSection}>
+              <View
+                style={[
+                  styles.iconHalo,
+                  {
+                    backgroundColor: isCompleted ? '#ECFDF5' : item.haloColor,
+                    borderColor: isCompleted ? '#6EE7B7' : item.haloBorderColor || '#BFDBFE',
+                  },
+                ]}
+              >
+                <View style={styles.iconInner}>
+                  <MissionIcon
+                    type={item.iconType}
+                    customSvg={item.customSvg}
+                    color={isCompleted ? '#059669' : themeColor}
+                    size={28}
+                  />
+                </View>
+                {isCompleted ? (
+                  <View style={styles.completedIconCheckBadge}>
+                    <Feather name="check" size={11} color="#FFFFFF" />
+                  </View>
+                ) : null}
+              </View>
+
+              <Text style={styles.missionTitle} numberOfLines={2}>
+                {item.title}
+              </Text>
+              {item.topic ? (
+                <Text style={styles.missionTopic}>
+                  Topic: <Text style={{ color: '#0F172A', ...fontStyle('outfit', 'semiBold') }}>{item.topic}</Text>
+                </Text>
+              ) : null}
+
+              {isCompleted ? (
+                <View style={styles.masteredRibbon}>
+                  <Feather name="check-circle" size={13} color="#059669" style={{ marginRight: 5 }} />
+                  <Text style={styles.masteredRibbonText}>Level Cleared & Mastered!</Text>
+                </View>
+              ) : null}
+            </View>
+
+            {/* Mission Details Cards */}
+            <View style={styles.metaBoxContainer}>
+              <View style={styles.metaBox}>
+                <Feather
+                  name={isCompleted ? 'check-circle' : 'award'}
+                  size={15}
+                  color={isCompleted ? '#059669' : '#0057FF'}
+                />
+                <View style={{ marginLeft: 8 }}>
+                  <Text style={styles.metaLabel}>{isCompleted ? 'Status' : 'Pass Requirement'}</Text>
+                  <Text style={[styles.metaValue, isCompleted && { color: '#059669' }]}>
+                    {isCompleted ? 'Completed ✓' : `≥ ${item.passingScorePercent || 75}% Score`}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.metaDivider} />
+
+              <View style={styles.metaBox}>
+                <Feather
+                  name="zap"
+                  size={15}
+                  color={isCompleted ? '#D97706' : '#10B981'}
+                />
+                <View style={{ marginLeft: 8 }}>
+                  <Text style={styles.metaLabel}>{isCompleted ? 'XP Reward' : 'XP Reward'}</Text>
+                  <Text style={[styles.metaValue, isCompleted && { color: '#D97706' }]}>
+                    {isCompleted ? `+${item.xpReward} XP Collected` : `+${item.xpReward || 100} XP`}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Practice Points Preview / What you'll practice */}
+            {(() => {
+              const points = (item.practicePoints && item.practicePoints.length > 0)
+                ? item.practicePoints
+                : (item.canonicalContent ? parseCanonicalLessonContent(item.canonicalContent).practicePoints : []);
+              if (points.length === 0) return null;
+
+              return (
+                <View
+                  style={[
+                    styles.objectivesPreviewCard,
+                    isCompleted && styles.objectivesPreviewCardCompleted,
+                  ]}
+                >
+                  <View style={styles.objectivesPreviewHeader}>
+                    <Feather
+                      name={isCompleted ? 'check-circle' : 'target'}
+                      size={13}
+                      color="#059669"
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={styles.objectivesPreviewTitle}>
+                      {isCompleted ? 'Points Mastered' : "What You'll Practice"}
+                    </Text>
+                  </View>
+                  <View style={styles.objectivesPillsRow}>
+                    {points.map((pt: string, idx: number) => (
+                      <View key={`pt-${idx}`} style={styles.objectivePill}>
+                        <Text style={styles.objectivePillText} numberOfLines={2}>
+                          {isCompleted ? '✓ ' : '• '}{pt}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              );
+            })()}
+
+            {/* Maya Coach Speech Preview Bubble */}
+            <View
+              style={[
+                styles.coachSpeechContainer,
+                isCompleted && styles.coachSpeechContainerCompleted,
+              ]}
+            >
+              <Image
+                source={require('@/assets/images/maya-avatar.png')}
+                style={styles.coachAvatar}
+                resizeMode="cover"
+              />
+              <View style={styles.speechBubble}>
+                <Text style={styles.speechText}>
+                  {isCompleted
+                    ? `"Awesome job mastering this lesson, ${userName}! You've already cleared this topic. Replay it anytime to sharpen your fluency, or keep your momentum going on the next level!"`
+                    : `Hi ${userName}! Let's practice speaking naturally together in English. I'll guide you step by step!`}
+                </Text>
+              </View>
+            </View>
+          </ScrollView>
+
+          {/* Pinned Action Buttons Footer */}
+          <View style={styles.cardFooter}>
+            {isCompleted ? (
+              <View style={styles.completedActionsContainer}>
+                {nextItem && nextItem.status !== 'locked' ? (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.primaryNextButton,
+                      pressed && styles.btnPressed,
+                    ]}
+                    onPress={() => {
+                      if (onNextLevel) {
+                        onNextLevel(nextItem);
+                      } else {
+                        handleStart(nextItem);
+                      }
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Continue to next level ${nextItem.number}`}
+                  >
+                    <Feather name="arrow-right-circle" size={17} color="#FFFFFF" style={{ marginRight: 8 }} />
+                    <Text style={styles.primaryNextButtonText}>
+                      CONTINUE TO LEVEL {nextItem.number}
+                    </Text>
+                    <Feather name="arrow-right" size={16} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                  </Pressable>
+                ) : null}
+
+                <View style={styles.completedSecondaryRow}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.reviewPracticeButton,
+                      (!nextItem || nextItem.status === 'locked') && styles.reviewPracticeButtonFull,
+                      pressed && styles.btnPressed,
+                      isStarting && styles.startButtonStarting,
+                    ]}
+                    onPress={() => handleStart(item)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Practice this level again"
+                  >
+                    <Feather name="rotate-ccw" size={15} color="#0057FF" style={{ marginRight: 6 }} />
+                    <Text style={styles.reviewPracticeButtonText}>
+                      {isStarting ? 'CONNECTING...' : 'PRACTICE AGAIN (REVIEW)'}
+                    </Text>
+                  </Pressable>
+
+                  {onViewHistory ? (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.historyButton,
+                        pressed && styles.btnPressed,
+                      ]}
+                      onPress={onViewHistory}
+                      accessibilityRole="button"
+                      accessibilityLabel="View call history and transcript"
+                    >
+                      <Feather name="file-text" size={14} color="#475569" style={{ marginRight: 5 }} />
+                      <Text style={styles.historyButtonText}>History</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+            ) : (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.startButton,
+                  { backgroundColor: themeColor },
+                  isStartBtnHovered && styles.startButtonHovered,
+                  pressed && styles.startButtonPressed,
+                  isStarting && styles.startButtonStarting,
+                ]}
+                onPress={() => handleStart(item)}
+                onHoverIn={() => setIsStartBtnHovered(true)}
+                onHoverOut={() => setIsStartBtnHovered(false)}
+                accessibilityRole="button"
+                accessibilityLabel={`Start Level ${item.number} practice with Maya`}
+              >
+                <Feather name="mic" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                <Text style={styles.startButtonText}>
+                  {isStarting ? 'CONNECTING...' : 'START PRACTICE'}
+                </Text>
+                <Animated.View style={{ transform: [{ translateX: arrowNudgeAnim }] }}>
+                  <Feather name="arrow-right" size={17} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                </Animated.View>
+              </Pressable>
+            )}
+          </View>
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -537,7 +550,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15, 23, 42, 0.62)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    padding: 16,
     ...(Platform.OS === 'web'
       ? ({ willChange: 'opacity' } as any)
       : {}),
@@ -545,17 +558,17 @@ const styles = StyleSheet.create({
   cardContainer: {
     width: '100%',
     maxWidth: 440,
+    maxHeight: '92%',
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
-    paddingHorizontal: 24,
-    paddingTop: 22,
-    paddingBottom: 24,
+    overflow: 'hidden',
     alignItems: 'center',
     position: 'relative',
     ...(Platform.OS === 'web'
       ? ({
           boxShadow: '0 20px 50px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.1)',
           willChange: 'transform, opacity',
+          maxHeight: 'min(90vh, 740px)',
         } as any)
       : {
           shadowColor: '#000',
@@ -565,17 +578,59 @@ const styles = StyleSheet.create({
           elevation: 12,
         }),
   },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+    width: '100%',
+    zIndex: 10,
+  },
+  topBadgeRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginRight: 8,
+  },
+  levelTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 3.5,
+    borderRadius: 10,
+    borderWidth: 1.5,
+  },
+  levelTagText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 10.5,
+    letterSpacing: 0.5,
+  },
+  xpRewardPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 9,
+    paddingVertical: 3.5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  xpRewardText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 11,
+    color: '#B45309',
+    letterSpacing: 0.3,
+  },
   closeButton: {
-    position: 'absolute',
-    top: 18,
-    right: 18,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#F1F5F9',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 5,
+    flexShrink: 0,
     ...(Platform.OS === 'web'
       ? ({
           cursor: 'pointer',
@@ -591,78 +646,55 @@ const styles = StyleSheet.create({
     backgroundColor: '#CBD5E1',
     transform: [{ scale: 0.92 }, { rotate: '90deg' }],
   },
-  topBadgeRow: {
-    flexDirection: 'row',
+  scrollBody: {
+    width: '100%',
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    marginBottom: 16,
-  },
-  levelTag: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1.5,
-  },
-  levelTagText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 11,
-    letterSpacing: 0.6,
-  },
-  xpRewardPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF3C7',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#FDE68A',
-  },
-  xpRewardText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 11.5,
-    color: '#B45309',
-    letterSpacing: 0.3,
   },
   heroSection: {
     alignItems: 'center',
-    marginBottom: 18,
+    marginBottom: 12,
     width: '100%',
   },
   iconHalo: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    marginBottom: 12,
+    marginBottom: 10,
     ...(Platform.OS === 'web'
       ? ({ boxShadow: '0 8px 24px rgba(0, 87, 255, 0.15)' } as any)
       : { elevation: 3 }),
   },
   iconInner: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   missionTitle: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 20,
+    fontSize: 19,
     color: '#0F172A',
     textAlign: 'center',
-    lineHeight: 26,
+    lineHeight: 25,
     letterSpacing: -0.3,
   },
   missionTopic: {
     fontFamily: Fonts.outfit.regular,
-    fontSize: 13,
+    fontSize: 12.5,
     color: '#64748B',
-    marginTop: 4,
+    marginTop: 3,
     textAlign: 'center',
   },
   metaBoxContainer: {
@@ -670,13 +702,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#F8FAFC',
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
     width: '100%',
-    marginBottom: 18,
+    marginBottom: 10,
   },
   metaBox: {
     flexDirection: 'row',
@@ -686,36 +718,36 @@ const styles = StyleSheet.create({
   },
   metaDivider: {
     width: 1,
-    height: 28,
+    height: 24,
     backgroundColor: '#E2E8F0',
-    marginHorizontal: 10,
+    marginHorizontal: 8,
   },
   metaLabel: {
     fontFamily: Fonts.outfit.regular,
-    fontSize: 10.5,
+    fontSize: 10,
     color: '#64748B',
   },
   metaValue: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 12.5,
+    fontSize: 12,
     color: '#0F172A',
   },
   coachSpeechContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#EFF6FF',
-    borderRadius: 16,
-    padding: 12,
+    borderRadius: 14,
+    padding: 9,
     width: '100%',
-    marginBottom: 20,
+    marginBottom: 6,
     borderWidth: 1,
     borderColor: '#DBEAFE',
   },
   coachAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    marginRight: 12,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    marginRight: 10,
     borderWidth: 2,
     borderColor: '#FFFFFF',
   },
@@ -724,17 +756,27 @@ const styles = StyleSheet.create({
   },
   speechText: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 12.5,
+    fontSize: 12,
     color: '#1E3A8A',
-    lineHeight: 17,
+    lineHeight: 16,
     fontStyle: 'italic',
+  },
+  cardFooter: {
+    width: '100%',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 16,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    zIndex: 10,
   },
   startButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 15,
-    borderRadius: 16,
+    paddingVertical: 13,
+    borderRadius: 14,
     width: '100%',
     ...(Platform.OS === 'web'
       ? ({
@@ -772,7 +814,7 @@ const styles = StyleSheet.create({
   },
   startButtonText: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 15,
+    fontSize: 14.5,
     color: '#FFFFFF',
     letterSpacing: 0.8,
   },
@@ -781,31 +823,32 @@ const styles = StyleSheet.create({
     borderColor: '#BBF7D0',
     borderWidth: 1,
     borderRadius: 12,
-    padding: 10,
+    padding: 9,
     width: '100%',
-    marginBottom: 14,
+    marginBottom: 10,
   },
   objectivesPreviewHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 5,
   },
   objectivesPreviewTitle: {
     ...fontStyle('outfit', 'semiBold'),
-    fontSize: 12,
+    fontSize: 11.5,
     color: '#166534',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   objectivesPillsRow: {
-    gap: 4,
+    gap: 3,
   },
   objectivePill: {
     paddingVertical: 1,
   },
   objectivePillText: {
     ...fontStyle('inter', 'medium'),
-    fontSize: 12.5,
+    fontSize: 12,
+    lineHeight: 16,
     color: '#15803D',
   },
   completedBadgePill: {
@@ -815,12 +858,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#6EE7B7',
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
+    paddingVertical: 3.5,
+    borderRadius: 10,
   },
   completedBadgeText: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#059669',
     letterSpacing: 0.5,
   },
@@ -829,9 +872,9 @@ const styles = StyleSheet.create({
     bottom: -2,
     right: -2,
     backgroundColor: '#059669',
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     borderWidth: 2,
     borderColor: '#FFFFFF',
     alignItems: 'center',
@@ -846,14 +889,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0FDF4',
     borderWidth: 1,
     borderColor: '#BBF7D0',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 3.5,
     borderRadius: 20,
-    marginTop: 8,
+    marginTop: 6,
   },
   masteredRibbonText: {
     ...fontStyle('inter', 'semiBold'),
-    fontSize: 12,
+    fontSize: 11.5,
     color: '#15803D',
   },
   objectivesPreviewCardCompleted: {
@@ -866,15 +909,15 @@ const styles = StyleSheet.create({
   },
   completedActionsContainer: {
     width: '100%',
-    gap: 10,
+    gap: 8,
   },
   primaryNextButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#059669',
-    paddingVertical: 14,
-    borderRadius: 16,
+    paddingVertical: 12.5,
+    borderRadius: 14,
     width: '100%',
     ...(Platform.OS === 'web'
       ? ({
@@ -885,7 +928,7 @@ const styles = StyleSheet.create({
   },
   primaryNextButtonText: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 14.5,
+    fontSize: 14,
     color: '#FFFFFF',
     letterSpacing: 0.6,
   },
@@ -903,8 +946,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#EFF6FF',
     borderWidth: 1.5,
     borderColor: '#BFDBFE',
-    paddingVertical: 12,
-    borderRadius: 14,
+    paddingVertical: 10.5,
+    borderRadius: 12,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
   reviewPracticeButtonFull: {
@@ -912,7 +955,7 @@ const styles = StyleSheet.create({
   },
   reviewPracticeButtonText: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 13,
+    fontSize: 12.5,
     color: '#0057FF',
     letterSpacing: 0.4,
   },
@@ -923,14 +966,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 14,
+    paddingVertical: 10.5,
+    paddingHorizontal: 14,
+    borderRadius: 12,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
   historyButtonText: {
     ...fontStyle('inter', 'semiBold'),
-    fontSize: 13,
+    fontSize: 12.5,
     color: '#475569',
   },
   btnPressed: {
