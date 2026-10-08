@@ -165,26 +165,27 @@
     "id": "lvl-muz6hv6x",
     "levelNumber": 7,
     "title": "Week 1 review & consolidation",
-    "description": "Listen back to recent recordings, redo 2 saved mistakes, no new material.",
-    "topic": "Break the ice",
+    "description": "Consolidate everything from Week 1: self-intro, daily routines, family, likes, hometown, and Q&A.",
+    "topic": "Chapter 1: Break the ice",
     "xpReward": 150,
     "iconType": "chat",
     "numberColor": "#9333EA",
     "haloColor": "#FAF5FF",
     "haloBorderColor": "#E9D5FF",
     "scenarioId": "general-practice",
+    "customSvg": "",
     "practicePoints": [
-      "Listening back to your recent conversation recordings from Week 1",
-      "Identifying and redoing 2 saved grammar or pronunciation mistakes",
-      "Consolidating your introductions, daily routines, and family topics",
-      "Speaking comfortably about yourself without rushing",
-      "Strengthening confidence with familiar vocabulary and phrases",
-      "Reflecting on your spoken fluency progress before moving to Week 2"
+      "Introduce yourself smoothly and share where you live and what you do (Day 1 check)",
+      "Describe your typical daily routine from morning to night in simple present (Day 2 check)",
+      "Describe your family and close friends with natural adjectives (Day 3 check)",
+      "Express what you like, dislike, and your favorite hobbies comfortably (Day 4 check)",
+      "Describe your hometown and favorite local places clearly (Day 5 check)",
+      "Ask questions back naturally and answer follow-up questions smoothly (Day 6 check)"
     ],
-    "canonicalContent": "Lesson: Week 1 review & consolidation\n\nWhat you’ll practice:\n- Listening back to your recent conversation recordings from Week 1\n- Identifying and redoing 2 saved grammar or pronunciation mistakes\n- Consolidating your introductions, daily routines, and family topics\n- Speaking comfortably about yourself without rushing\n- Strengthening confidence with familiar vocabulary and phrases\n- Reflecting on your spoken fluency progress before moving to Week 2",
+    "canonicalContent": "Lesson: Week 1 review & consolidation\n\nWhat you’ll practice:\n- Introduce yourself smoothly and share where you live and what you do (Day 1 check)\n- Describe your typical daily routine from morning to night in simple present (Day 2 check)\n- Describe your family and close friends with natural adjectives (Day 3 check)\n- Express what you like, dislike, and your favorite hobbies comfortably (Day 4 check)\n- Describe your hometown and favorite local places clearly (Day 5 check)\n- Ask questions back naturally and answer follow-up questions smoothly (Day 6 check)",
     "passingScorePercent": 75,
     "isPublished": true,
-    "createdAt": "2026-10-08T06:51:47.625Z",
-    "updatedAt": "2026-10-08T06:51:47.625Z"
+    "createdAt": "2026-10-08T06:51:47.625+00:00",
+    "updatedAt": "2026-10-08T07:05:48.983Z"
   }
 ]
