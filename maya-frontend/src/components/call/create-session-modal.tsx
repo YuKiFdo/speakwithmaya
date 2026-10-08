@@ -56,6 +56,78 @@ const DURATION_OPTIONS: DurationOption[] = [
   { minutes: 30, tierLabel: 'Premium', isPremium: true },
 ];
 
+interface LanguageOptionConfig {
+  id: LanguageHelpOption;
+  title: string;
+  subtitle: string;
+  iconName: any;
+  iconColor: string;
+  iconBg: string;
+}
+
+const LANGUAGE_OPTIONS: LanguageOptionConfig[] = [
+  {
+    id: 'english_only',
+    title: 'English only',
+    subtitle: 'Maya speaks in English only',
+    iconName: 'globe-outline',
+    iconColor: '#2B5BFF',
+    iconBg: '#E0EDFF',
+  },
+  {
+    id: 'sinhala_support',
+    title: 'Sinhala Support',
+    subtitle: 'Maya mixes Sinhala and English when you need help.',
+    iconName: 'chatbubble-ellipses-outline',
+    iconColor: '#9333EA',
+    iconBg: '#F3E8FF',
+  },
+  {
+    id: 'deep_guidance',
+    title: 'Deep Guidance',
+    subtitle: 'Maya uses both languages in every turn.',
+    iconName: 'book-outline',
+    iconColor: '#EA580C',
+    iconBg: '#FFEDD5',
+  },
+];
+
+interface CorrectionOptionConfig {
+  id: AICorrectionOption;
+  title: string;
+  subtitle: string;
+  iconType: 'sprout' | 'scale-balance' | 'flash-outline';
+  iconColor: string;
+  iconBg: string;
+}
+
+const CORRECTION_OPTIONS: CorrectionOptionConfig[] = [
+  {
+    id: 'let_me_speak',
+    title: 'Let me speak',
+    subtitle: 'No interruptions. Review at the end.',
+    iconType: 'sprout',
+    iconColor: '#059669',
+    iconBg: '#E6F9F0',
+  },
+  {
+    id: 'keep_on_track',
+    title: 'Keep me on track',
+    subtitle: 'Occasional corrections.',
+    iconType: 'scale-balance',
+    iconColor: '#2B5BFF',
+    iconBg: '#E0EDFF',
+  },
+  {
+    id: 'correct_instantly',
+    title: 'Correct me instantly',
+    subtitle: 'Every time I make a mistake.',
+    iconType: 'flash-outline',
+    iconColor: '#DB2777',
+    iconBg: '#FCE7F3',
+  },
+];
+
 export function CreateSessionModal({
   visible,
   onClose,
@@ -73,12 +145,14 @@ export function CreateSessionModal({
   const [selectedMinutes, setSelectedMinutes] = useState<SessionDurationMinutes>(5);
   const [languageHelp, setLanguageHelp] = useState<LanguageHelpOption>('english_only');
   const [aiCorrections, setAiCorrections] = useState<AICorrectionOption>('keep_on_track');
+  const [pickerModal, setPickerModal] = useState<'language' | 'corrections' | null>(null);
 
   useEffect(() => {
     if (visible) {
       setSelectedMinutes(5);
       setLanguageHelp('english_only');
       setAiCorrections('keep_on_track');
+      setPickerModal(null);
     }
   }, [visible]);
 
@@ -132,23 +206,38 @@ export function CreateSessionModal({
     });
   };
 
+  const currentLangOpt =
+    LANGUAGE_OPTIONS.find((o) => o.id === languageHelp) || LANGUAGE_OPTIONS[0];
+
+  const currentCorrectionOpt =
+    CORRECTION_OPTIONS.find((o) => o.id === aiCorrections) || CORRECTION_OPTIONS[1];
+
   return (
     <Modal
       transparent
       visible={visible}
-      animationType="fade"
-      onRequestClose={onClose}
+      animationType={isDesktop ? 'fade' : 'slide'}
+      onRequestClose={() => {
+        if (pickerModal) {
+          setPickerModal(null);
+        } else {
+          onClose();
+        }
+      }}
     >
-      <View style={styles.backdrop}>
+      <View style={[styles.backdrop, !isDesktop && styles.backdropMobile]}>
         {/* Backdrop touch to dismiss */}
         <Pressable
           style={styles.backdropTouchArea}
-          onPress={onClose}
+          onPress={() => {
+            if (pickerModal) setPickerModal(null);
+            else onClose();
+          }}
           accessibilityLabel="Close modal"
           accessibilityRole="button"
         />
 
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, !isDesktop && styles.modalContainerMobile]}>
           <View style={[styles.card, isDesktop ? styles.cardDesktop : styles.cardMobile]}>
             {/* Header */}
             <View style={styles.headerRow}>
@@ -254,94 +343,67 @@ export function CreateSessionModal({
                   <View style={styles.sectionTextGroup}>
                     <Text style={styles.sectionTitle}>Language help</Text>
                     <Text style={styles.sectionSubtitle}>
-                      Choose how much Sinhala support you'd like.
+                      Practise with friendly Sinhala coaching whenever you need help.
                     </Text>
                   </View>
                 </View>
 
-                <View style={[styles.threeColRow, !isDesktop && styles.threeColRowMobile]}>
-                  {/* English only */}
+                {isDesktop ? (
+                  <View style={styles.threeColRow}>
+                    {LANGUAGE_OPTIONS.map((opt) => {
+                      const isSelected = languageHelp === opt.id;
+                      return (
+                        <Pressable
+                          key={opt.id}
+                          style={({ pressed }) => [
+                            styles.choiceCard,
+                            isSelected && styles.choiceCardSelected,
+                            pressed && styles.btnPressed,
+                          ]}
+                          onPress={() => setLanguageHelp(opt.id)}
+                          accessibilityRole="button"
+                        >
+                          <View style={[styles.choiceIconCircle, { backgroundColor: opt.iconBg }]}>
+                            <Ionicons name={opt.iconName} size={18} color={opt.iconColor} />
+                          </View>
+                          <View style={styles.choiceTextCol}>
+                            <Text
+                              style={[
+                                styles.choiceTitle,
+                                isSelected && styles.choiceTitleSelected,
+                              ]}
+                            >
+                              {opt.title}
+                            </Text>
+                            <Text style={styles.choiceSubtitle}>{opt.subtitle}</Text>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  /* Mobile Collapsed Single Card with Change > */
                   <Pressable
-                    style={({ pressed }) => [
-                      styles.choiceCard,
-                      languageHelp === 'english_only' && styles.choiceCardSelected,
-                      pressed && styles.btnPressed,
-                    ]}
-                    onPress={() => setLanguageHelp('english_only')}
+                    style={({ pressed }) => [styles.summaryCard, pressed && styles.btnPressed]}
+                    onPress={() => setPickerModal('language')}
                     accessibilityRole="button"
+                    accessibilityLabel={`Language help: ${currentLangOpt.title}. Tap to change.`}
                   >
-                    <View style={[styles.choiceIconCircle, { backgroundColor: '#E0EDFF' }]}>
-                      <Ionicons name="globe-outline" size={19} color="#2B5BFF" />
+                    <View style={[styles.choiceIconCircle, { backgroundColor: currentLangOpt.iconBg }]}>
+                      <Ionicons name={currentLangOpt.iconName} size={18} color={currentLangOpt.iconColor} />
                     </View>
-                    <View style={styles.choiceTextCol}>
-                      <Text
-                        style={[
-                          styles.choiceTitle,
-                          languageHelp === 'english_only' && styles.choiceTitleSelected,
-                        ]}
-                      >
-                        English only
+                    <View style={styles.summaryTextCol}>
+                      <Text style={styles.summaryTitle}>{currentLangOpt.title}</Text>
+                      <Text style={styles.summarySubtitle} numberOfLines={1}>
+                        {currentLangOpt.subtitle}
                       </Text>
-                      <Text style={styles.choiceSubtitle}>Maya speaks in English only</Text>
+                    </View>
+                    <View style={styles.changeActionRow}>
+                      <Text style={styles.changeText}>Change</Text>
+                      <Ionicons name="chevron-forward" size={16} color="#2B5BFF" />
                     </View>
                   </Pressable>
-
-                  {/* Sinhala Support */}
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.choiceCard,
-                      languageHelp === 'sinhala_support' && styles.choiceCardSelected,
-                      pressed && styles.btnPressed,
-                    ]}
-                    onPress={() => setLanguageHelp('sinhala_support')}
-                    accessibilityRole="button"
-                  >
-                    <View style={[styles.choiceIconCircle, { backgroundColor: '#F3E8FF' }]}>
-                      <Ionicons name="chatbubble-ellipses-outline" size={18} color="#9333EA" />
-                    </View>
-                    <View style={styles.choiceTextCol}>
-                      <Text
-                        style={[
-                          styles.choiceTitle,
-                          languageHelp === 'sinhala_support' && styles.choiceTitleSelected,
-                        ]}
-                      >
-                        Sinhala Support
-                      </Text>
-                      <Text style={styles.choiceSubtitle}>
-                        Maya mixes Sinhala and English when you need help.
-                      </Text>
-                    </View>
-                  </Pressable>
-
-                  {/* Deep Guidance */}
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.choiceCard,
-                      languageHelp === 'deep_guidance' && styles.choiceCardSelected,
-                      pressed && styles.btnPressed,
-                    ]}
-                    onPress={() => setLanguageHelp('deep_guidance')}
-                    accessibilityRole="button"
-                  >
-                    <View style={[styles.choiceIconCircle, { backgroundColor: '#FFEDD5' }]}>
-                      <Ionicons name="book-outline" size={18} color="#EA580C" />
-                    </View>
-                    <View style={styles.choiceTextCol}>
-                      <Text
-                        style={[
-                          styles.choiceTitle,
-                          languageHelp === 'deep_guidance' && styles.choiceTitleSelected,
-                        ]}
-                      >
-                        Deep Guidance
-                      </Text>
-                      <Text style={styles.choiceSubtitle}>
-                        Maya uses both languages in every turn.
-                      </Text>
-                    </View>
-                  </Pressable>
-                </View>
+                )}
               </View>
 
               {/* SECTION 3: AI corrections */}
@@ -358,89 +420,74 @@ export function CreateSessionModal({
                   </View>
                 </View>
 
-                <View style={[styles.threeColRow, !isDesktop && styles.threeColRowMobile]}>
-                  {/* Let me speak */}
+                {isDesktop ? (
+                  <View style={styles.threeColRow}>
+                    {CORRECTION_OPTIONS.map((opt) => {
+                      const isSelected = aiCorrections === opt.id;
+                      return (
+                        <Pressable
+                          key={opt.id}
+                          style={({ pressed }) => [
+                            styles.choiceCard,
+                            isSelected && styles.choiceCardSelected,
+                            pressed && styles.btnPressed,
+                          ]}
+                          onPress={() => setAiCorrections(opt.id)}
+                          accessibilityRole="button"
+                        >
+                          <View style={[styles.choiceIconCircle, { backgroundColor: opt.iconBg }]}>
+                            {opt.iconType === 'scale-balance' ? (
+                              <MaterialCommunityIcons name="scale-balance" size={19} color={opt.iconColor} />
+                            ) : opt.iconType === 'sprout' ? (
+                              <MaterialCommunityIcons name="sprout" size={19} color={opt.iconColor} />
+                            ) : (
+                              <Ionicons name="flash-outline" size={18} color={opt.iconColor} />
+                            )}
+                          </View>
+                          <View style={styles.choiceTextCol}>
+                            <Text
+                              style={[
+                                styles.choiceTitle,
+                                isSelected && styles.choiceTitleSelected,
+                              ]}
+                            >
+                              {opt.title}
+                            </Text>
+                            <Text style={styles.choiceSubtitle}>{opt.subtitle}</Text>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  /* Mobile Collapsed Single Card with Change > */
                   <Pressable
-                    style={({ pressed }) => [
-                      styles.choiceCard,
-                      aiCorrections === 'let_me_speak' && styles.choiceCardSelected,
-                      pressed && styles.btnPressed,
-                    ]}
-                    onPress={() => setAiCorrections('let_me_speak')}
+                    style={({ pressed }) => [styles.summaryCard, pressed && styles.btnPressed]}
+                    onPress={() => setPickerModal('corrections')}
                     accessibilityRole="button"
+                    accessibilityLabel={`AI corrections: ${currentCorrectionOpt.title}. Tap to change.`}
                   >
-                    <View style={[styles.choiceIconCircle, { backgroundColor: '#DCFCE7' }]}>
-                      <Ionicons name="leaf-outline" size={18} color="#16A34A" />
+                    <View style={[styles.choiceIconCircle, { backgroundColor: currentCorrectionOpt.iconBg }]}>
+                      {currentCorrectionOpt.iconType === 'scale-balance' ? (
+                        <MaterialCommunityIcons name="scale-balance" size={19} color={currentCorrectionOpt.iconColor} />
+                      ) : currentCorrectionOpt.iconType === 'sprout' ? (
+                        <MaterialCommunityIcons name="sprout" size={19} color={currentCorrectionOpt.iconColor} />
+                      ) : (
+                        <Ionicons name="flash-outline" size={18} color={currentCorrectionOpt.iconColor} />
+                      )}
                     </View>
-                    <View style={styles.choiceTextCol}>
-                      <Text
-                        style={[
-                          styles.choiceTitle,
-                          aiCorrections === 'let_me_speak' && styles.choiceTitleSelected,
-                        ]}
-                      >
-                        Let me speak
+                    <View style={styles.summaryTextCol}>
+                      <Text style={styles.summaryTitle}>{currentCorrectionOpt.title}</Text>
+                      <Text style={styles.summarySubtitle} numberOfLines={1}>
+                        {currentCorrectionOpt.subtitle}
                       </Text>
-                      <Text style={styles.choiceSubtitle}>
-                        No interruptions. Review at the end.
-                      </Text>
+                    </View>
+                    <View style={styles.changeActionRow}>
+                      <Text style={styles.changeText}>Change</Text>
+                      <Ionicons name="chevron-forward" size={16} color="#2B5BFF" />
                     </View>
                   </Pressable>
-
-                  {/* Keep me on track */}
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.choiceCard,
-                      aiCorrections === 'keep_on_track' && styles.choiceCardSelected,
-                      pressed && styles.btnPressed,
-                    ]}
-                    onPress={() => setAiCorrections('keep_on_track')}
-                    accessibilityRole="button"
-                  >
-                    <View style={[styles.choiceIconCircle, { backgroundColor: '#E0EDFF' }]}>
-                      <MaterialCommunityIcons name="scale-balance" size={19} color="#2B5BFF" />
-                    </View>
-                    <View style={styles.choiceTextCol}>
-                      <Text
-                        style={[
-                          styles.choiceTitle,
-                          aiCorrections === 'keep_on_track' && styles.choiceTitleSelected,
-                        ]}
-                      >
-                        Keep me on track
-                      </Text>
-                      <Text style={styles.choiceSubtitle}>Occasional corrections.</Text>
-                    </View>
-                  </Pressable>
-
-                  {/* Correct me instantly */}
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.choiceCard,
-                      aiCorrections === 'correct_instantly' && styles.choiceCardSelected,
-                      pressed && styles.btnPressed,
-                    ]}
-                    onPress={() => setAiCorrections('correct_instantly')}
-                    accessibilityRole="button"
-                  >
-                    <View style={[styles.choiceIconCircle, { backgroundColor: '#FCE7F3' }]}>
-                      <Ionicons name="flash-outline" size={18} color="#DB2777" />
-                    </View>
-                    <View style={styles.choiceTextCol}>
-                      <Text
-                        style={[
-                          styles.choiceTitle,
-                          aiCorrections === 'correct_instantly' && styles.choiceTitleSelected,
-                        ]}
-                      >
-                        Correct me instantly
-                      </Text>
-                      <Text style={styles.choiceSubtitle}>
-                        Every time I make a mistake.
-                      </Text>
-                    </View>
-                  </Pressable>
-                </View>
+                )}
               </View>
             </ScrollView>
 
@@ -463,6 +510,147 @@ export function CreateSessionModal({
                 <Feather name="arrow-right" size={17} color="#FFFFFF" />
               </Pressable>
             </View>
+
+            {/* SUB-PICKER POPUP / BOTTOM SHEET OVERLAY */}
+            {pickerModal && (
+              <View style={styles.pickerOverlay}>
+                <Pressable
+                  style={styles.pickerBackdropTouch}
+                  onPress={() => setPickerModal(null)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close picker"
+                />
+                <View style={styles.pickerSheet}>
+                  {/* Sheet Handle */}
+                  <View style={styles.sheetHandle} />
+
+                  {/* Header */}
+                  <View style={styles.pickerHeaderRow}>
+                    <View style={styles.pickerHeaderLeft}>
+                      <View
+                        style={[
+                          styles.sectionIconBadge,
+                          {
+                            backgroundColor:
+                              pickerModal === 'language' ? '#E6F9F0' : '#FDE8EE',
+                          },
+                        ]}
+                      >
+                        {pickerModal === 'language' ? (
+                          <MaterialIcons name="translate" size={18} color="#059669" />
+                        ) : (
+                          <Ionicons name="chatbubbles-outline" size={18} color="#E11D48" />
+                        )}
+                      </View>
+                      <View style={styles.sectionTextGroup}>
+                        <Text style={styles.pickerHeaderTitle}>
+                          {pickerModal === 'language' ? 'Language help' : 'AI corrections'}
+                        </Text>
+                        <Text style={styles.pickerHeaderSubtitle}>
+                          {pickerModal === 'language'
+                            ? "Choose how much Sinhala support you'd like"
+                            : 'Choose when Maya should correct your mistakes'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Pressable
+                      style={({ pressed }) => [styles.closeBtn, pressed && styles.btnPressed]}
+                      onPress={() => setPickerModal(null)}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="close" size={18} color="#64748B" />
+                    </Pressable>
+                  </View>
+
+                  {/* Option Cards */}
+                  <View style={styles.pickerOptionsList}>
+                    {pickerModal === 'language'
+                      ? LANGUAGE_OPTIONS.map((opt) => {
+                          const isSelected = languageHelp === opt.id;
+                          return (
+                            <Pressable
+                              key={opt.id}
+                              style={({ pressed }) => [
+                                styles.pickerItemCard,
+                                isSelected && styles.pickerItemCardSelected,
+                                pressed && styles.btnPressed,
+                              ]}
+                              onPress={() => {
+                                setLanguageHelp(opt.id);
+                                setPickerModal(null);
+                              }}
+                              accessibilityRole="button"
+                            >
+                              <View style={[styles.choiceIconCircle, { backgroundColor: opt.iconBg }]}>
+                                <Ionicons name={opt.iconName} size={18} color={opt.iconColor} />
+                              </View>
+                              <View style={styles.choiceTextCol}>
+                                <Text
+                                  style={[
+                                    styles.choiceTitle,
+                                    isSelected && styles.choiceTitleSelected,
+                                  ]}
+                                >
+                                  {opt.title}
+                                </Text>
+                                <Text style={styles.choiceSubtitle}>{opt.subtitle}</Text>
+                              </View>
+                              {isSelected ? (
+                                <Ionicons name="checkmark-circle" size={22} color="#2B5BFF" />
+                              ) : (
+                                <View style={styles.radioUnchecked} />
+                              )}
+                            </Pressable>
+                          );
+                        })
+                      : CORRECTION_OPTIONS.map((opt) => {
+                          const isSelected = aiCorrections === opt.id;
+                          return (
+                            <Pressable
+                              key={opt.id}
+                              style={({ pressed }) => [
+                                styles.pickerItemCard,
+                                isSelected && styles.pickerItemCardSelected,
+                                pressed && styles.btnPressed,
+                              ]}
+                              onPress={() => {
+                                setAiCorrections(opt.id);
+                                setPickerModal(null);
+                              }}
+                              accessibilityRole="button"
+                            >
+                              <View style={[styles.choiceIconCircle, { backgroundColor: opt.iconBg }]}>
+                                {opt.iconType === 'scale-balance' ? (
+                                  <MaterialCommunityIcons name="scale-balance" size={19} color={opt.iconColor} />
+                                ) : opt.iconType === 'sprout' ? (
+                                  <MaterialCommunityIcons name="sprout" size={19} color={opt.iconColor} />
+                                ) : (
+                                  <Ionicons name="flash-outline" size={18} color={opt.iconColor} />
+                                )}
+                              </View>
+                              <View style={styles.choiceTextCol}>
+                                <Text
+                                  style={[
+                                    styles.choiceTitle,
+                                    isSelected && styles.choiceTitleSelected,
+                                  ]}
+                                >
+                                  {opt.title}
+                                </Text>
+                                <Text style={styles.choiceSubtitle}>{opt.subtitle}</Text>
+                              </View>
+                              {isSelected ? (
+                                <Ionicons name="checkmark-circle" size={22} color="#2B5BFF" />
+                              ) : (
+                                <View style={styles.radioUnchecked} />
+                              )}
+                            </Pressable>
+                          );
+                        })}
+                  </View>
+                </View>
+              </View>
+            )}
           </View>
         </View>
       </View>
@@ -478,6 +666,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
   },
+  backdropMobile: {
+    justifyContent: 'flex-end',
+    padding: 0,
+  },
   backdropTouchArea: {
     ...(StyleSheet.absoluteFill as any),
   },
@@ -486,6 +678,11 @@ const styles = StyleSheet.create({
     maxWidth: 670,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  modalContainerMobile: {
+    maxWidth: '100%',
+    width: '100%',
+    justifyContent: 'flex-end',
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -511,9 +708,15 @@ const styles = StyleSheet.create({
   },
   cardMobile: {
     maxWidth: '100%',
-    paddingHorizontal: 15,
-    paddingTop: 18,
-    paddingBottom: 18,
+    width: '100%',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    maxHeight: '92%',
   },
 
   /* Header */
@@ -825,5 +1028,138 @@ const styles = StyleSheet.create({
   },
   btnPressed: {
     opacity: 0.8,
+  },
+
+  /* Mobile Summary Card */
+  summaryCard: {
+    width: '100%',
+    minHeight: 62,
+    borderRadius: 14,
+    borderWidth: 1.2,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  summaryTextCol: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  summaryTitle: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 14,
+    color: '#0F172A',
+  },
+  summarySubtitle: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11.5,
+    color: '#64748B',
+    marginTop: 1.5,
+  },
+  changeActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingLeft: 6,
+  },
+  changeText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 13,
+    color: '#2B5BFF',
+  },
+
+  /* Sub-Picker Popup Overlay */
+  pickerOverlay: {
+    ...(StyleSheet.absoluteFill as any),
+    zIndex: 9999,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  pickerBackdropTouch: {
+    ...(StyleSheet.absoluteFill as any),
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  pickerSheet: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 22,
+    gap: 14,
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 -10px 40px rgba(15, 23, 42, 0.2)',
+        } as any)
+      : {
+          shadowColor: '#000000',
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.15,
+          shadowRadius: 12,
+          elevation: 20,
+        }),
+  },
+  sheetHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#CBD5E1',
+    alignSelf: 'center',
+    marginBottom: 4,
+  },
+  pickerHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  pickerHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    flex: 1,
+  },
+  pickerHeaderTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 17,
+    color: '#0F172A',
+  },
+  pickerHeaderSubtitle: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11.5,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  pickerOptionsList: {
+    gap: 10,
+  },
+  pickerItemCard: {
+    width: '100%',
+    minHeight: 64,
+    borderRadius: 14,
+    borderWidth: 1.4,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  pickerItemCardSelected: {
+    borderColor: '#2B5BFF',
+    backgroundColor: '#F8FBFF',
+  },
+  radioUnchecked: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
   },
 });
