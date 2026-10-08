@@ -695,41 +695,43 @@ export default function RoadmapScreen() {
                   strokeLinecap="round"
                 />
 
-                {/* 5. Elegant Soft-Glow Completed Progress Track & Particles */}
+                {/* 5. Stationary Illuminated Progress Track with Ambient Breathing Glow in Place */}
                 {desktopCompletedSvgPath ? (
                   <>
+                    {/* Ambient Breathing Glow Layers in Place */}
+                    <RoadmapGlowParticles
+                      svgPath={desktopCompletedSvgPath}
+                      totalLen={desktopTotalLen}
+                      segments={desktopSegments}
+                    />
+
                     {/* Soft Translucent Blue Groove Bed Fill */}
                     <Path
                       d={desktopCompletedSvgPath}
-                      stroke="rgba(59, 130, 246, 0.14)"
+                      stroke="rgba(59, 130, 246, 0.16)"
                       strokeWidth="7"
                       fill="none"
                       strokeLinecap="round"
                     />
-                    {/* Refined 3.2px Cyan-Blue Center Stream (fits snugly inside track) */}
+
+                    {/* Refined 3.5px Cyan-Blue Center Stream (fits snugly inside track groove) */}
                     <Path
                       d={desktopCompletedSvgPath}
                       stroke="#3B82F6"
-                      strokeWidth="3.2"
+                      strokeWidth="3.5"
                       fill="none"
                       strokeLinecap="round"
-                      opacity={0.8}
+                      opacity={0.9}
                     />
-                    {/* Delicate Inner Highlight */}
+
+                    {/* Delicate Inner Highlight Filament */}
                     <Path
                       d={desktopCompletedSvgPath}
                       stroke="#E0F2FE"
                       strokeWidth="1.2"
                       fill="none"
                       strokeLinecap="round"
-                      opacity={0.85}
-                    />
-
-                    {/* Animated Traveling Glowing Particles & Flowing Stream */}
-                    <RoadmapGlowParticles
-                      segments={desktopSegments}
-                      totalLen={desktopTotalLen}
-                      svgPath={desktopCompletedSvgPath}
+                      opacity={0.95}
                     />
                   </>
                 ) : null}
@@ -920,41 +922,43 @@ export default function RoadmapScreen() {
                   strokeLinecap="round"
                 />
 
-                {/* 5. Elegant Soft-Glow Completed Progress Track & Particles */}
+                {/* 5. Stationary Illuminated Progress Track with Ambient Breathing Glow in Place */}
                 {mobileCompletedSvgPath ? (
                   <>
+                    {/* Ambient Breathing Glow Layers in Place */}
+                    <RoadmapGlowParticles
+                      svgPath={mobileCompletedSvgPath}
+                      totalLen={mobileTotalLen}
+                      segments={mobileSegments}
+                    />
+
                     {/* Soft Translucent Blue Groove Bed Fill */}
                     <Path
                       d={mobileCompletedSvgPath}
-                      stroke="rgba(59, 130, 246, 0.14)"
+                      stroke="rgba(59, 130, 246, 0.16)"
                       strokeWidth="7"
                       fill="none"
                       strokeLinecap="round"
                     />
-                    {/* Refined 3.2px Cyan-Blue Center Stream (fits snugly inside track) */}
+
+                    {/* Refined 3.5px Cyan-Blue Center Stream (fits snugly inside track groove) */}
                     <Path
                       d={mobileCompletedSvgPath}
                       stroke="#3B82F6"
-                      strokeWidth="3.2"
+                      strokeWidth="3.5"
                       fill="none"
                       strokeLinecap="round"
-                      opacity={0.8}
+                      opacity={0.9}
                     />
-                    {/* Delicate Inner Highlight */}
+
+                    {/* Delicate Inner Highlight Filament */}
                     <Path
                       d={mobileCompletedSvgPath}
                       stroke="#E0F2FE"
                       strokeWidth="1.2"
                       fill="none"
                       strokeLinecap="round"
-                      opacity={0.85}
-                    />
-
-                    {/* Animated Traveling Glowing Particles & Flowing Stream */}
-                    <RoadmapGlowParticles
-                      segments={mobileSegments}
-                      totalLen={mobileTotalLen}
-                      svgPath={mobileCompletedSvgPath}
+                      opacity={0.95}
                     />
                   </>
                 ) : null}
