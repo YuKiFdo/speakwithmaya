@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef} from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -38,6 +38,11 @@ import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-si
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { MissionCardModal } from '@/components/roadmap/mission-card-modal';
+import {
+  RoadmapGlowParticles,
+  buildDesktopPathSegments,
+  buildMobilePathSegments,
+} from '@/components/roadmap/roadmap-particles';
 
 export interface MilestoneItem {
   id: string;
@@ -281,6 +286,8 @@ export default function RoadmapScreen() {
     fetchRoadmapData();
   }, []);
 
+
+
   // Responsive full-width calculations for desktop track & milestone columns:
   const [layoutTrackWidth, setLayoutTrackWidth] = useState<number | null>(null);
   const trackWidth = layoutTrackWidth ?? (isDesktop ? Math.max(900, windowWidth - 340) : windowWidth - 40);
@@ -472,6 +479,32 @@ export default function RoadmapScreen() {
 
   const mobileCompletedSvgPath = targetCompletedProgressIdx > 0 ? getMobilePathUpTo(targetCompletedProgressIdx) : '';
 
+  // Parametric geometry segments for Desktop Traveling Glow Particles
+  const { segments: desktopSegments, totalLen: desktopTotalLen } = useMemo(() => {
+    return buildDesktopPathSegments(
+      targetCompletedProgressIdx,
+      col1X,
+      col2X,
+      desktopYStart,
+      desktopRowStep,
+      xRight,
+      xLeft,
+      R
+    );
+  }, [targetCompletedProgressIdx, col1X, col2X, desktopYStart, desktopRowStep, xRight, xLeft, R]);
+
+  // Parametric geometry segments for Mobile Traveling Glow Particles
+  const { segments: mobileSegments, totalLen: mobileTotalLen } = useMemo(() => {
+    return buildMobilePathSegments(
+      targetCompletedProgressIdx,
+      mobileIconLeftX,
+      mobileIconRightX,
+      mobileYTrack1,
+      mobileTierHeight,
+      mobileR
+    );
+  }, [targetCompletedProgressIdx, mobileIconLeftX, mobileIconRightX, mobileYTrack1, mobileTierHeight, mobileR]);
+
   const handleSelectTab = (tab: DashboardTab) => {
     if (tab === 'home') {
       router.push({ pathname: '/dashboard', params });
@@ -662,41 +695,41 @@ export default function RoadmapScreen() {
                   strokeLinecap="round"
                 />
 
-                {/* 5. Glowing Completed Blue Progress Path */}
+                {/* 5. Elegant Soft-Glow Completed Progress Track & Particles */}
                 {desktopCompletedSvgPath ? (
                   <>
-                    {/* Ambient Neon Outer Glow */}
+                    {/* Soft Translucent Blue Groove Bed Fill */}
                     <Path
                       d={desktopCompletedSvgPath}
-                      stroke="rgba(0, 87, 255, 0.25)"
-                      strokeWidth="18"
+                      stroke="rgba(59, 130, 246, 0.14)"
+                      strokeWidth="7"
                       fill="none"
                       strokeLinecap="round"
                     />
-                    {/* Vibrant Mid-Layer Glow */}
+                    {/* Refined 3.2px Cyan-Blue Center Stream (fits snugly inside track) */}
                     <Path
                       d={desktopCompletedSvgPath}
-                      stroke="rgba(0, 102, 255, 0.50)"
-                      strokeWidth="12"
+                      stroke="#3B82F6"
+                      strokeWidth="3.2"
                       fill="none"
                       strokeLinecap="round"
+                      opacity={0.8}
                     />
-                    {/* Electric Blue Core Line */}
+                    {/* Delicate Inner Highlight */}
                     <Path
                       d={desktopCompletedSvgPath}
-                      stroke="#0057FF"
-                      strokeWidth="6.5"
+                      stroke="#E0F2FE"
+                      strokeWidth="1.2"
                       fill="none"
                       strokeLinecap="round"
+                      opacity={0.85}
                     />
-                    {/* Center Bright Shine Beam */}
-                    <Path
-                      d={desktopCompletedSvgPath}
-                      stroke="#93C5FD"
-                      strokeWidth="2"
-                      fill="none"
-                      strokeLinecap="round"
-                      opacity={0.9}
+
+                    {/* Animated Traveling Glowing Particles & Flowing Stream */}
+                    <RoadmapGlowParticles
+                      segments={desktopSegments}
+                      totalLen={desktopTotalLen}
+                      svgPath={desktopCompletedSvgPath}
                     />
                   </>
                 ) : null}
@@ -719,8 +752,8 @@ export default function RoadmapScreen() {
                       y1={dropYStart}
                       x2={x}
                       y2={trackY}
-                      stroke={isLocked ? '#CBD5E1' : isItemCompleted ? '#0057FF' : '#93C5FD'}
-                      strokeWidth={isItemCompleted ? '2.5' : '2'}
+                      stroke={isLocked ? '#CBD5E1' : isItemCompleted ? '#60A5FA' : '#93C5FD'}
+                      strokeWidth="1.8"
                       strokeDasharray="4,4"
                     />
                   );
@@ -745,21 +778,21 @@ export default function RoadmapScreen() {
                           <Circle
                             cx={x}
                             cy={trackY}
-                            r={15}
-                            fill="rgba(0, 87, 255, 0.28)"
+                            r={12}
+                            fill="rgba(59, 130, 246, 0.20)"
                           />
                           <Circle
                             cx={x}
                             cy={trackY}
-                            r={7.5}
-                            fill="#0057FF"
+                            r={6}
+                            fill="#3B82F6"
                             stroke="#FFFFFF"
-                            strokeWidth={2}
+                            strokeWidth={1.5}
                           />
                           <Circle
                             cx={x}
                             cy={trackY}
-                            r={3}
+                            r={2}
                             fill="#FFFFFF"
                           />
                         </>
@@ -768,19 +801,19 @@ export default function RoadmapScreen() {
                           <Circle
                             cx={x}
                             cy={trackY}
-                            r={16}
-                            fill="rgba(0, 87, 255, 0.22)"
+                            r={15}
+                            fill="rgba(59, 130, 246, 0.18)"
                           />
                           <Circle
                             cx={x}
                             cy={trackY}
-                            r={9}
-                            fill="#0057FF"
+                            r={8}
+                            fill="#3B82F6"
                           />
                           <Circle
                             cx={x}
                             cy={trackY}
-                            r={4}
+                            r={3}
                             fill="#FFFFFF"
                           />
                         </>
@@ -789,16 +822,16 @@ export default function RoadmapScreen() {
                           <Circle
                             cx={x}
                             cy={trackY}
-                            r={10}
-                            fill="rgba(148, 163, 184, 0.16)"
+                            r={9}
+                            fill="rgba(148, 163, 184, 0.14)"
                           />
                           <Circle
                             cx={x}
                             cy={trackY}
-                            r={5}
-                            fill={isLocked ? '#94A3B8' : '#0057FF'}
+                            r={4.5}
+                            fill={isLocked ? '#94A3B8' : '#3B82F6'}
                             stroke="#FFFFFF"
-                            strokeWidth={1.8}
+                            strokeWidth={1.5}
                           />
                         </>
                       )}
@@ -806,6 +839,8 @@ export default function RoadmapScreen() {
                   );
                 })}
               </Svg>
+
+
 
               {/* Milestone Cards Overlay - Symmetrically Distributed Across Full Width */}
               {milestones.map((item, idx) => {
@@ -885,41 +920,41 @@ export default function RoadmapScreen() {
                   strokeLinecap="round"
                 />
 
-                {/* 5. Glowing Completed Blue Progress Path */}
+                {/* 5. Elegant Soft-Glow Completed Progress Track & Particles */}
                 {mobileCompletedSvgPath ? (
                   <>
-                    {/* Ambient Neon Outer Glow */}
+                    {/* Soft Translucent Blue Groove Bed Fill */}
                     <Path
                       d={mobileCompletedSvgPath}
-                      stroke="rgba(0, 87, 255, 0.25)"
-                      strokeWidth="18"
+                      stroke="rgba(59, 130, 246, 0.14)"
+                      strokeWidth="7"
                       fill="none"
                       strokeLinecap="round"
                     />
-                    {/* Vibrant Mid-Layer Glow */}
+                    {/* Refined 3.2px Cyan-Blue Center Stream (fits snugly inside track) */}
                     <Path
                       d={mobileCompletedSvgPath}
-                      stroke="rgba(0, 102, 255, 0.50)"
-                      strokeWidth="12"
+                      stroke="#3B82F6"
+                      strokeWidth="3.2"
                       fill="none"
                       strokeLinecap="round"
+                      opacity={0.8}
                     />
-                    {/* Electric Blue Core Line */}
+                    {/* Delicate Inner Highlight */}
                     <Path
                       d={mobileCompletedSvgPath}
-                      stroke="#0057FF"
-                      strokeWidth="6.5"
+                      stroke="#E0F2FE"
+                      strokeWidth="1.2"
                       fill="none"
                       strokeLinecap="round"
+                      opacity={0.85}
                     />
-                    {/* Center Bright Shine Beam */}
-                    <Path
-                      d={mobileCompletedSvgPath}
-                      stroke="#93C5FD"
-                      strokeWidth="2"
-                      fill="none"
-                      strokeLinecap="round"
-                      opacity={0.9}
+
+                    {/* Animated Traveling Glowing Particles & Flowing Stream */}
+                    <RoadmapGlowParticles
+                      segments={mobileSegments}
+                      totalLen={mobileTotalLen}
+                      svgPath={mobileCompletedSvgPath}
                     />
                   </>
                 ) : null}
@@ -938,8 +973,8 @@ export default function RoadmapScreen() {
                       y1={yStart}
                       x2={x}
                       y2={yTrack}
-                      stroke={isLocked ? '#CBD5E1' : isItemCompleted ? '#0057FF' : '#93C5FD'}
-                      strokeWidth={isItemCompleted ? '2.5' : '2'}
+                      stroke={isLocked ? '#CBD5E1' : isItemCompleted ? '#60A5FA' : '#93C5FD'}
+                      strokeWidth="1.8"
                       strokeDasharray="4,4"
                     />
                   );
@@ -960,21 +995,21 @@ export default function RoadmapScreen() {
                           <Circle
                             cx={x}
                             cy={yTrack}
-                            r={15}
-                            fill="rgba(0, 87, 255, 0.28)"
+                            r={12}
+                            fill="rgba(59, 130, 246, 0.20)"
                           />
                           <Circle
                             cx={x}
                             cy={yTrack}
-                            r={7.5}
-                            fill="#0057FF"
+                            r={6}
+                            fill="#3B82F6"
                             stroke="#FFFFFF"
-                            strokeWidth={2}
+                            strokeWidth={1.5}
                           />
                           <Circle
                             cx={x}
                             cy={yTrack}
-                            r={3}
+                            r={2}
                             fill="#FFFFFF"
                           />
                         </>
@@ -983,19 +1018,19 @@ export default function RoadmapScreen() {
                           <Circle
                             cx={x}
                             cy={yTrack}
-                            r={16}
-                            fill="rgba(0, 87, 255, 0.22)"
+                            r={15}
+                            fill="rgba(59, 130, 246, 0.18)"
                           />
                           <Circle
                             cx={x}
                             cy={yTrack}
-                            r={9}
-                            fill="#0057FF"
+                            r={8}
+                            fill="#3B82F6"
                           />
                           <Circle
                             cx={x}
                             cy={yTrack}
-                            r={4}
+                            r={3}
                             fill="#FFFFFF"
                           />
                         </>
@@ -1004,16 +1039,16 @@ export default function RoadmapScreen() {
                           <Circle
                             cx={x}
                             cy={yTrack}
-                            r={10}
-                            fill="rgba(148, 163, 184, 0.16)"
+                            r={9}
+                            fill="rgba(148, 163, 184, 0.14)"
                           />
                           <Circle
                             cx={x}
                             cy={yTrack}
-                            r={5}
-                            fill={isLocked ? '#94A3B8' : '#0057FF'}
+                            r={4.5}
+                            fill={isLocked ? '#94A3B8' : '#3B82F6'}
                             stroke="#FFFFFF"
-                            strokeWidth={1.8}
+                            strokeWidth={1.5}
                           />
                         </>
                       )}

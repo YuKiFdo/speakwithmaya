@@ -106,5 +106,32 @@
     "isPublished": true,
     "createdAt": "2026-10-08T05:49:21.083+00:00",
     "updatedAt": "2026-10-08T05:49:21.083+00:00"
+  },
+  {
+    "id": "lvl-muz5bgui",
+    "levelNumber": 5,
+    "title": "Describing your hometown",
+    "description": "Describe where you live and what you like about it.",
+    "topic": "Spoken Practice",
+    "xpReward": 100,
+    "iconType": "home",
+    "numberColor": "#D97706",
+    "haloColor": "#FFFBEB",
+    "haloBorderColor": "#FDE68A",
+    "scenarioId": "general-practice",
+    "customSvg": "",
+    "practicePoints": [
+      "Describing your hometown and where you live",
+      "Talking about places and things you can find there",
+      "Explaining what you like about your hometown",
+      "Describing what makes your hometown special",
+      "Using simple phrases to describe places naturally",
+      "Asking and answering questions about where you live"
+    ],
+    "canonicalContent": "Lesson: Describing your hometown\n\nWhat you’ll practice:\n- Describing your hometown and where you live\n- Talking about places and things you can find there\n- Explaining what you like about your hometown\n- Describing what makes your hometown special\n- Using simple phrases to describe places naturally\n- Asking and answering questions about where you live",
+    "passingScorePercent": 75,
+    "isPublished": true,
+    "createdAt": "2026-10-08T06:18:49.482+00:00",
+    "updatedAt": "2026-10-08T06:18:55.291+00:00"
   }
 ]
