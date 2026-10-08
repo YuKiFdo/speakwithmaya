@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   Easing,
   Platform,
   Pressable,
+  ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
@@ -21,6 +23,21 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
   const [isCancelHovered, setIsCancelHovered] = useState(false);
   const [hoveredTip, setHoveredTip] = useState<number | null>(null);
   const [dotCount, setDotCount] = useState(2);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+
+  // Dynamic hero animation size: scales with screen height and width bounds
+  const heroSize = useMemo(() => {
+    // Proportional to screen height (~33%), bounded between 210px and 280px
+    const scaled = Math.round(windowHeight * 0.33);
+    const maxSafe = Math.round(windowWidth - 70);
+    return Math.min(280, maxSafe, Math.max(210, scaled));
+  }, [windowHeight, windowWidth]);
+
+  const dashedRingSize = Math.round(heroSize * 0.85);
+  const haloSize = Math.round(heroSize * 0.70);
+  const avatarContainerSize = Math.round(heroSize * 0.60);
+  const avatarInnerSize = avatarContainerSize - 8;
+  const dotOffset = Math.round(dashedRingSize * 0.13);
 
   // Animation values
   const rotateAnim = useRef(new Animated.Value(0)).current;
@@ -145,7 +162,12 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
 
   return (
     <View style={[styles.safeArea, style]}>
-      <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollArea}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
         {/* Top-Right Dismiss Button */}
         {onCancel ? (
           <Pressable
@@ -167,12 +189,15 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
 
         {/* Hero Section: Avatar with Concentric Orbital Rings */}
         <View style={styles.heroSection}>
-          <View style={styles.animationArea}>
+          <View style={[styles.animationArea, { width: heroSize, height: heroSize }]}>
             {/* Outermost Faint Dashed Ring */}
             <Animated.View
               style={[
                 styles.orbitalRingOuter,
                 {
+                  width: heroSize,
+                  height: heroSize,
+                  borderRadius: heroSize / 2,
                   transform: [
                     { rotate: spinReverse },
                     { scale: pulseAnim },
@@ -186,6 +211,9 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
               style={[
                 styles.orbitalRingDashed,
                 {
+                  width: dashedRingSize,
+                  height: dashedRingSize,
+                  borderRadius: dashedRingSize / 2,
                   transform: [
                     { rotate: spin },
                     { scale: pulseAnim },
@@ -193,10 +221,10 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
                 },
               ]}
             >
-              <View style={styles.satelliteDotTopLeft} />
-              <View style={styles.satelliteDotTopRight} />
-              <View style={styles.satelliteDotBottomLeft} />
-              <View style={styles.satelliteDotBottomRight} />
+              <View style={[styles.satelliteDotTopLeft, { top: dotOffset, left: dotOffset }]} />
+              <View style={[styles.satelliteDotTopRight, { top: dotOffset, right: dotOffset }]} />
+              <View style={[styles.satelliteDotBottomLeft, { bottom: dotOffset, left: dotOffset }]} />
+              <View style={[styles.satelliteDotBottomRight, { bottom: dotOffset, right: dotOffset }]} />
             </Animated.View>
 
             {/* Inner Solid Halo Ring (Line Only) */}
@@ -204,6 +232,9 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
               style={[
                 styles.orbitalRingHalo,
                 {
+                  width: haloSize,
+                  height: haloSize,
+                  borderRadius: haloSize / 2,
                   transform: [{ scale: pulseAnim }],
                 },
               ]}
@@ -214,11 +245,23 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
               style={[
                 styles.avatarContainer,
                 {
+                  width: avatarContainerSize,
+                  height: avatarContainerSize,
+                  borderRadius: avatarContainerSize / 2,
                   transform: [{ translateY: floatAnim }],
                 },
               ]}
             >
-              <View style={styles.avatarInnerCircle}>
+              <View
+                style={[
+                  styles.avatarInnerCircle,
+                  {
+                    width: avatarInnerSize,
+                    height: avatarInnerSize,
+                    borderRadius: avatarInnerSize / 2,
+                  },
+                ]}
+              >
                 <Image
                   source={require('@/assets/images/maya-wave-cheer.png')}
                   style={styles.avatarImage}
@@ -314,7 +357,7 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
             </Pressable>
           </View>
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -327,27 +370,29 @@ const styles = StyleSheet.create({
     width: '100%',
     overflow: 'hidden',
   },
-  container: {
+  scrollArea: {
     flex: 1,
     width: '100%',
-    maxWidth: 420,
-    paddingHorizontal: 18,
-    paddingTop: 20,
-    paddingBottom: 24,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    width: '100%',
+    maxWidth: 440,
+    paddingHorizontal: 20,
+    paddingTop: Platform.select({ web: 24, ios: 16, default: 20 }),
+    paddingBottom: Platform.select({ web: 42, ios: 36, default: 32 }),
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     alignSelf: 'center',
     position: 'relative',
-    overflow: 'hidden',
-    gap: 22,
   },
   cancelButton: {
     position: 'absolute',
-    top: 16,
-    right: 18,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    top: Platform.select({ web: 18, ios: 12, default: 16 }),
+    right: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#e2e8f0',
@@ -372,7 +417,7 @@ const styles = StyleSheet.create({
   heroSection: {
     alignItems: 'center',
     width: '100%',
-    marginTop: 0,
+    marginTop: Platform.select({ web: 12, ios: 8, default: 10 }),
   },
   animationArea: {
     width: 210,
@@ -585,17 +630,18 @@ const styles = StyleSheet.create({
   },
   tipsCard: {
     width: '100%',
-    backgroundColor: 'rgba(240, 246, 255, 0.85)',
+    backgroundColor: 'rgba(240, 246, 255, 0.88)',
     borderWidth: 1,
     borderColor: '#dbeafe',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     shadowColor: '#93c5fd',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.12,
     shadowRadius: 10,
     elevation: 2,
+    marginTop: 'auto',
   },
   tipsHeader: {
     ...fontStyle('outfit', 'bold'),
