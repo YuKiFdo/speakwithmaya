@@ -133,5 +133,58 @@
     "isPublished": true,
     "createdAt": "2026-10-08T06:18:49.482+00:00",
     "updatedAt": "2026-10-08T06:18:55.291+00:00"
+  },
+  {
+    "id": "lvl-muz5xqj0",
+    "levelNumber": 6,
+    "title": "Simple questions and answers",
+    "description": "Practice asking the AI questions back and answering follow-ups.",
+    "topic": "Spoken Practice",
+    "xpReward": 100,
+    "iconType": "robot",
+    "numberColor": "#4F46E5",
+    "haloColor": "#EEF2FF",
+    "haloBorderColor": "#C7D2FE",
+    "scenarioId": "general-practice",
+    "customSvg": "",
+    "practicePoints": [
+      "Asking Maya simple questions naturally",
+      "Answering questions with complete sentences",
+      "Asking follow-up questions instead of ending the conversation",
+      "Keeping a conversation going for longer",
+      "Using “What,” “Where,” “When,” “Why,” and “How” questions",
+      "Responding naturally when Maya asks an unexpected follow-up"
+    ],
+    "canonicalContent": "Lesson: Simple questions and answers\n\nWhat you’ll practice:\n- Asking Maya simple questions naturally\n- Answering questions with complete sentences\n- Asking follow-up questions instead of ending the conversation\n- Keeping a conversation going for longer\n- Using “What,” “Where,” “When,” “Why,” and “How” questions\n- Responding naturally when Maya asks an unexpected follow-up",
+    "passingScorePercent": 75,
+    "isPublished": true,
+    "createdAt": "2026-10-08T06:36:08.46+00:00",
+    "updatedAt": "2026-10-08T06:36:08.46+00:00"
+  },
+  {
+    "id": "lvl-muz6hv6x",
+    "levelNumber": 7,
+    "title": "Week 1 review & consolidation",
+    "description": "Listen back to recent recordings, redo 2 saved mistakes, no new material.",
+    "topic": "Break the ice",
+    "xpReward": 150,
+    "iconType": "chat",
+    "numberColor": "#9333EA",
+    "haloColor": "#FAF5FF",
+    "haloBorderColor": "#E9D5FF",
+    "scenarioId": "general-practice",
+    "practicePoints": [
+      "Listening back to your recent conversation recordings from Week 1",
+      "Identifying and redoing 2 saved grammar or pronunciation mistakes",
+      "Consolidating your introductions, daily routines, and family topics",
+      "Speaking comfortably about yourself without rushing",
+      "Strengthening confidence with familiar vocabulary and phrases",
+      "Reflecting on your spoken fluency progress before moving to Week 2"
+    ],
+    "canonicalContent": "Lesson: Week 1 review & consolidation\n\nWhat you’ll practice:\n- Listening back to your recent conversation recordings from Week 1\n- Identifying and redoing 2 saved grammar or pronunciation mistakes\n- Consolidating your introductions, daily routines, and family topics\n- Speaking comfortably about yourself without rushing\n- Strengthening confidence with familiar vocabulary and phrases\n- Reflecting on your spoken fluency progress before moving to Week 2",
+    "passingScorePercent": 75,
+    "isPublished": true,
+    "createdAt": "2026-10-08T06:51:47.625Z",
+    "updatedAt": "2026-10-08T06:51:47.625Z"
   }
 ]
