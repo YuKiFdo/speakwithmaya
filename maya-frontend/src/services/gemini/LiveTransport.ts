@@ -1,4 +1,5 @@
 import { getLogTimestamp } from '@/utils/time';
+import { sanitizeModelText } from '@/utils/text-sanitizer';
 import {
   Modality,
   StartSensitivity,
@@ -536,8 +537,9 @@ export class LiveTransport implements ILiveTransport {
         // Subtitles / output transcript (Maya speaking)
         const outputText = sc.outputTranscription?.text || (sc as any).output_transcription?.text;
         if (outputText) {
-          this.currentTurnSubtitles += outputText;
-          this.callbacks.onOutputTranscript?.(outputText);
+          const sanitizedOutput = sanitizeModelText(outputText);
+          this.currentTurnSubtitles += sanitizedOutput;
+          this.callbacks.onOutputTranscript?.(sanitizedOutput);
         }
 
         // Interim Student transcript (streaming preview for UI)
@@ -649,7 +651,7 @@ export class LiveTransport implements ILiveTransport {
             const correction: GrammarCorrectionPayload = {
               studentSaid: String(args.studentSaid || args.student_said || ''),
               moreNatural: String(args.moreNatural || args.more_natural || ''),
-              explanation: String(args.explanation || ''),
+              explanation: sanitizeModelText(String(args.explanation || '')),
               highlightWords: Array.isArray(args.highlightWords || args.highlight_words) ? (args.highlightWords || args.highlight_words) : [],
             };
             console.log(
@@ -678,7 +680,7 @@ export class LiveTransport implements ILiveTransport {
             const suggestion: RephraseSuggestionPayload = {
               studentSaid: String(args.studentSaid || args.student_said || ''),
               moreNatural: String(args.moreNatural || args.more_natural || ''),
-              explanation: String(args.explanation || ''),
+              explanation: sanitizeModelText(String(args.explanation || '')),
               highlightWords: Array.isArray(args.highlightWords || args.highlight_words) ? (args.highlightWords || args.highlight_words) : [],
             };
             console.log(

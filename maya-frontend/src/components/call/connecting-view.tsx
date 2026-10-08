@@ -25,19 +25,20 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
   const [dotCount, setDotCount] = useState(2);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
-  // Dynamic hero animation size: balanced so entire screen including tips card fits comfortably
+  // Dynamic hero animation size: scaled to fill vertical space harmoniously,
+  // safely bounded by screen width so orbital rings never clip.
   const heroSize = useMemo(() => {
-    // Proportional to screen height (~28%), bounded between 200px and 235px
-    const scaled = Math.round(windowHeight * 0.28);
-    const maxSafe = Math.round(windowWidth - 80);
-    return Math.min(235, maxSafe, Math.max(200, scaled));
+    // Proportional to screen height (~35%), bounded between 220px and 290px
+    const scaled = Math.round(windowHeight * 0.35);
+    const maxSafe = Math.round(windowWidth - 56);
+    return Math.min(290, maxSafe, Math.max(220, scaled));
   }, [windowHeight, windowWidth]);
 
   const dashedRingSize = Math.round(heroSize * 0.85);
   const haloSize = Math.round(heroSize * 0.70);
   const avatarContainerSize = Math.round(heroSize * 0.60);
   const avatarInnerSize = avatarContainerSize - 8;
-  const dotOffset = Math.round(dashedRingSize * 0.13);
+  const dotOffset = Math.round(dashedRingSize * 0.146);
 
   // Animation values
   const rotateAnim = useRef(new Animated.Value(0)).current;
@@ -377,9 +378,9 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     width: '100%',
     maxWidth: 440,
-    paddingHorizontal: 18,
-    paddingTop: Platform.select({ web: 16, ios: 12, default: 14 }),
-    paddingBottom: Platform.select({ web: 36, ios: 30, default: 26 }),
+    paddingHorizontal: 20,
+    paddingTop: Platform.select({ web: 18, ios: 14, default: 14 }),
+    paddingBottom: Platform.select({ web: 48, ios: 42, default: 36 }),
     alignItems: 'center',
     justifyContent: 'space-between',
     alignSelf: 'center',
@@ -416,7 +417,7 @@ const styles = StyleSheet.create({
   heroSection: {
     alignItems: 'center',
     width: '100%',
-    marginTop: Platform.select({ web: 6, ios: 4, default: 4 }),
+    marginTop: Platform.select({ web: 8, ios: 6, default: 6 }),
   },
   animationArea: {
     width: 210,
@@ -608,24 +609,24 @@ const styles = StyleSheet.create({
   },
   textSection: {
     alignItems: 'center',
-    marginTop: 8,
-    paddingHorizontal: 12,
+    marginTop: 10,
+    paddingHorizontal: 16,
   },
   title: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 21,
+    fontSize: 22,
     color: '#0f172a',
     letterSpacing: -0.4,
     textAlign: 'center',
-    minHeight: 26,
+    minHeight: 28,
   },
   subtitle: {
     ...fontStyle('outfit', 'medium'),
-    fontSize: 12.5,
+    fontSize: 13,
     color: '#64748b',
     textAlign: 'center',
-    marginTop: 3,
-    lineHeight: 17,
+    marginTop: 4,
+    lineHeight: 18,
   },
   tipsCard: {
     width: '100%',
@@ -633,8 +634,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#dbeafe',
     borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 11,
     shadowColor: '#93c5fd',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,

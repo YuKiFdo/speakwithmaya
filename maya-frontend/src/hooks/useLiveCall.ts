@@ -20,6 +20,7 @@ import { GrammarFeedbackData } from '@/components/call/grammar-feedback-modal';
 import { MicPermissionErrorType } from '@/components/call/microphone-permission-popup';
 import { MissionReportData, MissionObjectiveResult } from '@/components/roadmap/mission-report-modal';
 import { getLogTimestamp } from '@/utils/time';
+import { sanitizeModelText } from '@/utils/text-sanitizer';
 
 // Default to true (Server-to-Server NestJS Gateway) unless explicitly set to 'false'
 const USE_SERVER_LIVE = process.env.EXPO_PUBLIC_USE_SERVER_LIVE !== 'false';
@@ -611,7 +612,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             setIsSlowResponse(false);
             if (activeRoleRef.current !== 'model') {
               if (currentModelTextRef.current.trim()) {
-                setPreviousSubtitles(currentModelTextRef.current.trim());
+                setPreviousSubtitles(sanitizeModelText(currentModelTextRef.current.trim()));
               }
               if (currentUserTextRef.current.trim()) {
                 const textToPush = currentUserTextRef.current.trim();
@@ -636,12 +637,12 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
                   : currentModelTextRef.current + ' ' + text)
               : text;
 
-            setSubtitles(currentModelTextRef.current);
+            setSubtitles(sanitizeModelText(currentModelTextRef.current));
           },
           onInputTranscript: (text) => {
             if (activeRoleRef.current !== 'user') {
               if (currentModelTextRef.current.trim()) {
-                const textToPush = currentModelTextRef.current.trim();
+                const textToPush = sanitizeModelText(currentModelTextRef.current.trim());
                 const lastTurn = turnsRef.current[turnsRef.current.length - 1];
                 if (!lastTurn || lastTurn.role !== 'model' || lastTurn.text !== textToPush) {
                   turnsRef.current.push({
@@ -730,8 +731,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
           onGrammarCorrection: (payload: GrammarCorrectionPayload) => {
             console.log('[useLiveCall] 💡 [UI Feedback Card] Grammar correction displayed:', payload.studentSaid, '->', payload.moreNatural);
+            const sanitizedExplanation = sanitizeModelText(payload.explanation);
             const correctionItem = {
               ...payload,
+              explanation: sanitizedExplanation,
               timestamp: new Date().toISOString(),
             };
             correctionsRef.current.push(correctionItem);
@@ -740,7 +743,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               type: 'grammar',
               originalSentence: payload.studentSaid,
               correctedSentence: payload.moreNatural,
-              whyExplanation: payload.explanation,
+              whyExplanation: sanitizedExplanation,
               highlightedMistake: payload.highlightWords?.[0] || '',
               highlightedCorrection: payload.highlightWords?.[0] || '',
               autoDismissSeconds: 8,
@@ -749,8 +752,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onRephraseSuggestion: (payload: RephraseSuggestionPayload) => {
             console.log('[useLiveCall] 💬 [UI Feedback Card] Rephrase suggestion displayed:', payload.studentSaid, '->', payload.moreNatural);
+            const sanitizedExplanation = sanitizeModelText(payload.explanation);
             const correctionItem = {
               ...payload,
+              explanation: sanitizedExplanation,
               timestamp: new Date().toISOString(),
             };
             correctionsRef.current.push(correctionItem);
@@ -759,7 +764,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               type: 'rephrase',
               originalSentence: payload.studentSaid,
               correctedSentence: payload.moreNatural,
-              whyExplanation: payload.explanation,
+              whyExplanation: sanitizedExplanation,
               highlightedCorrection: payload.highlightWords?.[0] || '',
               autoDismissSeconds: 8,
             });
@@ -780,8 +785,12 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onLevelEvaluationCompleted: (evaluation: LevelEvaluationPayload) => {
             console.log('[useLiveCall] 🏆 Level evaluation completed:', evaluation);
-            evaluationResultRef.current = evaluation;
-            setEvaluationResult(evaluation);
+            const cleanEval: LevelEvaluationPayload = {
+              ...evaluation,
+              feedbackSinhala: sanitizeModelText(evaluation.feedbackSinhala),
+            };
+            evaluationResultRef.current = cleanEval;
+            setEvaluationResult(cleanEval);
           },
           onObjectiveRecorded: (payload: RecordedObjectivePayload) => {
             console.log('[useLiveCall] 🎯 Objective recorded by Maya coach:', payload.objectiveId, payload.status, payload.note);
