@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Modal,
   View,
@@ -8,6 +8,8 @@ import {
   StyleSheet,
   Platform,
   useWindowDimensions,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons, Feather } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
@@ -138,7 +140,7 @@ export function CreateSessionModal({
   isPro = false,
   onUpgradePrompt,
 }: CreateSessionModalProps) {
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isDesktop = windowWidth >= 768;
 
   // Selected State (Defaults match the uploaded design)
@@ -147,14 +149,63 @@ export function CreateSessionModal({
   const [aiCorrections, setAiCorrections] = useState<AICorrectionOption>('keep_on_track');
   const [pickerModal, setPickerModal] = useState<'language' | 'corrections' | null>(null);
 
+  // Smooth Entry / Exit Animations
+  const modalAnim = useRef(new Animated.Value(0)).current;
+  const pickerAnim = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     if (visible) {
       setSelectedMinutes(5);
       setLanguageHelp('english_only');
       setAiCorrections('keep_on_track');
       setPickerModal(null);
+      modalAnim.setValue(0);
+      Animated.spring(modalAnim, {
+        toValue: 1,
+        tension: 65,
+        friction: 11,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
     }
   }, [visible]);
+
+  const handleClose = () => {
+    if (pickerModal) {
+      closePicker();
+      return;
+    }
+    Animated.timing(modalAnim, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start(() => {
+      onClose();
+    });
+  };
+
+  const openPicker = (type: 'language' | 'corrections') => {
+    setPickerModal(type);
+    pickerAnim.setValue(0);
+    Animated.spring(pickerAnim, {
+      toValue: 1,
+      tension: 70,
+      friction: 12,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  };
+
+  const closePicker = (callback?: () => void) => {
+    Animated.timing(pickerAnim, {
+      toValue: 0,
+      duration: 170,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start(() => {
+      setPickerModal(null);
+      if (callback) callback();
+    });
+  };
 
   const handleSelectDuration = (opt: DurationOption) => {
     if (opt.isPremium && !isPro) {
@@ -212,33 +263,65 @@ export function CreateSessionModal({
   const currentCorrectionOpt =
     CORRECTION_OPTIONS.find((o) => o.id === aiCorrections) || CORRECTION_OPTIONS[1];
 
+  // Whether mobile height is limited enough to need scrollbar
+  const isScrollNeeded = !isDesktop && windowHeight < 520;
+
   return (
     <Modal
       transparent
       visible={visible}
-      animationType={isDesktop ? 'fade' : 'slide'}
-      onRequestClose={() => {
-        if (pickerModal) {
-          setPickerModal(null);
-        } else {
-          onClose();
-        }
-      }}
+      animationType="none"
+      onRequestClose={handleClose}
     >
       <View style={[styles.backdrop, !isDesktop && styles.backdropMobile]}>
-        {/* Backdrop touch to dismiss */}
-        <Pressable
-          style={styles.backdropTouchArea}
-          onPress={() => {
-            if (pickerModal) setPickerModal(null);
-            else onClose();
-          }}
-          accessibilityLabel="Close modal"
-          accessibilityRole="button"
-        />
+        {/* Animated Backdrop touch to dismiss */}
+        <Animated.View
+          style={[
+            styles.backdropTouchArea,
+            {
+              opacity: modalAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 1],
+              }),
+            },
+          ]}
+        >
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={handleClose}
+            accessibilityLabel="Close modal"
+            accessibilityRole="button"
+          />
+        </Animated.View>
 
         <View style={[styles.modalContainer, !isDesktop && styles.modalContainerMobile]}>
-          <View style={[styles.card, isDesktop ? styles.cardDesktop : styles.cardMobile]}>
+          <Animated.View
+            style={[
+              styles.card,
+              isDesktop ? styles.cardDesktop : styles.cardMobile,
+              !isDesktop && {
+                transform: [
+                  {
+                    translateY: modalAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [380, 0],
+                    }),
+                  },
+                ],
+              },
+              isDesktop && {
+                opacity: modalAnim,
+                transform: [
+                  {
+                    scale: modalAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.94, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             {/* Header */}
             <View style={styles.headerRow}>
               <View style={styles.headerLeft}>
@@ -259,7 +342,7 @@ export function CreateSessionModal({
               {/* Close Button */}
               <Pressable
                 style={({ pressed }) => [styles.closeBtn, pressed && styles.btnPressed]}
-                onPress={onClose}
+                onPress={handleClose}
                 accessibilityRole="button"
                 accessibilityLabel="Close"
                 hitSlop={8}
@@ -268,14 +351,17 @@ export function CreateSessionModal({
               </Pressable>
             </View>
 
-            {/* Scrollable Content Container */}
+            {/* Content Container (fits to content on mobile, scrolls only on tiny screens) */}
             <ScrollView
-              style={styles.scrollArea}
-              contentContainerStyle={styles.scrollContent}
+              style={[styles.scrollArea, !isDesktop && styles.scrollAreaMobile]}
+              contentContainerStyle={[styles.scrollContent, !isDesktop && styles.scrollContentMobile]}
               showsVerticalScrollIndicator={false}
+              bounces={false}
+              overScrollMode="never"
+              scrollEnabled={isDesktop || isScrollNeeded}
             >
               {/* SECTION 1: Practice Time */}
-              <View style={styles.sectionContainer}>
+              <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
                 <View style={styles.sectionHeader}>
                   <View style={[styles.sectionIconBadge, { backgroundColor: '#E0EDFF' }]}>
                     <Ionicons name="time-outline" size={20} color="#2B5BFF" />
@@ -335,7 +421,7 @@ export function CreateSessionModal({
               </View>
 
               {/* SECTION 2: Language Help */}
-              <View style={styles.sectionContainer}>
+              <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
                 <View style={styles.sectionHeader}>
                   <View style={[styles.sectionIconBadge, { backgroundColor: '#E6F9F0' }]}>
                     <MaterialIcons name="translate" size={20} color="#059669" />
@@ -385,7 +471,7 @@ export function CreateSessionModal({
                   /* Mobile Collapsed Single Card with Change > */
                   <Pressable
                     style={({ pressed }) => [styles.summaryCard, pressed && styles.btnPressed]}
-                    onPress={() => setPickerModal('language')}
+                    onPress={() => openPicker('language')}
                     accessibilityRole="button"
                     accessibilityLabel={`Language help: ${currentLangOpt.title}. Tap to change.`}
                   >
@@ -407,7 +493,7 @@ export function CreateSessionModal({
               </View>
 
               {/* SECTION 3: AI corrections */}
-              <View style={styles.sectionContainer}>
+              <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
                 <View style={styles.sectionHeader}>
                   <View style={[styles.sectionIconBadge, { backgroundColor: '#FDE8EE' }]}>
                     <Ionicons name="chatbubbles-outline" size={20} color="#E11D48" />
@@ -463,7 +549,7 @@ export function CreateSessionModal({
                   /* Mobile Collapsed Single Card with Change > */
                   <Pressable
                     style={({ pressed }) => [styles.summaryCard, pressed && styles.btnPressed]}
-                    onPress={() => setPickerModal('corrections')}
+                    onPress={() => openPicker('corrections')}
                     accessibilityRole="button"
                     accessibilityLabel={`AI corrections: ${currentCorrectionOpt.title}. Tap to change.`}
                   >
@@ -492,10 +578,10 @@ export function CreateSessionModal({
             </ScrollView>
 
             {/* Bottom Actions Bar */}
-            <View style={styles.footerRow}>
+            <View style={[styles.footerRow, !isDesktop && styles.footerRowMobile]}>
               <Pressable
                 style={({ pressed }) => [styles.cancelBtn, pressed && styles.btnPressed]}
-                onPress={onClose}
+                onPress={handleClose}
                 accessibilityRole="button"
               >
                 <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -514,13 +600,39 @@ export function CreateSessionModal({
             {/* SUB-PICKER POPUP / BOTTOM SHEET OVERLAY */}
             {pickerModal && (
               <View style={styles.pickerOverlay}>
-                <Pressable
-                  style={styles.pickerBackdropTouch}
-                  onPress={() => setPickerModal(null)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Close picker"
-                />
-                <View style={styles.pickerSheet}>
+                <Animated.View
+                  style={[
+                    styles.pickerBackdropTouch,
+                    {
+                      opacity: pickerAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, 1],
+                      }),
+                    },
+                  ]}
+                >
+                  <Pressable
+                    style={StyleSheet.absoluteFill}
+                    onPress={() => closePicker()}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close picker"
+                  />
+                </Animated.View>
+                <Animated.View
+                  style={[
+                    styles.pickerSheet,
+                    {
+                      transform: [
+                        {
+                          translateY: pickerAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [320, 0],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
                   {/* Sheet Handle */}
                   <View style={styles.sheetHandle} />
 
@@ -555,7 +667,7 @@ export function CreateSessionModal({
                     </View>
                     <Pressable
                       style={({ pressed }) => [styles.closeBtn, pressed && styles.btnPressed]}
-                      onPress={() => setPickerModal(null)}
+                      onPress={() => closePicker()}
                       hitSlop={8}
                     >
                       <Ionicons name="close" size={18} color="#64748B" />
@@ -577,7 +689,7 @@ export function CreateSessionModal({
                               ]}
                               onPress={() => {
                                 setLanguageHelp(opt.id);
-                                setPickerModal(null);
+                                closePicker();
                               }}
                               accessibilityRole="button"
                             >
@@ -615,7 +727,7 @@ export function CreateSessionModal({
                               ]}
                               onPress={() => {
                                 setAiCorrections(opt.id);
-                                setPickerModal(null);
+                                closePicker();
                               }}
                               accessibilityRole="button"
                             >
@@ -648,10 +760,10 @@ export function CreateSessionModal({
                           );
                         })}
                   </View>
-                </View>
+                </Animated.View>
               </View>
             )}
-          </View>
+          </Animated.View>
         </View>
       </View>
     </Modal>
@@ -714,9 +826,9 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
-    maxHeight: '92%',
+    paddingTop: 18,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 18,
+    maxHeight: '94%',
   },
 
   /* Header */
@@ -783,9 +895,18 @@ const styles = StyleSheet.create({
   scrollArea: {
     maxHeight: 600,
   },
+  scrollAreaMobile: {
+    flexGrow: 0,
+    flexShrink: 0,
+    maxHeight: undefined,
+  },
   scrollContent: {
     gap: 12,
     paddingBottom: 6,
+  },
+  scrollContentMobile: {
+    gap: 10,
+    paddingBottom: 2,
   },
 
   /* Section Containers */
@@ -812,6 +933,11 @@ const styles = StyleSheet.create({
           shadowRadius: 2,
           elevation: 1,
         }),
+  },
+  sectionContainerMobile: {
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    borderRadius: 14,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -978,6 +1104,11 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
+  },
+  footerRowMobile: {
+    marginTop: 12,
+    paddingTop: 10,
+    gap: 10,
   },
   cancelBtn: {
     flex: 1,
