@@ -351,6 +351,58 @@ export default function RoadmapScreen() {
     }
   }
 
+  // Calculate highest completed milestone index
+  let highestCompletedIdx = -1;
+  milestones.forEach((m, idx) => {
+    if (m.status === 'completed') {
+      highestCompletedIdx = Math.max(highestCompletedIdx, idx);
+    }
+  });
+
+  // Glowing progress line connects through all completed levels (and leads to the active in-progress level)
+  const targetCompletedProgressIdx =
+    highestCompletedIdx >= 0
+      ? (highestCompletedIdx === milestones.length - 1 ? highestCompletedIdx : highestCompletedIdx + 1)
+      : -1;
+
+  const getDesktopPathUpTo = (targetIdx: number): string => {
+    if (targetIdx <= 0 || milestones.length <= 1) return '';
+    const clampedTarget = Math.min(targetIdx, milestones.length - 1);
+
+    let path = `M ${col1X} ${desktopYStart}`;
+
+    for (let i = 0; i < clampedTarget; i++) {
+      const r = Math.floor(i / 2);
+      const yRow = desktopYStart + r * desktopRowStep;
+      const yNext = desktopYStart + (r + 1) * desktopRowStep;
+
+      if (i % 2 === 0) {
+        if (r % 2 === 0) {
+          path += ` L ${col2X} ${yRow}`;
+        } else {
+          path += ` L ${col1X} ${yRow}`;
+        }
+      } else {
+        if (r % 2 === 0) {
+          if (desktopRowStep > 2 * R) {
+            path += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight} ${yRow + R} L ${xRight} ${yNext - R} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext} L ${col2X} ${yNext}`;
+          } else {
+            path += ` L ${xRight - R} ${yRow} A ${R} ${R} 0 0 1 ${xRight - R} ${yNext} L ${col2X} ${yNext}`;
+          }
+        } else {
+          if (desktopRowStep > 2 * R) {
+            path += ` L ${xLeft + R} ${yRow} A ${R} ${R} 0 0 0 ${xLeft} ${yRow + R} L ${xLeft} ${yNext - R} A ${R} ${R} 0 0 0 ${xLeft + R} ${yNext} L ${col1X} ${yNext}`;
+          } else {
+            path += ` L ${xLeft + R} ${yRow} A ${R} ${R} 0 0 0 ${xLeft + R} ${yNext} L ${col1X} ${yNext}`;
+          }
+        }
+      }
+    }
+    return path;
+  };
+
+  const desktopCompletedSvgPath = targetCompletedProgressIdx > 0 ? getDesktopPathUpTo(targetCompletedProgressIdx) : '';
+
   // Responsive calculations for mobile track & milestone positions:
   const [layoutMobileWidth, setLayoutMobileWidth] = useState<number | null>(null);
   const mobileWidth = layoutMobileWidth ?? (!isDesktop ? Math.min(windowWidth - 40, 420) : 350);
@@ -393,6 +445,32 @@ export default function RoadmapScreen() {
       }
     }
   }
+
+  const getMobilePathUpTo = (targetIdx: number): string => {
+    if (targetIdx <= 0 || milestones.length <= 1) return '';
+    const clampedTarget = Math.min(targetIdx, milestones.length - 1);
+
+    let path = `M ${mobileIconLeftX} ${mobileYTrack1} L ${mobileIconRightX} ${mobileYTrack1}`;
+    for (let i = 0; i < clampedTarget - 1; i++) {
+      const yNext = mobileYTrack1 + (i + 1) * mobileTierHeight;
+      const isLastStep = i === clampedTarget - 2;
+
+      if (i % 2 === 0) {
+        path += ` A ${mobileR} ${mobileR} 0 0 1 ${mobileIconRightX} ${yNext}`;
+        if (!isLastStep) {
+          path += ` L ${mobileIconLeftX} ${yNext}`;
+        }
+      } else {
+        path += ` A ${mobileR} ${mobileR} 0 0 0 ${mobileIconLeftX} ${yNext}`;
+        if (!isLastStep) {
+          path += ` L ${mobileIconRightX} ${yNext}`;
+        }
+      }
+    }
+    return path;
+  };
+
+  const mobileCompletedSvgPath = targetCompletedProgressIdx > 0 ? getMobilePathUpTo(targetCompletedProgressIdx) : '';
 
   const handleSelectTab = (tab: DashboardTab) => {
     if (tab === 'home') {
@@ -584,6 +662,45 @@ export default function RoadmapScreen() {
                   strokeLinecap="round"
                 />
 
+                {/* 5. Glowing Completed Blue Progress Path */}
+                {desktopCompletedSvgPath ? (
+                  <>
+                    {/* Ambient Neon Outer Glow */}
+                    <Path
+                      d={desktopCompletedSvgPath}
+                      stroke="rgba(0, 87, 255, 0.25)"
+                      strokeWidth="18"
+                      fill="none"
+                      strokeLinecap="round"
+                    />
+                    {/* Vibrant Mid-Layer Glow */}
+                    <Path
+                      d={desktopCompletedSvgPath}
+                      stroke="rgba(0, 102, 255, 0.50)"
+                      strokeWidth="12"
+                      fill="none"
+                      strokeLinecap="round"
+                    />
+                    {/* Electric Blue Core Line */}
+                    <Path
+                      d={desktopCompletedSvgPath}
+                      stroke="#0057FF"
+                      strokeWidth="6.5"
+                      fill="none"
+                      strokeLinecap="round"
+                    />
+                    {/* Center Bright Shine Beam */}
+                    <Path
+                      d={desktopCompletedSvgPath}
+                      stroke="#93C5FD"
+                      strokeWidth="2"
+                      fill="none"
+                      strokeLinecap="round"
+                      opacity={0.9}
+                    />
+                  </>
+                ) : null}
+
                 {/* Vertical Dotted Drops from Card Icons down to Anchors */}
                 {milestones.map((item, idx) => {
                   const r = Math.floor(idx / 2);
@@ -594,6 +711,7 @@ export default function RoadmapScreen() {
                   const trackY = desktopYStart + r * desktopRowStep;
                   const dropYStart = 128 + r * desktopRowStep;
                   const isLocked = item.status === 'locked';
+                  const isItemCompleted = item.status === 'completed';
                   return (
                     <Line
                       key={`desktop-drop-${idx}`}
@@ -601,8 +719,8 @@ export default function RoadmapScreen() {
                       y1={dropYStart}
                       x2={x}
                       y2={trackY}
-                      stroke={isLocked ? '#CBD5E1' : '#93C5FD'}
-                      strokeWidth="2"
+                      stroke={isLocked ? '#CBD5E1' : isItemCompleted ? '#0057FF' : '#93C5FD'}
+                      strokeWidth={isItemCompleted ? '2.5' : '2'}
                       strokeDasharray="4,4"
                     />
                   );
@@ -618,9 +736,34 @@ export default function RoadmapScreen() {
                   const trackY = desktopYStart + r * desktopRowStep;
                   const isLocked = item.status === 'locked';
                   const isAvailable = item.status === 'in-progress';
+                  const isItemCompleted = item.status === 'completed';
+
                   return (
                     <React.Fragment key={`desktop-dot-${idx}`}>
-                      {isAvailable ? (
+                      {isItemCompleted ? (
+                        <>
+                          <Circle
+                            cx={x}
+                            cy={trackY}
+                            r={15}
+                            fill="rgba(0, 87, 255, 0.28)"
+                          />
+                          <Circle
+                            cx={x}
+                            cy={trackY}
+                            r={7.5}
+                            fill="#0057FF"
+                            stroke="#FFFFFF"
+                            strokeWidth={2}
+                          />
+                          <Circle
+                            cx={x}
+                            cy={trackY}
+                            r={3}
+                            fill="#FFFFFF"
+                          />
+                        </>
+                      ) : isAvailable ? (
                         <>
                           <Circle
                             cx={x}
@@ -647,7 +790,7 @@ export default function RoadmapScreen() {
                             cx={x}
                             cy={trackY}
                             r={10}
-                            fill={isLocked ? 'rgba(148, 163, 184, 0.16)' : 'rgba(0, 87, 255, 0.18)'}
+                            fill="rgba(148, 163, 184, 0.16)"
                           />
                           <Circle
                             cx={x}
@@ -733,7 +876,6 @@ export default function RoadmapScreen() {
                   fill="none"
                   strokeLinecap="round"
                 />
-
                 {/* 4. Center Core Inset Highlight */}
                 <Path
                   d={mobileSvgPath}
@@ -743,12 +885,52 @@ export default function RoadmapScreen() {
                   strokeLinecap="round"
                 />
 
+                {/* 5. Glowing Completed Blue Progress Path */}
+                {mobileCompletedSvgPath ? (
+                  <>
+                    {/* Ambient Neon Outer Glow */}
+                    <Path
+                      d={mobileCompletedSvgPath}
+                      stroke="rgba(0, 87, 255, 0.25)"
+                      strokeWidth="18"
+                      fill="none"
+                      strokeLinecap="round"
+                    />
+                    {/* Vibrant Mid-Layer Glow */}
+                    <Path
+                      d={mobileCompletedSvgPath}
+                      stroke="rgba(0, 102, 255, 0.50)"
+                      strokeWidth="12"
+                      fill="none"
+                      strokeLinecap="round"
+                    />
+                    {/* Electric Blue Core Line */}
+                    <Path
+                      d={mobileCompletedSvgPath}
+                      stroke="#0057FF"
+                      strokeWidth="6.5"
+                      fill="none"
+                      strokeLinecap="round"
+                    />
+                    {/* Center Bright Shine Beam */}
+                    <Path
+                      d={mobileCompletedSvgPath}
+                      stroke="#93C5FD"
+                      strokeWidth="2"
+                      fill="none"
+                      strokeLinecap="round"
+                      opacity={0.9}
+                    />
+                  </>
+                ) : null}
+
                 {/* Vertical Dotted Drops from Card Avatar bottom down to Track Dots */}
                 {milestones.map((item, idx) => {
                   const x = idx % 2 === 0 ? mobileIconLeftX : mobileIconRightX;
                   const yTrack = mobileYTrack1 + idx * mobileTierHeight;
                   const yStart = yTrack - mobileYDropLen;
                   const isLocked = item.status === 'locked';
+                  const isItemCompleted = item.status === 'completed';
                   return (
                     <Line
                       key={`mobile-drop-${idx}`}
@@ -756,8 +938,8 @@ export default function RoadmapScreen() {
                       y1={yStart}
                       x2={x}
                       y2={yTrack}
-                      stroke={isLocked ? '#CBD5E1' : '#93C5FD'}
-                      strokeWidth="2"
+                      stroke={isLocked ? '#CBD5E1' : isItemCompleted ? '#0057FF' : '#93C5FD'}
+                      strokeWidth={isItemCompleted ? '2.5' : '2'}
                       strokeDasharray="4,4"
                     />
                   );
@@ -769,9 +951,34 @@ export default function RoadmapScreen() {
                   const yTrack = mobileYTrack1 + idx * mobileTierHeight;
                   const isLocked = item.status === 'locked';
                   const isAvailable = item.status === 'in-progress';
+                  const isItemCompleted = item.status === 'completed';
+
                   return (
                     <React.Fragment key={`mobile-dot-${idx}`}>
-                      {isAvailable ? (
+                      {isItemCompleted ? (
+                        <>
+                          <Circle
+                            cx={x}
+                            cy={yTrack}
+                            r={15}
+                            fill="rgba(0, 87, 255, 0.28)"
+                          />
+                          <Circle
+                            cx={x}
+                            cy={yTrack}
+                            r={7.5}
+                            fill="#0057FF"
+                            stroke="#FFFFFF"
+                            strokeWidth={2}
+                          />
+                          <Circle
+                            cx={x}
+                            cy={yTrack}
+                            r={3}
+                            fill="#FFFFFF"
+                          />
+                        </>
+                      ) : isAvailable ? (
                         <>
                           <Circle
                             cx={x}
@@ -798,7 +1005,7 @@ export default function RoadmapScreen() {
                             cx={x}
                             cy={yTrack}
                             r={10}
-                            fill={isLocked ? 'rgba(148, 163, 184, 0.16)' : 'rgba(0, 87, 255, 0.18)'}
+                            fill="rgba(148, 163, 184, 0.16)"
                           />
                           <Circle
                             cx={x}
@@ -806,7 +1013,7 @@ export default function RoadmapScreen() {
                             r={5}
                             fill={isLocked ? '#94A3B8' : '#0057FF'}
                             stroke="#FFFFFF"
-                            strokeWidth={2}
+                            strokeWidth={1.8}
                           />
                         </>
                       )}
