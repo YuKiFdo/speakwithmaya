@@ -25,12 +25,12 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
   const [dotCount, setDotCount] = useState(2);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
-  // Dynamic hero animation size: scales with screen height and width bounds
+  // Dynamic hero animation size: balanced so entire screen including tips card fits comfortably
   const heroSize = useMemo(() => {
-    // Proportional to screen height (~33%), bounded between 210px and 280px
-    const scaled = Math.round(windowHeight * 0.33);
-    const maxSafe = Math.round(windowWidth - 70);
-    return Math.min(280, maxSafe, Math.max(210, scaled));
+    // Proportional to screen height (~28%), bounded between 200px and 235px
+    const scaled = Math.round(windowHeight * 0.28);
+    const maxSafe = Math.round(windowWidth - 80);
+    return Math.min(235, maxSafe, Math.max(200, scaled));
   }, [windowHeight, windowWidth]);
 
   const dashedRingSize = Math.round(heroSize * 0.85);
@@ -368,7 +368,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#f6f8fd',
     alignItems: 'center',
     width: '100%',
-    overflow: 'hidden',
   },
   scrollArea: {
     flex: 1,
@@ -378,9 +377,9 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     width: '100%',
     maxWidth: 440,
-    paddingHorizontal: 20,
-    paddingTop: Platform.select({ web: 24, ios: 16, default: 20 }),
-    paddingBottom: Platform.select({ web: 42, ios: 36, default: 32 }),
+    paddingHorizontal: 18,
+    paddingTop: Platform.select({ web: 16, ios: 12, default: 14 }),
+    paddingBottom: Platform.select({ web: 36, ios: 30, default: 26 }),
     alignItems: 'center',
     justifyContent: 'space-between',
     alignSelf: 'center',
@@ -417,7 +416,7 @@ const styles = StyleSheet.create({
   heroSection: {
     alignItems: 'center',
     width: '100%',
-    marginTop: Platform.select({ web: 12, ios: 8, default: 10 }),
+    marginTop: Platform.select({ web: 6, ios: 4, default: 4 }),
   },
   animationArea: {
     width: 210,
@@ -609,69 +608,69 @@ const styles = StyleSheet.create({
   },
   textSection: {
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 8,
     paddingHorizontal: 12,
   },
   title: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 22,
+    fontSize: 21,
     color: '#0f172a',
     letterSpacing: -0.4,
     textAlign: 'center',
-    minHeight: 28,
+    minHeight: 26,
   },
   subtitle: {
     ...fontStyle('outfit', 'medium'),
-    fontSize: 13,
+    fontSize: 12.5,
     color: '#64748b',
     textAlign: 'center',
-    marginTop: 4,
-    lineHeight: 18,
+    marginTop: 3,
+    lineHeight: 17,
   },
   tipsCard: {
     width: '100%',
     backgroundColor: 'rgba(240, 246, 255, 0.88)',
     borderWidth: 1,
     borderColor: '#dbeafe',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     shadowColor: '#93c5fd',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
     elevation: 2,
     marginTop: 'auto',
   },
   tipsHeader: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 15,
+    fontSize: 14,
     color: '#0f172a',
   },
   tipsSubheader: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 11.5,
+    fontSize: 11,
     color: '#64748b',
     marginTop: 1,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   tipsList: {
-    gap: 7,
+    gap: 6,
   },
   tipRow: {
     backgroundColor: '#ffffff',
-    borderRadius: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    borderRadius: 11,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 9,
     borderWidth: 1,
     borderColor: '#f1f5f9',
     shadowColor: '#0f172a',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.03,
-    shadowRadius: 4,
+    shadowRadius: 3,
     elevation: 1,
     ...(Platform.OS === 'web' ? ({ transition: 'background-color 0.15s ease, transform 0.15s ease' } as any) : {}),
   },
@@ -680,9 +679,9 @@ const styles = StyleSheet.create({
     transform: [{ translateX: 2 }],
   },
   tipIconBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: '#eff6ff',
     alignItems: 'center',
     justifyContent: 'center',
@@ -692,15 +691,15 @@ const styles = StyleSheet.create({
   },
   tipTitle: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 13,
+    fontSize: 12.5,
     color: '#0f172a',
     letterSpacing: -0.2,
   },
   tipDesc: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#64748b',
-    marginTop: 1,
+    marginTop: 0.5,
   },
 });
 
