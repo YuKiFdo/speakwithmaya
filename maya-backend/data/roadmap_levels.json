@@ -1,0 +1,56 @@
+[
+  {
+    "id": "lvl-muz22aj0",
+    "levelNumber": 1,
+    "title": "Meet your AI partner",
+    "description": "Introduce yourself: name, hometown, just talk.",
+    "topic": "Spoken Practice",
+    "xpReward": 100,
+    "iconType": "chat",
+    "numberColor": "#0057FF",
+    "haloColor": "#EFF6FF",
+    "haloBorderColor": "#BFDBFE",
+    "scenarioId": "general-practice",
+    "customSvg": "",
+    "practicePoints": [
+      "Introducing yourself naturally",
+      "Sharing your name and hometown",
+      "Talking about where you live",
+      "Sharing simple personal details",
+      "Asking and answering basic questions",
+      "Keeping a simple conversation going with Maya"
+    ],
+    "canonicalContent": "Lesson: Meet your AI partner\n\nWhat you’ll practice:\n- Introducing yourself naturally\n- Sharing your name and hometown\n- Talking about where you live\n- Sharing simple personal details\n- Asking and answering basic questions\n- Keeping a simple conversation going with Maya",
+    "passingScorePercent": 75,
+    "isPublished": true,
+    "createdAt": "2026-10-08T04:47:42.54+00:00",
+    "updatedAt": "2026-10-08T05:38:13.12+00:00"
+  },
+  {
+    "id": "lvl-muz241x1",
+    "levelNumber": 2,
+    "title": "Talking about your day",
+    "description": "Describe your daily routine in simple present tense, step by step.",
+    "topic": "Spoken Practice",
+    "xpReward": 100,
+    "iconType": "chat",
+    "numberColor": "#9333EA",
+    "haloColor": "#FAF5FF",
+    "haloBorderColor": "#E9D5FF",
+    "scenarioId": "general-practice",
+    "customSvg": "",
+    "practicePoints": [
+      "Talking about your daily routine",
+      "Describing your day step by step",
+      "Using the simple present naturally",
+      "Talking about morning, afternoon, and evening activities",
+      "Saying how often you do everyday activities",
+      "Asking and answering questions about daily routines"
+    ],
+    "canonicalContent": "Lesson: Talking about your day\n\nWhat you’ll practice:\n- Talking about your daily routine\n- Describing your day step by step\n- Using the simple present naturally\n- Talking about morning, afternoon, and evening activities\n- Saying how often you do everyday activities\n- Asking and answering questions about daily routines",
+    "passingScorePercent": 75,
+    "isPublished": true,
+    "createdAt": "2026-10-08T04:49:04.693+00:00",
+    "updatedAt": "2026-10-08T05:38:45.625+00:00"
+  }
+]

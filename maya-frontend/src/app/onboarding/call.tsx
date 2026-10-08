@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { AmbientGlow } from '@/components/call/ambient-glow';
 import { Radii } from '@/theme/tokens';
@@ -27,7 +28,7 @@ import { fontStyle } from '@/theme/fonts';
 import { useLiveCall } from '@/hooks/useLiveCall';
 import { ConnectingView } from '@/components/call/connecting-view';
 import { MicrophonePermissionPopup } from '@/components/call/microphone-permission-popup';
-import { MissionReportModal } from '@/components/roadmap/mission-report-modal';
+import { setLatestSessionReport } from '@/utils/session-report-store';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -47,13 +48,11 @@ export default function CallScreen() {
     scenarioId?: string;
     scenarioTitle?: string;
     roadmapLevelId?: string;
-    scenarioRole?: string;
-    coachingFocus?: string;
-    openingQuestion?: string;
-    customPromptAddon?: string;
+    practicePoints?: string;
+    canonicalContent?: string;
+    passingScorePercent?: string;
     levelNumber?: string;
     targetSpeakingShare?: string;
-    learningObjectives?: string;
   }>();
 
   const { isPhone } = useBreakpoint();
@@ -76,17 +75,11 @@ export default function CallScreen() {
   const effectiveUserName = (params.name || params.userName || '').trim() || 'Tharindu';
   const isIntro = params.isIntroCall === 'true';
 
-  const hasGuidedPrompt = Boolean(
-    params.scenarioRole || params.coachingFocus || params.openingQuestion || params.customPromptAddon,
-  );
-
-  let parsedObjectives = undefined;
-  if (params.learningObjectives) {
+  let parsedPracticePoints: string[] = [];
+  if (params.practicePoints) {
     try {
-      parsedObjectives = JSON.parse(params.learningObjectives);
-    } catch (e) {
-      console.warn('[call.tsx] Could not parse learningObjectives param:', e);
-    }
+      parsedPracticePoints = JSON.parse(params.practicePoints);
+    } catch {}
   }
 
   // Core Gemini Live Audio & Call Engine
@@ -104,17 +97,10 @@ export default function CallScreen() {
     roadmapLevelId: params.roadmapLevelId,
     levelNumber: params.levelNumber ? parseInt(params.levelNumber, 10) : undefined,
     levelTitle: params.scenarioTitle || params.topic,
+    practicePoints: parsedPracticePoints,
+    canonicalContent: params.canonicalContent,
+    passingScorePercent: params.passingScorePercent ? parseInt(params.passingScorePercent, 10) : 75,
     targetSpeakingShare: params.targetSpeakingShare ? parseInt(params.targetSpeakingShare, 10) : 40,
-    learningObjectives: parsedObjectives,
-    guidedPrompt: (hasGuidedPrompt || parsedObjectives)
-      ? {
-          scenarioRole: params.scenarioRole,
-          coachingFocus: params.coachingFocus,
-          openingQuestion: params.openingQuestion,
-          customPromptAddon: params.customPromptAddon,
-          learningObjectives: parsedObjectives,
-        }
-      : undefined,
   });
 
 
@@ -332,6 +318,33 @@ export default function CallScreen() {
     }
   };
 
+  // When session completes, navigate directly to dedicated full-screen completion page
+  useEffect(() => {
+    if (liveCall.missionReport) {
+      setLatestSessionReport({
+        ...liveCall.missionReport,
+        callParams: params,
+      });
+      router.replace({
+        pathname: '/onboarding/complete',
+        params: {
+          roadmapLevelId: liveCall.missionReport.roadmapLevelId || '',
+          levelNumber: String(liveCall.missionReport.levelNumber || ''),
+          levelTitle: liveCall.missionReport.levelTitle || '',
+          durationSeconds: String(liveCall.missionReport.durationSeconds || ''),
+          talkTimeSeconds: String(liveCall.missionReport.talkTimeSeconds || ''),
+          overallScore: String(liveCall.missionReport.overallScore || ''),
+          passed: String(liveCall.missionReport.passed),
+          feedbackSinhala: liveCall.missionReport.feedbackSinhala || '',
+          feedbackEnglish: liveCall.missionReport.feedbackEnglish || '',
+          userSentencesCount: String(liveCall.missionReport.userSentencesCount || ''),
+          xpEarned: String(liveCall.missionReport.xpEarned || ''),
+          isGeneralChat: String(Boolean(liveCall.missionReport.isGeneralChat)),
+        },
+      });
+    }
+  }, [liveCall.missionReport]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.mainContentWrapper}>
@@ -371,7 +384,7 @@ export default function CallScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Call settings"
                 >
-                  <Text style={styles.settingsIcon}>⚙️</Text>
+                  <Feather name="settings" size={20} color="#64748B" />
                 </Pressable>
 
                 <Pressable
@@ -400,7 +413,7 @@ export default function CallScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Call settings"
               >
-                <Text style={styles.settingsIcon}>⚙️</Text>
+                <Feather name="settings" size={20} color="#64748B" />
               </Pressable>
 
               <View style={styles.mobileHeaderInfo}>
@@ -524,6 +537,33 @@ export default function CallScreen() {
               )}
             </View>
 
+            {/* Evaluation Result Banner */}
+            {liveCall.evaluationResult && (
+              <View style={[
+                styles.evalCardContainer,
+                liveCall.evaluationResult.isPassed ? styles.evalCardPassed : styles.evalCardFailed,
+              ]}>
+                <Feather
+                  name={liveCall.evaluationResult.isPassed ? 'check-circle' : 'refresh-cw'}
+                  size={20}
+                  color={liveCall.evaluationResult.isPassed ? '#059669' : '#D97706'}
+                />
+                <View style={styles.evalTextCol}>
+                  <Text style={[
+                    styles.evalTitle,
+                    liveCall.evaluationResult.isPassed ? styles.evalTitlePassed : styles.evalTitleFailed,
+                  ]}>
+                    {liveCall.evaluationResult.isPassed
+                      ? `Level Mastered! (${liveCall.evaluationResult.scorePercent}%)`
+                      : `Needs Practice (${liveCall.evaluationResult.scorePercent}%)`}
+                  </Text>
+                  <Text style={styles.evalSubtitle}>
+                    {liveCall.evaluationResult.feedbackSinhala || liveCall.evaluationResult.feedbackEnglish || 'Great speaking session with Maya!'}
+                  </Text>
+                </View>
+              </View>
+            )}
+
             {/* Conversation Display with Multi-Turn History (Image 2 Design) */}
             <ConversationDisplay
               previousText={liveCall.previousSubtitles}
@@ -570,27 +610,6 @@ export default function CallScreen() {
         }}
         onAllow={liveCall.requestMicrophoneAndStart}
         errorType={liveCall.permissionErrorType}
-      />
-
-      {/* Post-Call Mission Report Modal for Curriculum Roadmap Levels */}
-      <MissionReportModal
-        visible={Boolean(liveCall.missionReport)}
-        report={liveCall.missionReport}
-        onContinue={() => {
-          liveCall.setMissionReport(null);
-          router.replace('/(tabs)/roadmap');
-        }}
-        onRetry={() => {
-          liveCall.setMissionReport(null);
-          router.replace({
-            pathname: '/onboarding/call',
-            params: { ...params },
-          });
-        }}
-        onViewHistory={() => {
-          liveCall.setMissionReport(null);
-          router.replace('/history');
-        }}
       />
     </SafeAreaView>
   );
@@ -917,5 +936,117 @@ const styles = StyleSheet.create({
   },
   buttonPressed: {
     opacity: 0.7,
+  },
+
+  /* Active Practice Task Card */
+  taskCardContainer: {
+    width: '100%',
+    maxWidth: 640,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  taskCardTeaching: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#BFDBFE',
+  },
+  taskCardTesting: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  taskCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  taskPhaseBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    gap: 5,
+  },
+  taskPhaseBadgeTeaching: {
+    backgroundColor: '#EFF6FF',
+  },
+  taskPhaseBadgeTesting: {
+    backgroundColor: '#FEF3C7',
+  },
+  taskPhaseText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 11,
+    letterSpacing: 0.4,
+  },
+  taskPhaseTextTeaching: {
+    color: '#0057FF',
+  },
+  taskPhaseTextTesting: {
+    color: '#D97706',
+  },
+  taskModeHint: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 12,
+    color: '#B45309',
+  },
+  taskTitleText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 17,
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  taskHintText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13.5,
+    color: '#64748B',
+    lineHeight: 18,
+  },
+
+  /* Evaluation Result Banner */
+  evalCardContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 640,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    gap: 12,
+  },
+  evalCardPassed: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+  },
+  evalCardFailed: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  evalTextCol: {
+    flex: 1,
+  },
+  evalTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 16,
+    marginBottom: 2,
+  },
+  evalTitlePassed: {
+    color: '#059669',
+  },
+  evalTitleFailed: {
+    color: '#D97706',
+  },
+  evalSubtitle: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#475569',
+    lineHeight: 17,
   },
 });

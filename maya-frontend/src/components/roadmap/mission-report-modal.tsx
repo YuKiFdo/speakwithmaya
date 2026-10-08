@@ -9,8 +9,11 @@ import {
   Easing,
   Platform,
   ScrollView,
+  Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
+import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 
@@ -18,7 +21,6 @@ export interface MissionObjectiveResult {
   id: string;
   title: string;
   description?: string;
-  isMandatory?: boolean;
   status: 'mastered' | 'assisted' | 'struggling' | 'incomplete';
   note?: string;
 }
@@ -29,16 +31,18 @@ export interface MissionReportData {
   levelTitle?: string;
   topic?: string;
   durationSeconds: number;
-  targetDurationSeconds: number;
-  userSpeakingSeconds: number;
-  userSpeakingShare: number; // 0 - 100%
-  targetSpeakingShare: number; // e.g. 40%
   overallScore: number; // 0 - 100%
-  fluencyScore: number;
-  grammarScore: number;
-  pronunciationScore: number;
+  passingScorePercent?: number; // e.g. 75%
+  fluencyScore?: number;
+  grammarScore?: number;
   passed: boolean;
   passReason: string;
+  feedbackSinhala?: string;
+  feedbackEnglish?: string;
+  userSentencesCount?: number;
+  talkTimeSeconds?: number;
+  xpEarned?: number;
+  isGeneralChat?: boolean;
   objectives: MissionObjectiveResult[];
   corrections: Array<{
     studentSaid: string;
@@ -52,6 +56,7 @@ interface MissionReportModalProps {
   report: MissionReportData | null;
   onContinue: () => void;
   onRetry: () => void;
+  onBackToHome?: () => void;
   onViewHistory?: () => void;
 }
 
@@ -60,19 +65,21 @@ export function MissionReportModal({
   report,
   onContinue,
   onRetry,
+  onBackToHome,
   onViewHistory,
 }: MissionReportModalProps) {
   const { isPhone } = useBreakpoint();
   const [internalVisible, setInternalVisible] = useState(visible);
+  const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
 
   const backdropAnim = useRef(new Animated.Value(0)).current;
-  const cardScaleAnim = useRef(new Animated.Value(0.9)).current;
+  const cardScaleAnim = useRef(new Animated.Value(0.92)).current;
   const cardOpacityAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible && report) {
       setInternalVisible(true);
-      cardScaleAnim.setValue(0.9);
+      cardScaleAnim.setValue(0.92);
       cardOpacityAnim.setValue(0);
       backdropAnim.setValue(0);
 
@@ -85,7 +92,7 @@ export function MissionReportModal({
         }),
         Animated.spring(cardScaleAnim, {
           toValue: 1,
-          damping: 20,
+          damping: 22,
           stiffness: 240,
           mass: 0.9,
           useNativeDriver: Platform.OS !== 'web',
@@ -108,22 +115,90 @@ export function MissionReportModal({
           duration: 160,
           useNativeDriver: Platform.OS !== 'web',
         }),
-      ]).start(() => setInternalVisible(false));
+      ]).start(() => {
+        setInternalVisible(false);
+        setIsDetailsExpanded(false);
+      });
     }
   }, [visible, report]);
 
   if (!internalVisible || !report) return null;
 
   const isPassed = report.passed;
-  const durationMin = Math.max(1, Math.round(report.durationSeconds / 60));
-  const shareMet = report.userSpeakingShare >= report.targetSpeakingShare;
+  const isGeneral = Boolean(report.isGeneralChat);
+
+  // Time metrics
+  const totalSecs = report.durationSeconds || 0;
+  const sessionMins = Math.floor(totalSecs / 60);
+  const sessionRemSecs = totalSecs % 60;
+  const formattedSessionTime = `${String(sessionMins).padStart(2, '0')}:${String(sessionRemSecs).padStart(2, '0')}`;
+
+  const talkSecs = report.talkTimeSeconds || totalSecs;
+  const talkMins = Math.floor(talkSecs / 60);
+
+  // XP & Sentence metrics (preserve 0 accurately)
+  const xpEarned = report.xpEarned ?? 0;
+  const sentencesCount = report.userSentencesCount ?? 0;
+
+  // Avatar source: Celebrate when passed, gentle sad/encouraging when failed
+  const avatarSource = isPassed
+    ? require('@/assets/images/maya-celebrate.png')
+    : require('@/assets/images/maya-sad.png');
+
+  // Headings
+  const titleText = isGeneral
+    ? 'Great job! 🎉'
+    : (isPassed ? 'Great job! 🎉' : 'Needs a Bit More Practice! 💪');
+
+  // Subtitle / Feedback text
+  let subtitleText = 'You expressed your ideas clearly. Now let\'s make your English sound even more natural and fluent.';
+  if (!isGeneral) {
+    if (report.feedbackSinhala) {
+      subtitleText = report.feedbackSinhala;
+    } else if (report.feedbackEnglish) {
+      subtitleText = report.feedbackEnglish;
+    } else if (isPassed) {
+      subtitleText = 'You communicated naturally and met all lesson goals! Ready for the next challenge.';
+    } else {
+      subtitleText = 'Keep practicing! Review your errors below and try again to master this level.';
+    }
+  }
+
+  // Button Labels & Callbacks
+  const primaryButtonText = isGeneral
+    ? "Let's Review →"
+    : (isPassed ? 'Continue to Roadmap →' : 'Try Again 🔄');
+
+  const secondaryButtonText = isGeneral
+    ? 'Back to home'
+    : (isPassed ? 'Back to home' : 'Back to Roadmap');
+
+  const handlePrimaryPress = () => {
+    if (!isGeneral && !isPassed) {
+      onRetry();
+    } else {
+      onContinue();
+    }
+  };
+
+  const handleSecondaryPress = () => {
+    if (onBackToHome) {
+      onBackToHome();
+    } else {
+      onContinue();
+    }
+  };
+
+  const totalObjectives = report.objectives?.length || 0;
+  const passedObjectives = report.objectives?.filter((o) => o.status === 'mastered').length || 0;
+  const hasReviewItems = (report.objectives && report.objectives.length > 0) || (report.corrections && report.corrections.length > 0);
 
   return (
     <Modal
       transparent
       visible={internalVisible}
       animationType="none"
-      onRequestClose={onContinue}
+      onRequestClose={handleSecondaryPress}
     >
       <Animated.View style={[styles.backdrop, { opacity: backdropAnim }]}>
         <Animated.View
@@ -136,381 +211,253 @@ export function MissionReportModal({
             },
           ]}
         >
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.scrollContent}
-          >
-            {/* Header Banner */}
-            <View
-              style={[
-                styles.headerBanner,
-                isPassed ? styles.bannerPassed : styles.bannerRetry,
-              ]}
+          <SafeAreaView style={styles.safeAreaView} edges={['top', 'bottom']}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.scrollContent}
             >
-              <View
-                style={[
-                  styles.statusIconCircle,
-                  isPassed ? styles.iconCirclePassed : styles.iconCircleRetry,
-                ]}
-              >
-                <Feather
-                  name={isPassed ? 'award' : 'refresh-cw'}
-                  size={26}
-                  color={isPassed ? '#059669' : '#d97706'}
-                />
-              </View>
-
-              <Text
-                style={[
-                  styles.statusHeaderTag,
-                  isPassed ? styles.tagPassed : styles.tagRetry,
-                ]}
-              >
-                {isPassed ? 'LEVEL COMPLETED' : 'PRACTICE RETRY RECOMMENDED'}
-              </Text>
-
-              <Text style={styles.sessionTitle}>
-                {report.levelTitle || `Level ${report.levelNumber || 1}`}
-              </Text>
-
-              <Text style={styles.passReasonText}>{report.passReason}</Text>
-            </View>
-
-            {/* Score & Metrics Overview */}
-            <View style={styles.metricsRow}>
-              {/* Overall Score Circle */}
-              <View style={styles.scoreCard}>
-                <Text style={styles.scoreValue}>{report.overallScore}%</Text>
-                <Text style={styles.scoreLabel}>Overall Score</Text>
+              {/* Top Maya Avatar with Soft Aura */}
+              <View style={styles.avatarSection}>
                 <View
                   style={[
-                    styles.gradeBadge,
-                    report.overallScore >= 75
-                      ? styles.gradeBadgeHigh
-                      : styles.gradeBadgeMed,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.gradeBadgeText,
-                      report.overallScore >= 75
-                        ? styles.gradeBadgeTextHigh
-                        : styles.gradeBadgeTextMed,
-                    ]}
-                  >
-                    {report.overallScore >= 85
-                      ? 'Excellent'
-                      : report.overallScore >= 75
-                      ? 'Proficient'
-                      : 'Developing'}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Sub-scores */}
-              <View style={styles.subScoresContainer}>
-                <View style={styles.subScoreItem}>
-                  <Text style={styles.subScoreLabel}>Fluency</Text>
-                  <View style={styles.subScoreProgressTrack}>
-                    <View
-                      style={[
-                        styles.subScoreProgressFill,
-                        {
-                          width: `${report.fluencyScore}%`,
-                          backgroundColor: '#3b82f6',
-                        },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.subScoreValue}>{report.fluencyScore}%</Text>
-                </View>
-
-                <View style={styles.subScoreItem}>
-                  <Text style={styles.subScoreLabel}>Grammar</Text>
-                  <View style={styles.subScoreProgressTrack}>
-                    <View
-                      style={[
-                        styles.subScoreProgressFill,
-                        {
-                          width: `${report.grammarScore}%`,
-                          backgroundColor: '#10b981',
-                        },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.subScoreValue}>{report.grammarScore}%</Text>
-                </View>
-
-                <View style={styles.subScoreItem}>
-                  <Text style={styles.subScoreLabel}>Time Practiced</Text>
-                  <Text style={styles.timeValue}>{durationMin} min</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Student Speaking Balance Ratio */}
-            <View style={styles.speakingShareCard}>
-              <View style={styles.speakingShareHeader}>
-                <View style={styles.speakingShareTitleGroup}>
-                  <Feather
-                    name="mic"
-                    size={15}
-                    color={shareMet ? '#059669' : '#d97706'}
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text style={styles.speakingShareTitle}>
-                    Student Speaking Share: {report.userSpeakingShare}%
-                  </Text>
-                </View>
-                <View
-                  style={[
-                    styles.targetShareBadge,
-                    shareMet ? styles.targetShareMet : styles.targetSharePending,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.targetShareText,
-                      shareMet ? styles.targetShareTextMet : styles.targetShareTextPending,
-                    ]}
-                  >
-                    Target: ≥ {report.targetSpeakingShare}% {shareMet ? '✓' : '⚠️'}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Progress Bar */}
-              <View style={styles.shareBarTrack}>
-                <View
-                  style={[
-                    styles.shareBarFillUser,
-                    {
-                      width: `${Math.min(100, Math.max(8, report.userSpeakingShare))}%`,
-                      backgroundColor: shareMet ? '#0d9488' : '#f59e0b',
-                    },
+                    styles.avatarGlowCircle,
+                    isPassed ? styles.avatarGlowPassed : styles.avatarGlowRetry,
                   ]}
                 />
-              </View>
-              <View style={styles.shareBarLegend}>
-                <Text style={styles.legendText}>
-                  You: {report.userSpeakingShare}%
-                </Text>
-                <Text style={styles.legendText}>
-                  Maya: {Math.max(0, 100 - report.userSpeakingShare)}%
-                </Text>
-              </View>
-            </View>
-
-            {/* Curriculum Objectives Section */}
-            {report.objectives && report.objectives.length > 0 && (
-              <View style={styles.sectionBox}>
-                <View style={styles.sectionHeader}>
-                  <Feather
-                    name="target"
-                    size={16}
-                    color="#0f172a"
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text style={styles.sectionTitle}>
-                    Learning Objectives Checkpoints
-                  </Text>
-                </View>
-
-                {report.objectives.map((obj, i) => {
-                  const isMastered = obj.status === 'mastered';
-                  const isAssisted = obj.status === 'assisted';
-                  const isIncomplete =
-                    obj.status === 'incomplete' || obj.status === 'struggling';
-
-                  return (
-                    <View key={obj.id || i} style={styles.objectiveRow}>
-                      <View style={styles.objectiveLeftIcon}>
-                        {isMastered ? (
-                          <Ionicons
-                            name="checkmark-circle"
-                            size={18}
-                            color="#059669"
-                          />
-                        ) : isAssisted ? (
-                          <Ionicons
-                            name="bulb"
-                            size={18}
-                            color="#0284c7"
-                          />
-                        ) : (
-                          <Ionicons
-                            name="ellipse-outline"
-                            size={18}
-                            color="#94a3b8"
-                          />
-                        )}
-                      </View>
-
-                      <View style={styles.objectiveContent}>
-                        <View style={styles.objectiveTitleRow}>
-                          <Text style={styles.objectiveTitleText}>
-                            {obj.title}
-                          </Text>
-                          {obj.isMandatory && (
-                            <View style={styles.mandatoryPill}>
-                              <Text style={styles.mandatoryPillText}>
-                                Required
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                        {obj.description ? (
-                          <Text style={styles.objectiveDescText}>
-                            {obj.description}
-                          </Text>
-                        ) : null}
-                      </View>
-
-                      <View
-                        style={[
-                          styles.statusBadge,
-                          isMastered
-                            ? styles.statusMastered
-                            : isAssisted
-                            ? styles.statusAssisted
-                            : styles.statusIncomplete,
-                        ]}
+                <Image
+                  source={avatarSource}
+                  style={styles.avatarImage}
+                  resizeMode="contain"
+                  accessibilityLabel={isPassed ? 'Maya celebrating' : 'Maya encouraging you to try again'}
+                />
+                {/* White gradient fade blend at bottom to dissolve into card surface */}
+                <View style={styles.imageBottomFade} pointerEvents="none">
+                  <Svg width="100%" height="100%" preserveAspectRatio="none">
+                    <Defs>
+                      <LinearGradient
+                        id="whiteFadeBlendModal"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
                       >
-                        <Text
-                          style={[
-                            styles.statusBadgeLabel,
-                            isMastered
-                              ? styles.statusMasteredText
-                              : isAssisted
-                              ? styles.statusAssistedText
-                              : styles.statusIncompleteText,
-                          ]}
-                        >
-                          {isMastered
-                            ? 'Mastered 🌟'
-                            : isAssisted
-                            ? 'With Coach 💡'
-                            : 'Incomplete 🔄'}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })}
+                        <Stop offset="0%" stopColor="#ffffff" stopOpacity="0" />
+                        <Stop offset="60%" stopColor="#ffffff" stopOpacity="0.8" />
+                        <Stop offset="100%" stopColor="#ffffff" stopOpacity="1" />
+                      </LinearGradient>
+                    </Defs>
+                    <Rect x="0" y="0" width="100%" height="100%" fill="url(#whiteFadeBlendModal)" />
+                  </Svg>
+                </View>
               </View>
-            )}
 
-            {/* Grammar Mistakes & Corrections */}
-            {report.corrections && report.corrections.length > 0 ? (
-              <View style={styles.sectionBox}>
-                <View style={styles.sectionHeader}>
-                  <Feather
-                    name="edit-3"
-                    size={16}
-                    color="#0f172a"
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text style={styles.sectionTitle}>
-                    Grammar Insights ({report.corrections.length})
-                  </Text>
+              {/* Title & Subtitle */}
+              <View style={styles.titleSection}>
+                <Text style={styles.title}>{titleText}</Text>
+                <Text style={styles.subtitle}>{subtitleText}</Text>
+                {!isGeneral && report.feedbackEnglish && report.feedbackSinhala ? (
+                  <Text style={styles.secondarySubtitle}>{report.feedbackEnglish}</Text>
+                ) : null}
+              </View>
+
+              {/* Row 1: Talk Time & XP Earned Cards */}
+              <View style={styles.rowOneStats}>
+                {/* Talk Time */}
+                <View style={styles.pillStatCard}>
+                  <View style={styles.clockIconBadge}>
+                    <Ionicons name="time-outline" size={20} color="#2563EB" />
+                  </View>
+                  <View style={styles.statTexts}>
+                    <Text style={styles.statValueBold}>{talkMins} min</Text>
+                    <Text style={styles.statLabelMuted}>Talk time</Text>
+                  </View>
                 </View>
 
-                {report.corrections.map((c, i) => (
-                  <View key={i} style={styles.correctionCard}>
-                    <View style={styles.correctionBefore}>
-                      <Text style={styles.correctionOriginal}>
-                        "{c.studentSaid}"
-                      </Text>
-                    </View>
-                    <View style={styles.correctionArrowRow}>
-                      <Feather
-                        name="arrow-down"
-                        size={14}
-                        color="#10b981"
-                        style={{ marginVertical: 3 }}
-                      />
-                    </View>
-                    <View style={styles.correctionAfter}>
-                      <Text style={styles.correctionNatural}>
-                        "{c.moreNatural}"
-                      </Text>
-                    </View>
-                    {c.explanation ? (
-                      <Text style={styles.correctionExplanation}>
-                        💡 {c.explanation}
-                      </Text>
-                    ) : null}
+                {/* XP Earned */}
+                <View style={styles.pillStatCard}>
+                  <View style={styles.starIconBadge}>
+                    <Ionicons name="star" size={18} color="#EAB308" />
                   </View>
-                ))}
+                  <View style={styles.statTexts}>
+                    <Text style={styles.statValueBold}>+{xpEarned} XP</Text>
+                    <Text style={styles.statLabelMuted}>Earned today</Text>
+                  </View>
+                </View>
               </View>
-            ) : null}
 
-            {/* Action CTA Buttons */}
-            <View style={styles.actionButtonsContainer}>
-              {isPassed ? (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.primaryCtaBtn,
-                    styles.btnPassedCta,
-                    pressed && styles.btnPressed,
-                  ]}
-                  onPress={onContinue}
-                >
-                  <Text style={styles.primaryCtaText}>
-                    CONTINUE TO NEXT LEVEL
-                  </Text>
-                  <Feather
-                    name="arrow-right"
-                    size={18}
-                    color="#ffffff"
-                    style={{ marginLeft: 6 }}
-                  />
-                </Pressable>
-              ) : (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.primaryCtaBtn,
-                    styles.btnRetryCta,
-                    pressed && styles.btnPressed,
-                  ]}
-                  onPress={onRetry}
-                >
-                  <Feather
-                    name="refresh-cw"
-                    size={17}
-                    color="#ffffff"
-                    style={{ marginRight: 8 }}
-                  />
-                  <Text style={styles.primaryCtaText}>
-                    TRY AGAIN (KEEP PROGRESS)
-                  </Text>
-                </Pressable>
-              )}
+              {/* Row 2: 3-Metric Summary Card (Session Time | Sentences | Score) */}
+              <View style={styles.threeMetricCard}>
+                {/* Metric 1: Session Time */}
+                <View style={styles.metricColumn}>
+                  <View style={styles.metricIconBadge}>
+                    <Ionicons name="time-outline" size={17} color="#3B82F6" />
+                  </View>
+                  <Text style={styles.metricValueText}>{formattedSessionTime}</Text>
+                  <Text style={styles.metricLabelText}>Session time</Text>
+                </View>
 
-              <View style={styles.secondaryButtonsRow}>
-                {onViewHistory && (
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.secondaryBtn,
-                      pressed && styles.btnPressed,
+                {/* Divider Line */}
+                <View style={styles.metricDivider} />
+
+                {/* Metric 2: Sentences Spoken */}
+                <View style={styles.metricColumn}>
+                  <View style={styles.metricIconBadge}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={17} color="#3B82F6" />
+                  </View>
+                  <Text style={styles.metricValueText}>{sentencesCount}</Text>
+                  <Text style={styles.metricLabelText}>Sentences</Text>
+                </View>
+
+                {/* Divider Line */}
+                <View style={styles.metricDivider} />
+
+                {/* Metric 3: Score % */}
+                <View style={styles.metricColumn}>
+                  <View
+                    style={[
+                      styles.metricIconBadge,
+                      !isPassed && !isGeneral && styles.metricIconBadgeRetry,
                     ]}
-                    onPress={onViewHistory}
                   >
-                    <Text style={styles.secondaryBtnText}>Call Transcript</Text>
-                  </Pressable>
-                )}
+                    <Ionicons
+                      name="star"
+                      size={17}
+                      color={isPassed || isGeneral ? '#3B82F6' : '#D97706'}
+                    />
+                  </View>
+                  <Text
+                    style={[
+                      styles.metricValueText,
+                      !isPassed && !isGeneral && styles.metricValueTextRetry,
+                    ]}
+                  >
+                    {report.overallScore}%
+                  </Text>
+                  <Text style={styles.metricLabelText}>
+                    {isGeneral ? 'Fluency Score' : 'Roleplay Score'}
+                  </Text>
+                </View>
+              </View>
 
+              {/* Action Buttons */}
+              <View style={styles.actionButtonsContainer}>
+                {/* Primary Button */}
                 <Pressable
                   style={({ pressed }) => [
-                    styles.secondaryBtn,
-                    pressed && styles.btnPressed,
+                    styles.primaryButton,
+                    pressed && styles.primaryButtonPressed,
                   ]}
-                  onPress={onContinue}
+                  onPress={handlePrimaryPress}
+                  accessibilityRole="button"
                 >
-                  <Text style={styles.secondaryBtnText}>Roadmap Track</Text>
+                  <Text style={styles.primaryButtonText}>{primaryButtonText}</Text>
+                </Pressable>
+
+                {/* Secondary Outlined Button */}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    pressed && styles.secondaryButtonPressed,
+                  ]}
+                  onPress={handleSecondaryPress}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.secondaryButtonText}>{secondaryButtonText}</Text>
                 </Pressable>
               </View>
-            </View>
-          </ScrollView>
+
+              {/* Optional Collapsible Practice Review for Deliberate Learning */}
+              {hasReviewItems && !isGeneral && (
+                <View style={styles.reviewAccordionContainer}>
+                  <Pressable
+                    style={styles.reviewAccordionHeader}
+                    onPress={() => setIsDetailsExpanded((prev) => !prev)}
+                  >
+                    <View style={styles.accordionHeaderLeft}>
+                      <Ionicons
+                        name="clipboard-outline"
+                        size={17}
+                        color="#475569"
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text style={styles.accordionHeaderText}>
+                        Review Practice Tasks ({passedObjectives}/{totalObjectives})
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name={isDetailsExpanded ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color="#64748B"
+                    />
+                  </Pressable>
+
+                  {isDetailsExpanded && (
+                    <View style={styles.reviewAccordionBody}>
+                      {/* Checkpoint Tasks List */}
+                      {report.objectives?.map((obj, idx) => {
+                        const isTaskPassed = obj.status === 'mastered';
+                        return (
+                          <View key={obj.id || idx} style={styles.taskItemCard}>
+                            <View style={styles.taskItemHeader}>
+                              <Text style={styles.taskItemTitle}>
+                                {idx + 1}. {obj.title}
+                              </Text>
+                              <View
+                                style={[
+                                  styles.taskStatusBadge,
+                                  isTaskPassed
+                                    ? styles.taskStatusBadgePassed
+                                    : styles.taskStatusBadgeGuided,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.taskStatusText,
+                                    isTaskPassed
+                                      ? styles.taskStatusTextPassed
+                                      : styles.taskStatusTextGuided,
+                                  ]}
+                                >
+                                  {isTaskPassed ? 'Roleplay Passed 🌟' : 'Guided with Coach 💡'}
+                                </Text>
+                              </View>
+                            </View>
+                            {obj.note ? (
+                              <Text style={styles.taskItemNote}>{obj.note}</Text>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+
+                      {/* Grammar & Phrasing Corrections */}
+                      {report.corrections && report.corrections.length > 0 && (
+                        <View style={styles.correctionsBox}>
+                          <Text style={styles.correctionsBoxTitle}>
+                            Key Phrases & Corrections:
+                          </Text>
+                          {report.corrections.map((corr, cIdx) => (
+                            <View key={cIdx} style={styles.correctionRow}>
+                              <Text style={styles.correctionOriginal}>
+                                ❌ "{corr.studentSaid}"
+                              </Text>
+                              <Text style={styles.correctionBetter}>
+                                ✨ "{corr.moreNatural}"
+                              </Text>
+                              {corr.explanation ? (
+                                <Text style={styles.correctionExpl}>
+                                  {corr.explanation}
+                                </Text>
+                              ) : null}
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </View>
+              )}
+            </ScrollView>
+          </SafeAreaView>
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -520,418 +467,370 @@ export function MissionReportModal({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
   },
   cardContainer: {
+    flex: 1,
     width: '100%',
-    maxHeight: '92%',
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    ...(Platform.OS === 'web'
-      ? ({
-          boxShadow: '0 20px 48px rgba(0, 0, 0, 0.25)',
-        } as any)
-      : { elevation: 8 }),
+    backgroundColor: '#FFFFFF',
   },
   cardContainerDesktop: {
-    maxWidth: 580,
+    flex: undefined,
+    maxWidth: 440,
+    width: '92%',
+    maxHeight: '92%',
+    borderRadius: 24,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.16,
+    shadowRadius: 28,
+    elevation: 12,
+    overflow: 'hidden',
+  },
+  safeAreaView: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
   },
   scrollContent: {
-    padding: 20,
+    paddingHorizontal: 24,
+    paddingTop: 16,
     paddingBottom: 28,
-  },
-  headerBanner: {
-    borderRadius: 16,
-    padding: 18,
     alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 1,
   },
-  bannerPassed: {
-    backgroundColor: '#ecfdf5',
-    borderColor: '#a7f3d0',
-  },
-  bannerRetry: {
-    backgroundColor: '#fffbeb',
-    borderColor: '#fde68a',
-  },
-  statusIconCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    alignItems: 'center',
+
+  /* Avatar Presentation */
+  avatarSection: {
+    width: 220,
+    height: 200,
     justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
     marginBottom: 8,
   },
-  iconCirclePassed: {
-    backgroundColor: '#d1fae5',
+  avatarGlowCircle: {
+    position: 'absolute',
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    top: 15,
   },
-  iconCircleRetry: {
-    backgroundColor: '#fef3c7',
+  avatarGlowPassed: {
+    backgroundColor: '#EFF6FF',
   },
-  statusHeaderTag: {
+  avatarGlowRetry: {
+    backgroundColor: '#FEF3C7',
+  },
+  avatarImage: {
+    width: 200,
+    height: 200,
+  },
+  imageBottomFade: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 52,
+    pointerEvents: 'none',
+  },
+
+  /* Title & Subtitle */
+  titleSection: {
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 8,
+  },
+  title: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 12,
-    letterSpacing: 0.8,
-    marginBottom: 4,
-  },
-  tagPassed: {
-    color: '#059669',
-  },
-  tagRetry: {
-    color: '#d97706',
-  },
-  sessionTitle: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 20,
-    color: '#0f172a',
+    fontSize: 26,
+    color: '#0F172A',
     textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: 8,
   },
-  passReasonText: {
+  subtitle: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 14,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 22,
+    paddingHorizontal: 12,
+  },
+  secondarySubtitle: {
     ...fontStyle('inter', 'regular'),
     fontSize: 13,
-    color: '#475569',
+    color: '#94A3B8',
     textAlign: 'center',
     lineHeight: 18,
-  },
-  metricsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    padding: 14,
-    marginBottom: 14,
-    gap: 14,
-  },
-  scoreCard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingRight: 12,
-    borderRightWidth: 1,
-    borderRightColor: '#e2e8f0',
-    minWidth: 100,
-  },
-  scoreValue: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 32,
-    color: '#0f172a',
-    lineHeight: 38,
-  },
-  scoreLabel: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 11,
-    color: '#64748b',
-    marginTop: 2,
-    marginBottom: 4,
-  },
-  gradeBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  gradeBadgeHigh: {
-    backgroundColor: '#d1fae5',
-  },
-  gradeBadgeMed: {
-    backgroundColor: '#fef3c7',
-  },
-  gradeBadgeText: {
-    ...fontStyle('inter', 'bold'),
-    fontSize: 11,
-  },
-  gradeBadgeTextHigh: {
-    color: '#059669',
-  },
-  gradeBadgeTextMed: {
-    color: '#d97706',
-  },
-  subScoresContainer: {
-    flex: 1,
-    gap: 8,
-  },
-  subScoreItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  subScoreLabel: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 12,
-    color: '#475569',
-    width: 82,
-  },
-  subScoreProgressTrack: {
-    flex: 1,
-    height: 7,
-    backgroundColor: '#e2e8f0',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginHorizontal: 8,
-  },
-  subScoreProgressFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  subScoreValue: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 12,
-    color: '#0f172a',
-    width: 32,
-    textAlign: 'right',
-  },
-  timeValue: {
-    ...fontStyle('inter', 'bold'),
-    fontSize: 12,
-    color: '#0284c7',
-    textAlign: 'right',
-  },
-  speakingShareCard: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    padding: 14,
-    marginBottom: 14,
-  },
-  speakingShareHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  speakingShareTitleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  speakingShareTitle: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 13,
-    color: '#0f172a',
-  },
-  targetShareBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  targetShareMet: {
-    backgroundColor: '#d1fae5',
-  },
-  targetSharePending: {
-    backgroundColor: '#fef3c7',
-  },
-  targetShareText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 11,
-  },
-  targetShareTextMet: {
-    color: '#059669',
-  },
-  targetShareTextPending: {
-    color: '#b45309',
-  },
-  shareBarTrack: {
-    height: 10,
-    backgroundColor: '#e2e8f0',
-    borderRadius: 5,
-    overflow: 'hidden',
-  },
-  shareBarFillUser: {
-    height: '100%',
-    borderRadius: 5,
-  },
-  shareBarLegend: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     marginTop: 4,
+    paddingHorizontal: 12,
   },
-  legendText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#64748b',
-  },
-  sectionBox: {
-    backgroundColor: '#ffffff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    padding: 14,
-    marginBottom: 14,
-  },
-  sectionHeader: {
+
+  /* Row 1: Side-by-side Pill Stat Cards */
+  rowOneStats: {
+    width: '100%',
     flexDirection: 'row',
-    alignItems: 'center',
+    gap: 12,
     marginBottom: 12,
   },
-  sectionTitle: {
-    ...fontStyle('outfit', 'semiBold'),
-    fontSize: 14,
-    color: '#0f172a',
-  },
-  objectiveRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-    gap: 8,
-  },
-  objectiveLeftIcon: {
-    width: 22,
-    alignItems: 'center',
-  },
-  objectiveContent: {
+  pillStatCard: {
     flex: 1,
-  },
-  objectiveTitleRow: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 12,
   },
-  objectiveTitleText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 12.5,
-    color: '#1e293b',
+  clockIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  mandatoryPill: {
-    backgroundColor: '#fee2e2',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 4,
+  starIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FEF9C3',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  mandatoryPillText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 10,
-    color: '#dc2626',
+  statTexts: {
+    flex: 1,
+    justifyContent: 'center',
   },
-  objectiveDescText: {
+  statValueBold: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 16,
+    color: '#0F172A',
+    marginBottom: 2,
+  },
+  statLabelMuted: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#64748B',
+  },
+
+  /* Row 2: 3-Metric Summary Card */
+  threeMetricCard: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 22,
+  },
+  metricColumn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  metricIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  metricIconBadgeRetry: {
+    backgroundColor: '#FEF3C7',
+  },
+  metricValueText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 17,
+    color: '#0F172A',
+  },
+  metricValueTextRetry: {
+    color: '#D97706',
+  },
+  metricLabelText: {
     ...fontStyle('inter', 'regular'),
     fontSize: 11,
-    color: '#64748b',
-    marginTop: 2,
+    color: '#64748B',
   },
-  statusBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 8,
+  metricDivider: {
+    width: 1,
+    height: 44,
+    backgroundColor: '#E2E8F0',
   },
-  statusMastered: {
-    backgroundColor: '#ecfdf5',
+
+  /* Action Buttons */
+  actionButtonsContainer: {
+    width: '100%',
+    gap: 12,
+    marginBottom: 16,
   },
-  statusAssisted: {
-    backgroundColor: '#f0f9ff',
+  primaryButton: {
+    width: '100%',
+    backgroundColor: '#007AFF',
+    height: 52,
+    borderRadius: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 4,
   },
-  statusIncomplete: {
-    backgroundColor: '#f8fafc',
+  primaryButtonPressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.99 }],
+  },
+  primaryButtonText: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 16,
+    color: '#FFFFFF',
+  },
+  secondaryButton: {
+    width: '100%',
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: '#3B82F6',
+    height: 52,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  secondaryButtonPressed: {
+    backgroundColor: '#EFF6FF',
+    opacity: 0.9,
+  },
+  secondaryButtonText: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 16,
+    color: '#2563EB',
+  },
+
+  /* Collapsible Review Accordion */
+  reviewAccordionContainer: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#E2E8F0',
+    overflow: 'hidden',
+    marginTop: 6,
   },
-  statusBadgeLabel: {
-    ...fontStyle('inter', 'semiBold'),
+  reviewAccordionHeader: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  accordionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  accordionHeaderText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 13,
+    color: '#475569',
+  },
+  reviewAccordionBody: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+    paddingTop: 12,
+    gap: 10,
+  },
+  taskItemCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  taskItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 8,
+  },
+  taskItemTitle: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 13,
+    color: '#1E293B',
+    flex: 1,
+  },
+  taskStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  taskStatusBadgePassed: {
+    backgroundColor: '#ECFDF5',
+  },
+  taskStatusBadgeGuided: {
+    backgroundColor: '#FEF3C7',
+  },
+  taskStatusText: {
+    ...fontStyle('inter', 'medium'),
     fontSize: 11,
   },
-  statusMasteredText: {
+  taskStatusTextPassed: {
     color: '#059669',
   },
-  statusAssistedText: {
-    color: '#0284c7',
+  taskStatusTextGuided: {
+    color: '#D97706',
   },
-  statusIncompleteText: {
-    color: '#64748b',
+  taskItemNote: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+    lineHeight: 16,
   },
-  correctionCard: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 10,
+  correctionsBox: {
+    marginTop: 6,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 8,
+  },
+  correctionsBoxTitle: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#334155',
+  },
+  correctionRow: {
+    backgroundColor: '#FFFFFF',
+    padding: 8,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
-    padding: 10,
-    marginBottom: 8,
-  },
-  correctionBefore: {
-    backgroundColor: '#fef2f2',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    borderColor: '#F1F5F9',
+    gap: 2,
   },
   correctionOriginal: {
     ...fontStyle('inter', 'regular'),
     fontSize: 12,
-    color: '#dc2626',
+    color: '#DC2626',
   },
-  correctionArrowRow: {
-    alignItems: 'center',
-  },
-  correctionAfter: {
-    backgroundColor: '#ecfdf5',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  correctionNatural: {
-    ...fontStyle('inter', 'semiBold'),
+  correctionBetter: {
+    ...fontStyle('inter', 'medium'),
     fontSize: 12,
     color: '#059669',
   },
-  correctionExplanation: {
+  correctionExpl: {
     ...fontStyle('inter', 'regular'),
     fontSize: 11,
-    color: '#475569',
-    marginTop: 6,
-    lineHeight: 15,
-  },
-  actionButtonsContainer: {
-    marginTop: 6,
-    gap: 10,
-  },
-  primaryCtaBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 48,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-  },
-  btnPassedCta: {
-    backgroundColor: '#059669',
-  },
-  btnRetryCta: {
-    backgroundColor: '#2563eb',
-  },
-  primaryCtaText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 14,
-    color: '#ffffff',
-    letterSpacing: 0.6,
-  },
-  secondaryButtonsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  secondaryBtn: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 40,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#cbd5e1',
-    backgroundColor: '#ffffff',
-  },
-  secondaryBtnText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 12.5,
-    color: '#475569',
-  },
-  btnPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
+    color: '#64748B',
+    marginTop: 2,
   },
 });

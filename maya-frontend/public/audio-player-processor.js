@@ -38,6 +38,11 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
           // Start playing when pre-buffer threshold is reached, or resume immediately if already active
           if (!this.isPlaying && this.totalBufferedSamples >= this.prebufferTarget) {
             this.isPlaying = true;
+            // Prepend 60ms of zero-samples (~1440 samples at 24kHz) to allow physical DACs / OS mixers
+            // to unmute smoothly without clipping the first spoken syllable/consonant.
+            const leadInSilence = new Float32Array(1440);
+            this.queue.unshift(leadInSilence);
+            this.totalBufferedSamples += 1440;
             this.port.postMessage({ state: 'speaking' });
           }
         }
@@ -46,6 +51,9 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
         // If there's pending audio, start playing immediately even if below prebuffer threshold
         if (this.totalBufferedSamples > 0 && !this.isPlaying) {
           this.isPlaying = true;
+          const leadInSilence = new Float32Array(1440);
+          this.queue.unshift(leadInSilence);
+          this.totalBufferedSamples += 1440;
           this.port.postMessage({ state: 'speaking' });
         } else if (this.totalBufferedSamples === 0) {
           this.isPlaying = false;

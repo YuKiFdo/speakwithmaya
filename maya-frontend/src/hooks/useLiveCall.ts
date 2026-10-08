@@ -4,7 +4,16 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { createAudioCapture } from '@/services/audio/AudioCapture';
 import { createAudioPlayer } from '@/services/audio/AudioPlayer';
-import { LiveTransport, ILiveTransport, GrammarCorrectionPayload, RephraseSuggestionPayload, RecordedObjectivePayload } from '@/services/gemini/LiveTransport';
+import {
+  LiveTransport,
+  ILiveTransport,
+  GrammarCorrectionPayload,
+  RephraseSuggestionPayload,
+  RecordedObjectivePayload,
+  PracticeTaskPayload,
+  TestScorePayload,
+  LevelEvaluationPayload,
+} from '@/services/gemini/LiveTransport';
 import { ServerLiveTransport } from '@/services/gemini/ServerLiveTransport';
 import { persistSessionRecord, SessionHistoryRecord, getAuthHeaders } from '@/services/supabase';
 import { GrammarFeedbackData } from '@/components/call/grammar-feedback-modal';
@@ -59,6 +68,9 @@ interface UseLiveCallOptions {
   roadmapLevelId?: string;
   levelNumber?: number;
   levelTitle?: string;
+  practicePoints?: string[];
+  canonicalContent?: string;
+  passingScorePercent?: number;
   targetSpeakingShare?: number;
   learningObjectives?: Array<{
     id: string;
@@ -102,6 +114,13 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const [lastTurnLatencyMs, setLastTurnLatencyMs] = useState<number | null>(null);
   const [networkQuality, setNetworkQuality] = useState<'good' | 'fair' | 'poor'>('good');
   const [networkRttMs, setNetworkRttMs] = useState<number>(0);
+
+  // Next-generation deliberate practice & testing states
+  const [activePracticeTask, setActivePracticeTask] = useState<PracticeTaskPayload | null>(null);
+  const [testScores, setTestScores] = useState<Map<number, TestScorePayload>>(new Map());
+  const [evaluationResult, setEvaluationResult] = useState<LevelEvaluationPayload | null>(null);
+  const testScoresRef = useRef<Map<number, TestScorePayload>>(new Map());
+  const evaluationResultRef = useRef<LevelEvaluationPayload | null>(null);
 
   const captureRef = useRef(createAudioCapture());
   const playerRef = useRef(createAudioPlayer());
@@ -276,6 +295,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         sessionStartTimeRef.current = null;
         secondsElapsedRef.current = 0;
         setSecondsElapsed(0);
+        setActivePracticeTask(null);
+        setTestScores(new Map());
+        setEvaluationResult(null);
+        testScoresRef.current.clear();
+        evaluationResultRef.current = null;
       }
 
       // 1. Initialize Audio Player
@@ -404,16 +428,6 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         .map((t) => `${t.role === 'user' ? 'Student' : 'Maya'}: ${t.text}`)
         .join('\n');
 
-      const effectiveObjectives = options.learningObjectives || options.guidedPrompt?.learningObjectives;
-      const effectiveGuidedPrompt = options.guidedPrompt
-        ? {
-            ...options.guidedPrompt,
-            learningObjectives: options.guidedPrompt.learningObjectives || effectiveObjectives,
-          }
-        : effectiveObjectives
-          ? { learningObjectives: effectiveObjectives }
-          : undefined;
-
       const backendBaseUrl = getBackendBaseUrl();
       const authHeaders = await getAuthHeaders();
       const res = await fetch(`${backendBaseUrl}/v1/session-token`, {
@@ -433,8 +447,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           userName: options.userName,
           isIntroCall: options.isIntroCall,
           roadmapLevelId: options.roadmapLevelId,
-          guidedPrompt: effectiveGuidedPrompt,
-          learningObjectives: effectiveObjectives,
+          practicePoints: options.practicePoints,
+          canonicalContent: options.canonicalContent,
+          passingScorePercent: options.passingScorePercent,
           memory: rollingMemory || undefined,
         }),
       });
@@ -477,8 +492,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             userName: options.userName,
             isIntroCall: options.isIntroCall,
             roadmapLevelId: options.roadmapLevelId,
-            guidedPrompt: effectiveGuidedPrompt,
-            learningObjectives: effectiveObjectives,
+            practicePoints: options.practicePoints,
+            canonicalContent: options.canonicalContent,
+            passingScorePercent: options.passingScorePercent,
             isReconnect,
             memory: rollingMemory || undefined,
           },
@@ -749,6 +765,36 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             });
             setFeedbackVisible(true);
           },
+          onPracticeTaskUpdate: (task: PracticeTaskPayload) => {
+            console.log('[useLiveCall] 🎯 Active practice task update:', task);
+            setActivePracticeTask(task);
+          },
+          onTestScoreRecorded: (score: TestScorePayload) => {
+            console.log('[useLiveCall] 📝 Test score recorded:', score);
+            testScoresRef.current.set(score.pointIndex, score);
+            setTestScores((prev) => {
+              const updated = new Map(prev);
+              updated.set(score.pointIndex, score);
+              return updated;
+            });
+          },
+          onLevelEvaluationCompleted: (evaluation: LevelEvaluationPayload) => {
+            console.log('[useLiveCall] 🏆 Level evaluation completed:', evaluation);
+            evaluationResultRef.current = evaluation;
+            setEvaluationResult(evaluation);
+            if (evaluation.isPassed && options.roadmapLevelId) {
+              if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+                try {
+                  const raw = window.localStorage.getItem('maya_cached_completed_levels');
+                  const stored = raw ? JSON.parse(raw) : [];
+                  if (Array.isArray(stored) && !stored.includes(options.roadmapLevelId)) {
+                    stored.push(options.roadmapLevelId);
+                    window.localStorage.setItem('maya_cached_completed_levels', JSON.stringify(stored));
+                  }
+                } catch {}
+              }
+            }
+          },
           onObjectiveRecorded: (payload: RecordedObjectivePayload) => {
             console.log('[useLiveCall] 🎯 Objective recorded by Maya coach:', payload.objectiveId, payload.status, payload.note);
             recordedObjectivesRef.current.set(payload.objectiveId, {
@@ -1005,85 +1051,139 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       : Math.max(55, 75 - (targetShare - userShare));
     const pronunciationScore = 85;
 
-    const overallScore = Math.min(
-      99,
-      Math.max(45, Math.round(objectiveScore * 0.45 + fluencyScore * 0.35 + grammarScore * 0.20))
-    );
+    const evalRes = evaluationResultRef.current;
+    const isRoadmap = Boolean(options.roadmapLevelId);
+    const minPassingScore = options.passingScorePercent || 75;
 
-    const mandatoryFailed = objectivesResult.some((o) => o.isMandatory && o.status === 'incomplete');
-    const minPassingScore = 70;
-    const passed = !mandatoryFailed && overallScore >= minPassingScore;
+    const userTurns = turnsRef.current.filter((t) => t.role === 'user');
+    const userSentencesCount = Math.max(0, userTurns.length);
+    const talkTimeSecs = totalTalkSecs > 0 ? totalTalkSecs : secs;
+    const isVeryShortSession = secs < 25 || userSentencesCount < 2;
 
-    let passReason = 'All core objectives achieved with great conversational flow!';
-    if (mandatoryFailed) {
-      passReason = 'Complete all mandatory curriculum checkpoints to unlock the next level.';
-    } else if (userShare < targetShare - 10) {
-      passReason = `Try speaking more! Aim for at least ${targetShare}% student speech next time.`;
-    } else if (overallScore < minPassingScore) {
-      passReason = `Score fell below ${minPassingScore}%. Review the corrections below and retry.`;
+    // Strict evaluation rules: A roadmap level CANNOT be passed without completing the Stage 2 evaluation test
+    let passed = false;
+    let overallScore = 0;
+    let passReason = '';
+    let feedbackSinhala = evalRes?.feedbackSinhala;
+    let feedbackEnglish = evalRes?.feedbackEnglish;
+
+    if (isRoadmap) {
+      if (evalRes) {
+        passed = Boolean(evalRes.isPassed);
+        overallScore = evalRes.scorePercent;
+        passReason = evalRes.feedbackEnglish || evalRes.feedbackSinhala || (passed ? 'Level mastered!' : 'Review practice points and retry.');
+      } else {
+        // User exited early without completing the lesson and test
+        passed = false;
+        overallScore = 0;
+        passReason = 'Session ended early before completing the practice tasks and test.';
+        feedbackSinhala = feedbackSinhala || 'ඔයා session එක අතරමගදී අවසන් කළා. Level එක complete කරන්න මුල ඉඳන් test එක සම්පූර්ණ කරන්න.';
+        feedbackEnglish = feedbackEnglish || 'Session ended early before completing the tasks and evaluation. Try again to pass this level.';
+      }
+    } else {
+      // General Chat / Free Practice
+      if (isVeryShortSession) {
+        passed = false;
+        overallScore = 0;
+        passReason = 'Session ended early before sufficient practice.';
+        feedbackEnglish = 'You ended the call before practicing. Whenever you are ready, come back and practice speaking with Maya!';
+      } else {
+        passed = true;
+        overallScore = fluencyScore;
+        passReason = 'All core objectives achieved with great conversational flow!';
+      }
     }
 
-    // 3. Handle Roadmap Session vs Free Practice
-    if (options.roadmapLevelId) {
-      const report: MissionReportData = {
-        roadmapLevelId: options.roadmapLevelId,
-        levelNumber: options.levelNumber,
-        levelTitle: options.levelTitle || options.topic,
-        topic: options.topic,
-        durationSeconds: secs,
-        targetDurationSeconds: options.durationSeconds || 300,
-        userSpeakingSeconds: userSecs,
-        userSpeakingShare: userShare,
-        targetSpeakingShare: targetShare,
-        overallScore,
-        fluencyScore,
-        grammarScore,
-        pronunciationScore,
-        passed,
-        passReason,
-        objectives: objectivesResult,
-        corrections: correctionsRef.current.map((c) => ({
-          studentSaid: c.studentSaid,
-          moreNatural: c.moreNatural,
-          explanation: c.explanation,
-        })),
-      };
+    // Build deliberate practice tasks list for the report
+    let finalObjectives: MissionObjectiveResult[] = [];
+    const pointsList: string[] = (options.practicePoints && options.practicePoints.length > 0)
+      ? options.practicePoints
+      : curriculumObjectives.map((o) => o.title);
 
-      setMissionReport(report);
-      if (options.onCallCompleted) {
-        options.onCallCompleted(report);
-      }
+    if (pointsList.length > 0) {
+      finalObjectives = pointsList.map((pt, idx) => {
+        const testScore = testScoresRef.current.get(idx);
+        let status: 'mastered' | 'assisted' | 'struggling' | 'incomplete' = 'incomplete';
+        if (testScore) {
+          status = testScore.passed ? 'mastered' : 'assisted';
+        } else if (evalRes) {
+          status = evalRes.isPassed ? 'mastered' : 'assisted';
+        }
+        return {
+          id: `task-${idx}`,
+          title: pt,
+          status,
+          note: testScore?.note,
+        };
+      });
+    } else {
+      finalObjectives = objectivesResult;
+    }
 
-      // If passed, immediately cache completed roadmap level ID for instant zero-jump unlock
-      if (passed) {
-        try {
-          if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-            const raw = window.localStorage.getItem('maya_cached_completed_levels');
-            const stored: string[] = raw ? JSON.parse(raw) : [];
-            const candidates = [
-              options.roadmapLevelId,
-              options.levelNumber ? `lvl-${options.levelNumber}` : null,
-              options.levelNumber ? `lvl-0${options.levelNumber}` : null,
-              options.levelNumber ? String(options.levelNumber) : null,
-            ].filter(Boolean) as string[];
+    // 3. Assemble Post-Call Session & Mission Report
+    const isGeneral = !options.roadmapLevelId;
+    const xpEarned = isRoadmap
+      ? (passed ? 100 : (evalRes ? 25 : 0))
+      : (passed ? 50 : 0);
 
-            let changed = false;
-            for (const c of candidates) {
-              if (!stored.includes(c)) {
-                stored.push(c);
-                changed = true;
-              }
-            }
-            if (changed) {
-              window.localStorage.setItem('maya_cached_completed_levels', JSON.stringify(stored));
+    const report: MissionReportData = {
+      roadmapLevelId: options.roadmapLevelId || '',
+      levelNumber: options.levelNumber,
+      levelTitle: options.levelTitle || options.topic,
+      topic: options.topic,
+      durationSeconds: secs,
+      overallScore,
+      passingScorePercent: minPassingScore,
+      fluencyScore,
+      grammarScore,
+      passed,
+      passReason,
+      feedbackSinhala,
+      feedbackEnglish,
+      userSentencesCount,
+      talkTimeSeconds: talkTimeSecs,
+      xpEarned,
+      isGeneralChat: isGeneral,
+      objectives: finalObjectives,
+      corrections: correctionsRef.current.map((c) => ({
+        studentSaid: c.studentSaid,
+        moreNatural: c.moreNatural,
+        explanation: c.explanation,
+      })),
+    };
+
+    setMissionReport(report);
+    if (options.onCallCompleted) {
+      options.onCallCompleted(report);
+    }
+
+    // If passed, immediately cache completed roadmap level ID for instant zero-jump unlock
+    if (options.roadmapLevelId && passed) {
+      try {
+        if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+          const raw = window.localStorage.getItem('maya_cached_completed_levels');
+          const stored: string[] = raw ? JSON.parse(raw) : [];
+          const candidates = [
+            options.roadmapLevelId,
+            options.levelNumber ? `lvl-${options.levelNumber}` : null,
+            options.levelNumber ? `lvl-0${options.levelNumber}` : null,
+            options.levelNumber ? String(options.levelNumber) : null,
+          ].filter(Boolean) as string[];
+
+          let changed = false;
+          for (const c of candidates) {
+            if (!stored.includes(c)) {
+              stored.push(c);
+              changed = true;
             }
           }
-        } catch (e) {
-          console.warn('[useLiveCall] Error caching completed level:', e);
+          if (changed) {
+            window.localStorage.setItem('maya_cached_completed_levels', JSON.stringify(stored));
+          }
         }
+      } catch (e) {
+        console.warn('[useLiveCall] Error caching completed level:', e);
       }
-    } else if (shouldNavigate) {
-      router.replace('/history');
     }
 
     // 4. Persist session history asynchronously in background (non-blocking)
@@ -1230,6 +1330,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     lastTurnLatencyMs,
     networkQuality,
     networkRttMs,
+    activePracticeTask,
+    testScores,
+    evaluationResult,
   };
 }
 

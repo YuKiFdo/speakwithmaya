@@ -1,63 +1,49 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber, IsBoolean, IsIn, ValidateNested, IsArray } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsNumber, IsBoolean, IsArray, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export type UnlockType = 'free' | 'completion' | 'score' | 'time';
+/**
+ * Universal canonical lesson parser:
+ * Parses:
+ * Lesson: <Title>
+ *
+ * What you’ll practice:
+ * - <Point 1>
+ * - <Point 2>
+ */
+export function parseCanonicalLessonContent(raw: string): { title?: string; practicePoints: string[] } {
+  if (!raw || typeof raw !== 'string') return { practicePoints: [] };
+  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  let title: string | undefined;
+  const practicePoints: string[] = [];
 
-export class UnlockRuleDto {
-  @IsIn(['free', 'completion', 'score', 'time'])
-  type: UnlockType = 'score';
+  for (const line of lines) {
+    const lessonMatch = line.match(/^lesson:\s*(.+)$/i);
+    if (lessonMatch) {
+      title = lessonMatch[1].trim();
+      continue;
+    }
+    const bulletMatch = line.match(/^[-*•]\s*(.+)$/);
+    if (bulletMatch) {
+      practicePoints.push(bulletMatch[1].trim());
+      continue;
+    }
+  }
 
-  @IsOptional()
-  @IsNumber()
-  minScore?: number = 75;
-
-  @IsOptional()
-  @IsNumber()
-  minDurationSeconds?: number = 240;
-
-  @IsOptional()
-  @IsNumber()
-  requiresLevelNumber?: number;
+  return { title, practicePoints };
 }
 
-export class GuidedPromptDto {
-  @IsOptional()
-  @IsString()
-  scenarioRole?: string; // e.g. "Maya is a friendly coffee shop barista in London"
-
-  @IsOptional()
-  @IsString()
-  coachingFocus?: string; // e.g. "Practice polite ordering forms ('Could I please have...', 'I would like...')"
-
-  @IsOptional()
-  @IsString()
-  openingQuestion?: string; // e.g. "Hello! Welcome to Costa Coffee. What can I get started for you today?"
-
-  @IsOptional()
-  @IsString()
-  customPromptAddon?: string; // Optional raw guidance if advanced admin wants extra constraints
-}
-
-export class LearningObjectiveDto {
-  @IsString()
-  @IsNotEmpty()
-  id: string;
-
-  @IsString()
-  @IsNotEmpty()
-  title: string;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  isMandatory?: boolean = true;
-
-  @IsOptional()
-  @IsNumber()
-  targetTurns?: number;
+/**
+ * Universal canonical lesson formatter:
+ * Generates:
+ * Lesson: <Title>
+ *
+ * What you’ll practice:
+ * - <Point 1>
+ * - <Point 2>
+ */
+export function formatCanonicalLessonContent(title: string, practicePoints: string[] = []): string {
+  const points = (practicePoints || []).map((p) => `- ${p}`).join('\n');
+  return `Lesson: ${title || 'Speaking Practice'}\n\nWhat you’ll practice:\n${points}`;
 }
 
 export class CreateRoadmapLevelDto {
@@ -69,6 +55,19 @@ export class CreateRoadmapLevelDto {
   title: string;
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  practicePoints?: string[];
+
+  @IsOptional()
+  @IsString()
+  canonicalContent?: string;
+
+  @IsOptional()
+  @IsNumber()
+  passingScorePercent?: number = 75;
+
+  @IsOptional()
   @IsString()
   description?: string;
 
@@ -77,12 +76,8 @@ export class CreateRoadmapLevelDto {
   topic?: string;
 
   @IsOptional()
-  @IsNumber()
-  targetDurationMinutes?: number = 5;
-
-  @IsOptional()
-  @IsIn(['robot', 'chat', 'family', 'home', 'wave', 'directions'])
-  iconType?: 'robot' | 'chat' | 'family' | 'home' | 'wave' | 'directions' = 'chat';
+  @IsString()
+  iconType?: string = 'chat';
 
   @IsOptional()
   @IsString()
@@ -109,26 +104,6 @@ export class CreateRoadmapLevelDto {
   xpReward?: number = 100;
 
   @IsOptional()
-  @ValidateNested()
-  @Type(() => GuidedPromptDto)
-  guidedPrompt?: GuidedPromptDto;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => UnlockRuleDto)
-  unlockRule?: UnlockRuleDto;
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => LearningObjectiveDto)
-  learningObjectives?: LearningObjectiveDto[];
-
-  @IsOptional()
-  @IsNumber()
-  targetSpeakingShare?: number = 40;
-
-  @IsOptional()
   @IsBoolean()
   isPublished?: boolean = true;
 }
@@ -143,6 +118,19 @@ export class UpdateRoadmapLevelDto {
   title?: string;
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  practicePoints?: string[];
+
+  @IsOptional()
+  @IsString()
+  canonicalContent?: string;
+
+  @IsOptional()
+  @IsNumber()
+  passingScorePercent?: number;
+
+  @IsOptional()
   @IsString()
   description?: string;
 
@@ -152,15 +140,11 @@ export class UpdateRoadmapLevelDto {
 
   @IsOptional()
   @IsNumber()
-  targetDurationMinutes?: number;
-
-  @IsOptional()
-  @IsNumber()
   xpReward?: number;
 
   @IsOptional()
-  @IsIn(['robot', 'chat', 'family', 'home', 'wave', 'directions'])
-  iconType?: 'robot' | 'chat' | 'family' | 'home' | 'wave' | 'directions';
+  @IsString()
+  iconType?: string;
 
   @IsOptional()
   @IsString()
@@ -181,26 +165,6 @@ export class UpdateRoadmapLevelDto {
   @IsOptional()
   @IsString()
   customSvg?: string;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => GuidedPromptDto)
-  guidedPrompt?: GuidedPromptDto;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => UnlockRuleDto)
-  unlockRule?: UnlockRuleDto;
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => LearningObjectiveDto)
-  learningObjectives?: LearningObjectiveDto[];
-
-  @IsOptional()
-  @IsNumber()
-  targetSpeakingShare?: number;
 
   @IsOptional()
   @IsBoolean()
@@ -228,17 +192,17 @@ export class SimulateLevelTurnDto {
   userMessage: string;
 
   @IsOptional()
-  @ValidateNested()
-  @Type(() => GuidedPromptDto)
-  guidedPrompt?: GuidedPromptDto;
-
-  @IsOptional()
   @IsString()
   topic?: string;
 
   @IsOptional()
   @IsString()
   levelTitle?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  practicePoints?: string[];
 
   @IsOptional()
   @IsArray()

@@ -33,6 +33,26 @@ export interface RecordedObjectivePayload {
   note?: string;
 }
 
+export interface PracticeTaskPayload {
+  pointIndex: number;
+  phase: 'teaching' | 'testing';
+  pointTitle: string;
+  guidanceOrScenario?: string;
+}
+
+export interface TestScorePayload {
+  pointIndex: number;
+  passed: boolean;
+  note?: string;
+}
+
+export interface LevelEvaluationPayload {
+  isPassed: boolean;
+  scorePercent: number;
+  feedbackSinhala?: string;
+  feedbackEnglish?: string;
+}
+
 export interface LiveTransportCallbacks {
   onOpen?: () => void;
   onAudioChunk?: (base64Pcm: string) => void;
@@ -43,6 +63,9 @@ export interface LiveTransportCallbacks {
   onInterrupted?: () => void;
   onGrammarCorrection?: (correction: GrammarCorrectionPayload) => void;
   onRephraseSuggestion?: (suggestion: RephraseSuggestionPayload) => void;
+  onPracticeTaskUpdate?: (task: PracticeTaskPayload) => void;
+  onTestScoreRecorded?: (score: TestScorePayload) => void;
+  onLevelEvaluationCompleted?: (evaluation: LevelEvaluationPayload) => void;
   onObjectiveRecorded?: (payload: RecordedObjectivePayload) => void;
   onConcludeCall?: (reason: string) => void;
   onUsageUpdate?: (tokens: {

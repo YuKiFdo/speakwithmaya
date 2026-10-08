@@ -1,34 +1,6 @@
 import { IsString, IsOptional, IsNumber, IsArray, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class GuidedPromptDto {
-  @IsOptional()
-  @IsString()
-  scenarioRole?: string;
-
-  @IsOptional()
-  @IsString()
-  coachingFocus?: string;
-
-  @IsOptional()
-  @IsString()
-  openingQuestion?: string;
-
-  @IsOptional()
-  @IsString()
-  customPromptAddon?: string;
-
-  @IsOptional()
-  @IsArray()
-  learningObjectives?: Array<{
-    id: string;
-    title: string;
-    description?: string;
-    isMandatory?: boolean;
-    targetTurns?: number;
-  }>;
-}
-
 export class CreateSessionTokenDto {
   @IsOptional()
   @IsString()
@@ -89,18 +61,15 @@ export class CreateSessionTokenDto {
 
   @IsOptional()
   @IsArray()
-  learningObjectives?: Array<{
-    id: string;
-    title: string;
-    description?: string;
-    isMandatory?: boolean;
-    targetTurns?: number;
-  }>;
+  practicePoints?: string[];
 
   @IsOptional()
-  @ValidateNested()
-  @Type(() => GuidedPromptDto)
-  guidedPrompt?: GuidedPromptDto;
+  @IsString()
+  canonicalContent?: string;
+
+  @IsOptional()
+  @IsNumber()
+  passingScorePercent?: number;
 }
 
 

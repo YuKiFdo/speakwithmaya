@@ -426,14 +426,57 @@ export class ServerLiveTransport implements ILiveTransport {
         this.callbacks.onInterrupted?.();
         break;
 
+      case 'practice_task_update':
+        this.callbacks.onPracticeTaskUpdate?.({
+          pointIndex: Number(msg.pointIndex) || 0,
+          phase: msg.phase === 'testing' ? 'testing' : 'teaching',
+          pointTitle: String(msg.pointTitle || ''),
+          guidanceOrScenario: String(msg.guidanceOrScenario || ''),
+        });
+        break;
+
+      case 'test_score_update':
+        this.callbacks.onTestScoreRecorded?.({
+          pointIndex: Number(msg.pointIndex) || 0,
+          passed: Boolean(msg.passed),
+          note: String(msg.note || ''),
+        });
+        break;
+
+      case 'level_evaluation_completed':
+        this.callbacks.onLevelEvaluationCompleted?.({
+          isPassed: Boolean(msg.isPassed),
+          scorePercent: Number(msg.scorePercent) || 0,
+          feedbackSinhala: String(msg.feedbackSinhala || ''),
+          feedbackEnglish: String(msg.feedbackEnglish || ''),
+        });
+        break;
+
       case 'tool_call':
         if (msg.name === 'show_grammar_correction') {
           this.callbacks.onGrammarCorrection?.(msg.args);
         } else if (msg.name === 'show_rephrase_suggestion') {
           this.callbacks.onRephraseSuggestion?.(msg.args);
-        } else if (msg.name === 'record_objective') {
-          console.log(`[${getLogTimestamp()}] 🎯 [ServerLiveTransport:${this.clientSessionId}] Objective recorded:`, msg.args);
-          this.callbacks.onObjectiveRecorded?.(msg.args);
+        } else if (msg.name === 'set_active_practice_task') {
+          this.callbacks.onPracticeTaskUpdate?.({
+            pointIndex: Number(msg.args?.pointIndex) || 0,
+            phase: msg.args?.phase === 'testing' ? 'testing' : 'teaching',
+            pointTitle: String(msg.args?.taskTitle || msg.args?.pointTitle || ''),
+            guidanceOrScenario: String(msg.args?.hint || msg.args?.guidanceOrScenario || ''),
+          });
+        } else if (msg.name === 'record_test_score') {
+          this.callbacks.onTestScoreRecorded?.({
+            pointIndex: Number(msg.args?.pointIndex) || 0,
+            passed: Boolean(msg.args?.passed),
+            note: String(msg.args?.note || ''),
+          });
+        } else if (msg.name === 'conclude_level_evaluation') {
+          this.callbacks.onLevelEvaluationCompleted?.({
+            isPassed: Boolean(msg.args?.isPassed),
+            scorePercent: Number(msg.args?.scorePercent) || 0,
+            feedbackSinhala: String(msg.args?.feedbackSinhala || ''),
+            feedbackEnglish: String(msg.args?.feedbackEnglish || ''),
+          });
         } else if (msg.name === 'conclude_call') {
           this.callbacks.onConcludeCall?.(msg.args?.farewellReason || 'Call completed');
         }

@@ -82,27 +82,11 @@ const SAMPLE_SVGS = [
   },
 ];
 
-export interface LearningObjective {
-  id: string;
-  title: string;
-  description?: string;
-  isMandatory?: boolean;
-  targetTurns?: number;
-}
-
-export interface GuidedPrompt {
-  scenarioRole?: string;
-  coachingFocus?: string;
-  openingQuestion?: string;
-  customPromptAddon?: string;
-}
-
-export interface UnlockRule {
-  type: 'free' | 'completion' | 'score' | 'time';
-  minScore?: number;
-  minDurationSeconds?: number;
-  requiresLevelNumber?: number;
-}
+import {
+  parseCanonicalLessonContent,
+  formatCanonicalLessonContent,
+  DEFAULT_CANONICAL_TEMPLATE,
+} from '@/utils/roadmap-canonical';
 
 export interface RoadmapLevel {
   id: string;
@@ -110,7 +94,6 @@ export interface RoadmapLevel {
   title: string;
   description: string;
   topic: string;
-  targetDurationMinutes: number;
   xpReward: number;
   iconType: 'robot' | 'chat' | 'family' | 'home' | 'wave' | 'directions';
   numberColor: string;
@@ -118,10 +101,9 @@ export interface RoadmapLevel {
   haloBorderColor: string;
   scenarioId?: string;
   customSvg?: string;
-  guidedPrompt: GuidedPrompt;
-  unlockRule: UnlockRule;
-  learningObjectives?: LearningObjective[];
-  targetSpeakingShare?: number;
+  practicePoints: string[];
+  canonicalContent: string;
+  passingScorePercent?: number;
   isPublished: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -140,108 +122,6 @@ export interface SimulatorMessage {
     explanation?: string;
   };
 }
-
-interface PromptPreset {
-  id: string;
-  name: string;
-  topic: string;
-  scenarioRole: string;
-  coachingFocus: string;
-  openingQuestion: string;
-  iconType: 'robot' | 'chat' | 'family' | 'home' | 'wave' | 'directions';
-  sampleObjectives?: Array<{
-    title: string;
-    description: string;
-    isMandatory: boolean;
-  }>;
-}
-
-const PROMPT_PRESETS: PromptPreset[] = [
-  {
-    id: 'cafe-ordering',
-    name: 'Ordering at a Cafe',
-    topic: 'Food & Dining Out',
-    scenarioRole: 'Maya is a cheerful, polite barista at a busy coffee shop in Colombo.',
-    coachingFocus: 'Polite requests using "Could I please have...", "I would like...", and asking for modifications.',
-    openingQuestion: 'Hi there! Welcome to the cafe. What can I get started for you today?',
-    iconType: 'chat',
-    sampleObjectives: [
-      { title: 'Order food or drinks clearly', description: 'State desired coffee or snack items using polite expressions', isMandatory: true },
-      { title: 'Specify customization or size', description: 'Request milk type, sugar level, or cup size', isMandatory: true },
-      { title: 'Ask about price or payment', description: 'Inquire how much it costs or offer payment', isMandatory: false },
-    ],
-  },
-  {
-    id: 'job-interview-strengths',
-    name: 'Job Interview: Introducing Yourself',
-    topic: 'Career & Workplace',
-    scenarioRole: 'Maya is a warm and professional hiring manager conducting a friendly first-round interview.',
-    coachingFocus: 'Professional self-introductions, career background, and articulating personal strengths confidently.',
-    openingQuestion: 'Welcome to your interview! To start off, could you tell me a little bit about yourself and your background?',
-    iconType: 'robot',
-    sampleObjectives: [
-      { title: 'Professional Introduction', description: 'Briefly summarize education or work background', isMandatory: true },
-      { title: 'State Core Strengths', description: 'Share 2-3 key personal qualities or skills with examples', isMandatory: true },
-      { title: 'Ask interviewer a question', description: 'Ask an insightful question about role or company culture', isMandatory: false },
-    ],
-  },
-  {
-    id: 'past-vacation',
-    name: 'Describing a Memorable Vacation',
-    topic: 'Travel & Experiences',
-    scenarioRole: 'Maya is a close, curious friend who loves traveling and wants to hear all about your latest trip.',
-    coachingFocus: 'Past tense verbs ("went", "visited", "tasted", "saw") and evocative sensory descriptions.',
-    openingQuestion: 'Hey! I heard you went on a trip recently. Where did you go, and what was the highlight of the trip?',
-    iconType: 'home',
-    sampleObjectives: [
-      { title: 'Share trip destination & timing', description: 'Explain where and when trip took place using past tense', isMandatory: true },
-      { title: 'Describe memorable activities or food', description: 'Use sensory details to narrate highlights', isMandatory: true },
-      { title: 'Reflect on the experience', description: 'State whether you would visit again and why', isMandatory: false },
-    ],
-  },
-  {
-    id: 'asking-directions',
-    name: 'Asking & Following Directions',
-    topic: 'Public Navigation',
-    scenarioRole: 'Maya is a helpful local resident on the street helping a visitor find their way.',
-    coachingFocus: 'Directional prepositions ("opposite to", "next to", "turn left at the traffic light", "keep walking straight").',
-    openingQuestion: 'Excuse me! You seem to be searching for a street or building. Can I help you find where you are going?',
-    iconType: 'directions',
-    sampleObjectives: [
-      { title: 'Ask for directions politely', description: 'Use polite opener like "Excuse me, how can I get to..."', isMandatory: true },
-      { title: 'Clarify landmarks or distance', description: 'Ask how far it is or reference visible landmarks', isMandatory: true },
-      { title: 'Confirm understanding & thank Maya', description: 'Rephrase directions and express gratitude', isMandatory: false },
-    ],
-  },
-  {
-    id: 'colleague-small-talk',
-    name: 'Casual Colleague Small Talk',
-    topic: 'Social Small Talk',
-    scenarioRole: 'Maya is an enthusiastic colleague bumping into you at the office coffee pantry on Monday morning.',
-    coachingFocus: 'Casual weekend conversation, showing interest with follow-up questions, and active listening.',
-    openingQuestion: 'Good morning! How was your weekend? Did you do anything fun or relaxing?',
-    iconType: 'wave',
-    sampleObjectives: [
-      { title: 'Weekend recap', description: 'Share 2-3 things done over the weekend with enthusiasm', isMandatory: true },
-      { title: 'Ask Maya about her weekend', description: 'Reciprocate interest by asking about her activities', isMandatory: true },
-      { title: 'Discuss the week ahead', description: 'Mention an upcoming work project or event', isMandatory: false },
-    ],
-  },
-  {
-    id: 'family-traditions',
-    name: 'Family Celebrations & Food',
-    topic: 'Family & Culture',
-    scenarioRole: 'Maya is an empathetic friend curious about holiday traditions and family gatherings.',
-    coachingFocus: 'Expressing feelings, descriptive food vocabulary, and cultural celebrations.',
-    openingQuestion: 'When your family gets together for special occasions, what is your favorite traditional dish everyone loves?',
-    iconType: 'family',
-    sampleObjectives: [
-      { title: 'Describe family holiday or event', description: 'Introduce occasion and who gathers together', isMandatory: true },
-      { title: 'Highlight special dish or activity', description: 'Explain a specific custom or favorite family meal', isMandatory: true },
-      { title: 'Express why it matters to you', description: 'Reflect on family bonding and memories', isMandatory: false },
-    ],
-  },
-];
 
 const COLOR_THEMES = [
   { name: 'Blue', numberColor: '#0057FF', haloColor: '#EFF6FF', haloBorderColor: '#BFDBFE' },
@@ -272,7 +152,7 @@ export default function AdminRoadmapScreen() {
   // Editor Modal State
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingLevel, setEditingLevel] = useState<RoadmapLevel | null>(null);
-  const [activeTab, setActiveTab] = useState<'basics' | 'objectives' | 'unlock'>('basics');
+  const [activeTab, setActiveTab] = useState<'basics' | 'objectives'>('basics');
 
   // Playground Modal State
   const [isPlaygroundOpen, setIsPlaygroundOpen] = useState(false);
@@ -286,28 +166,58 @@ export default function AdminRoadmapScreen() {
   const [formTitle, setFormTitle] = useState('');
   const [formTopic, setFormTopic] = useState('');
   const [formDescription, setFormDescription] = useState('');
-  const [formDuration, setFormDuration] = useState<number>(5);
   const [formXpReward, setFormXpReward] = useState<number>(100);
   const [formIcon, setFormIcon] = useState<'robot' | 'chat' | 'family' | 'home' | 'wave' | 'directions'>('chat');
   const [formColorIdx, setFormColorIdx] = useState(0);
   const [iconMode, setIconMode] = useState<'preset' | 'custom_svg'>('preset');
   const [formCustomSvg, setFormCustomSvg] = useState('');
 
-  // Guided Prompt Fields
-  const [formScenarioRole, setFormScenarioRole] = useState('');
-  const [formCoachingFocus, setFormCoachingFocus] = useState('');
-  const [formOpeningQuestion, setFormOpeningQuestion] = useState('');
-  const [formCustomPromptAddon, setFormCustomPromptAddon] = useState('');
+  // Canonical Content & Practice Points Fields
+  const [formCanonicalContent, setFormCanonicalContent] = useState<string>(DEFAULT_CANONICAL_TEMPLATE);
+  const [formPracticePoints, setFormPracticePoints] = useState<string[]>([]);
+  const [newPracticePointInput, setNewPracticePointInput] = useState<string>('');
 
-  // Objectives & Speaking Share Fields
-  const [formTargetSpeakingShare, setFormTargetSpeakingShare] = useState<number>(40);
-  const [formObjectives, setFormObjectives] = useState<LearningObjective[]>([]);
-
-  // Unlock Rule Fields
-  const [formUnlockType, setFormUnlockType] = useState<'free' | 'completion' | 'score' | 'time'>('score');
+  // Progression & Publication Fields
   const [formMinScore, setFormMinScore] = useState<number>(75);
-  const [formMinSeconds, setFormMinSeconds] = useState<number>(240);
   const [formIsPublished, setFormIsPublished] = useState<boolean>(true);
+
+  const handleCanonicalTextChange = (text: string) => {
+    setFormCanonicalContent(text);
+    const parsed = parseCanonicalLessonContent(text);
+    if (parsed.title) {
+      setFormTitle(parsed.title);
+    }
+    if (parsed.practicePoints.length > 0) {
+      setFormPracticePoints(parsed.practicePoints);
+    }
+  };
+
+  const handleTitleChange = (newTitle: string) => {
+    setFormTitle(newTitle);
+    setFormCanonicalContent(formatCanonicalLessonContent(newTitle, formPracticePoints));
+  };
+
+  const handleAddPracticePoint = () => {
+    const trimmed = newPracticePointInput.trim();
+    if (!trimmed) return;
+    const updated = [...formPracticePoints, trimmed];
+    setFormPracticePoints(updated);
+    setNewPracticePointInput('');
+    setFormCanonicalContent(formatCanonicalLessonContent(formTitle, updated));
+  };
+
+  const handleRemovePracticePoint = (index: number) => {
+    const updated = formPracticePoints.filter((_, i) => i !== index);
+    setFormPracticePoints(updated);
+    setFormCanonicalContent(formatCanonicalLessonContent(formTitle, updated));
+  };
+
+  const handleUpdatePracticePoint = (index: number, val: string) => {
+    const updated = [...formPracticePoints];
+    updated[index] = val;
+    setFormPracticePoints(updated);
+    setFormCanonicalContent(formatCanonicalLessonContent(formTitle, updated));
+  };
 
   // Fetch all levels
   const fetchLevels = async () => {
@@ -337,27 +247,20 @@ export default function AdminRoadmapScreen() {
     const nextNumber = levels.length > 0 ? Math.max(...levels.map((l) => l.levelNumber)) + 1 : 1;
     setEditingLevel(null);
     setFormLevelNumber(nextNumber);
-    setFormTitle(`Level ${nextNumber}`);
-    setFormTopic('General Practice');
-    setFormDescription('Practice conversational English with Maya.');
-    setFormDuration(5);
+    setFormTitle('');
+    setFormTopic('');
+    setFormDescription('');
     setFormXpReward(100);
     setFormIcon('chat');
     setIconMode('preset');
     setFormCustomSvg('');
     setFormColorIdx((nextNumber - 1) % COLOR_THEMES.length);
-    setFormScenarioRole('Maya is a friendly conversational AI English coach.');
-    setFormCoachingFocus('Fluency, conversational flow, and natural phrasing.');
-    setFormOpeningQuestion('Hello! What would you like to talk about today?');
-    setFormCustomPromptAddon('');
-    setFormTargetSpeakingShare(40);
-    setFormObjectives([
-      { id: `obj_${Date.now()}_1`, title: 'Clear Self Introduction', description: 'Student introduces themselves with name and background', isMandatory: true },
-      { id: `obj_${Date.now()}_2`, title: 'Answer Open Questions', description: 'Student responds with complete sentences rather than one-word answers', isMandatory: true },
-    ]);
-    setFormUnlockType(nextNumber === 1 ? 'free' : 'score');
+
+    setFormCanonicalContent('');
+    setFormPracticePoints([]);
+    setNewPracticePointInput('');
+
     setFormMinScore(75);
-    setFormMinSeconds(240);
     setFormIsPublished(true);
     setActiveTab('basics');
     setIsEditorOpen(true);
@@ -369,7 +272,6 @@ export default function AdminRoadmapScreen() {
     setFormTitle(lvl.title);
     setFormTopic(lvl.topic || '');
     setFormDescription(lvl.description || '');
-    setFormDuration(lvl.targetDurationMinutes || 5);
     setFormXpReward(lvl.xpReward || 100);
     setFormIcon(lvl.iconType || 'chat');
     if (lvl.customSvg && lvl.customSvg.trim()) {
@@ -381,43 +283,19 @@ export default function AdminRoadmapScreen() {
     }
     const colorIdx = COLOR_THEMES.findIndex((c) => c.numberColor === lvl.numberColor);
     setFormColorIdx(colorIdx !== -1 ? colorIdx : 0);
-    setFormScenarioRole(lvl.guidedPrompt?.scenarioRole || '');
-    setFormCoachingFocus(lvl.guidedPrompt?.coachingFocus || '');
-    setFormOpeningQuestion(lvl.guidedPrompt?.openingQuestion || '');
-    setFormCustomPromptAddon(lvl.guidedPrompt?.customPromptAddon || '');
-    setFormTargetSpeakingShare(lvl.targetSpeakingShare ?? 40);
-    setFormObjectives(
-      lvl.learningObjectives && lvl.learningObjectives.length > 0
-        ? lvl.learningObjectives.map((o) => ({ ...o }))
-        : [
-            { id: `obj_${Date.now()}_1`, title: 'Active Speaking & Clarity', description: 'Express ideas clearly and naturally', isMandatory: true },
-          ],
-    );
-    setFormUnlockType(lvl.unlockRule?.type || 'score');
-    setFormMinScore(lvl.unlockRule?.minScore ?? 75);
-    setFormMinSeconds(lvl.unlockRule?.minDurationSeconds ?? 240);
+
+    const pts = (lvl.practicePoints && lvl.practicePoints.length > 0)
+      ? lvl.practicePoints
+      : (lvl.canonicalContent ? parseCanonicalLessonContent(lvl.canonicalContent).practicePoints : []);
+    const content = lvl.canonicalContent || formatCanonicalLessonContent(lvl.title, pts);
+    setFormCanonicalContent(content);
+    setFormPracticePoints(pts);
+    setNewPracticePointInput('');
+
+    setFormMinScore(lvl.passingScorePercent ?? 75);
     setFormIsPublished(lvl.isPublished);
     setActiveTab('basics');
     setIsEditorOpen(true);
-  };
-
-  const handleApplyPreset = (preset: PromptPreset) => {
-    setFormTitle(preset.name);
-    setFormTopic(preset.topic);
-    setFormScenarioRole(preset.scenarioRole);
-    setFormCoachingFocus(preset.coachingFocus);
-    setFormOpeningQuestion(preset.openingQuestion);
-    setFormIcon(preset.iconType);
-    if (preset.sampleObjectives && preset.sampleObjectives.length > 0) {
-      setFormObjectives(
-        preset.sampleObjectives.map((o, idx) => ({
-          id: `obj_${Date.now()}_${idx + 1}`,
-          title: o.title,
-          description: o.description,
-          isMandatory: o.isMandatory,
-        })),
-      );
-    }
   };
 
   const handleSaveLevel = async () => {
@@ -427,32 +305,36 @@ export default function AdminRoadmapScreen() {
     }
     setIsSaving(true);
     const theme = COLOR_THEMES[formColorIdx];
+    const points = formPracticePoints.filter((p) => p.trim().length > 0);
+    
+    // Ensure canonical lesson content matches the user's entered formTitle
+    let canonical = formCanonicalContent.trim();
+    if (!canonical) {
+      canonical = formatCanonicalLessonContent(formTitle.trim(), points);
+    } else {
+      const parsed = parseCanonicalLessonContent(canonical);
+      if (parsed.title && parsed.title !== formTitle.trim()) {
+        canonical = formatCanonicalLessonContent(
+          formTitle.trim(),
+          points.length > 0 ? points : parsed.practicePoints
+        );
+      }
+    }
+
     const payload = {
       levelNumber: Number(formLevelNumber),
       title: formTitle.trim(),
       description: formDescription.trim(),
       topic: formTopic.trim() || formTitle.trim(),
-      targetDurationMinutes: Number(formDuration),
       xpReward: Number(formXpReward) || 100,
       iconType: formIcon,
       customSvg: iconMode === 'custom_svg' && formCustomSvg.trim() ? formCustomSvg.trim() : '',
       numberColor: theme.numberColor,
       haloColor: theme.haloColor,
       haloBorderColor: theme.haloBorderColor,
-      guidedPrompt: {
-        scenarioRole: formScenarioRole.trim(),
-        coachingFocus: formCoachingFocus.trim(),
-        openingQuestion: formOpeningQuestion.trim(),
-        customPromptAddon: formCustomPromptAddon.trim(),
-      },
-      targetSpeakingShare: Number(formTargetSpeakingShare) || 40,
-      learningObjectives: formObjectives.filter((o) => o.title.trim().length > 0),
-      unlockRule: {
-        type: formUnlockType,
-        minScore: formUnlockType === 'score' ? Number(formMinScore) : undefined,
-        minDurationSeconds: formUnlockType === 'time' ? Number(formMinSeconds) : undefined,
-        requiresLevelNumber: formLevelNumber > 1 ? formLevelNumber - 1 : undefined,
-      },
+      practicePoints: points,
+      canonicalContent: canonical,
+      passingScorePercent: Number(formMinScore) || 75,
       isPublished: formIsPublished,
     };
 
@@ -553,15 +435,13 @@ export default function AdminRoadmapScreen() {
 
   const openPlayground = (lvl: RoadmapLevel) => {
     setPlaygroundLevel(lvl);
-    const icebreaker =
-      lvl.guidedPrompt?.openingQuestion?.trim() ||
-      'Hello! What would you like to talk about today?';
+    const greeting = `Hello! Welcome to practice for "${lvl.title}". Let's get started!`;
     setSimMessages([
       {
         id: `initial-maya-${Date.now()}`,
         sender: 'maya',
-        text: icebreaker,
-        wordCount: icebreaker.trim().split(/\s+/).filter(Boolean).length,
+        text: greeting,
+        wordCount: greeting.trim().split(/\s+/).filter(Boolean).length,
       },
     ]);
     setSimInput('');
@@ -569,13 +449,13 @@ export default function AdminRoadmapScreen() {
   };
 
   const openPlaygroundWithDraft = () => {
+    const points = formPracticePoints.filter((p) => p.trim().length > 0);
     const draftLevel: RoadmapLevel = {
       id: editingLevel?.id || 'draft-level',
       levelNumber: formLevelNumber,
       title: formTitle || `Level ${formLevelNumber}`,
       topic: formTopic || 'General Conversation',
       description: formDescription,
-      targetDurationMinutes: formDuration,
       xpReward: formXpReward,
       iconType: formIcon,
       customSvg: iconMode === 'custom_svg' ? formCustomSvg : undefined,
@@ -583,34 +463,22 @@ export default function AdminRoadmapScreen() {
       haloColor: COLOR_THEMES[formColorIdx].haloColor,
       haloBorderColor: COLOR_THEMES[formColorIdx].haloBorderColor,
       isPublished: formIsPublished,
-      guidedPrompt: {
-        scenarioRole: formScenarioRole,
-        coachingFocus: formCoachingFocus,
-        openingQuestion: formOpeningQuestion,
-        customPromptAddon: formCustomPromptAddon,
-      },
-      targetSpeakingShare: formTargetSpeakingShare,
-      learningObjectives: formObjectives,
-      unlockRule: {
-        type: formUnlockType,
-        minScore: formMinScore,
-        minDurationSeconds: formMinSeconds,
-      },
+      practicePoints: points,
+      canonicalContent: formCanonicalContent,
+      passingScorePercent: Number(formMinScore) || 75,
     };
     openPlayground(draftLevel);
   };
 
   const handleResetPlayground = () => {
     if (!playgroundLevel) return;
-    const icebreaker =
-      playgroundLevel.guidedPrompt?.openingQuestion?.trim() ||
-      'Hello! What would you like to talk about today?';
+    const greeting = `Hello! Welcome to practice for "${playgroundLevel.title}". Let's get started!`;
     setSimMessages([
       {
         id: `reset-maya-${Date.now()}`,
         sender: 'maya',
-        text: icebreaker,
-        wordCount: icebreaker.trim().split(/\s+/).filter(Boolean).length,
+        text: greeting,
+        wordCount: greeting.trim().split(/\s+/).filter(Boolean).length,
       },
     ]);
     setSimInput('');
@@ -638,7 +506,8 @@ export default function AdminRoadmapScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userMessage: text,
-          guidedPrompt: playgroundLevel.guidedPrompt,
+          levelTitle: playgroundLevel.title,
+          practicePoints: playgroundLevel.practicePoints,
           topic: playgroundLevel.topic,
         }),
       });
@@ -700,12 +569,9 @@ export default function AdminRoadmapScreen() {
         languageMode: 'english',
         sinhalaStyle: 'smart',
         aiSuggestions: 'true',
-        scenarioRole: lvl.guidedPrompt?.scenarioRole || '',
-        coachingFocus: lvl.guidedPrompt?.coachingFocus || '',
-        openingQuestion: lvl.guidedPrompt?.openingQuestion || '',
-        customPromptAddon: lvl.guidedPrompt?.customPromptAddon || '',
-        targetSpeakingShare: String(lvl.targetSpeakingShare || 40),
-        learningObjectives: lvl.learningObjectives && lvl.learningObjectives.length > 0 ? JSON.stringify(lvl.learningObjectives) : '',
+        practicePoints: JSON.stringify(lvl.practicePoints || []),
+        canonicalContent: lvl.canonicalContent || '',
+        passingScorePercent: String(lvl.passingScorePercent || 75),
       },
     });
   };
@@ -740,7 +606,7 @@ export default function AdminRoadmapScreen() {
   // Metrics
   const totalLevels = levels.length;
   const publishedCount = levels.filter((l) => l.isPublished).length;
-  const totalMinutes = levels.reduce((acc, l) => acc + (l.targetDurationMinutes || 5), 0);
+  const totalTasks = levels.reduce((acc, l) => acc + (l.practicePoints?.length || 0), 0);
   const totalXp = levels.reduce((acc, l) => acc + (l.xpReward || 100), 0);
 
   return (
@@ -758,7 +624,7 @@ export default function AdminRoadmapScreen() {
           {/* Modular Reusable Admin Top Bar */}
           <AdminTopBar
             title="Maya Curriculum Studio"
-            subtitle="Design roadmap levels, configure guided Maya personas, and define progression unlock rules."
+            subtitle="Design roadmap curriculum, configure canonical lesson tasks, and test live simulator."
             badgeText="Guided Mode"
             sidebarOpen={sidebarOpen}
             onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
@@ -783,9 +649,9 @@ export default function AdminRoadmapScreen() {
               <Text style={styles.metricSub}>{totalLevels - publishedCount} in draft mode</Text>
             </View>
             <View style={styles.metricCard}>
-              <Text style={styles.metricLabel}>Total Learning Time</Text>
-              <Text style={[styles.metricVal, { color: '#0284c7' }]}>{totalMinutes}m</Text>
-              <Text style={styles.metricSub}>Speaking practice</Text>
+              <Text style={styles.metricLabel}>Total Practice Tasks</Text>
+              <Text style={[styles.metricVal, { color: '#0284c7' }]}>{totalTasks}</Text>
+              <Text style={styles.metricSub}>Deliberate focus points</Text>
             </View>
             <View style={styles.metricCard}>
               <Text style={styles.metricLabel}>Curriculum XP</Text>
@@ -875,21 +741,25 @@ export default function AdminRoadmapScreen() {
                         <View style={styles.titleRow}>
                           <Text style={styles.levelTitle}>{lvl.title}</Text>
                           <View style={styles.timeBadge}>
-                            <Feather name="clock" size={12} color="#0369a1" style={{ marginRight: 4 }} />
-                            <Text style={styles.timeBadgeText}>{lvl.targetDurationMinutes} min</Text>
+                            <Feather name="check-circle" size={12} color="#0369a1" style={{ marginRight: 4 }} />
+                            <Text style={styles.timeBadgeText}>Pass ≥ {lvl.passingScorePercent || 75}%</Text>
                           </View>
                           <View style={styles.xpBadge}>
                             <Feather name="award" size={12} color="#b45309" style={{ marginRight: 4 }} />
                             <Text style={styles.xpBadgeText}>+{lvl.xpReward || 100} XP</Text>
                           </View>
-                          {lvl.learningObjectives && lvl.learningObjectives.length > 0 && (
+                          {lvl.practicePoints && lvl.practicePoints.length > 0 && (
                             <View style={styles.objectivesBadge}>
                               <Feather name="target" size={12} color="#059669" style={{ marginRight: 4 }} />
                               <Text style={styles.objectivesBadgeText}>
-                                {lvl.learningObjectives.length} Obj
+                                {lvl.practicePoints.length} Tasks
                               </Text>
                             </View>
                           )}
+                          <View style={[styles.timeBadge, { backgroundColor: '#f5f3ff', borderColor: '#ddd6fe' }]}>
+                            <Feather name="check-circle" size={12} color="#7c3aed" style={{ marginRight: 4 }} />
+                            <Text style={[styles.timeBadgeText, { color: '#6d28d9' }]}>Pass: {lvl.passingScorePercent || 75}%</Text>
+                          </View>
                           <View
                             style={[
                               styles.statusBadge,
@@ -911,38 +781,31 @@ export default function AdminRoadmapScreen() {
                           {lvl.description || 'No description provided.'}
                         </Text>
 
-                        {/* Guided Prompt Preview Snippets */}
-                        <View style={styles.guidedSnippetsRow}>
-                          {lvl.guidedPrompt?.scenarioRole ? (
+                        {/* Practice Points Preview Snippets */}
+                        {lvl.practicePoints && lvl.practicePoints.length > 0 ? (
+                          <View style={styles.guidedSnippetsRow}>
                             <View style={styles.snippetItem}>
-                              <Text style={styles.snippetLabel}>Role:</Text>
+                              <Text style={styles.snippetLabel}>Practice:</Text>
                               <Text style={styles.snippetValue} numberOfLines={1}>
-                                {lvl.guidedPrompt.scenarioRole}
+                                {lvl.practicePoints.slice(0, 2).join(' • ')}
+                                {lvl.practicePoints.length > 2 ? ` (+${lvl.practicePoints.length - 2} more)` : ''}
                               </Text>
                             </View>
-                          ) : null}
+                          </View>
+                        ) : null}
 
-                          {lvl.guidedPrompt?.openingQuestion ? (
-                            <View style={styles.snippetItem}>
-                              <Text style={styles.snippetLabel}>Icebreaker:</Text>
-                              <Text style={styles.snippetValue} numberOfLines={1}>
-                                "{lvl.guidedPrompt.openingQuestion}"
-                              </Text>
-                            </View>
-                          ) : null}
-                        </View>
-
-                        {/* Unlock Rule Info */}
+                        {/* Unlock Condition Info */}
                         <View style={styles.unlockRuleRow}>
-                          <Feather name="lock" size={13} color="#64748b" style={{ marginRight: 5 }} />
+                          <Feather
+                            name={lvl.levelNumber === 1 ? 'unlock' : 'lock'}
+                            size={13}
+                            color="#64748b"
+                            style={{ marginRight: 5 }}
+                          />
                           <Text style={styles.unlockRuleText}>
-                            {lvl.unlockRule?.type === 'free'
-                              ? 'Always Unlocked (Open to all)'
-                              : lvl.unlockRule?.type === 'score'
-                              ? `Unlocks when Level ${lvl.levelNumber - 1} score ≥ ${lvl.unlockRule.minScore ?? 75}%`
-                              : lvl.unlockRule?.type === 'time'
-                              ? `Unlocks after ${Math.round((lvl.unlockRule.minDurationSeconds ?? 240) / 60)}m speaking on Level ${lvl.levelNumber - 1}`
-                              : `Unlocks upon completing Level ${lvl.levelNumber - 1}`}
+                            {lvl.levelNumber === 1
+                              ? 'Level 01 · Open to all students'
+                              : `Unlocks upon passing Level ${lvl.levelNumber - 1} (Score ≥ ${lvl.passingScorePercent || 75}%)`}
                           </Text>
                         </View>
                       </View>
@@ -1057,22 +920,7 @@ export default function AdminRoadmapScreen() {
                   style={{ marginRight: 8 }}
                 />
                 <Text style={[styles.tabBtnText, activeTab === 'objectives' && styles.tabBtnTextActive]}>
-                  2. Objectives & Speaking ({formObjectives.length})
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => setActiveTab('unlock')}
-                style={[styles.tabBtn, activeTab === 'unlock' && styles.tabBtnActive]}
-              >
-                <Feather
-                  name="lock"
-                  size={15}
-                  color={activeTab === 'unlock' ? '#0d9488' : '#64748b'}
-                  style={{ marginRight: 8 }}
-                />
-                <Text style={[styles.tabBtnText, activeTab === 'unlock' && styles.tabBtnTextActive]}>
-                  3. Unlock Rules
+                  2. Lesson & Practice ({formPracticePoints.length})
                 </Text>
               </Pressable>
             </View>
@@ -1097,7 +945,7 @@ export default function AdminRoadmapScreen() {
                       <TextInput
                         style={styles.textInput}
                         value={formTitle}
-                        onChangeText={setFormTitle}
+                        onChangeText={handleTitleChange}
                         placeholder="e.g. Talking about your day"
                       />
                     </View>
@@ -1127,24 +975,24 @@ export default function AdminRoadmapScreen() {
 
                   <View style={styles.twoColRow}>
                     <View style={styles.formCol}>
-                      <Text style={styles.fieldLabel}>Target Duration</Text>
+                      <Text style={styles.fieldLabel}>Passing Requirement</Text>
                       <View style={styles.durationBtnRow}>
-                        {[5, 10, 15, 30].map((mins) => (
+                        {[60, 65, 70, 75, 80, 85].map((sc) => (
                           <Pressable
-                            key={mins}
-                            onPress={() => setFormDuration(mins)}
+                            key={sc}
+                            onPress={() => setFormMinScore(sc)}
                             style={[
                               styles.durPill,
-                              formDuration === mins && styles.durPillActive,
+                              formMinScore === sc && styles.durPillActive,
                             ]}
                           >
                             <Text
                               style={[
                                 styles.durPillText,
-                                formDuration === mins && styles.durPillTextActive,
+                                formMinScore === sc && styles.durPillTextActive,
                               ]}
                             >
-                              {mins}m
+                              ≥ {sc}%
                             </Text>
                           </Pressable>
                         ))}
@@ -1370,401 +1218,8 @@ export default function AdminRoadmapScreen() {
                     )}
                   </View>
 
-                  {/* Scenario Roleplay & Maya's Persona (Merged into Tab 1) */}
-                  <View style={styles.scenarioCard}>
-                    <View style={styles.scenarioHeader}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Feather name="message-circle" size={16} color="#0d9488" style={{ marginRight: 6 }} />
-                        <Text style={styles.fieldLabel}>Scenario Roleplay & Maya's Persona</Text>
-                      </View>
-                      <View style={styles.hintBadge}>
-                        <Text style={styles.hintBadgeText}>Dynamic Voice AI</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.fieldHelper}>
-                      Who is Maya acting as, and what is her opening question? Maya adapts the conversation naturally from this icebreaker.
-                    </Text>
-
-                    {/* Quick Lesson Templates */}
-                    <View style={styles.presetsBarRow}>
-                      <Text style={styles.presetsLabel}>Templates:</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetsScroll}>
-                        {PROMPT_PRESETS.map((p) => (
-                          <Pressable
-                            key={p.id}
-                            onPress={() => handleApplyPreset(p)}
-                            style={styles.presetChip}
-                          >
-                            <Text style={styles.presetChipText}>{p.name}</Text>
-                          </Pressable>
-                        ))}
-                      </ScrollView>
-                    </View>
-
-                    <View style={{ marginTop: 6 }}>
-                      <Text style={styles.subFieldLabel}>1. Maya's Role & Character</Text>
-                      <TextInput
-                        style={styles.textInput}
-                        value={formScenarioRole}
-                        onChangeText={setFormScenarioRole}
-                        placeholder="e.g. Maya is a cheerful barista at a busy coffee shop in Colombo."
-                      />
-                    </View>
-
-                    <View style={{ marginTop: 8 }}>
-                      <Text style={styles.subFieldLabel}>2. Opening Icebreaker Question</Text>
-                      <TextInput
-                        style={styles.textInput}
-                        value={formOpeningQuestion}
-                        onChangeText={setFormOpeningQuestion}
-                        placeholder="e.g. Hi there! Welcome to the cafe. What can I get started for you today?"
-                      />
-                      <Text style={styles.fieldHelper}>
-                        💡 Tip: Maya speaks this opening line to kick off the session and invites the student to respond.
-                      </Text>
-                    </View>
-
-                    <View style={{ marginTop: 8 }}>
-                      <Text style={styles.subFieldLabel}>3. Coaching Focus & Pedagogical Emphasis</Text>
-                      <TextInput
-                        style={styles.textInput}
-                        value={formCoachingFocus}
-                        onChangeText={setFormCoachingFocus}
-                        placeholder="e.g. Descriptive adjectives for personality and appearance (kind, hardworking, energetic)."
-                      />
-                      <Text style={styles.fieldHelper}>
-                        Directs Maya's feedback toward specific vocabulary, grammar patterns, or fluency goals.
-                      </Text>
-                    </View>
-
-                    <View style={{ marginTop: 8 }}>
-                      <Text style={styles.subFieldLabel}>4. Custom System Prompt Add-on (Optional)</Text>
-                      <TextInput
-                        style={[styles.textInput, { minHeight: 60 }]}
-                        value={formCustomPromptAddon}
-                        onChangeText={setFormCustomPromptAddon}
-                        placeholder="e.g. If the student hesitates, offer a gentle starter phrase. Praise their confidence."
-                        multiline
-                      />
-                      <Text style={styles.fieldHelper}>
-                        Custom behavioral nuances or rules injected into Maya's live coaching instructions.
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              )}
-
-              {/* TAB 3: OBJECTIVES & SPEAKING SHARE */}
-              {activeTab === 'objectives' && (
-                <View style={styles.tabSection}>
-                  {/* Student Speaking Target Section */}
-                  <View style={styles.promptCard}>
-                    <View style={styles.promptCardHeader}>
-                      <Text style={styles.fieldLabel}>Student Speaking Share Target</Text>
-                      <View style={styles.hintBadge}>
-                        <Text style={styles.hintBadgeText}>Anti-Monologue Guardrail</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.fieldHelper}>
-                      The minimum percentage of conversation time the student should be actively talking. Ensures Maya acts as a responsive coach rather than lecturing.
-                    </Text>
-                    <View style={styles.scoreRow}>
-                      {[30, 40, 50, 60].map((share) => (
-                        <Pressable
-                          key={share}
-                          onPress={() => setFormTargetSpeakingShare(share)}
-                          style={[
-                            styles.scorePill,
-                            formTargetSpeakingShare === share && styles.scorePillActive,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.scorePillText,
-                              formTargetSpeakingShare === share && styles.scorePillTextActive,
-                            ]}
-                          >
-                            ≥ {share}% {share === 40 ? '(Standard)' : ''}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-
-                  {/* Curriculum Objectives Section */}
-                  <View style={styles.objectivesSectionCard}>
-                    <View style={styles.objectivesSectionHeader}>
-                      <View>
-                        <Text style={styles.fieldLabel}>Curriculum Learning Objectives</Text>
-                        <Text style={styles.fieldHelper}>
-                          Maya guides the conversation toward these checkpoints and evaluates student responses in real time.
-                        </Text>
-                      </View>
-                      <Pressable
-                        onPress={() => {
-                          const newObj: LearningObjective = {
-                            id: `obj_${Date.now()}_${formObjectives.length + 1}`,
-                            title: '',
-                            description: '',
-                            isMandatory: true,
-                          };
-                          setFormObjectives([...formObjectives, newObj]);
-                        }}
-                        style={styles.addObjectiveBtn}
-                      >
-                        <Feather name="plus" size={14} color="#0d9488" style={{ marginRight: 4 }} />
-                        <Text style={styles.addObjectiveBtnText}>Add Objective</Text>
-                      </Pressable>
-                    </View>
-
-                    {formObjectives.length === 0 ? (
-                      <View style={styles.emptyObjectivesBox}>
-                        <Feather name="target" size={26} color="#94a3b8" style={{ marginBottom: 6 }} />
-                        <Text style={styles.emptyObjectivesTitle}>No specific checkpoints added yet</Text>
-                        <Text style={styles.emptyObjectivesDesc}>
-                          Add 2-3 learning checkpoints so Maya can guide and score the student's speaking goals.
-                        </Text>
-                        <View style={styles.emptyActionsRow}>
-                          <Pressable
-                            onPress={() => {
-                              const newObj: LearningObjective = {
-                                id: `obj_${Date.now()}_1`,
-                                title: '',
-                                description: '',
-                                isMandatory: true,
-                              };
-                              setFormObjectives([newObj]);
-                            }}
-                            style={styles.addObjectiveBtn}
-                          >
-                            <Feather name="plus" size={14} color="#0d9488" style={{ marginRight: 4 }} />
-                            <Text style={styles.addObjectiveBtnText}>Add Objective</Text>
-                          </Pressable>
-                          <Pressable
-                            onPress={() => {
-                              setFormObjectives([
-                                { id: `obj_${Date.now()}_1`, title: 'Active Greeting & Introduction', description: 'Student introduces themselves clearly with relevant details', isMandatory: true },
-                                { id: `obj_${Date.now()}_2`, title: 'Answer Open Questions', description: 'Student responds with full sentences rather than one-word answers', isMandatory: true },
-                                { id: `obj_${Date.now()}_3`, title: 'Ask Maya a Follow-up Question', description: 'Student shows conversational engagement by reciprocating a question', isMandatory: false },
-                              ]);
-                            }}
-                            style={styles.quickFillObjectivesBtn}
-                          >
-                            <Feather name="zap" size={14} color="#d97706" style={{ marginRight: 4 }} />
-                            <Text style={styles.quickFillObjectivesBtnText}>Auto-Fill Common Checkpoints</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                    ) : (
-                      formObjectives.map((obj, index) => (
-                        <View key={obj.id || index} style={styles.objectiveEditorCard}>
-                          <View style={styles.objectiveCardTop}>
-                            <View style={styles.objectiveNumBadge}>
-                              <Text style={styles.objectiveNumText}>#{index + 1}</Text>
-                            </View>
-                            <TextInput
-                              style={[styles.textInput, { flex: 1, marginHorizontal: 8 }]}
-                              value={obj.title}
-                              onChangeText={(val) => {
-                                const updated = [...formObjectives];
-                                updated[index] = { ...updated[index], title: val };
-                                setFormObjectives(updated);
-                              }}
-                              placeholder={`Objective title (e.g. Order coffee politely)`}
-                            />
-                            <Pressable
-                              onPress={() => {
-                                const updated = [...formObjectives];
-                                updated[index] = { ...updated[index], isMandatory: !obj.isMandatory };
-                                setFormObjectives(updated);
-                              }}
-                              style={[
-                                styles.mandatoryToggle,
-                                obj.isMandatory !== false && styles.mandatoryToggleActive,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.mandatoryToggleText,
-                                  obj.isMandatory !== false && styles.mandatoryToggleTextActive,
-                                ]}
-                              >
-                                {obj.isMandatory !== false ? 'Required' : 'Optional'}
-                              </Text>
-                            </Pressable>
-                            <Pressable
-                              onPress={() => {
-                                setFormObjectives(formObjectives.filter((_, i) => i !== index));
-                              }}
-                              style={styles.deleteObjectiveBtn}
-                              hitSlop={8}
-                            >
-                              <Feather name="trash-2" size={16} color="#ef4444" />
-                            </Pressable>
-                          </View>
-                          <TextInput
-                            style={[styles.textInput, { marginTop: 8 }]}
-                            value={obj.description || ''}
-                            onChangeText={(val) => {
-                              const updated = [...formObjectives];
-                              updated[index] = { ...updated[index], description: val };
-                              setFormObjectives(updated);
-                            }}
-                            placeholder="Criteria / hint (e.g. Student uses 'Could I please get...' and specifies size)"
-                          />
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, flexWrap: 'wrap', gap: 6 }}>
-                            <Text style={[styles.fieldHelper, { marginRight: 4, marginTop: 0 }]}>
-                              Target Budget:
-                            </Text>
-                            {[undefined, 3, 4, 5, 6].map((turns) => {
-                              const isSelected = obj.targetTurns === turns;
-                              return (
-                                <Pressable
-                                  key={turns === undefined ? 'auto' : turns}
-                                  onPress={() => {
-                                    const updated = [...formObjectives];
-                                    updated[index] = { ...updated[index], targetTurns: turns };
-                                    setFormObjectives(updated);
-                                  }}
-                                  style={[
-                                    styles.turnBudgetPill,
-                                    isSelected && styles.turnBudgetPillActive,
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.turnBudgetPillText,
-                                      isSelected && styles.turnBudgetPillTextActive,
-                                    ]}
-                                  >
-                                    {turns === undefined ? 'Auto (~3-5)' : `${turns} turns`}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })}
-                          </View>
-                        </View>
-                      ))
-                    )}
-                  </View>
-                </View>
-              )}
-
-              {/* TAB 3: UNLOCK RULES */}
-              {activeTab === 'unlock' && (
-                <View style={styles.tabSection}>
-                  <Text style={styles.fieldLabel}>How Does This Milestone Unlock?</Text>
-                  <Text style={styles.fieldHelper}>
-                    Choose the requirement students must meet before this milestone unlocks on their roadmap track:
-                  </Text>
-
-                  <View style={styles.unlockOptionsGrid}>
-                    <Pressable
-                      onPress={() => setFormUnlockType('score')}
-                      style={[
-                        styles.unlockOptionCard,
-                        formUnlockType === 'score' && styles.unlockOptionCardActive,
-                      ]}
-                    >
-                      <Feather name="award" size={20} color={formUnlockType === 'score' ? '#0d9488' : '#64748b'} />
-                      <Text style={styles.unlockOptionTitle}>Passing Score (Standard)</Text>
-                      <Text style={styles.unlockOptionDesc}>Unlocks when previous session score reaches threshold (evaluating curriculum objectives, speech share ≥ 40%, and grammar).</Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => setFormUnlockType('time')}
-                      style={[
-                        styles.unlockOptionCard,
-                        formUnlockType === 'time' && styles.unlockOptionCardActive,
-                      ]}
-                    >
-                      <Feather name="clock" size={20} color={formUnlockType === 'time' ? '#0d9488' : '#64748b'} />
-                      <Text style={styles.unlockOptionTitle}>Minimum Speaking Time</Text>
-                      <Text style={styles.unlockOptionDesc}>Student must accumulate at least N minutes of total speaking time on previous level.</Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => setFormUnlockType('completion')}
-                      style={[
-                        styles.unlockOptionCard,
-                        formUnlockType === 'completion' && styles.unlockOptionCardActive,
-                      ]}
-                    >
-                      <Feather name="check-circle" size={20} color={formUnlockType === 'completion' ? '#0d9488' : '#64748b'} />
-                      <Text style={styles.unlockOptionTitle}>Any Completion</Text>
-                      <Text style={styles.unlockOptionDesc}>Unlocks as soon as previous level call finishes and all mandatory objectives are covered.</Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => setFormUnlockType('free')}
-                      style={[
-                        styles.unlockOptionCard,
-                        formUnlockType === 'free' && styles.unlockOptionCardActive,
-                      ]}
-                    >
-                      <Feather name="unlock" size={20} color={formUnlockType === 'free' ? '#0d9488' : '#64748b'} />
-                      <Text style={styles.unlockOptionTitle}>Always Free</Text>
-                      <Text style={styles.unlockOptionDesc}>Unlocked immediately for all students without prerequisites (e.g. Level 01).</Text>
-                    </Pressable>
-                  </View>
-
-                  {formUnlockType === 'score' && (
-                    <View style={styles.ruleDetailBox}>
-                      <Text style={styles.ruleDetailTitle}>Minimum Overall Passing Score: {formMinScore}%</Text>
-                      <View style={styles.scoreRow}>
-                        {[60, 65, 70, 75, 80, 85].map((sc) => (
-                          <Pressable
-                            key={sc}
-                            onPress={() => setFormMinScore(sc)}
-                            style={[
-                              styles.scorePill,
-                              formMinScore === sc && styles.scorePillActive,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.scorePillText,
-                                formMinScore === sc && styles.scorePillTextActive,
-                              ]}
-                            >
-                              ≥ {sc}%
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    </View>
-                  )}
-
-                  {formUnlockType === 'time' && (
-                    <View style={styles.ruleDetailBox}>
-                      <Text style={styles.ruleDetailTitle}>
-                        Minimum Required Speaking Time: {Math.round(formMinSeconds / 60)} minutes
-                      </Text>
-                      <View style={styles.scoreRow}>
-                        {[120, 180, 240, 300, 600].map((sec) => (
-                          <Pressable
-                            key={sec}
-                            onPress={() => setFormMinSeconds(sec)}
-                            style={[
-                              styles.scorePill,
-                              formMinSeconds === sec && styles.scorePillActive,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.scorePillText,
-                                formMinSeconds === sec && styles.scorePillTextActive,
-                              ]}
-                            >
-                              {sec / 60}m
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    </View>
-                  )}
-
-                  <View style={styles.publishToggleRow}>
+                  {/* Publish Status Toggle */}
+                  <View style={[styles.publishToggleRow, { marginTop: 16 }]}>
                     <View>
                       <Text style={styles.fieldLabel}>Publish Level Live to Students</Text>
                       <Text style={styles.fieldHelper}>Draft levels remain hidden on the student roadmap track.</Text>
@@ -1783,6 +1238,122 @@ export default function AdminRoadmapScreen() {
                         ]}
                       />
                     </Pressable>
+                  </View>
+
+                </View>
+              )}
+
+              {/* TAB 2: LESSON CONTENT & PRACTICE TASKS */}
+              {activeTab === 'objectives' && (
+                <View style={styles.tabSection}>
+                  {/* Canonical Plain Text Editor Card */}
+                  <View style={styles.promptCard}>
+                    <View style={styles.promptCardHeader}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Feather name="file-text" size={16} color="#0d9488" style={{ marginRight: 6 }} />
+                        <Text style={styles.fieldLabel}>Canonical Plain-Text Format</Text>
+                      </View>
+                      <View style={styles.hintBadge}>
+                        <Text style={styles.hintBadgeText}>AI 3-Stage Learning Engine</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.fieldHelper}>
+                      Paste or edit the lesson in this universal format. Maya uses these exact points for Stage 1 Guided Teaching and Stage 2 Roleplay Challenge.
+                    </Text>
+
+                    <TextInput
+                      style={[styles.textInput, styles.canonicalEditorInput]}
+                      value={formCanonicalContent}
+                      onChangeText={handleCanonicalTextChange}
+                      placeholder={DEFAULT_CANONICAL_TEMPLATE}
+                      placeholderTextColor="#94a3b8"
+                      multiline
+                      numberOfLines={8}
+                    />
+
+                    <View style={styles.canonicalActionsRow}>
+                      <Pressable
+                        onPress={() => handleCanonicalTextChange(DEFAULT_CANONICAL_TEMPLATE)}
+                        style={styles.quickFillObjectivesBtn}
+                      >
+                        <Feather name="book-open" size={13} color="#d97706" style={{ marginRight: 4 }} />
+                        <Text style={styles.quickFillObjectivesBtnText}>Load Restaurant Template</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setFormCanonicalContent(formatCanonicalLessonContent(formTitle, formPracticePoints))}
+                        style={styles.addObjectiveBtn}
+                      >
+                        <Feather name="refresh-cw" size={13} color="#0d9488" style={{ marginRight: 4 }} />
+                        <Text style={styles.addObjectiveBtnText}>Re-format Text</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {/* Active Practice Points List */}
+                  <View style={styles.objectivesSectionCard}>
+                    <View style={styles.objectivesSectionHeader}>
+                      <View>
+                        <Text style={styles.fieldLabel}>
+                          Active Practice Tasks ({formPracticePoints.length})
+                        </Text>
+                        <Text style={styles.fieldHelper}>
+                          Each point is displayed on-screen during the call as an active mission task.
+                        </Text>
+                      </View>
+                    </View>
+
+                    {formPracticePoints.length === 0 ? (
+                      <View style={styles.emptyObjectivesBox}>
+                        <Feather name="target" size={26} color="#94a3b8" style={{ marginBottom: 6 }} />
+                        <Text style={styles.emptyObjectivesTitle}>No practice points defined</Text>
+                        <Text style={styles.emptyObjectivesDesc}>
+                          Type bullet points in the box above or add them using the input below.
+                        </Text>
+                      </View>
+                    ) : (
+                      formPracticePoints.map((point, index) => (
+                        <View key={`pt-${index}`} style={styles.objectiveEditorCard}>
+                          <View style={styles.objectiveCardTop}>
+                            <View style={styles.objectiveNumBadge}>
+                              <Text style={styles.objectiveNumText}>#{index + 1}</Text>
+                            </View>
+                            <TextInput
+                              style={[styles.textInput, { flex: 1, marginHorizontal: 8 }]}
+                              value={point}
+                              onChangeText={(val) => handleUpdatePracticePoint(index, val)}
+                              placeholder="e.g. Asking for a table and looking at the menu"
+                            />
+                            <Pressable
+                              onPress={() => handleRemovePracticePoint(index)}
+                              style={styles.deleteObjectiveBtn}
+                              hitSlop={8}
+                            >
+                              <Feather name="trash-2" size={16} color="#ef4444" />
+                            </Pressable>
+                          </View>
+                        </View>
+                      ))
+                    )}
+
+                    {/* Add New Practice Point Row */}
+                    <View style={styles.addPointRow}>
+                      <TextInput
+                        style={[styles.textInput, { flex: 1, marginRight: 8 }]}
+                        value={newPracticePointInput}
+                        onChangeText={setNewPracticePointInput}
+                        placeholder="Add another practice task (e.g. Asking for recommendations)..."
+                        onSubmitEditing={handleAddPracticePoint}
+                        returnKeyType="done"
+                      />
+                      <Pressable
+                        onPress={handleAddPracticePoint}
+                        style={[styles.addObjectiveBtn, !newPracticePointInput.trim() && { opacity: 0.6 }]}
+                        disabled={!newPracticePointInput.trim()}
+                      >
+                        <Feather name="plus" size={14} color="#0d9488" style={{ marginRight: 4 }} />
+                        <Text style={styles.addObjectiveBtnText}>Add Point</Text>
+                      </Pressable>
+                    </View>
                   </View>
                 </View>
               )}
@@ -1883,24 +1454,24 @@ export default function AdminRoadmapScreen() {
             {/* Prompt Config Snapshot Bar */}
             <View style={styles.playgroundInfoBar}>
               <View style={styles.infoBarItem}>
-                <Text style={styles.infoBarLabel}>ROLE</Text>
+                <Text style={styles.infoBarLabel}>LESSON</Text>
                 <Text style={styles.infoBarValue} numberOfLines={1}>
-                  {playgroundLevel?.guidedPrompt?.scenarioRole || 'Friendly English Coach'}
+                  {playgroundLevel?.title || 'Speaking Practice'}
                 </Text>
               </View>
               <View style={styles.infoBarDivider} />
               <View style={styles.infoBarItem}>
-                <Text style={styles.infoBarLabel}>COACHING FOCUS</Text>
+                <Text style={styles.infoBarLabel}>TASKS</Text>
                 <Text style={styles.infoBarValue} numberOfLines={1}>
-                  {playgroundLevel?.guidedPrompt?.coachingFocus || 'Natural phrasing & fluency'}
+                  {playgroundLevel?.practicePoints?.length || 0} Practice Points
                 </Text>
               </View>
               <View style={styles.infoBarDivider} />
               <View style={styles.infoBarItem}>
-                <Text style={styles.infoBarLabel}>BREVITY RULE</Text>
+                <Text style={styles.infoBarLabel}>PASS RULE</Text>
                 <View style={styles.guardrailPill}>
-                  <Feather name="shield" size={12} color="#059669" style={{ marginRight: 4 }} />
-                  <Text style={styles.guardrailPillText}>≤ 15 words / turn</Text>
+                  <Feather name="award" size={12} color="#059669" style={{ marginRight: 4 }} />
+                  <Text style={styles.guardrailPillText}>≥ {playgroundLevel?.passingScorePercent || 75}%</Text>
                 </View>
               </View>
             </View>
@@ -2993,6 +2564,26 @@ const styles = StyleSheet.create({
     minHeight: 80,
     textAlignVertical: 'top',
     backgroundColor: '#fafafa',
+  },
+  canonicalEditorInput: {
+    fontFamily: Platform.select({ web: 'monospace', default: 'Courier' }),
+    fontSize: 12.5,
+    lineHeight: 19,
+    minHeight: 140,
+    textAlignVertical: 'top',
+    backgroundColor: '#fafafa',
+  },
+  canonicalActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    flexWrap: 'wrap',
+  },
+  addPointRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
   },
 
   /* Prompt Builder */

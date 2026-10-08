@@ -1,6 +1,15 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { CreateRoadmapLevelDto, UpdateRoadmapLevelDto, ReorderItemDto, SimulateLevelTurnDto } from './dto/roadmap.dto.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+  CreateRoadmapLevelDto,
+  UpdateRoadmapLevelDto,
+  ReorderItemDto,
+  SimulateLevelTurnDto,
+  parseCanonicalLessonContent,
+  formatCanonicalLessonContent,
+} from './dto/roadmap.dto.js';
 import { GoogleGenAI } from '@google/genai';
 
 export interface RoadmapLevelEntity {
@@ -9,285 +18,102 @@ export interface RoadmapLevelEntity {
   title: string;
   description: string;
   topic: string;
-  targetDurationMinutes: number;
   xpReward: number;
-  iconType: 'robot' | 'chat' | 'family' | 'home' | 'wave' | 'directions';
+  iconType: string;
   numberColor: string;
   haloColor: string;
   haloBorderColor: string;
   scenarioId?: string;
   customSvg?: string;
-  guidedPrompt: {
-    scenarioRole?: string;
-    coachingFocus?: string;
-    openingQuestion?: string;
-    customPromptAddon?: string;
-  };
-  unlockRule: {
-    type: 'free' | 'completion' | 'score' | 'time';
-    minScore?: number;
-    minDurationSeconds?: number;
-    requiresLevelNumber?: number;
-  };
-  learningObjectives?: Array<{
-    id: string;
-    title: string;
-    description?: string;
-    isMandatory?: boolean;
-  }>;
-  targetSpeakingShare?: number;
+  practicePoints: string[];
+  canonicalContent: string;
+  passingScorePercent?: number;
   isPublished: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-const DEFAULT_LEVELS: RoadmapLevelEntity[] = [
+const DEFAULT_ROADMAP_LEVELS: RoadmapLevelEntity[] = [
   {
-    id: 'lvl-01-meet-ai',
+    id: 'lvl-01',
     levelNumber: 1,
-    title: 'Meet your AI partner',
-    description: 'Break the ice with Maya. Introduce yourself and get comfortable speaking English.',
-    topic: 'Introduction & Greetings',
-    targetDurationMinutes: 5,
-    xpReward: 50,
-    iconType: 'robot',
-    numberColor: '#0057FF',
-    haloColor: '#EFF6FF',
-    haloBorderColor: '#BFDBFE',
-    scenarioId: 'general-practice',
-    guidedPrompt: {
-      scenarioRole: 'Maya is a warm, enthusiastic AI English coach introducing herself to a new student.',
-      coachingFocus: 'Comfort, positive reinforcement, and basic self-introduction phrases.',
-      openingQuestion: 'Hi there! I am Maya, your AI speaking coach. Tell me a little about yourself — what do you like to do in your free time?',
-      customPromptAddon: 'Keep Maya extremely supportive. Praise every attempt to speak.',
-    },
-    learningObjectives: [
-      {
-        id: 'obj_self_intro',
-        title: 'Introduce Yourself',
-        description: 'Shares name, studies or work, and where they live',
-        isMandatory: true,
-      },
-      {
-        id: 'obj_free_time',
-        title: 'Free Time & Hobbies',
-        description: 'Describes at least one hobby or favorite weekend activity',
-        isMandatory: true,
-      },
-    ],
-    targetSpeakingShare: 40,
-    unlockRule: {
-      type: 'free',
-    },
-    isPublished: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'lvl-02-daily-routine',
-    levelNumber: 2,
-    title: 'Talking about your day',
-    description: 'Describe your daily morning routine, work or school schedule, and evening habits.',
-    topic: 'Daily Routine & Habits',
-    targetDurationMinutes: 5,
-    xpReward: 75,
-    iconType: 'chat',
-    numberColor: '#9333EA',
-    haloColor: '#FAF5FF',
-    haloBorderColor: '#E9D5FF',
-    scenarioId: 'general-practice',
-    guidedPrompt: {
-      scenarioRole: 'Maya is a friendly, curious conversation partner asking about how you spend your days.',
-      coachingFocus: 'Present simple tense verbs and frequency adverbs (always, usually, sometimes, after that).',
-      openingQuestion: 'How was your morning today? What is the first thing you usually do when you wake up?',
-    },
-    learningObjectives: [
-      {
-        id: 'obj_morning_routine',
-        title: 'Morning Routine',
-        description: 'Describes morning routine using present simple verbs (wake up, brush, eat)',
-        isMandatory: true,
-      },
-      {
-        id: 'obj_frequency_adverbs',
-        title: 'Frequency Words',
-        description: 'Uses frequency adverbs like always, usually, or sometimes',
-        isMandatory: true,
-      },
-    ],
-    targetSpeakingShare: 40,
-    unlockRule: {
-      type: 'completion',
-      requiresLevelNumber: 1,
-    },
-    isPublished: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'lvl-03-family-friends',
-    levelNumber: 3,
-    title: 'Family and friends',
-    description: 'Learn to talk about your family members, close friends, and their personalities.',
-    topic: 'Family & Relationships',
-    targetDurationMinutes: 10,
+    title: 'Ordering Coffee & Snacks',
+    description: 'Learn how to greet a barista, place an order, customize milk or sugar, and ask for the bill with confidence.',
+    topic: 'Ordering Coffee & Snacks',
     xpReward: 100,
-    iconType: 'family',
-    numberColor: '#E11D48',
-    haloColor: '#FFF1F2',
-    haloBorderColor: '#FECDD3',
-    scenarioId: 'general-practice',
-    guidedPrompt: {
-      scenarioRole: 'Maya is an empathetic friend asking about who you are closest to in your family.',
-      coachingFocus: 'Descriptive adjectives for personality and physical appearance (kind, hardworking, energetic).',
-      openingQuestion: 'Tell me about someone in your family or a close friend who inspires you. What are they like?',
-    },
-    learningObjectives: [
-      {
-        id: 'obj_describe_person',
-        title: 'Describe a Family Member / Friend',
-        description: 'Names a person and describes their relationship',
-        isMandatory: true,
-      },
-      {
-        id: 'obj_personality_adjectives',
-        title: 'Personality Adjectives',
-        description: 'Uses descriptive adjectives (kind, friendly, smart, funny)',
-        isMandatory: true,
-      },
-    ],
-    targetSpeakingShare: 40,
-    unlockRule: {
-      type: 'score',
-      minScore: 70,
-      requiresLevelNumber: 2,
-    },
-    isPublished: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'lvl-04-hometown',
-    levelNumber: 4,
-    title: 'Describing your home town',
-    description: 'Talk about your city, local foods, climate, landmarks, and favorite spots.',
-    topic: 'Hometown & Culture',
-    targetDurationMinutes: 10,
-    xpReward: 125,
-    iconType: 'home',
-    numberColor: '#16A34A',
-    haloColor: '#F0FDF4',
-    haloBorderColor: '#BBF7D0',
-    scenarioId: 'general-practice',
-    guidedPrompt: {
-      scenarioRole: 'Maya is a curious traveler who has never visited your hometown.',
-      coachingFocus: 'Prepositions of place and descriptive sensory adjectives (bustling, peaceful, scenic).',
-      openingQuestion: 'Which town or city do you live in? What is your favorite thing about living there?',
-    },
-    learningObjectives: [
-      {
-        id: 'obj_hometown_places',
-        title: 'Describe Your Hometown & Landmarks',
-        description: 'Mentions town or city name and at least one local landmark, nature spot, or attraction',
-        isMandatory: true,
-      },
-      {
-        id: 'obj_sensory_adjectives',
-        title: 'Sensory & Descriptive Words',
-        description: 'Uses descriptive words for the area (peaceful, bustling, scenic, green)',
-        isMandatory: true,
-      },
-    ],
-    targetSpeakingShare: 40,
-    unlockRule: {
-      type: 'score',
-      minScore: 75,
-      requiresLevelNumber: 3,
-    },
-    isPublished: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'lvl-05-greetings-public',
-    levelNumber: 5,
-    title: 'Greetings & introductions in public',
-    description: 'Practice natural small talk in professional and social settings with strangers.',
-    topic: 'Social Small Talk',
-    targetDurationMinutes: 10,
-    xpReward: 150,
-    iconType: 'wave',
-    numberColor: '#F59E0B',
-    haloColor: '#FFFBEB',
+    iconType: 'coffee',
+    numberColor: '#D97706',
+    haloColor: '#FEF3C7',
     haloBorderColor: '#FDE68A',
-    scenarioId: 'workplace',
-    guidedPrompt: {
-      scenarioRole: 'Maya roleplays as a new colleague you just met at a seminar or office hallway.',
-      coachingFocus: 'Polite small talk questions, active listening reactions, and continuing conversations smoothly.',
-      openingQuestion: 'Nice to meet you! Are you also attending the workshop today? What department are you in?',
-    },
-    learningObjectives: [
-      {
-        id: 'obj_public_greeting',
-        title: 'Polite Professional Greeting',
-        description: 'Introduces themselves politely in a public or event setting',
-        isMandatory: true,
-      },
-      {
-        id: 'obj_smalltalk_exchange',
-        title: 'Small Talk & Follow-up Question',
-        description: 'Shares role or interest and asks Maya a polite conversational follow-up',
-        isMandatory: true,
-      },
+    scenarioId: 'cafe-order',
+    customSvg: '',
+    practicePoints: [
+      'Politely greet the barista and state your coffee order (e.g. "Can I have a cappuccino, please?")',
+      'Specify customization preferences such as size, sugar, or type of milk (e.g. "Small with oat milk, no sugar")',
+      'Ask for the price or bill and conclude the payment warmly (e.g. "How much is that? Can I pay by card?")',
     ],
-    targetSpeakingShare: 40,
-    unlockRule: {
-      type: 'score',
-      minScore: 75,
-      requiresLevelNumber: 4,
-    },
+    canonicalContent: `LESSON: Ordering Coffee & Snacks
+PRACTICE SKILLS:
+- Politely greet the barista and state your coffee order (e.g. "Can I have a cappuccino, please?")
+- Specify customization preferences such as size, sugar, or type of milk (e.g. "Small with oat milk, no sugar")
+- Ask for the price or bill and conclude the payment warmly (e.g. "How much is that? Can I pay by card?")`,
+    passingScorePercent: 75,
     isPublished: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
   {
-    id: 'lvl-06-directions',
-    levelNumber: 6,
-    title: 'Asking for directions',
-    description: 'Navigate unfamiliar places, ask for landmark locations, and give clear directions.',
-    topic: 'Travel & Navigation',
-    targetDurationMinutes: 10,
-    xpReward: 200,
-    iconType: 'directions',
-    numberColor: '#0057FF',
-    haloColor: '#EFF6FF',
+    id: 'lvl-02',
+    levelNumber: 2,
+    title: 'Asking for Street Directions',
+    description: 'Navigate city streets smoothly by asking locals for directions, clarifying walking distance, and thanking them.',
+    topic: 'Asking for Street Directions',
+    xpReward: 125,
+    iconType: 'map-pin',
+    numberColor: '#2563EB',
+    haloColor: '#DBEAFE',
     haloBorderColor: '#BFDBFE',
-    scenarioId: 'travel-english',
-    guidedPrompt: {
-      scenarioRole: 'Maya roleplays as a helpful local on the street assisting a visitor who needs directions.',
-      coachingFocus: 'Directional phrases: "turn right at the corner", "straight ahead", "opposite to", "next to".',
-      openingQuestion: 'Excuse me, you look like you are searching for somewhere. Where are you trying to get to?',
-    },
-    learningObjectives: [
-      {
-        id: 'obj_ask_destination',
-        title: 'Ask for a Location / Landmark',
-        description: 'Asks how to get to a specific place clearly and politely',
-        isMandatory: true,
-      },
-      {
-        id: 'obj_directional_prepositions',
-        title: 'Understand & Confirm Directions',
-        description: 'Uses or confirms directional phrases (straight ahead, turn left, opposite)',
-        isMandatory: true,
-      },
+    scenarioId: 'street-directions',
+    customSvg: '',
+    practicePoints: [
+      'Stop someone politely and ask how to get to a landmark (e.g. "Excuse me, could you tell me how to get to the train station?")',
+      'Clarify walking time or distance (e.g. "Is it within walking distance or should I take a tuk-tuk?")',
+      'Thank them politely for their help (e.g. "Thank you so much, have a wonderful day!")',
     ],
-    targetSpeakingShare: 40,
-    unlockRule: {
-      type: 'score',
-      minScore: 75,
-      requiresLevelNumber: 5,
-    },
+    canonicalContent: `LESSON: Asking for Street Directions
+PRACTICE SKILLS:
+- Stop someone politely and ask how to get to a landmark (e.g. "Excuse me, could you tell me how to get to the train station?")
+- Clarify walking time or distance (e.g. "Is it within walking distance or should I take a tuk-tuk?")
+- Thank them politely for their help (e.g. "Thank you so much, have a wonderful day!")`,
+    passingScorePercent: 75,
+    isPublished: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'lvl-03',
+    levelNumber: 3,
+    title: 'Dining at a Restaurant',
+    description: 'Master table reservations, asking about menu recommendations, and requesting dietary adjustments.',
+    topic: 'Dining at a Restaurant',
+    xpReward: 150,
+    iconType: 'utensils',
+    numberColor: '#059669',
+    haloColor: '#D1FAE5',
+    haloBorderColor: '#A7F3D0',
+    scenarioId: 'restaurant-dining',
+    customSvg: '',
+    practicePoints: [
+      'Request a table for your group (e.g. "Could we get a table for two near the window, please?")',
+      'Ask the waiter for popular recommendations (e.g. "What would you recommend for dinner tonight?")',
+      'Ask for the bill and compliment the meal (e.g. "Everything was delicious, could we have the bill please?")',
+    ],
+    canonicalContent: `LESSON: Dining at a Restaurant
+PRACTICE SKILLS:
+- Request a table for your group (e.g. "Could we get a table for two near the window, please?")
+- Ask the waiter for popular recommendations (e.g. "What would you recommend for dinner tonight?")
+- Ask for the bill and compliment the meal (e.g. "Everything was delicious, could we have the bill please?")`,
+    passingScorePercent: 75,
     isPublished: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -298,13 +124,19 @@ const DEFAULT_LEVELS: RoadmapLevelEntity[] = [
 export class RoadmapService {
   private readonly logger = new Logger(RoadmapService.name);
   private readonly supabase: SupabaseClient | null = null;
-  private memoryLevels: RoadmapLevelEntity[] = JSON.parse(JSON.stringify(DEFAULT_LEVELS));
+  private readonly filePath = path.join(process.cwd(), 'data', 'roadmap_levels.json');
+  private memoryLevels: RoadmapLevelEntity[] = [];
 
   constructor() {
+    // 1. Initialize local persistent file storage
+    this.memoryLevels = this.loadFromFile();
+
+    // 2. Initialize Supabase client
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY ||
       process.env.SUPABASE_SERVICE_KEY ||
+      process.env.SUPABASE_SECRET_KEY ||
       process.env.SUPABASE_ANON_KEY;
 
     if (supabaseUrl && supabaseKey) {
@@ -312,40 +144,144 @@ export class RoadmapService {
       this.logger.log('RoadmapService connected to Supabase client');
       this.initDatabaseTable();
     } else {
-      this.logger.warn('RoadmapService running with in-memory curriculum store');
+      this.logger.warn(`RoadmapService running with local file store (${this.memoryLevels.length} levels loaded)`);
     }
+  }
+
+  private loadFromFile(): RoadmapLevelEntity[] {
+    try {
+      if (fs.existsSync(this.filePath)) {
+        const raw = fs.readFileSync(this.filePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.logger.log(`Loaded ${parsed.length} roadmap levels from local store (${this.filePath})`);
+          return parsed;
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Failed to read roadmap levels from file: ${err?.message}`);
+    }
+
+    // Ensure directory exists and write default levels
+    this.saveToFile(DEFAULT_ROADMAP_LEVELS);
+    return [...DEFAULT_ROADMAP_LEVELS];
+  }
+
+  private saveToFile(levels: RoadmapLevelEntity[]): void {
+    try {
+      const dir = path.dirname(this.filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(this.filePath, JSON.stringify(levels, null, 2), 'utf-8');
+    } catch (err: any) {
+      this.logger.warn(`Failed to save roadmap levels to file: ${err?.message}`);
+    }
+  }
+
+  private hasHaloBorderColorSnake = false;
+
+  private mapDbRowToEntity(d: any): RoadmapLevelEntity {
+    const rawPoints =
+      d.practice_points ||
+      d.practicePoints ||
+      (Array.isArray(d.learning_objectives) ? d.learning_objectives.map((o: any) => o.title || o) : []);
+    const practicePoints: string[] = Array.isArray(rawPoints)
+      ? rawPoints.map((p: any) => (typeof p === 'string' ? p : p.title || String(p)))
+      : [];
+    const canonicalContent =
+      d.canonical_content || d.canonicalContent || formatCanonicalLessonContent(d.title, practicePoints);
+
+    return {
+      id: d.id,
+      levelNumber: d.level_number ?? d.levelNumber ?? 1,
+      title: d.title || '',
+      description: d.description || '',
+      topic: d.topic || '',
+      xpReward: d.xp_reward ?? d.xpReward ?? 100,
+      iconType: d.icon_type || d.iconType || 'chat',
+      numberColor: d.number_color || d.numberColor || '#0057FF',
+      haloColor: d.halo_color || d.haloColor || '#EFF6FF',
+      haloBorderColor: d.halo_border_color || d.halobordercolor || d.haloBorderColor || '#BFDBFE',
+      scenarioId: d.scenario_id || d.scenarioId || 'general-practice',
+      customSvg: d.custom_svg || d.customSvg || '',
+      practicePoints,
+      canonicalContent,
+      passingScorePercent: d.passing_score_percent ?? d.passingScorePercent ?? 75,
+      isPublished: d.is_published ?? d.isPublished ?? true,
+      createdAt: d.created_at || d.createdAt || new Date().toISOString(),
+      updatedAt: d.updated_at || d.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  private mapEntityToDbRow(e: RoadmapLevelEntity): any {
+    const row: any = {
+      id: e.id,
+      level_number: e.levelNumber,
+      title: e.title,
+      description: e.description,
+      topic: e.topic,
+      xp_reward: e.xpReward,
+      icon_type: e.iconType,
+      number_color: e.numberColor,
+      halo_color: e.haloColor,
+      scenario_id: e.scenarioId,
+      custom_svg: e.customSvg || '',
+      practice_points: e.practicePoints,
+      canonical_content: e.canonicalContent,
+      passing_score_percent: e.passingScorePercent,
+      is_published: e.isPublished,
+      created_at: e.createdAt,
+      updated_at: e.updatedAt,
+    };
+
+    if (this.hasHaloBorderColorSnake) {
+      row.halo_border_color = e.haloBorderColor;
+    } else {
+      row.halobordercolor = e.haloBorderColor;
+    }
+
+    return row;
   }
 
   private async initDatabaseTable() {
     if (!this.supabase) return;
     try {
+      const { error: snakeErr } = await this.supabase
+        .from('roadmap_levels')
+        .select('halo_border_color')
+        .limit(1);
+      this.hasHaloBorderColorSnake = !snakeErr;
+
       const { data, error } = await this.supabase
         .from('roadmap_levels')
-        .select('id')
-        .limit(1);
+        .select('*')
+        .order('level_number', { ascending: true });
 
-      if (error && error.code === '42P01') {
-        this.logger.warn('Table roadmap_levels does not exist in Supabase yet. Run schema.sql to persist in DB.');
-      } else if (data && data.length === 0) {
-        this.logger.log('Seeding initial roadmap levels to Supabase...');
-        for (const lvl of DEFAULT_LEVELS) {
-          await this.supabase.from('roadmap_levels').insert({
-            id: lvl.id,
-            level_number: lvl.levelNumber,
-            title: lvl.title,
-            description: lvl.description,
-            topic: lvl.topic,
-            target_duration_minutes: lvl.targetDurationMinutes,
-            icon_type: lvl.iconType,
-            number_color: lvl.numberColor,
-            halo_color: lvl.haloColor,
-            halo_border_color: lvl.haloBorderColor,
-            scenario_id: lvl.scenarioId,
-            guided_prompt: lvl.guidedPrompt,
-            unlock_rule: lvl.unlockRule,
-            is_published: lvl.isPublished,
-          });
+      if (error) {
+        if (error.code === '42P01' || error.code === 'PGRST205') {
+          this.logger.warn(
+            `Table 'public.roadmap_levels' does not exist in Supabase yet. Run 'src/database/create_roadmap_levels.sql' in your Supabase SQL editor. Local persistence active (${this.memoryLevels.length} levels loaded).`
+          );
+        } else {
+          this.logger.warn(`initDatabaseTable error: ${error.message} (code: ${error.code})`);
         }
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const dbLevels = data.map((d: any) => this.mapDbRowToEntity(d));
+        this.memoryLevels = dbLevels;
+        this.saveToFile(this.memoryLevels);
+        this.logger.log(`RoadmapService synchronized ${dbLevels.length} levels from Supabase DB`);
+      } else if (data && data.length === 0 && this.memoryLevels.length > 0) {
+        // Table exists but is empty -> seed initial levels to Supabase DB
+        this.logger.log(`Seeding ${this.memoryLevels.length} initial levels to Supabase DB...`);
+        for (const lvl of this.memoryLevels) {
+          const row = this.mapEntityToDbRow(lvl);
+          await this.supabase.from('roadmap_levels').insert(row);
+        }
+        this.logger.log(`RoadmapService successfully seeded ${this.memoryLevels.length} levels into Supabase DB`);
       }
     } catch (err: any) {
       this.logger.debug(`initDatabaseTable error: ${err?.message}`);
@@ -366,41 +302,52 @@ export class RoadmapService {
 
         const { data, error } = await query;
         if (!error && data && data.length > 0) {
-          return data.map((d: any) => ({
-            id: d.id,
-            levelNumber: d.level_number,
-            title: d.title,
-            description: d.description || '',
-            topic: d.topic || '',
-            targetDurationMinutes: d.target_duration_minutes || 5,
-            xpReward: d.xp_reward || 100,
-            iconType: d.icon_type || 'chat',
-            numberColor: d.number_color || '#0057FF',
-            haloColor: d.halo_color || '#EFF6FF',
-            haloBorderColor: d.halo_border_color || '#BFDBFE',
-            scenarioId: d.scenario_id,
-            customSvg: d.custom_svg,
-            guidedPrompt: d.guided_prompt || {},
-            unlockRule: d.unlock_rule || { type: 'score', minScore: 75 },
-            learningObjectives: d.learning_objectives || [],
-            targetSpeakingShare: d.target_speaking_share ?? 40,
-            isPublished: d.is_published ?? true,
-            createdAt: d.created_at || new Date().toISOString(),
-            updatedAt: d.updated_at || new Date().toISOString(),
-          }));
+          const dbLevels = data.map((d: any) => this.mapDbRowToEntity(d));
+          if (adminView) {
+            this.memoryLevels = dbLevels;
+            this.saveToFile(this.memoryLevels);
+          }
+          return dbLevels;
+        }
+
+        if (error && error.code !== 'PGRST205' && error.code !== '42P01') {
+          this.logger.warn(`Supabase DB query error in getAllLevels: ${error.message}`);
         }
       } catch (err: any) {
-        this.logger.debug(`getAllLevels DB query failed, falling back to memory: ${err?.message}`);
+        this.logger.debug(`getAllLevels DB query failed, falling back to local store: ${err?.message}`);
       }
     }
 
-    const list = this.memoryLevels.sort((a, b) => a.levelNumber - b.levelNumber);
+    const list = [...this.memoryLevels].sort((a, b) => a.levelNumber - b.levelNumber);
     return adminView ? list : list.filter((l) => l.isPublished);
   }
 
   async getLevelById(id: string): Promise<RoadmapLevelEntity> {
+    if (this.supabase) {
+      try {
+        const { data, error } = await this.supabase
+          .from('roadmap_levels')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (!error && data) {
+          return this.mapDbRowToEntity(data);
+        }
+      } catch (err: any) {
+        this.logger.debug(`getLevelById DB query failed for id ${id}: ${err?.message}`);
+      }
+    }
+
     const levels = await this.getAllLevels(true);
-    const found = levels.find((l) => l.id === id);
+    const rawId = String(id).toLowerCase().replace(/^lvl-0?/, '');
+    const found = levels.find(
+      (l) =>
+        l.id.toLowerCase() === id.toLowerCase() ||
+        l.id.toLowerCase() === `lvl-${id.toLowerCase()}` ||
+        String(l.levelNumber) === rawId
+    );
+
     if (!found) {
       throw new NotFoundException(`Roadmap level with id '${id}' not found`);
     }
@@ -408,14 +355,24 @@ export class RoadmapService {
   }
 
   async createLevel(dto: CreateRoadmapLevelDto): Promise<RoadmapLevelEntity> {
+    const title = dto.title.trim();
+    let practicePoints = (dto.practicePoints && dto.practicePoints.length > 0) ? dto.practicePoints : [];
+
+    if (practicePoints.length === 0 && dto.canonicalContent) {
+      const parsed = parseCanonicalLessonContent(dto.canonicalContent);
+      if (parsed.practicePoints.length > 0) {
+        practicePoints = parsed.practicePoints;
+      }
+    }
+
+    const canonicalContent = formatCanonicalLessonContent(title, practicePoints);
     const newId = `lvl-${Date.now().toString(36)}`;
     const newLevel: RoadmapLevelEntity = {
       id: newId,
       levelNumber: dto.levelNumber,
-      title: dto.title,
-      description: dto.description || '',
-      topic: dto.topic || dto.title,
-      targetDurationMinutes: dto.targetDurationMinutes || 5,
+      title,
+      description: dto.description?.trim() || '',
+      topic: dto.topic?.trim() || title,
       xpReward: dto.xpReward || 100,
       iconType: dto.iconType || 'chat',
       numberColor: dto.numberColor || '#0057FF',
@@ -423,55 +380,59 @@ export class RoadmapService {
       haloBorderColor: dto.haloBorderColor || '#BFDBFE',
       scenarioId: dto.scenarioId || 'general-practice',
       customSvg: dto.customSvg,
-      guidedPrompt: dto.guidedPrompt || {},
-      unlockRule: dto.unlockRule || { type: 'score', minScore: 75 },
-      learningObjectives: dto.learningObjectives || [],
-      targetSpeakingShare: dto.targetSpeakingShare ?? 40,
+      practicePoints,
+      canonicalContent,
+      passingScorePercent: dto.passingScorePercent || 75,
       isPublished: dto.isPublished ?? true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
+    // Save to memory and local persistent file
+    this.memoryLevels = this.memoryLevels.filter((l) => l.id !== newLevel.id);
+    this.memoryLevels.push(newLevel);
+    this.saveToFile(this.memoryLevels);
+
+    // Save to Supabase DB
     if (this.supabase) {
       try {
-        await this.supabase.from('roadmap_levels').insert({
-          id: newLevel.id,
-          level_number: newLevel.levelNumber,
-          title: newLevel.title,
-          description: newLevel.description,
-          topic: newLevel.topic,
-          target_duration_minutes: newLevel.targetDurationMinutes,
-          xp_reward: newLevel.xpReward,
-          icon_type: newLevel.iconType,
-          number_color: newLevel.numberColor,
-          halo_color: newLevel.haloColor,
-          halo_border_color: newLevel.haloBorderColor,
-          scenario_id: newLevel.scenarioId,
-          custom_svg: newLevel.customSvg,
-          guided_prompt: newLevel.guidedPrompt,
-          unlock_rule: newLevel.unlockRule,
-          learning_objectives: newLevel.learningObjectives,
-          target_speaking_share: newLevel.targetSpeakingShare,
-          is_published: newLevel.isPublished,
-        });
+        const dbRow = this.mapEntityToDbRow(newLevel);
+        const { error } = await this.supabase.from('roadmap_levels').insert(dbRow);
+        if (error) {
+          this.logger.error(
+            `Failed to insert level ${newLevel.id} into Supabase DB: ${error.message} (code: ${error.code})`
+          );
+        } else {
+          this.logger.log(`[DB INSERT] Successfully added level "${newLevel.title}" (${newLevel.id}) to Supabase DB`);
+        }
       } catch (err: any) {
         this.logger.warn(`Failed to insert into Supabase: ${err?.message}`);
       }
     }
 
-    this.memoryLevels.push(newLevel);
     return newLevel;
   }
 
   async updateLevel(id: string, dto: UpdateRoadmapLevelDto): Promise<RoadmapLevelEntity> {
     const existing = await this.getLevelById(id);
+    const title = dto.title !== undefined ? dto.title.trim() : existing.title;
+    let practicePoints = dto.practicePoints !== undefined ? dto.practicePoints : existing.practicePoints;
+
+    if (practicePoints.length === 0 && dto.canonicalContent) {
+      const parsed = parseCanonicalLessonContent(dto.canonicalContent);
+      if (parsed.practicePoints.length > 0) {
+        practicePoints = parsed.practicePoints;
+      }
+    }
+
+    const canonicalContent = formatCanonicalLessonContent(title, practicePoints);
+
     const updated: RoadmapLevelEntity = {
       ...existing,
       levelNumber: dto.levelNumber !== undefined ? dto.levelNumber : existing.levelNumber,
-      title: dto.title !== undefined ? dto.title : existing.title,
-      description: dto.description !== undefined ? dto.description : existing.description,
-      topic: dto.topic !== undefined ? dto.topic : existing.topic,
-      targetDurationMinutes: dto.targetDurationMinutes !== undefined ? dto.targetDurationMinutes : existing.targetDurationMinutes,
+      title,
+      description: dto.description !== undefined ? dto.description.trim() : existing.description,
+      topic: dto.topic !== undefined ? dto.topic.trim() : existing.topic,
       xpReward: dto.xpReward !== undefined ? dto.xpReward : existing.xpReward,
       iconType: dto.iconType !== undefined ? dto.iconType : existing.iconType,
       numberColor: dto.numberColor !== undefined ? dto.numberColor : existing.numberColor,
@@ -479,61 +440,63 @@ export class RoadmapService {
       haloBorderColor: dto.haloBorderColor !== undefined ? dto.haloBorderColor : existing.haloBorderColor,
       scenarioId: dto.scenarioId !== undefined ? dto.scenarioId : existing.scenarioId,
       customSvg: dto.customSvg !== undefined ? dto.customSvg : existing.customSvg,
-      guidedPrompt: dto.guidedPrompt !== undefined ? { ...existing.guidedPrompt, ...dto.guidedPrompt } : existing.guidedPrompt,
-      unlockRule: dto.unlockRule !== undefined ? { ...existing.unlockRule, ...dto.unlockRule } : existing.unlockRule,
-      learningObjectives: dto.learningObjectives !== undefined ? dto.learningObjectives : existing.learningObjectives,
-      targetSpeakingShare: dto.targetSpeakingShare !== undefined ? dto.targetSpeakingShare : existing.targetSpeakingShare,
+      practicePoints,
+      canonicalContent,
+      passingScorePercent: dto.passingScorePercent !== undefined ? dto.passingScorePercent : existing.passingScorePercent,
       isPublished: dto.isPublished !== undefined ? dto.isPublished : existing.isPublished,
       updatedAt: new Date().toISOString(),
     };
 
+    // Update memory and local persistent file
+    const idx = this.memoryLevels.findIndex((l) => l.id === id);
+    if (idx !== -1) {
+      this.memoryLevels[idx] = updated;
+    } else {
+      this.memoryLevels.push(updated);
+    }
+    this.saveToFile(this.memoryLevels);
+
+    // Update in Supabase DB
     if (this.supabase) {
       try {
-        await this.supabase
+        const dbRow = this.mapEntityToDbRow(updated);
+        const { error } = await this.supabase
           .from('roadmap_levels')
-          .update({
-            level_number: updated.levelNumber,
-            title: updated.title,
-            description: updated.description,
-            topic: updated.topic,
-            target_duration_minutes: updated.targetDurationMinutes,
-            xp_reward: updated.xpReward,
-            icon_type: updated.iconType,
-            number_color: updated.numberColor,
-            halo_color: updated.haloColor,
-            halo_border_color: updated.haloBorderColor,
-            scenario_id: updated.scenarioId,
-            custom_svg: updated.customSvg,
-            guided_prompt: updated.guidedPrompt,
-            unlock_rule: updated.unlockRule,
-            learning_objectives: updated.learningObjectives,
-            target_speaking_share: updated.targetSpeakingShare,
-            is_published: updated.isPublished,
-            updated_at: updated.updatedAt,
-          })
+          .update(dbRow)
           .eq('id', id);
+
+        if (error) {
+          this.logger.error(`Failed to update level ${id} in Supabase DB: ${error.message} (code: ${error.code})`);
+        } else {
+          this.logger.log(`[DB UPDATE] Successfully updated level "${updated.title}" (${id}) in Supabase DB`);
+        }
       } catch (err: any) {
         this.logger.warn(`Failed to update in Supabase: ${err?.message}`);
       }
     }
 
-    const idx = this.memoryLevels.findIndex((l) => l.id === id);
-    if (idx !== -1) {
-      this.memoryLevels[idx] = updated;
-    }
     return updated;
   }
 
   async deleteLevel(id: string): Promise<{ success: boolean; deletedId: string }> {
+    // Delete from memory and local file
+    this.memoryLevels = this.memoryLevels.filter((l) => l.id !== id);
+    this.saveToFile(this.memoryLevels);
+
+    // Delete from Supabase DB
     if (this.supabase) {
       try {
-        await this.supabase.from('roadmap_levels').delete().eq('id', id);
+        const { error } = await this.supabase.from('roadmap_levels').delete().eq('id', id);
+        if (error) {
+          this.logger.error(`Failed to delete level ${id} from Supabase DB: ${error.message}`);
+        } else {
+          this.logger.log(`[DB DELETE] Successfully deleted level ${id} from Supabase DB`);
+        }
       } catch (err: any) {
         this.logger.warn(`Failed to delete from Supabase: ${err?.message}`);
       }
     }
 
-    this.memoryLevels = this.memoryLevels.filter((l) => l.id !== id);
     return { success: true, deletedId: id };
   }
 
@@ -549,7 +512,7 @@ export class RoadmapService {
         try {
           await this.supabase
             .from('roadmap_levels')
-            .update({ level_number: item.levelNumber })
+            .update({ level_number: item.levelNumber, updated_at: new Date().toISOString() })
             .eq('id', item.id);
         } catch (err) {
           // ignore
@@ -557,27 +520,24 @@ export class RoadmapService {
       }
     }
 
+    this.saveToFile(this.memoryLevels);
     return this.getAllLevels(true);
   }
 
   async simulateTurn(dto: SimulateLevelTurnDto) {
-    const role = dto.guidedPrompt?.scenarioRole || 'Maya is a friendly English coach.';
-    const focus = dto.guidedPrompt?.coachingFocus || 'Focus on conversational flow and fluency.';
-    const opening = dto.guidedPrompt?.openingQuestion || '';
-    const addon = dto.guidedPrompt?.customPromptAddon || '';
+    const title = dto.levelTitle || 'Speaking Practice';
+    const points = (dto.practicePoints || []).map((p) => `- ${p}`).join('\n');
 
-    const systemPrompt = `You are Maya (මායා), an upbeat, encouraging AI English speaking coach for Sri Lankan learners.
-ROLEPLAY SCENARIO:
-- Role: ${role}
-- Specific Coaching Focus: ${focus}
-${opening ? `- Icebreaker Question Context: "${opening}"` : ''}
-${addon ? `- Additional Constraints: ${addon}` : ''}
+    const systemPrompt = `You are Maya, a dynamic, encouraging AI English speaking coach for Sri Lankan learners.
+LESSON: "${title}"
+PRACTICE GOALS:
+${points || '- General conversation'}
 
 INSTRUCTIONS:
 1. Student just said: "${dto.userMessage}".
-2. Check if the student made a noticeable grammatical, prepositional, or phrasing error.
-3. Respond in character as Maya. Keep your spoken response strictly under 15 words.
-4. If there was a grammatical mistake, verbally model the short correction in natural Sinhala ("ඔයාට පුළුවන් '[short fix]' කියලා කියන්න"), followed immediately by your next short English question. Keep total spoken turn under 15 words.
+2. Check if the student made an obvious phrasing or grammar mistake.
+3. Respond dynamically as Maya. Keep your spoken response strictly under 15 words.
+4. If there was a grammatical mistake, verbally model the correction in natural everyday Sinhala, followed immediately by your next practice prompt.
 5. Return ONLY a valid JSON object matching:
 {
   "mayaSpoken": "Your spoken reply strictly under 15 words",
@@ -589,7 +549,7 @@ INSTRUCTIONS:
     "explanation": "concise explanation in natural Sinhala",
     "highlightWords": ["words"]
   } | null,
-  "focusEvaluation": "1 sentence on how the reply followed the coaching focus"
+  "focusEvaluation": "1 sentence on how the reply addresses the lesson goals"
 }`;
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -618,50 +578,10 @@ INSTRUCTIONS:
       }
     }
 
-    // Contextual smart simulation fallback
-    const lower = (dto.userMessage || '').toLowerCase();
-    const hasPastTenseError = lower.includes('buyed') || lower.includes('goed') || lower.includes('eated');
-    const hasPrepositionError = lower.includes('in morning') || lower.includes('listen music');
-
-    if (hasPastTenseError) {
-      const wrong = lower.includes('buyed') ? 'buyed' : lower.includes('goed') ? 'goed' : 'eated';
-      const right = wrong === 'buyed' ? 'bought' : wrong === 'goed' ? 'went' : 'ate';
-      return {
-        success: true,
-        mayaSpoken: `ඔයාට පුළුවන් '${right}' කියලා කියන්න. What did you do next?`,
-        wordCount: 11,
-        hasMistake: true,
-        correction: {
-          studentSaid: wrong,
-          moreNatural: right,
-          explanation: `අතීත කාල ක්‍රියා පදය සඳහා '${right}' භාවිතා කරන්න.`,
-          highlightWords: [wrong],
-        },
-        focusEvaluation: `Identified irregular past tense mistake and modeled correction in Sinhala.`,
-      };
-    }
-
-    if (hasPrepositionError) {
-      return {
-        success: true,
-        mayaSpoken: `ඔයාට පුළුවන් 'in the morning' කියලා කියන්න. How was the weather?`,
-        wordCount: 12,
-        hasMistake: true,
-        correction: {
-          studentSaid: 'in morning',
-          moreNatural: 'in the morning',
-          explanation: `'morning' ඉදිරියෙන් 'the' නිපාතය එකතු කරන්න.`,
-          highlightWords: ['in morning'],
-        },
-        focusEvaluation: `Checked preposition and article usage per coaching focus.`,
-      };
-    }
-
-    const words = `That sounds wonderful! How often do you usually do that?`.split(/\s+/).length;
     return {
       success: true,
-      mayaSpoken: `That sounds wonderful! How often do you usually do that?`,
-      wordCount: words,
+      mayaSpoken: `That was a great attempt! How would you describe that next?`,
+      wordCount: 11,
       hasMistake: false,
       correction: null,
       focusEvaluation: `Engaged with student input and prompted next turn under 15 words.`,

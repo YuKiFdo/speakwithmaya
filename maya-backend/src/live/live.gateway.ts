@@ -58,7 +58,20 @@ interface ClientSessionState {
     detail?: string;
   }>;
   connectedAt: number;
-  recordedObjectives?: Set<string>;
+  activePracticeTask?: {
+    pointIndex: number;
+    phase: 'teaching' | 'testing';
+    pointTitle: string;
+    guidanceOrScenario?: string;
+  };
+  testScores?: Map<number, boolean>;
+  practiceTaskToolCalledThisTurn?: boolean;
+  evaluationResult?: {
+    isPassed: boolean;
+    scorePercent: number;
+    feedbackSinhala?: string;
+    feedbackEnglish?: string;
+  };
 }
 
 // Backpressure threshold: 128 KB of queued data
@@ -122,7 +135,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Session diagnostics
       sessionLog: [{ ts: Date.now(), event: 'client_connected' }],
       connectedAt: Date.now(),
-      recordedObjectives: new Set<string>(),
+      testScores: new Map<number, boolean>(),
     };
     this.clients.set(client, state);
 
@@ -545,6 +558,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     dto: CreateSessionTokenDto,
   ) {
     try {
+      // Ensure roadmap curriculum details are fully loaded
+      await this.sessionsService.enrichRoadmapDto(dto);
+
       const isSinhala = dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
       const systemInstruction = this.sessionsService.getSystemPrompt(dto);
       const toolsDeclaration = this.sessionsService.getToolsDeclaration(
@@ -606,6 +622,27 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
               model: this.liveModel,
               voiceName,
             }));
+
+            // If roadmap curriculum session with practice points, proactively prime Task 0 on client
+            if (dto.practicePoints && dto.practicePoints.length > 0) {
+              const firstPoint = dto.practicePoints[0];
+              state.activePracticeTask = {
+                pointIndex: 0,
+                phase: 'teaching',
+                pointTitle: firstPoint,
+                guidanceOrScenario: '',
+              };
+              this.safeSendToClient(state, JSON.stringify({
+                type: 'tool_call',
+                name: 'set_active_practice_task',
+                args: {
+                  pointIndex: 0,
+                  phase: 'teaching',
+                  taskTitle: firstPoint,
+                  hint: '',
+                },
+              }));
+            }
 
             // Dispatch opening turn greeting prompt if fresh session
             const isFreshSession = !dto.isReconnect && !dto.memory;
@@ -830,11 +867,13 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           `   💬 Maya Replied: "${modelText || '(audio only)'}"`
         );
         this.addSessionLog(state, 'model_turn_complete', `user="${userText?.slice(0, 80)}" maya="${modelText?.slice(0, 80)}"`);
+
         // Turn fully complete: clear accumulators for the next conversational exchange
         state.userTranscriptAccumulator = '';
         state.lastStudentTranscript = '';
         state.modelTranscriptAccumulator = '';
         state.hasModelSpokenThisTurn = false;
+        state.practiceTaskToolCalledThisTurn = false;
         this.safeSendToClient(state, JSON.stringify({
           type: 'turn_complete',
         }));
@@ -867,6 +906,10 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const functionResponses: any[] = [];
       const isSinhala = state.dto?.languageMode === 'sinhala' || state.dto?.mode === 'sinhala_tutor';
       const isDeepGuidance = isSinhala && state.dto?.sinhalaStyle === 'deep_guidance';
+      const isRoadmap = Boolean(
+        state.dto?.roadmapLevelId ||
+        (state.dto?.practicePoints && state.dto.practicePoints.length > 0)
+      );
 
       for (const fc of response.toolCall.functionCalls) {
         const args = (fc.args || {}) as any;
@@ -887,63 +930,154 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             response: {
               result: 'concluding',
               instruction: isSinhala
-                ? 'The call is terminating now. In your own natural, spontaneous spoken everyday Sinhala (කතා කරන බසින්, strictly NO canned scripts, NO bookish Sinhala): warmly wish the student goodbye, acknowledge their saved progress or questions, and deliver a final closing farewell statement. STRICTLY NEVER ASK A QUESTION (NO "?", NO "කරමුද?"), then stop speaking.'
-                : 'The call is terminating now. In your own natural, spontaneous words: warmly wish the student goodbye, acknowledge their saved progress or questions, and deliver a final closing farewell statement. STRICTLY NEVER ASK A QUESTION, then stop speaking.',
+                ? 'The call is terminating right now. Speak a warm, 1-sentence definitive final goodbye statement (e.g. wishing them a great day or to keep practicing). ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK "ප්‍රශ්න තියෙනවද?" OR "කරමුද?". Then stop speaking.'
+                : 'The call is terminating right now. Speak a warm, 1-sentence definitive final goodbye statement (e.g. wishing them a great day or to keep practicing). ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK ANY QUESTION. Then stop speaking.',
             },
           });
         } else if (fc.name === 'show_grammar_correction') {
           const shortKeyPhrase = String(args.moreNatural || args.more_natural || '').split(/[.,;!?]/)[0].trim().replace(/"/g, "'");
           const rawExplanation = String(args.explanation || '').replace(/"/g, "'");
+          let instruction: string;
+
+          if (isRoadmap) {
+            instruction = isSinhala
+              ? `Correction card displayed to student. In friendly spoken Sinhala: explain why it was wrong, model the correct English phrase "${shortKeyPhrase}", and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '${shortKeyPhrase}'"). STRICTLY DO NOT ask your next question yet. DO NOT advance to the next step. Wait for the student to repeat.`
+              : `Correction card displayed to student. Verbally explain the correction, model the correct phrase "${shortKeyPhrase}", and explicitly ask the student to repeat it aloud (say "Try saying: '${shortKeyPhrase}'"). DO NOT ask your next question yet. Wait for the student to repeat.`;
+          } else {
+            instruction = isSinhala
+              ? isDeepGuidance
+                ? `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "ඔයාට පුළුවන් '${shortKeyPhrase}' කියලා කියන්න", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
+                : `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "ඔයාට පුළුවන් '${shortKeyPhrase}' කියලා කියන්න"), and immediately ask your next short English question. Total turn strictly under 12 words.`
+              : `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`;
+          }
+
           functionResponses.push({
             name: fc.name,
             id: fc.id,
             response: {
               result: 'displayed_to_student',
-              instruction: isSinhala
-                ? isDeepGuidance
-                  ? `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "ඔයාට පුළුවන් '${shortKeyPhrase}' කියලා කියන්න", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
-                  : `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "ඔයාට පුළුවන් '${shortKeyPhrase}' කියලා කියන්න"), and immediately ask your next short English question. Total turn strictly under 12 words.`
-                : `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`,
+              instruction,
             },
           });
         } else if (fc.name === 'show_rephrase_suggestion') {
           const shortKeyPhrase = String(args.moreNatural || args.more_natural || '').split(/[.,;!?]/)[0].trim().replace(/"/g, "'");
           const rawExplanation = String(args.explanation || '').replace(/"/g, "'");
+          let instruction: string;
+
+          if (isRoadmap) {
+            instruction = isSinhala
+              ? `Rephrase card displayed to student. In friendly spoken Sinhala: explain why this phrasing is more natural, model the natural phrase "${shortKeyPhrase}", and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '${shortKeyPhrase}'"). STRICTLY DO NOT ask your next question yet. DO NOT advance to the next step. Wait for the student to repeat.`
+              : `Rephrase card displayed to student. Verbally model the natural phrase "${shortKeyPhrase}", and explicitly ask the student to repeat it aloud (say "Try saying: '${shortKeyPhrase}'"). DO NOT ask your next question yet. Wait for the student to repeat.`;
+          } else {
+            instruction = isSinhala
+              ? isDeepGuidance
+                ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${shortKeyPhrase}' කියලා කියන්න පුළුවන්", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
+                : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${shortKeyPhrase}' කියලා කියන්න පුළුවන්"), and immediately ask your next short English question. Total turn strictly under 12 words.`
+              : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`;
+          }
+
           functionResponses.push({
             name: fc.name,
             id: fc.id,
             response: {
               result: 'displayed_to_student',
-              instruction: isSinhala
-                ? isDeepGuidance
-                  ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${shortKeyPhrase}' කියලා කියන්න පුළුවන්", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
-                  : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${shortKeyPhrase}' කියලා කියන්න පුළුවන්"), and immediately ask your next short English question. Total turn strictly under 12 words.`
-                : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`,
+              instruction,
             },
           });
-        } else if (fc.name === 'record_objective') {
-          const rawId = String(args.objectiveId || '').trim();
-          if (rawId && state.recordedObjectives) {
-            state.recordedObjectives.add(rawId.toLowerCase());
-          }
+        } else if (fc.name === 'set_active_practice_task') {
+          const pointIndex = Number(args.pointIndex) || 0;
+          const phase = (args.phase === 'testing' ? 'testing' : 'teaching') as 'teaching' | 'testing';
+          const pointTitle = String(args.taskTitle || args.pointTitle || '').trim();
+          const guidanceOrScenario = String(args.hint || args.guidanceOrScenario || '').trim();
 
-          const allObjectives =
-            state.dto?.guidedPrompt?.learningObjectives ||
-            state.dto?.learningObjectives ||
-            [];
-          const isAllCompleted =
-            allObjectives.length > 0 &&
-            Boolean(state.recordedObjectives && state.recordedObjectives.size >= allObjectives.length);
+          state.activePracticeTask = {
+            pointIndex,
+            phase,
+            pointTitle,
+            guidanceOrScenario,
+          };
+
+          this.safeSendToClient(state, JSON.stringify({
+            type: 'practice_task_update',
+            pointIndex,
+            phase,
+            pointTitle,
+            guidanceOrScenario,
+          }));
+
+          state.practiceTaskToolCalledThisTurn = true;
 
           functionResponses.push({
             name: fc.name,
             id: fc.id,
             response: {
-              result: 'objective_recorded',
-              allObjectivesCompleted: isAllCompleted,
-              instruction: isAllCompleted
-                ? 'All milestones for this level are now complete! In your current spoken turn: formulate your own fresh, natural spoken Sinhala words without repetitive scripts. If the student ALREADY asked to wrap up or asked about next levels: answer their question, speak a warm final farewell statement (NEVER ask a question), and call conclude_call. If they have NOT yet asked to wrap up: warmly praise their completion of this level and ask if they are ready to wrap up and save.'
-                : 'Objective successfully recorded. In your current spoken turn: give ONE brief validation reaction (under 5 words), and immediately ask an engaging question pivoting to the next objective. Keep your total turn under 15 words.',
+              result: 'task_card_displayed',
+            },
+          });
+        } else if (fc.name === 'record_test_score') {
+          const pointIndex = Number(args.pointIndex) || 0;
+          const passed = Boolean(args.passed);
+          const note = String(args.note || args.studentSaidSummary || '');
+
+          if (!state.testScores) {
+            state.testScores = new Map<number, boolean>();
+          }
+          state.testScores.set(pointIndex, passed);
+
+          const allScores = Array.from(state.testScores.entries())
+            .map(([idx, p]) => `#${idx}:${p ? 'PASS' : 'FAIL'}`)
+            .join(', ');
+          this.logger.log(
+            `[${state.sessionId}] 📝 [record_test_score] Point ${pointIndex}: passed=${passed ? 'YES' : 'NO'} | Note: "${note}" | Current Progress: [${allScores}]`,
+          );
+
+          this.safeSendToClient(state, JSON.stringify({
+            type: 'test_score_update',
+            pointIndex,
+            passed,
+            note,
+          }));
+
+          functionResponses.push({
+            name: fc.name,
+            id: fc.id,
+            response: {
+              result: 'test_score_recorded',
+            },
+          });
+        } else if (fc.name === 'conclude_level_evaluation') {
+          const isPassed = Boolean(args.isPassed);
+          const scorePercent = Number(args.scorePercent) || 0;
+          const feedbackSinhala = String(args.feedbackSinhala || '').trim();
+          const feedbackEnglish = String(args.feedbackEnglish || '').trim();
+
+          state.evaluationResult = {
+            isPassed,
+            scorePercent,
+            feedbackSinhala,
+            feedbackEnglish,
+          };
+
+          this.logger.log(
+            `[${state.sessionId}] 🏆 [conclude_level_evaluation] Score: ${scorePercent}% | Passed: ${isPassed ? 'YES' : 'NO'} | Feedback (Sinhala): "${feedbackSinhala}" | Feedback (English): "${feedbackEnglish}"`,
+          );
+
+          this.safeSendToClient(state, JSON.stringify({
+            type: 'level_evaluation_completed',
+            isPassed,
+            scorePercent,
+            feedbackSinhala,
+            feedbackEnglish,
+          }));
+
+          functionResponses.push({
+            name: fc.name,
+            id: fc.id,
+            response: {
+              result: 'evaluation_completed',
+              instruction: isSinhala
+                ? 'Evaluation finalized. In your own natural, spontaneous spoken everyday Sinhala (කතා කරන බසින්, strictly NO canned scripts): deliver your definitive closing verdict to the student. State whether they passed and unlocked the next level or need to re-attempt, highlighting specific feedback. STRICTLY NEVER ASK A QUESTION (NO "?", NO "කරමුද?"), then call conclude_call.'
+                : 'Evaluation finalized. In your own natural, spontaneous spoken words: deliver your definitive closing verdict to the student. State whether they passed and unlocked the next level or need to re-attempt, highlighting specific feedback. STRICTLY NEVER ASK A QUESTION, then call conclude_call.',
             },
           });
         } else {

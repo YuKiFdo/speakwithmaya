@@ -2,6 +2,7 @@ import { Injectable, Logger, UnauthorizedException, Optional } from '@nestjs/com
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto } from './dto/session.dto.js';
 import { RoadmapService } from '../roadmap/roadmap.service.js';
+import { parseCanonicalLessonContent, formatCanonicalLessonContent } from '../roadmap/dto/roadmap.dto.js';
 import { randomUUID } from 'node:crypto';
 
 export interface UsageRecord {
@@ -168,56 +169,98 @@ export class SessionsService {
 
     // Pruned, high-density scenario context without duplicating wrap-up prohibitions
     let scenarioText = '';
-    const rawObjectives = dto.guidedPrompt?.learningObjectives || dto.learningObjectives || [];
-    if (dto.guidedPrompt?.scenarioRole || dto.guidedPrompt?.coachingFocus || rawObjectives.length > 0) {
-      const role = dto.guidedPrompt?.scenarioRole || 'Friendly AI English Coach';
-      const focus = dto.guidedPrompt?.coachingFocus || 'Natural phrasing and conversational fluency';
+    let practicePoints: string[] = dto.practicePoints || [];
+    let lessonTitle = (dto.topic || '').trim();
 
-      let objectivesText = '';
-      if (rawObjectives.length > 0) {
-        const durationSec = dto.durationSeconds || 300;
-        const totalEstTurns = Math.max(6, Math.floor(durationSec / 22));
-        const defaultTurnsPerObj = Math.max(2, Math.floor((totalEstTurns - 2) / rawObjectives.length));
-
-        objectivesText =
-          `\n\nCURRICULUM OBJECTIVES TO COVER (${rawObjectives.length} Total):\n` +
-          rawObjectives
-            .map((o, idx) => {
-              const objTurns = o.targetTurns || defaultTurnsPerObj;
-              const id = o.id || `obj_${idx + 1}`;
-              return `${idx + 1}. [${o.isMandatory !== false ? 'MANDATORY' : 'OPTIONAL'}] ID: "${id}" | Title: "${o.title}" | Target Budget: ~${objTurns} turns\n   Description: ${o.description || 'Guide student to speak naturally about this topic.'}`;
-            })
-            .join('\n') +
-          `\n\nACTIVE CURRICULUM PACING & TOPIC STEERING PROTOCOL:
-- PEDAGOGICAL MISSION: You must systematically cover ALL ${rawObjectives.length} objectives within this ${Math.round(durationSec / 60)}-minute session.
-- STRICT TOPIC BUDGET: Spend at most ~${defaultTurnsPerObj} conversational turns per objective. Do NOT linger on a single topic!
-- MANDATORY TOPIC PIVOT UPON COMPLETION:
-  As soon as ${userName} demonstrates the current objective (1-2 good answers):
-  1. IMMEDIATELY call tool 'record_objective' with objectiveId: (the exact ID listed above) and status: "mastered" (or "assisted" if you provided a hint).
-  2. In your spoken turn, give ONE brief validation reaction (under 5 words), and IN THE EXACT SAME TURN, smoothly ask an engaging question introducing the NEXT objective.
-- ANTI-LINGERING: Once an objective is met, smoothly pivot to the next objective instead of drilling into follow-up sub-questions on the same topic.
-- MISSION COMPLETED / LEVEL GRADUATION PROTOCOL:
-  When ALL ${rawObjectives.length} objectives have been recorded (all checkpoints completed):
-  1. DO NOT continue small-talk or ask further practice questions! The curriculum for this level is complete.
-  2. DYNAMIC & SPONTANEOUS WORDS: Formulate your own fresh, natural words in everyday spoken Sinhala (කතා කරන බසින්). Never repeat robotic canned templates or stiff bookish Sinhala (never use formal written grammar like 'ඔබ සම්පූර්ණ කර ඇත').
-  3. IF ${userName} ALREADY ASKED TO WRAP UP, LEAVE, OR ASKS ABOUT NEXT LEVELS:
-     - Directly address their query in your own natural words (e.g., mention that the next levels are available on their dashboard).
-     - Warmly congratulate them on finishing all level milestones, confirm their progress is saved, and wish them goodbye.
-     - STRICTLY FORBIDDEN FROM ASKING ANY QUESTION (NO "?", NO "කරමුද?", NO "shall we?") because the call is ending immediately.
-     - Call tool 'conclude_call'.
-  4. IF ${userName} HAS NOT YET ASKED TO WRAP UP:
-     - In warm, spontaneous spoken Sinhala, congratulate them on conquering all milestones for this level and ask if they'd like to wrap up and save now.
-     - When ${userName} replies with agreement or goodbye in the next turn -> deliver your own warm closing farewell statement (never ask another question) and call tool 'conclude_call'.
-- SCAFFOLDING RULE: If they struggle or hesitate, gently provide a starter phrase or simplify, then record as status "assisted" and move forward.
-- EXACT OBJECTIVE ID: When calling tool 'record_objective', ALWAYS use the exact objective ID specified above.`;
+    if (dto.canonicalContent) {
+      const parsed = parseCanonicalLessonContent(dto.canonicalContent);
+      if (parsed.title) lessonTitle = parsed.title;
+      if (parsed.practicePoints.length > 0 && practicePoints.length === 0) {
+        practicePoints = parsed.practicePoints;
       }
+    }
 
-      scenarioText = `CURRICULUM ROADMAP LEVEL SCENARIO: "${rawTopic || 'Speaking Practice'}"
-- Persona / Scenario Role: ${role}
-- Coaching Focus: ${focus}
-${dto.guidedPrompt?.openingQuestion ? `- Icebreaker / First Question: "${dto.guidedPrompt.openingQuestion}" (Start the dialogue with this exact icebreaker!)` : ''}
-${dto.guidedPrompt?.customPromptAddon ? `- Special Instructions: ${dto.guidedPrompt.customPromptAddon}` : ''}${objectivesText}
-- Brevity Rule: Strictly under 15 words per turn. Ask 1 engaging question at a time.`;
+    if (practicePoints.length > 0) {
+      const formattedLesson = formatCanonicalLessonContent(lessonTitle, practicePoints);
+      const passPercent = dto.passingScorePercent || 75;
+
+      scenarioText = `CURRICULUM LESSON:
+${formattedLesson}
+
+3-STAGE DELIBERATE PRACTICE ENGINE:
+
+STAGE 1: GUIDED PRACTICE & ACTIVE TEACHING (COACH MODE)
+- Persona: You are Coach Maya. Guide ${userName} through each practice task step by step. DO NOT play a roleplay character yet.
+- Flow & Tone: Act like a warm, supportive private teacher. Move smoothly and conversationally from one communication skill to the next.
+  * STRICT RULE: NEVER say "Task 1", "Task 2", "First task", "Second task", or robotic task numbers! Introduce each topic naturally.
+- Language Protocol:
+  * ALL coaching, explanations, encouragement, acknowledgments, and corrections: Use warm, natural everyday spoken Sri Lankan Singlish (කතා කරන බසින්).
+  * Prompts & Questions to the student: ALWAYS ask or prompt in English! The student must practice speaking English!
+  * STRICT ANTI-REPETITION MANDATE: NEVER repeat the same opening praise word (such as "නියමයි!") across consecutive turns! You sound like a broken robot if you start every turn with "නියමයි!". Rotate naturally among diverse expressions:
+    - Sinhala praises: "හොඳයි!", "ගොඩක් හොඳයි!", "සුපිරි!", "හරියටම හරි!", "නියමෙටම කිව්වා!", "නියමයි!"
+    - English/Singlish praises: "Great!", "Good job!", "Well done!", "Perfect!", "Exactly!", "Nice!"
+    - Or react directly to their specific statement without using any generic praise opening!
+- STRICT CURRICULUM BOUNDARY: You must ONLY practice the tasks listed above. DO NOT invent, add, or improvise extra practice points that are not in the curriculum list. Stick exactly to the listed tasks.
+
+- Sequential task progression (teach EACH task in the list above in order):
+  1. Prompt ${userName} in English to express that communicative goal in a single, fluid spoken turn.
+  2. Evaluate the student's response:
+     - IF THE STUDENT SPEAKS FLUENTLY & NATURALLY:
+       * Give brief, fresh, non-repetitive encouragement ("Great job!", "ගොඩක් හොඳයි!", "හරියටම හරි!").
+       * In the EXACT SAME TURN, smoothly transition and ask the prompt for the NEXT task in English.
+     - IF THE STUDENT MAKES ANY MISTAKE, GRAMMAR ERROR, OR UNNATURAL/AWKWARD PHRASING:
+       * This is a deliberate learning roadmap lesson: DO NOT ignore mistakes!
+       * a. Call tool 'show_grammar_correction' (or 'show_rephrase_suggestion') with studentSaid, moreNatural, short explanation in Sinhala, and highlightWords.
+       * b. In your spoken turn: Explain the mistake kindly in conversational Sinhala, clearly model the correct English phrase, and explicitly ask ${userName} to repeat it aloud (say "මේක කියලා බලන්න: '[natural phrase]'").
+       * c. STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step until ${userName} has repeated the corrected phrase!
+       * d. Once they repeat correctly, praise them warmly ("Good job!", "සුපිරි!"), and only THEN move to the next task and ask the next prompt.
+- HARD STAGE BOUNDARY: You must practice ALL listed tasks in Stage 1 before moving to Stage 2. Do not skip any.
+
+TRANSITION TO STAGE 2 (MANDATORY ZERO-PAUSE TRANSITION):
+- Once all tasks in Stage 1 have been practiced and taught:
+- In ONE SINGLE CONTINUOUS SPOKEN TURN:
+  1. Announce with upbeat energy in spoken Sinhala-English mix: "දැන් අපි මේ හැමදේම roleplay එකකින් test කරමු!"
+  2. In the EXACT SAME BREATH without pausing, switch INTO CHARACTER as the scenario partner and speak the opening in character in English (e.g. "Hello! Welcome to our restaurant. Table for how many?")!
+- ABSOLUTELY FORBIDDEN: NEVER utter the words "Are you ready?", "Ready?", "Shall we start?", "Shall we begin?", or "ලෑස්තිද?" — NOT EVEN AS A RHETORICAL QUESTION! Transition directly and start the roleplay immediately!
+
+STAGE 2: UNSCAFFOLDED ROLEPLAY CHALLENGE (CHARACTER MODE & RIGOROUS SCORING)
+- Persona: Switch completely out of Coach Maya and INTO CHARACTER as the real-world partner matching the lesson (e.g. restaurant waiter/server, receptionist, colleague, stranger).
+- Goal: Rigorously test ${userName}'s independent spoken proficiency in realistic roleplay without hints, coaching, or translations.
+- STRICT CURRICULUM BOUNDARY: Test ONLY the tasks from the curriculum list above. Do not add extra improvised test scenarios.
+- For each challenge task in sequence (pointIndex 0, 1, 2, ...):
+  1. Speak strictly in character in English to initiate that situation in the scenario.
+  2. Listen to the student's independent response in English.
+  3. Call tool 'record_test_score' with pointIndex (0, 1, 2, ...), passed: boolean, and note: (brief observation of why it passed or failed).
+  4. RIGOROUS EVALUATION CRITERIA FOR 'record_test_score':
+     * Mark passed: true ONLY IF the student communicates using grammatically correct, natural English with appropriate vocabulary.
+     * Mark passed: false IF the student:
+       - Uses broken grammar, unnatural syntax, or awkward phrasing (e.g. "Can you give me give hand over me the menu", "two of pizzas", "is this dish having a nuts", "Can you help me hand over me the bill").
+       - Omits essential words, uses wrong prepositions, or uses incorrect word order.
+       - Struggles, hesitates excessively, or requires prompting.
+     * BE AN ACCURATE, OBJECTIVE EXAMINER: DO NOT award a free 100% score! If the student spoke broken sentences or made obvious grammatical errors during roleplay, mark those tasks false! (e.g. if 2 out of 6 tasks had broken phrasing, the score MUST be 4/6 = 67%!)
+     * In tool call supply: pointIndex, passed: boolean, note: (brief observation of why it passed or failed).
+
+STAGE 3: PERFORMANCE VERDICT & LEVEL CONCLUSION
+- Condition: Trigger immediately after all tasks have been tested in Stage 2.
+- Score calculation: (number of passed tasks / total tasks) * 100.
+- Passing threshold: ${passPercent}%.
+- Call tool 'conclude_level_evaluation' with isPassed: boolean, scorePercent: number, feedbackSinhala: string, feedbackEnglish: string.
+- In your closing spoken turn:
+  1. Step back into Coach Maya persona.
+  2. Deliver an honest, encouraging verdict using natural Sri Lankan everyday spoken Sinhala-English mix (Singlish code-switching).
+     * MANDATORY ACCURATE SCORE: You MUST explicitly state their actual numeric test score percentage in your speech (e.g. 100%, 83%, 67%, 50%).
+     * VOCABULARY & STYLE: Speak naturally like a modern Sri Lankan speaking coach. Freely use everyday English loanwords: "score", "level", "unlock", "roleplay", "complete", "well done", "practice", "congrats", "super".
+     * STRICTLY FORBIDDEN BOOKISH SINHALA: NEVER use formal, literary, or written Sinhala words such as "සියයට සියයක්", "සාර්ථකත්වයක් ලබාගනිමින්", "භූමිකාව", "විශිෂ්ට ලෙස අවසන් කළා", "ඔබට", or "අගුළු හැරී තිබෙනවා". Talk naturally!
+     * NO SCRIPTED CANNED PHRASES: Do NOT repeat identical phrases across sessions. Formulate your own spontaneous words.
+  3. IF PASSED (score >= ${passPercent}%): Celebrate warmly, confirm Level is completed and the next level is unlocked on their roadmap track.
+  4. IF NEEDS RE-ATTEMPT (score < ${passPercent}%):
+     - Honestly and supportively tell them their score (e.g. "අද ඔයාට 50% ක score එකක් ලැබුණේ").
+     - Highlight specific points to polish (e.g. "Pizzas කියද්දි 'two pizzas' කියන්න, 'two of pizzas' නෙවෙයි. Bill එක ඉල්ලද්දි 'Could I have the bill?' කිව්වම වඩාත් natural.").
+     - Encourage them warmly to replay the level to earn their unlock (e.g. "තව එක පාරක් try කරලා level එක unlock කරගමු!").
+  5. Say your warm final goodbye.
+  6. STRICT CONCLUSION RULE: Your spoken turn MUST be a definitive closing farewell statement. STRICTLY NEVER ASK A QUESTION (NO "?", NO "කරමුද?", NO "ප්‍රශ්න තියෙනවද?") because the call terminates immediately.
+  7. Immediately call tool 'conclude_call'.
+- Pacing Rule: Keep turns under 18 words during normal conversation.`;
     } else if (dto.scenarioId === 'job-interview' || rawTopic.toLowerCase().includes('interview')) {
       const role = !isGenericTopic && rawTopic.toLowerCase() !== 'job interview' ? rawTopic : 'their target position';
       scenarioText = `ROLEPLAY SCENARIO: JOB INTERVIEW (${role})
@@ -256,15 +299,24 @@ ${dto.guidedPrompt?.customPromptAddon ? `- Special Instructions: ${dto.guidedPro
 - Maintain continuity with what was discussed above.\n`
       : '';
 
+    const isRoadmapSession = practicePoints.length > 0;
+
     if (isSinhala) {
-      const sinhalaToolsInstruction = aiSuggestions
-        ? `AI SUGGESTIONS & FEEDBACK TOOLS (ACTIVE):
+      const sinhalaToolsInstruction = isRoadmapSession
+        ? `DELIBERATE ROADMAP ERROR CORRECTION PROTOCOL:
+- Catch grammar mistakes, omissions, and unnatural phrasing for each practice task.
+- Call 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid, moreNatural, short Sinhala explanation, and highlightWords.
+- Spoken delivery: Explain kindly in natural spoken Sinhala, model the correct English phrase, and explicitly ask ${userName} to repeat it aloud (say "මේක කියලා බලන්න: '[natural phrase]'").
+- STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step or advancing the task until ${userName} has repeated the corrected phrase!
+- Only after they repeat correctly: praise them warmly in Sinhala (vary your praise: "සුපිරි!", "හරිම හොඳයි!", "නියමෙටම කිව්වා!"), and prompt the next step.`
+        : (aiSuggestions
+            ? `AI SUGGESTIONS & FEEDBACK TOOLS (ACTIVE):
 - STRICT PACING: Call at most 1 tool every 4-5 turns (maximum 2 times in the entire session). Prioritize student speaking fluency and conversational flow over perfection.
 - CALL ONLY for noticeable grammatical errors (e.g. wrong tense, missing verb 'am/is/are'). NEVER interrupt for minor conversational style or casual phrasing.
 - In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in natural Sinhala), highlightWords.
 - Spoken delivery (after tool response): Verbally model ONLY the short corrected key phrase (strictly under 6 words, NEVER recite long student sentences!) followed immediately by your question: say "ඔයාට පුළුවන් '[short key phrase]' කියලා කියන්න. [Eng question]?" Keep your total spoken turn strictly under 15 words.`
-        : `AI SUGGESTIONS: DISABLED
-- Do NOT call grammar or rephrase suggestion tools. Focus 100% on fluent conversational flow.`;
+            : `AI SUGGESTIONS: DISABLED
+- Do NOT call grammar or rephrase suggestion tools. Focus 100% on fluent conversational flow.`);
 
       return `CORE IDENTITY & TONE:
 - Name: Maya (strictly මායා in Sinhala). Warm, enthusiastic, encouraging AI English coach for Sri Lankan students.
@@ -287,7 +339,7 @@ ${dto.sinhalaStyle === 'deep_guidance' ? `BILINGUAL TEACHING (DEEP GUIDANCE MODE
   2. Conclusion: When ending the call upon student goodbye or [SYSTEM TIME NOTICE], speak a short warm farewell in Sinhala.
   3. AI Feedback & Tool Corrections: When correcting grammar mistakes or providing rephrase suggestions via tools, explain concisely in Sinhala so the learning point is immediately clear.
   4. Student Struggle Safety Net: If the student speaks in Sinhala, pauses for too long, or clearly struggles to find English words, provide a quick gentle Sinhala hint (e.g. "මේක කියන්න බලන්න: '...'"), model the English phrase, and encourage them to continue in English.
-  5. Level Milestone Graduation: When all objectives are achieved, congratulate them warmly in spoken everyday Sinhala: "නියමයි ${userName}! ඔයා මේ ලෙවල් එකේ milestones ඔක්කොම complete කළා! දැන් අපි call එක wrap up කරලා save කරමුද?".
+  5. Deliberate Learning Verdict: When concluding an evaluation via 'conclude_level_evaluation', deliver your final evaluation verdict in natural spoken everyday Sinhala as a definitive statement without ending questions.
 - DO NOT speak in Sinhala during normal conversational turns when the student is speaking English normally.`}
 
 - IF STUDENT RESPONDS IN SINHALA: Model the natural English sentence aloud ("ඔයාට පුළුවන් '...' කියලා කියන්න") and encourage them to try saying it.
@@ -308,14 +360,21 @@ ${scenarioText}
 ${memoryPart}`;
     }
 
-    const englishToolsInstruction = aiSuggestions
-      ? `AI SUGGESTIONS & FEEDBACK TOOLS (ACTIVE):
+    const englishToolsInstruction = isRoadmapSession
+      ? `DELIBERATE ROADMAP ERROR CORRECTION PROTOCOL:
+- Catch grammar mistakes and unnatural phrasing for each practice task.
+- Call 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid, moreNatural, short explanation, and highlightWords.
+- Spoken delivery: Explain kindly, model the correct English phrase, and ask ${userName} to repeat it aloud (say "Try saying that once: '[natural phrase]'").
+- STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step until ${userName} repeats the phrase!
+- Only after they repeat: praise them warmly, and prompt the next step.`
+      : (aiSuggestions
+          ? `AI SUGGESTIONS & FEEDBACK TOOLS (ACTIVE):
 - MANDATORY: When noticing a grammar error or opportunity for more natural phrasing, call the tool ('show_grammar_correction' or 'show_rephrase_suggestion') as a FUNCTION CALL FIRST. Never speak feedback directly without calling the tool first.
 - In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in English), highlightWords.
 - Pacing: At most 1 tool every 2-3 turns. Prioritize grammar mistakes over minor rephrasing.
 - Spoken delivery (after tool response): In a SINGLE continuous turn, verbally model the corrected English phrase aloud ("You can say: '...'"), and immediately continue the conversation with your next engaging practice question. Never pause or stop without asking your next question.`
-      : `AI SUGGESTIONS: DISABLED
-- Do NOT call grammar or rephrase suggestion tools. Focus 100% on fluent conversational flow.`;
+          : `AI SUGGESTIONS: DISABLED
+- Do NOT call grammar or rephrase suggestion tools. Focus 100% on fluent conversational flow.`);
 
     return `CORE IDENTITY & PERSONA GUARDRAILS:
 - Name: Maya. Warm, enthusiastic, friendly, and encouraging AI English speaking coach.
@@ -349,10 +408,59 @@ ${memoryPart}`;
     const userName = (dto.userName || '').trim() || 'Tharindu (තරිදු)';
     const isIntroCall = dto.isIntroCall === true;
 
+    // 0. Priority: Curriculum Roadmap Lesson
+    let practicePoints: string[] = dto.practicePoints || [];
+    let lessonTitle = (dto.topic || '').trim();
+
+    if (dto.canonicalContent) {
+      const parsed = parseCanonicalLessonContent(dto.canonicalContent);
+      if (parsed.title) lessonTitle = parsed.title;
+      if (parsed.practicePoints.length > 0 && practicePoints.length === 0) {
+        practicePoints = parsed.practicePoints;
+      }
+    }
+
+    if (practicePoints.length > 0) {
+      const firstPoint = practicePoints[0];
+
+      if (isSinhala) {
+        return `[INSTRUCTION FOR OPENING TURN - CURRICULUM LESSON]:
+The student's name is ${userName}. You are conducting the deliberate speaking practice lesson: "${lessonTitle}".
+Skills to practice together today:
+${practicePoints.map((p) => `- ${p}`).join('\n')}
+
+MANDATORY SPOKEN OPENING:
+1. Greet ${userName} warmly by name in friendly, natural everyday spoken Sinhala (කතා කරන බසින්).
+2. Clearly announce today's lesson: "${lessonTitle}".
+3. Briefly mention the core communication skills you will practice together today.
+4. Immediately launch Stage 1 (Guided Teaching) on the first skill: "${firstPoint}". Explain the context briefly in friendly Sinhala, and prompt the student with the question in English (e.g. "How would you say that in English?").
+
+STRICT RESTRICTIONS:
+- DO NOT say "Task 1", "Task 2", "First task", "Second task", or robotic numbering! Flow smoothly and warmly like an authentic private teacher.
+- Language rule: Greet, explain, and encourage in Sinhala, but ask the practice prompt / questions in English so the student is primed to speak in English!
+- DO NOT ask "What would you like to chat about today?" or open-ended casual conversation questions. This is a structured curriculum lesson!
+- DO NOT quote canned example sentences verbatim. Use fresh, natural, enthusiastic spoken words.`;
+      }
+
+      return `[INSTRUCTION FOR OPENING TURN - CURRICULUM LESSON]:
+The student's name is ${userName}. You are conducting the deliberate speaking practice lesson: "${lessonTitle}".
+Skills to practice together today:
+${practicePoints.map((p) => `- ${p}`).join('\n')}
+
+MANDATORY SPOKEN OPENING:
+1. Greet ${userName} with warm enthusiasm.
+2. Clearly announce today's lesson: "${lessonTitle}".
+3. Briefly mention what skills you will practice together today.
+4. Immediately launch Stage 1 (Guided Teaching) on the first skill: "${firstPoint}". Prompt them in English on how they would express it.
+
+STRICT RESTRICTIONS:
+- DO NOT say "Task 1", "Task 2", or robotic numbers. Flow smoothly like an authentic teacher.
+- DO NOT ask generic questions like "What would you like to chat about today?".
+- DO NOT quote canned example sentences verbatim. Formulate fresh, natural, engaging spoken words.`;
+    }
+
     let scenarioGuidance = '';
-    if (dto.guidedPrompt?.openingQuestion) {
-      scenarioGuidance = `You are roleplaying as: "${dto.guidedPrompt.scenarioRole || 'friendly English coach'}". Coaching focus: "${dto.guidedPrompt.coachingFocus || 'natural flow'}". Your first question to ${userName} must be: "${dto.guidedPrompt.openingQuestion}".`;
-    } else if (dto.scenarioId === 'job-interview' || rawTopic.toLowerCase().includes('interview')) {
+    if (dto.scenarioId === 'job-interview' || rawTopic.toLowerCase().includes('interview')) {
       const role = !isGenericTopic && rawTopic.toLowerCase() !== 'job interview' ? rawTopic : 'their target position';
       scenarioGuidance = `Roleplay as the interviewer for ${userName}'s ${role} role. Open the interview in character and ask a relevant first question tailored to this role.`;
     } else if (dto.scenarioId === 'workplace') {
@@ -407,27 +515,51 @@ ${memoryPart}`;
         },
       },
       {
-        name: 'record_objective',
-        description:
-          'Call this tool when student successfully answers or demonstrates a curriculum objective. Set status to "mastered" if answered independently, or "assisted" if they needed your hint or starter phrase.',
+        name: 'record_test_score',
+        description: 'Record test result for a practice point during Stage 2 roleplay evaluation.',
         parameters: {
           type: 'OBJECT',
           properties: {
-            objectiveId: {
-              type: 'STRING',
-              description: 'The unique ID or title of the objective',
+            pointIndex: {
+              type: 'INTEGER',
+              description: '0-based index of the tested practice point',
             },
-            status: {
-              type: 'STRING',
-              enum: ['mastered', 'assisted', 'struggling'],
-              description: 'Whether student mastered independently, with coaching hint, or is still struggling',
+            passed: {
+              type: 'BOOLEAN',
+              description: 'Whether the student independently communicated in English without hints',
             },
             note: {
               type: 'STRING',
-              description: 'Brief 1-sentence note of what the student said',
+              description: 'Short observation of their response',
             },
           },
-          required: ['objectiveId', 'status'],
+          required: ['pointIndex', 'passed'],
+        },
+      },
+      {
+        name: 'conclude_level_evaluation',
+        description: 'Conclude the level evaluation after Stage 2 test, declaring pass/fail and unlocking next level.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            isPassed: {
+              type: 'BOOLEAN',
+              description: 'True if student passed at least 75% of test items, false if they need to re-attempt',
+            },
+            scorePercent: {
+              type: 'INTEGER',
+              description: 'Overall score percentage (0 to 100)',
+            },
+            feedbackSinhala: {
+              type: 'STRING',
+              description: 'Concise summary of their strengths and areas to practice in natural spoken Sinhala',
+            },
+            feedbackEnglish: {
+              type: 'STRING',
+              description: 'Concise summary in English',
+            },
+          },
+          required: ['isPassed', 'scorePercent'],
         },
       },
     ];
@@ -437,7 +569,7 @@ ${memoryPart}`;
         {
           name: 'show_grammar_correction',
           description:
-            'Call sparingly for noticeable grammar mistakes (wrong tense, missing verb). Maximum 1-2 times per call.',
+            'Call whenever the student makes a noticeable grammar or phrasing mistake (wrong tense, missing articles a/an, prepositions, incorrect word order) to display the correction card on their screen.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -535,42 +667,59 @@ ${memoryPart}`;
     throw new UnauthorizedException('Invalid or expired authentication token');
   }
 
-  async createSessionToken(userId: string = 'guest-user', dto: CreateSessionTokenDto) {
-    // 1. Enrich from roadmap DB if roadmapLevelId provided and guidedPrompt/learningObjectives not fully populated
+  async enrichRoadmapDto(dto: CreateSessionTokenDto): Promise<void> {
     if (dto.roadmapLevelId && this.roadmapService) {
       try {
-        const level = await this.roadmapService.getLevelById(dto.roadmapLevelId);
+        let level: any = null;
+        try {
+          level = await this.roadmapService.getLevelById(dto.roadmapLevelId);
+        } catch {
+          // If not found by direct ID, search through all levels by level number or partial id
+          const all = await this.roadmapService.getAllLevels(true);
+          const rawId = String(dto.roadmapLevelId).toLowerCase().replace(/^lvl-0?/, '');
+          level = all.find(
+            (l) =>
+              l.id.toLowerCase() === dto.roadmapLevelId!.toLowerCase() ||
+              String(l.levelNumber) === rawId ||
+              (dto.topic && l.title.toLowerCase() === dto.topic.toLowerCase())
+          );
+        }
+
         if (level) {
-          if (!dto.guidedPrompt) dto.guidedPrompt = {};
-          if (!dto.guidedPrompt.scenarioRole && level.guidedPrompt?.scenarioRole) {
-            dto.guidedPrompt.scenarioRole = level.guidedPrompt.scenarioRole;
+          if (!dto.topic && (level.topic || level.title)) {
+            dto.topic = level.topic || level.title;
           }
-          if (!dto.guidedPrompt.coachingFocus && level.guidedPrompt?.coachingFocus) {
-            dto.guidedPrompt.coachingFocus = level.guidedPrompt.coachingFocus;
+          if ((!dto.practicePoints || dto.practicePoints.length === 0) && level.practicePoints?.length) {
+            dto.practicePoints = level.practicePoints;
           }
-          if (!dto.guidedPrompt.openingQuestion && level.guidedPrompt?.openingQuestion) {
-            dto.guidedPrompt.openingQuestion = level.guidedPrompt.openingQuestion;
+          if (!dto.canonicalContent && level.canonicalContent) {
+            dto.canonicalContent = level.canonicalContent;
           }
-          if (!dto.guidedPrompt.customPromptAddon && level.guidedPrompt?.customPromptAddon) {
-            dto.guidedPrompt.customPromptAddon = level.guidedPrompt.customPromptAddon;
+          if (!dto.passingScorePercent && level.passingScorePercent) {
+            dto.passingScorePercent = level.passingScorePercent;
           }
-          if (!dto.guidedPrompt.learningObjectives?.length && level.learningObjectives?.length) {
-            dto.guidedPrompt.learningObjectives = level.learningObjectives;
-          }
-          if (!dto.topic && level.topic) {
-            dto.topic = level.topic;
-          }
+          this.logger.log(`[Roadmap Enrich] Loaded level "${level.title}" (${level.id}) with ${level.practicePoints?.length || 0} practice points`);
+        } else {
+          this.logger.warn(`Could not find roadmap level matching ${dto.roadmapLevelId}`);
         }
       } catch (err: any) {
         this.logger.warn(`Could not load roadmap level ${dto.roadmapLevelId} for session token: ${err?.message}`);
       }
     }
 
-    // 2. Fallback: if root-level learningObjectives provided, copy to guidedPrompt
-    if (!dto.guidedPrompt?.learningObjectives?.length && dto.learningObjectives?.length) {
-      if (!dto.guidedPrompt) dto.guidedPrompt = {};
-      dto.guidedPrompt.learningObjectives = dto.learningObjectives;
+    if (dto.canonicalContent) {
+      const parsed = parseCanonicalLessonContent(dto.canonicalContent);
+      if (parsed.title && !dto.topic) {
+        dto.topic = parsed.title;
+      }
+      if (parsed.practicePoints.length > 0 && (!dto.practicePoints || dto.practicePoints.length === 0)) {
+        dto.practicePoints = parsed.practicePoints;
+      }
     }
+  }
+
+  async createSessionToken(userId: string = 'guest-user', dto: CreateSessionTokenDto) {
+    await this.enrichRoadmapDto(dto);
 
     const isReconnect = Boolean(dto.sessionId);
     const sessionId = dto.sessionId || randomUUID();
@@ -733,7 +882,7 @@ ${memoryPart}`;
     const costLkr = Number((costUsd * this.usdToLkr).toFixed(2));
 
     this.logger.log(
-      `Finished session ${sessionId}: ${durationSeconds}s, ${totalTokens} tokens (in: ${audioInTokens} audio / ${textInTokens} text, out: ${audioOutTokens} audio / ${textOutTokens} text / ${thoughtsTokens} thoughts), Cost: $${costUsd} (LKR ${costLkr}) [~$${(costLkr / (Math.max(1, durationSeconds) / 60)).toFixed(2)} LKR/min]`,
+      `[SessionsService] 💾 [finishSession] Saving session ${sessionId}: duration=${durationSeconds}s, scores=${JSON.stringify(scores || {})}, corrections=${grammarCorrections?.length || 0}, turns=${turns?.length || 0}, tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`,
     );
 
     const resolvedUserId = THARINDU_USER_ID;

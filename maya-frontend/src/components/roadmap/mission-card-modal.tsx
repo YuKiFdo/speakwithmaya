@@ -25,6 +25,7 @@ import {
 import { LockIcon } from '@/components/icons/nav-icons';
 import { SvgXml } from 'react-native-svg';
 import { adaptSvgColor } from '@/app/admin/roadmap';
+import { parseCanonicalLessonContent } from '@/utils/roadmap-canonical';
 
 interface MissionCardModalProps {
   visible: boolean;
@@ -153,7 +154,6 @@ export function MissionCardModal({
 
   const isCompleted = item.status === 'completed';
   const themeColor = item.numberColor || '#0057FF';
-  const durationMin = item.targetDurationMinutes || 5;
 
   const handleStart = (targetItem: MilestoneItem = item) => {
     if (isStarting) return;
@@ -312,14 +312,14 @@ export function MissionCardModal({
           <View style={styles.metaBoxContainer}>
             <View style={styles.metaBox}>
               <Feather
-                name={isCompleted ? 'check-circle' : 'clock'}
+                name={isCompleted ? 'check-circle' : 'award'}
                 size={16}
                 color={isCompleted ? '#059669' : '#0057FF'}
               />
               <View style={{ marginLeft: 8 }}>
-                <Text style={styles.metaLabel}>{isCompleted ? 'Status' : 'Duration'}</Text>
+                <Text style={styles.metaLabel}>{isCompleted ? 'Status' : 'Pass Requirement'}</Text>
                 <Text style={[styles.metaValue, isCompleted && { color: '#059669' }]}>
-                  {isCompleted ? 'Completed ✓' : `${durationMin} mins`}
+                  {isCompleted ? 'Completed ✓' : `≥ ${item.passingScorePercent || 75}% Score`}
                 </Text>
               </View>
             </View>
@@ -328,49 +328,56 @@ export function MissionCardModal({
 
             <View style={styles.metaBox}>
               <Feather
-                name={isCompleted ? 'award' : 'target'}
+                name="zap"
                 size={16}
                 color={isCompleted ? '#D97706' : '#10B981'}
               />
               <View style={{ marginLeft: 8 }}>
-                <Text style={styles.metaLabel}>{isCompleted ? 'XP Reward' : 'Format'}</Text>
+                <Text style={styles.metaLabel}>{isCompleted ? 'XP Reward' : 'XP Reward'}</Text>
                 <Text style={[styles.metaValue, isCompleted && { color: '#D97706' }]}>
-                  {isCompleted ? `+${item.xpReward} XP Collected` : 'Real-time Voice'}
+                  {isCompleted ? `+${item.xpReward} XP Collected` : `+${item.xpReward || 100} XP`}
                 </Text>
               </View>
             </View>
           </View>
 
-          {/* Learning Objectives Preview / Checkpoints Cleared */}
-          {item.learningObjectives && item.learningObjectives.length > 0 ? (
-            <View
-              style={[
-                styles.objectivesPreviewCard,
-                isCompleted && styles.objectivesPreviewCardCompleted,
-              ]}
-            >
-              <View style={styles.objectivesPreviewHeader}>
-                <Feather
-                  name={isCompleted ? 'check-circle' : 'target'}
-                  size={13}
-                  color="#059669"
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.objectivesPreviewTitle}>
-                  {isCompleted ? 'Checkpoints Mastered' : 'Key Checkpoints'}
-                </Text>
+          {/* Practice Points Preview / What you'll practice */}
+          {(() => {
+            const points = (item.practicePoints && item.practicePoints.length > 0)
+              ? item.practicePoints
+              : (item.canonicalContent ? parseCanonicalLessonContent(item.canonicalContent).practicePoints : []);
+            if (points.length === 0) return null;
+
+            return (
+              <View
+                style={[
+                  styles.objectivesPreviewCard,
+                  isCompleted && styles.objectivesPreviewCardCompleted,
+                ]}
+              >
+                <View style={styles.objectivesPreviewHeader}>
+                  <Feather
+                    name={isCompleted ? 'check-circle' : 'target'}
+                    size={13}
+                    color="#059669"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.objectivesPreviewTitle}>
+                    {isCompleted ? 'Points Mastered' : "What You'll Practice"}
+                  </Text>
+                </View>
+                <View style={styles.objectivesPillsRow}>
+                  {points.map((pt: string, idx: number) => (
+                    <View key={`pt-${idx}`} style={styles.objectivePill}>
+                      <Text style={styles.objectivePillText} numberOfLines={2}>
+                        {isCompleted ? '✓ ' : '• '}{pt}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
               </View>
-              <View style={styles.objectivesPillsRow}>
-                {item.learningObjectives.slice(0, 3).map((obj) => (
-                  <View key={obj.id} style={styles.objectivePill}>
-                    <Text style={styles.objectivePillText} numberOfLines={1}>
-                      {isCompleted ? '✓ ' : '• '}{obj.title}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          ) : null}
+            );
+          })()}
 
           {/* Maya Coach Speech Preview Bubble */}
           <View
@@ -388,9 +395,7 @@ export function MissionCardModal({
               <Text style={styles.speechText}>
                 {isCompleted
                   ? `"Awesome job mastering this lesson, ${userName}! You've already cleared this topic. Replay it anytime to sharpen your fluency, or keep your momentum going on the next level!"`
-                  : item.guidedPrompt?.openingQuestion
-                  ? `"${item.guidedPrompt.openingQuestion}"`
-                  : `Hi ${userName}! I'm ready to practice speaking with you. Let's make this session count!`}
+                  : `Hi ${userName}! Let's practice speaking naturally together in English. I'll guide you step by step!`}
               </Text>
             </View>
           </View>

@@ -45,7 +45,6 @@ export interface MilestoneItem {
   number: string;
   title: string;
   sessionTime: string;
-  targetDurationMinutes: number;
   xpReward: number;
   status: 'completed' | 'in-progress' | 'locked';
   iconType: 'robot' | 'chat' | 'family' | 'home' | 'wave' | 'directions';
@@ -57,152 +56,10 @@ export interface MilestoneItem {
   innerBg: string;
   topic?: string;
   scenarioId?: string;
-  guidedPrompt?: {
-    scenarioRole?: string;
-    coachingFocus?: string;
-    openingQuestion?: string;
-    customPromptAddon?: string;
-  };
-  unlockRule?: {
-    type: 'free' | 'completion' | 'score' | 'time';
-    minScore?: number;
-    minDurationSeconds?: number;
-    requiresLevelNumber?: number;
-  };
-  learningObjectives?: Array<{
-    id: string;
-    title: string;
-    description?: string;
-    isMandatory?: boolean;
-  }>;
-  targetSpeakingShare?: number;
+  practicePoints?: string[];
+  canonicalContent?: string;
+  passingScorePercent?: number;
 }
-
-const DEFAULT_MILESTONES: MilestoneItem[] = [
-  {
-    id: 'lvl-01-meet-ai',
-    levelNumber: 1,
-    number: '01',
-    title: 'Meet your AI partner',
-    sessionTime: 'Session time · 5 min',
-    targetDurationMinutes: 5,
-    xpReward: 50,
-    status: 'in-progress',
-    iconType: 'robot',
-    align: 'left',
-    numberColor: '#0057FF',
-    haloColor: '#EFF6FF',
-    haloBorderColor: '#BFDBFE',
-    innerBg: '#FFFFFF',
-    topic: 'Introduction & Greetings',
-    scenarioId: 'general-practice',
-    learningObjectives: [
-      { id: 'lvl1_obj1', title: 'Self-Introduction', description: 'Introduce name and occupation or background', isMandatory: true },
-      { id: 'lvl1_obj2', title: 'Answer Open Questions', description: 'Respond to icebreaker with complete sentences', isMandatory: true },
-    ],
-    targetSpeakingShare: 40,
-  },
-  {
-    id: 'lvl-02-daily-routine',
-    levelNumber: 2,
-    number: '02',
-    title: 'Talking about your day',
-    sessionTime: 'Session time · 5 min',
-    targetDurationMinutes: 5,
-    xpReward: 75,
-    status: 'locked',
-    iconType: 'chat',
-    align: 'right',
-    numberColor: '#9333EA',
-    haloColor: '#FAF5FF',
-    haloBorderColor: '#E9D5FF',
-    innerBg: '#FFFFFF',
-    topic: 'Daily Habits & Morning Routine',
-    scenarioId: 'general-practice',
-    learningObjectives: [
-      { id: 'lvl2_obj1', title: 'Daily Routine', description: 'Describe morning or daily habits using present simple verbs', isMandatory: true },
-      { id: 'lvl2_obj2', title: 'Time Expressions', description: 'Use time transition words like first, then, after that', isMandatory: false },
-    ],
-    targetSpeakingShare: 40,
-  },
-  {
-    id: 'lvl-03-family-friends',
-    levelNumber: 3,
-    number: '03',
-    title: 'Family and friends',
-    sessionTime: 'Session time · 10 min',
-    targetDurationMinutes: 10,
-    xpReward: 100,
-    status: 'locked',
-    iconType: 'family',
-    align: 'left',
-    numberColor: '#E11D48',
-    haloColor: '#FFF1F2',
-    haloBorderColor: '#FECDD3',
-    innerBg: '#FFFFFF',
-    topic: 'Family & Relationships',
-    scenarioId: 'general-practice',
-    learningObjectives: [
-      { id: 'lvl3_obj1', title: 'Describe Relationships', description: 'Talk about a family member or friend with descriptive adjectives', isMandatory: true },
-      { id: 'lvl3_obj2', title: 'Ask Maya a Question', description: 'Inquire about Maya or share an anecdote', isMandatory: false },
-    ],
-    targetSpeakingShare: 40,
-  },
-  {
-    id: 'lvl-04-hometown',
-    levelNumber: 4,
-    number: '04',
-    title: 'Describing your home town',
-    sessionTime: 'Session time · 10 min',
-    targetDurationMinutes: 10,
-    xpReward: 125,
-    status: 'locked',
-    iconType: 'home',
-    align: 'right',
-    numberColor: '#16A34A',
-    haloColor: '#F0FDF4',
-    haloBorderColor: '#BBF7D0',
-    innerBg: '#FFFFFF',
-    topic: 'Hometown & Culture',
-    scenarioId: 'general-practice',
-  },
-  {
-    id: 'lvl-05-greetings-public',
-    levelNumber: 5,
-    number: '05',
-    title: 'Greetings & introductions in public',
-    sessionTime: 'Session time · 10 min',
-    targetDurationMinutes: 10,
-    xpReward: 150,
-    status: 'locked',
-    iconType: 'wave',
-    align: 'left',
-    numberColor: '#F59E0B',
-    haloColor: '#FFFBEB',
-    haloBorderColor: '#FDE68A',
-    innerBg: '#FFFFFF',
-    topic: 'Social Small Talk',
-    scenarioId: 'workplace',
-  },
-  {
-    id: 'lvl-06-directions',
-    levelNumber: 6,
-    number: '06',
-    title: 'Asking for directions',
-    sessionTime: 'Session time · 10 min',
-    targetDurationMinutes: 10,
-    xpReward: 200,
-    status: 'locked',
-    iconType: 'directions',
-    align: 'right',
-    numberColor: '#0057FF',
-    haloColor: '#EFF6FF',
-    haloBorderColor: '#BFDBFE',
-    innerBg: '#FFFFFF',
-    topic: 'Travel & Navigation',
-    scenarioId: 'travel-english',
-  },
-];
 
 let cachedRoadmapMilestones: MilestoneItem[] | null = null;
 
@@ -226,7 +83,7 @@ function getInitialMilestones(): MilestoneItem[] {
   const baseList =
     cachedRoadmapMilestones && cachedRoadmapMilestones.length > 0
       ? cachedRoadmapMilestones
-      : DEFAULT_MILESTONES;
+      : [];
 
   const completedIds = getInitialCompletedLevelIds();
   if (completedIds.size === 0) {
@@ -265,7 +122,7 @@ function getInitialMilestones(): MilestoneItem[] {
 
     const status: 'completed' | 'in-progress' | 'locked' = isThisLevelCompleted
       ? 'completed'
-      : (levelNum === 1 || isPrevLevelCompleted || lvl.unlockRule?.type === 'free' ? 'in-progress' : 'locked');
+      : (levelNum === 1 || isPrevLevelCompleted ? 'in-progress' : 'locked');
 
     return { ...lvl, status };
   });
@@ -303,7 +160,7 @@ export default function RoadmapScreen() {
         }
       }
 
-      const sourceLevels = backendLevels.length > 0 ? backendLevels : DEFAULT_MILESTONES;
+      const sourceLevels = backendLevels;
 
       // Determine which levels the student has genuinely completed
       const completedLevelIds = getInitialCompletedLevelIds();
@@ -369,19 +226,23 @@ export default function RoadmapScreen() {
 
         if (isThisLevelCompleted) {
           status = 'completed';
-        } else if (levelNum === 1 || isPrevLevelCompleted || lvl.unlockRule?.type === 'free') {
+        } else if (levelNum === 1 || isPrevLevelCompleted) {
           status = 'in-progress';
         } else {
           status = 'locked';
         }
+
+        const rawPoints = lvl.practice_points || lvl.practicePoints || (Array.isArray(lvl.learningObjectives) ? lvl.learningObjectives.map((o: any) => o.title || o) : []);
+        const practicePoints: string[] = Array.isArray(rawPoints)
+          ? rawPoints.map((p: any) => (typeof p === 'string' ? p : p.title || String(p)))
+          : [];
 
         return {
           id: lvl.id || `lvl-${levelNum}`,
           levelNumber: levelNum,
           number: String(levelNum).padStart(2, '0'),
           title: lvl.title,
-          sessionTime: `Session time · ${lvl.targetDurationMinutes || 5} min`,
-          targetDurationMinutes: lvl.targetDurationMinutes || 5,
+          sessionTime: practicePoints.length > 0 ? `${practicePoints.length} Tasks` : '',
           xpReward: lvl.xpReward || 50 + idx * 25,
           status,
           iconType: lvl.iconType || 'chat',
@@ -392,10 +253,9 @@ export default function RoadmapScreen() {
           innerBg: '#FFFFFF',
           topic: lvl.topic,
           scenarioId: lvl.scenarioId,
-          guidedPrompt: lvl.guidedPrompt,
-          unlockRule: lvl.unlockRule,
-          learningObjectives: lvl.learningObjectives,
-          targetSpeakingShare: lvl.targetSpeakingShare,
+          practicePoints,
+          canonicalContent: lvl.canonicalContent || lvl.canonical_content || '',
+          passingScorePercent: lvl.passingScorePercent || lvl.passing_score_percent || 75,
         };
       });
 
@@ -553,14 +413,9 @@ export default function RoadmapScreen() {
         topic: item.topic || item.title,
         scenarioTitle: item.title,
         scenarioId: item.scenarioId || 'general-practice',
-        duration: String((item.targetDurationMinutes || 5) * 60),
-        durationMinutes: String(item.targetDurationMinutes || 5),
-        scenarioRole: item.guidedPrompt?.scenarioRole || '',
-        coachingFocus: item.guidedPrompt?.coachingFocus || '',
-        openingQuestion: item.guidedPrompt?.openingQuestion || '',
-        customPromptAddon: item.guidedPrompt?.customPromptAddon || '',
-        targetSpeakingShare: String(item.targetSpeakingShare || 40),
-        learningObjectives: item.learningObjectives && item.learningObjectives.length > 0 ? JSON.stringify(item.learningObjectives) : '',
+        practicePoints: JSON.stringify(item.practicePoints || []),
+        canonicalContent: item.canonicalContent || '',
+        passingScorePercent: String(item.passingScorePercent || 75),
       },
     });
   };
@@ -646,7 +501,22 @@ export default function RoadmapScreen() {
           {/* ==================================================================== */}
           {/* ROADMAP TRACK & MILESTONES */}
           {/* ==================================================================== */}
-          {isDesktop ? (
+          {isLoadingLevels ? (
+            <View style={styles.roadmapStatusCard}>
+              <ActivityIndicator size="large" color="#0057FF" />
+              <Text style={styles.roadmapStatusText}>Loading your learning path...</Text>
+            </View>
+          ) : milestones.length === 0 ? (
+            <View style={styles.roadmapStatusCard}>
+              <View style={styles.roadmapEmptyIconWrapper}>
+                <Feather name="map" size={36} color="#0057FF" />
+              </View>
+              <Text style={styles.roadmapEmptyTitle}>No Roadmap Levels Yet</Text>
+              <Text style={styles.roadmapEmptyText}>
+                No published levels available at the moment. Levels will appear here once created.
+              </Text>
+            </View>
+          ) : isDesktop ? (
             /* ================================================================ */
             /* DESKTOP ROADMAP (100% FULL WIDTH WITH ACCURATE CONNECTIONS)      */
             /* ================================================================ */
@@ -2263,5 +2133,51 @@ const styles = StyleSheet.create({
   },
   milestoneTitleHovered: {
     color: '#0057FF',
+  },
+  /* Roadmap Status & Empty States */
+  roadmapStatusCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 20,
+    marginTop: 40,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 2,
+  },
+  roadmapStatusText: {
+    ...fontStyle('outfit', 'medium'),
+    fontSize: 15,
+    color: '#64748B',
+    marginTop: 14,
+  },
+  roadmapEmptyIconWrapper: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  roadmapEmptyTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 18,
+    color: '#0F172A',
+    marginBottom: 8,
+  },
+  roadmapEmptyText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 14,
+    color: '#64748B',
+    textAlign: 'center',
+    maxWidth: 380,
+    lineHeight: 20,
   },
 });
