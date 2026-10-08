@@ -263,9 +263,6 @@ export function CreateSessionModal({
   const currentCorrectionOpt =
     CORRECTION_OPTIONS.find((o) => o.id === aiCorrections) || CORRECTION_OPTIONS[1];
 
-  // Whether mobile height is limited enough to need scrollbar
-  const isScrollNeeded = !isDesktop && windowHeight < 520;
-
   return (
     <Modal
       transparent
@@ -358,7 +355,7 @@ export function CreateSessionModal({
               showsVerticalScrollIndicator={false}
               bounces={false}
               overScrollMode="never"
-              scrollEnabled={!isDesktop ? windowHeight < 560 : true}
+              scrollEnabled={true}
             >
               {/* SECTION 1: Practice Time */}
               <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
@@ -829,8 +826,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 18,
     paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    height: '92%',
-    maxHeight: '95%',
+    maxHeight: '92%',
   },
 
   /* Header */
@@ -898,7 +894,8 @@ const styles = StyleSheet.create({
     maxHeight: 600,
   },
   scrollAreaMobile: {
-    flex: 1,
+    flexGrow: 0,
+    flexShrink: 1,
     maxHeight: undefined,
     ...(Platform.OS === 'web'
       ? ({
