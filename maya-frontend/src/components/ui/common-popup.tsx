@@ -208,13 +208,9 @@ export function CommonPopup({
   const resolvedPreset = preset;
 
   let finalImage = imageSource;
-  if (!finalImage && !renderHeaderGraphic) {
-    if (resolvedPreset === 'unlock-premium') {
-      finalImage = PRESET_IMAGES['unlock-premium'];
-    } else if (resolvedPreset === 'daily-limit') {
-      finalImage = PRESET_IMAGES['daily-limit'];
-    } else if (resolvedPreset === 'practice-complete') {
-      finalImage = PRESET_IMAGES['practice-complete'];
+  if (!finalImage && !renderHeaderGraphic && resolvedPreset) {
+    if (resolvedPreset in PRESET_IMAGES) {
+      finalImage = PRESET_IMAGES[resolvedPreset as keyof typeof PRESET_IMAGES];
     }
   }
 
