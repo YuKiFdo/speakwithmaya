@@ -10,6 +10,11 @@ import {
   parseCanonicalLessonContent,
   formatCanonicalLessonContent,
 } from './dto/roadmap.dto.js';
+import {
+  UserRoadmapProgressEntity,
+  RecordUserRoadmapProgressDto,
+} from './dto/user-roadmap-progress.dto.js';
+import { randomUUID } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 
 export interface RoadmapLevelEntity {
@@ -125,11 +130,14 @@ export class RoadmapService {
   private readonly logger = new Logger(RoadmapService.name);
   private readonly supabase: SupabaseClient | null = null;
   private readonly filePath = path.join(process.cwd(), 'data', 'roadmap_levels.json');
+  private readonly userProgressFilePath = path.join(process.cwd(), 'data', 'user_roadmap_progress.json');
   private memoryLevels: RoadmapLevelEntity[] = [];
+  private memoryUserProgress: UserRoadmapProgressEntity[] = [];
 
   constructor() {
     // 1. Initialize local persistent file storage
     this.memoryLevels = this.loadFromFile();
+    this.memoryUserProgress = this.loadUserProgressFromFile();
 
     // 2. Initialize Supabase client
     const supabaseUrl = process.env.SUPABASE_URL;
@@ -586,5 +594,123 @@ INSTRUCTIONS:
       correction: null,
       focusEvaluation: `Engaged with student input and prompted next turn under 15 words.`,
     };
+  }
+
+  private loadUserProgressFromFile(): UserRoadmapProgressEntity[] {
+    try {
+      if (fs.existsSync(this.userProgressFilePath)) {
+        const raw = fs.readFileSync(this.userProgressFilePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Failed to read user progress from file: ${err?.message}`);
+    }
+    return [];
+  }
+
+  private saveUserProgressToFile(progress: UserRoadmapProgressEntity[]): void {
+    try {
+      const dir = path.dirname(this.userProgressFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(this.userProgressFilePath, JSON.stringify(progress, null, 2), 'utf-8');
+    } catch (err: any) {
+      this.logger.warn(`Failed to save user progress to file: ${err?.message}`);
+    }
+  }
+
+  async getUserProgress(userId: string): Promise<UserRoadmapProgressEntity[]> {
+    if (this.supabase) {
+      try {
+        const { data, error } = await this.supabase
+          .from('user_roadmap_progress')
+          .select('*')
+          .eq('user_id', userId)
+          .order('level_number', { ascending: true });
+
+        if (!error && data && data.length > 0) {
+          return data.map((d: any) => ({
+            id: d.id,
+            userId: d.user_id,
+            roadmapLevelId: d.roadmap_level_id,
+            levelNumber: d.level_number,
+            sessionId: d.session_id,
+            status: d.status,
+            scorePercent: d.score_percent,
+            isPassed: d.is_passed,
+            xpEarned: d.xp_earned,
+            completedAt: d.completed_at,
+            createdAt: d.created_at,
+            updatedAt: d.updated_at,
+          }));
+        }
+      } catch (err: any) {
+        this.logger.debug(`getUserProgress Supabase query error: ${err?.message}`);
+      }
+    }
+
+    return this.memoryUserProgress.filter((p) => p.userId === userId);
+  }
+
+  async recordUserProgress(
+    userId: string,
+    dto: RecordUserRoadmapProgressDto,
+  ): Promise<UserRoadmapProgressEntity> {
+    const now = new Date().toISOString();
+    const existingIdx = this.memoryUserProgress.findIndex(
+      (p) => p.userId === userId && p.roadmapLevelId === dto.roadmapLevelId,
+    );
+
+    const record: UserRoadmapProgressEntity = {
+      id: existingIdx >= 0 ? this.memoryUserProgress[existingIdx].id : randomUUID(),
+      userId,
+      roadmapLevelId: dto.roadmapLevelId,
+      levelNumber: dto.levelNumber,
+      sessionId: dto.sessionId || null,
+      status: dto.status || 'completed',
+      scorePercent: dto.scorePercent ?? 75,
+      isPassed: dto.isPassed ?? true,
+      xpEarned: dto.xpEarned ?? 100,
+      completedAt: dto.isPassed !== false ? now : undefined,
+      createdAt: existingIdx >= 0 ? this.memoryUserProgress[existingIdx].createdAt : now,
+      updatedAt: now,
+    };
+
+    if (existingIdx >= 0) {
+      this.memoryUserProgress[existingIdx] = record;
+    } else {
+      this.memoryUserProgress.push(record);
+    }
+    this.saveUserProgressToFile(this.memoryUserProgress);
+
+    // Save to Supabase DB if available
+    if (this.supabase) {
+      try {
+        const row = {
+          id: record.id,
+          user_id: record.userId,
+          roadmap_level_id: record.roadmapLevelId,
+          level_number: record.levelNumber,
+          session_id: record.sessionId,
+          status: record.status,
+          score_percent: record.scorePercent,
+          is_passed: record.isPassed,
+          xp_earned: record.xpEarned,
+          completed_at: record.completedAt,
+          updated_at: record.updatedAt,
+        };
+        await this.supabase
+          .from('user_roadmap_progress')
+          .upsert(row, { onConflict: 'user_id, roadmap_level_id' });
+      } catch (err: any) {
+        this.logger.warn(`Failed to upsert user_roadmap_progress to Supabase: ${err?.message}`);
+      }
+    }
+
+    return record;
   }
 }

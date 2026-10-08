@@ -132,7 +132,7 @@ export class SessionsService {
   private readonly geminiApiKey: string | undefined;
   private readonly liveModel: string;
   private readonly usdToLkr = Number(process.env.USD_TO_LKR) || 308.50;
-  private readonly activeSessions = new Map<string, { userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string }>();
+  private readonly activeSessions = new Map<string, { userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string; roadmapLevelId?: string }>();
   private readonly recentDiagnostics = new Map<string, SessionDiagnosticsRecord>();
 
   constructor(
@@ -825,6 +825,7 @@ STRICT RESTRICTIONS:
       scenarioId: dto.scenarioId,
       languageMode: isSinhala ? 'sinhala' : 'english',
       sinhalaStyle: dto.sinhalaStyle || 'balanced',
+      roadmapLevelId: dto.roadmapLevelId,
     });
 
     const greetingPrompt = this.generateGreetingPrompt(dto);
@@ -971,6 +972,37 @@ STRICT RESTRICTIONS:
           cost_lkr: costLkr,
           duration_seconds: durationSeconds,
         });
+
+        // 5. If this session was for a roadmap level, record progress in user_roadmap_progress
+        const activeInfo = this.activeSessions.get(sessionId);
+        const roadmapLevelId = activeInfo?.roadmapLevelId || (dto as any).roadmapLevelId;
+        if (roadmapLevelId && this.roadmapService) {
+          try {
+            const overallScore = scores?.overall ?? 85;
+            const isPassed = overallScore >= 75;
+            let levelNumber = 1;
+            try {
+              const lvl = await this.roadmapService.getLevelById(roadmapLevelId);
+              if (lvl) levelNumber = lvl.levelNumber;
+            } catch {
+              const numMatch = String(roadmapLevelId).match(/\d+/);
+              if (numMatch) levelNumber = parseInt(numMatch[0], 10);
+            }
+
+            await this.roadmapService.recordUserProgress(resolvedUserId, {
+              roadmapLevelId,
+              levelNumber,
+              sessionId,
+              scorePercent: overallScore,
+              isPassed,
+              status: isPassed ? 'completed' : 'in_progress',
+              xpEarned: isPassed ? 100 : 25,
+            });
+            this.logger.log(`[Roadmap Progress] Recorded completion for user ${resolvedUserId}, level ${roadmapLevelId}, session ${sessionId}, passed: ${isPassed}`);
+          } catch (progressErr: any) {
+            this.logger.warn(`Failed to auto-record roadmap progress: ${progressErr?.message}`);
+          }
+        }
       } catch (e: unknown) {
         this.logger.error(`Error saving final session records to Supabase: ${e instanceof Error ? e.message : String(e)}`);
       }

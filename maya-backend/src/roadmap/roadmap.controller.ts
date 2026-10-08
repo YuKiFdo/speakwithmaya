@@ -6,6 +6,8 @@ import {
   Delete,
   Body,
   Param,
+  Headers,
+  Query,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
@@ -16,6 +18,7 @@ import {
   ReorderRoadmapLevelsDto,
   SimulateLevelTurnDto,
 } from './dto/roadmap.dto.js';
+import { RecordUserRoadmapProgressDto } from './dto/user-roadmap-progress.dto.js';
 
 @Controller('v1')
 export class RoadmapController {
@@ -82,5 +85,35 @@ export class RoadmapController {
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async simulateLevelTurn(@Body() dto: SimulateLevelTurnDto) {
     return this.roadmapService.simulateTurn(dto);
+  }
+
+  // 9. User Roadmap Progress: Get completed levels for user
+  @Get('roadmap/user-progress')
+  async getUserProgress(
+    @Headers('authorization') authHeader?: string,
+    @Query('userId') queryUserId?: string,
+  ) {
+    const userId = queryUserId || 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
+    const progress = await this.roadmapService.getUserProgress(userId);
+    const completedItems = progress.filter((p) => p.status === 'completed' || p.isPassed);
+    return {
+      userId,
+      progress,
+      completedLevelIds: completedItems.map((p) => p.roadmapLevelId),
+      completedLevelNumbers: completedItems.map((p) => p.levelNumber),
+      totalCompleted: completedItems.length,
+    };
+  }
+
+  // 10. User Roadmap Progress: Record a completed level
+  @Post('roadmap/user-progress')
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  async recordUserProgress(
+    @Body() dto: RecordUserRoadmapProgressDto,
+    @Headers('authorization') authHeader?: string,
+    @Query('userId') queryUserId?: string,
+  ) {
+    const userId = queryUserId || 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
+    return this.roadmapService.recordUserProgress(userId, dto);
   }
 }

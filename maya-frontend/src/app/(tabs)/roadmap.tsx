@@ -152,9 +152,10 @@ export default function RoadmapScreen() {
   const fetchRoadmapData = async () => {
     try {
       const baseUrl = getBackendBaseUrl();
-      const [roadmapRes, sessions] = await Promise.all([
+      const [roadmapRes, sessions, progressRes] = await Promise.all([
         fetch(`${baseUrl}/v1/roadmap`).catch(() => null),
         fetchAllPracticeSessions().catch(() => []),
+        fetch(`${baseUrl}/v1/roadmap/user-progress`).catch(() => null),
       ]);
 
       let backendLevels: any[] = [];
@@ -185,7 +186,20 @@ export default function RoadmapScreen() {
         }
       });
 
-      // 2. Cross-reference with completed sessions recorded in backend
+      // 2. Fetch real user level completions directly from user_roadmap_progress backend table
+      if (progressRes && progressRes.ok) {
+        try {
+          const progressData = await progressRes.json();
+          if (Array.isArray(progressData.completedLevelIds)) {
+            progressData.completedLevelIds.forEach((id: string) => completedLevelIds.add(id));
+          }
+          if (Array.isArray(progressData.completedLevelNumbers)) {
+            progressData.completedLevelNumbers.forEach((num: number) => completedLevelNumbers.add(num));
+          }
+        } catch {}
+      }
+
+      // 3. Cross-reference with completed sessions recorded in backend
       if (Array.isArray(sessions)) {
         sessions.forEach((s: any) => {
           if (s.status === 'completed') {
