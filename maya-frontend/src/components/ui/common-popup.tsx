@@ -64,6 +64,8 @@ export interface CommonPopupProps {
   primaryButtonIcon?: 'crown' | 'play' | 'arrow' | 'mic' | 'none' | React.ReactNode;
   showPrimaryArrow?: boolean;
   onPrimaryPress?: () => void;
+  primaryButtonStyle?: ViewStyle;
+  primaryButtonVariant?: 'default' | 'danger';
 
   // Footer / Secondary action
   footerText?: string;
@@ -195,6 +197,8 @@ export function CommonPopup({
   primaryButtonIcon,
   showPrimaryArrow,
   onPrimaryPress,
+  primaryButtonStyle,
+  primaryButtonVariant = 'default',
   footerText,
   footerButtonText,
   onFooterButtonPress,
@@ -692,7 +696,12 @@ export function CommonPopup({
             <Pressable
               style={({ pressed }) => [
                 styles.primaryButton,
-                pressed && styles.primaryButtonPressed,
+                primaryButtonVariant === 'danger' && styles.primaryButtonDanger,
+                pressed &&
+                  (primaryButtonVariant === 'danger'
+                    ? styles.primaryButtonDangerPressed
+                    : styles.primaryButtonPressed),
+                primaryButtonStyle,
               ]}
               onPress={onPrimaryPress || onClose}
               accessibilityRole="button"
@@ -936,6 +945,18 @@ const styles = StyleSheet.create({
   },
   primaryButtonPressed: {
     backgroundColor: '#1D4ED8',
+    transform: [{ scale: 0.98 }],
+  },
+  primaryButtonDanger: {
+    backgroundColor: '#EF4444',
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0px 6px 16px rgba(239, 68, 68, 0.35)' } as any)
+      : {
+          shadowColor: '#EF4444',
+        }),
+  },
+  primaryButtonDangerPressed: {
+    backgroundColor: '#DC2626',
     transform: [{ scale: 0.98 }],
   },
   primaryButtonContent: {

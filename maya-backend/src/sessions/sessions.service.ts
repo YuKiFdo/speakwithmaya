@@ -1,9 +1,10 @@
 import { Injectable, Logger, UnauthorizedException, Optional } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto } from './dto/session.dto.js';
+import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto } from './dto/session.dto.js';
 import { RoadmapService } from '../roadmap/roadmap.service.js';
 import { parseCanonicalLessonContent, formatCanonicalLessonContent } from '../roadmap/dto/roadmap.dto.js';
 import { randomUUID } from 'node:crypto';
+import { GoogleGenAI, Type } from '@google/genai';
 
 export interface UsageRecord {
   id: string;
@@ -134,6 +135,9 @@ export class SessionsService {
   private readonly usdToLkr = Number(process.env.USD_TO_LKR) || 308.50;
   private readonly activeSessions = new Map<string, { userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string; roadmapLevelId?: string }>();
   private readonly recentDiagnostics = new Map<string, SessionDiagnosticsRecord>();
+  private readonly translationCache = new Map<string, string>();
+  private readonly hintCache = new Map<string, { hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number }>();
+  private readonly sessionHintUsage = new Map<string, { count: number; totalTokens: number; costUsd: number; costLkr: number }>();
 
   constructor(
     @Optional() private readonly roadmapService?: RoadmapService,
@@ -1058,6 +1062,7 @@ STRICT RESTRICTIONS:
       });
     }
 
+    const hintUsage = this.sessionHintUsage.get(sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
     const sessionCode = `SM-${sessionId.slice(0, 5).toUpperCase()}`;
 
     return {
@@ -1076,6 +1081,10 @@ STRICT RESTRICTIONS:
         responseTokens: textOutTokens + audioOutTokens + thoughtsTokens,
         costUsd,
         costLkr,
+        hintsUsedCount: hintUsage.count,
+        hintCostUsd: hintUsage.costUsd,
+        hintCostLkr: hintUsage.costLkr,
+        totalWithHintsLkr: Number((costLkr + hintUsage.costLkr).toFixed(2)),
       },
       correctionsRecorded: grammarCorrections?.length || 0,
       scores: scores || { overall: 85, fluency: 84, grammar: 82, pronunciation: 86 },
@@ -1650,6 +1659,194 @@ STRICT RESTRICTIONS:
     }
 
     return Array.from(this.recentDiagnostics.values()).reverse();
+  }
+
+  async translateText(dto: TranslateDto): Promise<{ translatedText: string }> {
+    const text = (dto.text || '').trim();
+    if (!text) {
+      return { translatedText: '' };
+    }
+
+    const targetLang = dto.targetLang || 'si';
+    const sourceLang = dto.sourceLang || 'en';
+    const cacheKey = `${sourceLang}:${targetLang}:${text}`;
+
+    if (this.translationCache.has(cacheKey)) {
+      return { translatedText: this.translationCache.get(cacheKey)! };
+    }
+
+    // 1. Google Translate (Chrome Extension endpoint - high speed, no 429 rate limit)
+    try {
+      const url = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(sourceLang)}&tl=${encodeURIComponent(targetLang)}&q=${encodeURIComponent(text)}`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data[0]) {
+          const translated = (typeof data[0] === 'string' ? data[0] : String(data[0])).trim();
+          if (translated) {
+            this.translationCache.set(cacheKey, translated);
+            return { translatedText: translated };
+          }
+        }
+      }
+    } catch (err: any) {
+      this.logger.debug(`Google Translate dict-chrome-ex failed: ${err?.message}`);
+    }
+
+    // 2. MyMemory free translation fallback
+    try {
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(sourceLang)}|${encodeURIComponent(targetLang)}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const translated = data?.responseData?.translatedText?.trim();
+        if (translated) {
+          this.translationCache.set(cacheKey, translated);
+          return { translatedText: translated };
+        }
+      }
+    } catch (err: any) {
+      this.logger.debug(`MyMemory translation failed: ${err?.message}`);
+    }
+
+    // 3. Fallback: Gemini 3.1 Flash-Lite for natural spoken Sinhala translation
+    const apiKey = this.geminiApiKey;
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `Translate the following English phrase into natural, spoken Sri Lankan Sinhala (use natural conversational Sinhala, NOT archaic or book Sinhala):\n"${text}"\nOutput ONLY the Sinhala translation, without quotes or additional text.`;
+        const res = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite',
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        });
+        const sinhalaText = res.text?.trim() || '';
+        if (sinhalaText) {
+          this.translationCache.set(cacheKey, sinhalaText);
+          return { translatedText: sinhalaText };
+        }
+      } catch (err: any) {
+        this.logger.warn(`Gemini translation fallback failed: ${err?.message}`);
+      }
+    }
+
+    return { translatedText: text };
+  }
+
+  async generateHint(dto: GenerateHintDto): Promise<{
+    hintEnglish: string;
+    hintSinhala: string;
+    costUsd?: number;
+    costLkr?: number;
+    tokens?: { promptTokens: number; outputTokens: number; totalTokens: number };
+  }> {
+    const question = (dto.question || '').trim();
+    if (!question) {
+      return {
+        hintEnglish: 'I usually relax at home and meet my friends.',
+        hintSinhala: 'මම සාමාන්‍යයෙන් ගෙදරදී විවේක ගන්නවා සහ මගේ යාළුවෝ හමුවෙනවා.',
+        costUsd: 0,
+        costLkr: 0,
+      };
+    }
+
+    const cacheKey = `${dto.level || 'all'}:${dto.topic || 'all'}:${question}`;
+    if (this.hintCache.has(cacheKey)) {
+      const cached = this.hintCache.get(cacheKey)!;
+      // If sessionId provided, log count
+      if (dto.sessionId) {
+        const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
+        this.sessionHintUsage.set(dto.sessionId, {
+          ...existing,
+          count: existing.count + 1,
+        });
+      }
+      return cached;
+    }
+
+    const apiKey = this.geminiApiKey;
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `You are Maya, an AI English speaking coach.
+A student was just asked this conversational question by Maya:
+"${question}"
+Topic: ${dto.topic || 'Daily Speaking Practice'}
+Level: ${dto.level || 'Beginner to Intermediate'}
+
+Provide one short, natural, practical model answer the student can say in response (1 simple or compound sentence, natural everyday conversational English, easy to say aloud), along with its natural spoken Sinhala translation.`;
+
+        const res = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite',
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                hintEnglish: {
+                  type: Type.STRING,
+                  description: 'Short, natural conversational English model answer (1 sentence) the student can say.',
+                },
+                hintSinhala: {
+                  type: Type.STRING,
+                  description: 'Accurate and natural spoken Sinhala translation of that exact answer.',
+                },
+              },
+              required: ['hintEnglish', 'hintSinhala'],
+            },
+            temperature: 0.3,
+          },
+        });
+
+        // Calculate token usage and cost for gemini-3.1-flash-lite
+        // Pricing: Input = $0.25/1M tokens, Output = $1.50/1M tokens
+        const promptTokens = res.usageMetadata?.promptTokenCount || 70;
+        const outputTokens = res.usageMetadata?.candidatesTokenCount || 35;
+        const totalTokens = promptTokens + outputTokens;
+        const costUsd = Number(((promptTokens / 1_000_000) * 0.25 + (outputTokens / 1_000_000) * 1.50).toFixed(6));
+        const costLkr = Number((costUsd * this.usdToLkr).toFixed(4));
+
+        const text = res.text?.trim() || '';
+        if (text) {
+          const parsed = JSON.parse(text);
+          if (parsed.hintEnglish && parsed.hintSinhala) {
+            const result = {
+              hintEnglish: String(parsed.hintEnglish).trim(),
+              hintSinhala: String(parsed.hintSinhala).trim(),
+              costUsd,
+              costLkr,
+              tokens: { promptTokens, outputTokens, totalTokens },
+            };
+
+            this.hintCache.set(cacheKey, result);
+
+            // Record per-session hint cost in usage ledger tracker
+            if (dto.sessionId) {
+              const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
+              this.sessionHintUsage.set(dto.sessionId, {
+                count: existing.count + 1,
+                totalTokens: existing.totalTokens + totalTokens,
+                costUsd: Number((existing.costUsd + costUsd).toFixed(6)),
+                costLkr: Number((existing.costLkr + costLkr).toFixed(4)),
+              });
+              this.logger.log(`[SessionsService] 💡 Hint generated for session ${dto.sessionId}: tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`);
+            }
+
+            return result;
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Gemini hint generation failed with gemini-3.1-flash-lite: ${err?.message}`);
+      }
+    }
+
+    const fallback = {
+      hintEnglish: 'I usually relax at home and spend time with my friends.',
+      hintSinhala: 'මම සාමාන්‍යයෙන් ගෙදර විවේක ගන්නවා සහ යාළුවෝ එක්ක කාලය ගත කරනවා.',
+      costUsd: 0,
+      costLkr: 0,
+    };
+    return fallback;
   }
 }
 

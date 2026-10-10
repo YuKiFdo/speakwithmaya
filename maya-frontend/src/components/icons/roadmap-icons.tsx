@@ -185,3 +185,29 @@ export function RoadmapDirectionsIcon({ size = 28, color = '#3B82F6' }: { size?:
   );
 }
 
+/**
+ * Padlock icon for locked milestones (Grey with keyhole cutout matching design)
+ */
+export function RoadmapLockIcon({
+  size = 28,
+  color = '#8E95A0',
+  innerBg = '#E2E8F0',
+}: {
+  size?: number;
+  color?: string;
+  innerBg?: string;
+}) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6 10V8C6 4.68629 8.68629 2 12 2C15.3137 2 18 4.68629 18 8V10H19C20.1046 10 21 10.8954 21 12V20C21 21.1046 20.1046 22 19 22H5C3.89543 22 3 21.1046 3 20V12C3 10.8954 3.89543 10 5 10H6ZM8 10H16V8C16 5.79086 14.2091 4 12 4C9.79086 4 8 5.79086 8 8V10Z"
+        fill={color}
+      />
+      {/* Keyhole cutout */}
+      <Circle cx="12" cy="14.5" r="1.6" fill={innerBg} />
+      <Path d="M11.2 15L10.6 18H13.4L12.8 15H11.2Z" fill={innerBg} />
+    </Svg>
+  );
+}
+
+

@@ -8,12 +8,17 @@ import {
   ScrollView,
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
+import { TranslationToggleButton } from './translation-toggle-button';
 
 interface ConversationDisplayProps {
   previousText?: string;
   currentText: string;
   isSpeaking: boolean;
   isWebOrDesktop?: boolean;
+  translationText?: string;
+  isTranslationVisible?: boolean;
+  isTranslating?: boolean;
+  onToggleTranslation?: () => void;
 }
 
 /**
@@ -46,6 +51,10 @@ function ConversationDisplayComponent({
   currentText,
   isSpeaking,
   isWebOrDesktop = false,
+  translationText,
+  isTranslationVisible = false,
+  isTranslating = false,
+  onToggleTranslation,
 }: ConversationDisplayProps) {
   const scrollRef = useRef<ScrollView>(null);
 
@@ -320,6 +329,27 @@ function ConversationDisplayComponent({
             {displayedCurrentText}
           </Text>
 
+          {/* Sinhala Translation of Active Prompt (Image 2 Design) */}
+          {isTranslationVisible && !!translationText && (
+            <Text
+              style={[
+                styles.sinhalaTranslationText,
+                isWebOrDesktop && styles.sinhalaTranslationTextDesktop,
+              ]}
+            >
+              {translationText}
+            </Text>
+          )}
+
+          {/* Translation Toggle Pill Button (Image 1 & 2 Design) */}
+          {!!onToggleTranslation && !!displayedCurrentText && (
+            <TranslationToggleButton
+              isExpanded={Boolean(isTranslationVisible)}
+              isLoading={isTranslating}
+              onToggle={onToggleTranslation}
+            />
+          )}
+
           {/* Dancing Audio Waveform Bars (Active while Maya is speaking) */}
           {isSpeaking && (
             <View style={styles.waveContainer}>
@@ -340,7 +370,7 @@ const styles = StyleSheet.create({
   outerContainer: {
     width: '100%',
     minHeight: 140,
-    maxHeight: 310,
+    maxHeight: 380,
     paddingHorizontal: 16,
     justifyContent: 'center',
     alignItems: 'center',
@@ -348,8 +378,21 @@ const styles = StyleSheet.create({
   outerContainerDesktop: {
     maxWidth: 720,
     minHeight: 170,
-    maxHeight: 380,
+    maxHeight: 440,
     paddingHorizontal: 24,
+  },
+  sinhalaTranslationText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 16,
+    lineHeight: 25,
+    color: '#1E293B',
+    textAlign: 'center',
+    marginTop: 10,
+    paddingHorizontal: 12,
+  },
+  sinhalaTranslationTextDesktop: {
+    fontSize: 18,
+    lineHeight: 28,
   },
   scrollContent: {
     flexGrow: 1,

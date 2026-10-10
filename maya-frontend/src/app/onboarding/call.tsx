@@ -29,6 +29,10 @@ import { useLiveCall } from '@/hooks/useLiveCall';
 import { ConnectingView } from '@/components/call/connecting-view';
 import { MicrophonePermissionPopup } from '@/components/call/microphone-permission-popup';
 import { setLatestSessionReport } from '@/utils/session-report-store';
+import { HintFloatingButton } from '@/components/call/hint-floating-button';
+import { HintSuggestionCard } from '@/components/call/hint-suggestion-card';
+import { fetchTranslation, fetchHint, HintResponse } from '@/services/assistance/assistance-service';
+import { CommonPopup } from '@/components/ui/common-popup';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -116,6 +120,119 @@ export default function CallScreen() {
   }, []);
 
 
+  // Translation & Conversational Hint State (Image 1 & 2 Design)
+  const [isTranslationVisible, setIsTranslationVisible] = useState(false);
+  const [translationText, setTranslationText] = useState('');
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  const [hintData, setHintData] = useState<HintResponse | null>(null);
+  const [isHintVisible, setIsHintVisible] = useState(false);
+  const [isHintLoading, setIsHintLoading] = useState(false);
+
+  const translationTargetPromptRef = useRef<string>('');
+  const pendingTranslationAfterSpeakingRef = useRef<boolean>(false);
+
+  // 1. Whenever Maya starts speaking a new response, automatically hide translation and hint
+  useEffect(() => {
+    if (liveCall.status === 'speaking') {
+      setIsTranslationVisible(false);
+      setTranslationText('');
+      setIsTranslating(false);
+      pendingTranslationAfterSpeakingRef.current = false;
+      translationTargetPromptRef.current = '';
+
+      setIsHintVisible(false);
+      setHintData(null);
+      setIsHintLoading(false);
+    }
+  }, [liveCall.status]);
+
+  // 2. If the user tapped "[ Show Translation ]" while Maya was still speaking,
+  // fetch the complete sentence once Maya finishes speaking and enters 'listening'
+  useEffect(() => {
+    if (liveCall.status === 'listening' && pendingTranslationAfterSpeakingRef.current) {
+      pendingTranslationAfterSpeakingRef.current = false;
+      const targetPrompt = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim();
+      if (targetPrompt) {
+        translationTargetPromptRef.current = targetPrompt;
+        setIsTranslating(true);
+        fetchTranslation(targetPrompt).then((res) => {
+          const currentActive = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim();
+          if (targetPrompt === currentActive && res) {
+            setTranslationText(res);
+          }
+          setIsTranslating(false);
+        });
+      } else {
+        setIsTranslating(false);
+      }
+    }
+  }, [liveCall.status, liveCall.subtitles, liveCall.previousSubtitles]);
+
+  // 3. User explicitly presses "[ Show Translation ]" / "[ Hide Translation ]"
+  const handleToggleTranslation = async () => {
+    if (isTranslationVisible) {
+      // User tapped to hide
+      setIsTranslationVisible(false);
+      return;
+    }
+
+    // User tapped to show
+    setIsTranslationVisible(true);
+    const targetPrompt = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim();
+    if (!targetPrompt) return;
+
+    // Instant reuse if already fetched for this prompt
+    if (translationText && translationTargetPromptRef.current === targetPrompt) {
+      return;
+    }
+
+    // If Maya is currently speaking, wait for her to complete the full sentence
+    if (liveCall.status === 'speaking') {
+      setIsTranslating(true);
+      pendingTranslationAfterSpeakingRef.current = true;
+      return;
+    }
+
+    // Maya has finished speaking: fetch full translation immediately
+    translationTargetPromptRef.current = targetPrompt;
+    setIsTranslating(true);
+    const res = await fetchTranslation(targetPrompt);
+    const currentActive = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim();
+    if (targetPrompt === currentActive && res) {
+      setTranslationText(res);
+    }
+    setIsTranslating(false);
+  };
+
+  const handleToggleHint = async () => {
+    if (isHintVisible) {
+      setIsHintVisible(false);
+      return;
+    }
+
+    if (hintData) {
+      setIsHintVisible(true);
+      return;
+    }
+
+    const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
+    setIsHintLoading(true);
+    const res = await fetchHint(question, {
+      topic: effectiveTopic,
+      level: params.level,
+      scenarioId: params.scenarioId,
+      userName: effectiveUserName,
+      sessionId: liveCall.sessionId,
+    });
+    setIsHintLoading(false);
+
+    if (res) {
+      setHintData(res);
+      setIsHintVisible(true);
+    }
+  };
+
   // Timer: user gets the FULL targetDuration for uninterrupted conversation.
   // Farewell only fires AFTER time is up. Display freezes at the target so extra farewell time is invisible.
   const hasTriggeredFarewellRef = useRef(false);
@@ -153,12 +270,14 @@ export default function CallScreen() {
     };
   }, []);
 
+  const [isConcludingCall, setIsConcludingCall] = useState(false);
+
   const isCallActive = liveCall.status === 'speaking' || liveCall.status === 'listening';
   const isCallReconnecting = liveCall.status === 'reconnecting' || connection.isReconnecting;
   const isCallConnectionLost = (connection.isLost || !connection.isOnline) && liveCall.status !== 'ended';
   const isSlowNetwork = liveCall.isSlowResponse || connection.isWeak;
 
-  const isSessionEndingNear = (remainingSeconds <= 30 && liveCall.secondsElapsed > 0) || isFarewellPhase;
+  const isSessionEndingNear = (remainingSeconds <= 30 && liveCall.secondsElapsed > 0) || isFarewellPhase || isConcludingCall;
 
   // Priority:
   // 1. Critical connection alerts (connection lost / reconnecting) - active throughout the session
@@ -171,7 +290,7 @@ export default function CallScreen() {
     ? 'reconnecting'
     : liveCall.isSlowResponse
     ? 'slow-connection'
-    : isSessionEndingNear
+    : (isSessionEndingNear || isConcludingCall)
     ? 'session-ends'
     : connection.toastPreset;
 
@@ -181,6 +300,8 @@ export default function CallScreen() {
     ? 'Reconnecting...'
     : liveCall.status === 'ended'
     ? 'Session ended'
+    : (isConcludingCall || isFarewellPhase)
+    ? 'Wrapping up...'
     : liveCall.isSlowResponse
     ? 'Waiting for Maya...'
     : connection.isWeak
@@ -292,20 +413,34 @@ export default function CallScreen() {
     }
   };
 
+  const [showForceEndPopup, setShowForceEndPopup] = useState(false);
+
   const handleHangup = () => {
-    if (farewellGraceTimerRef.current) {
-      clearTimeout(farewellGraceTimerRef.current);
-      farewellGraceTimerRef.current = null;
+    if (isConcludingCall || isFarewellPhase) {
+      // Second press during concluding / farewell wrap-up phase: show force end confirmation popup
+      setShowForceEndPopup(true);
+      return;
     }
-    liveCall.endCall();
+    setIsConcludingCall(true);
+    liveCall.requestGracefulHangup();
   };
 
   const handleBackToHome = () => {
+    if (isConcludingCall || isFarewellPhase) {
+      setShowForceEndPopup(true);
+      return;
+    }
+    setIsConcludingCall(true);
+    liveCall.requestGracefulHangup();
+  };
+
+  const handleForceEnd = () => {
+    setShowForceEndPopup(false);
     if (farewellGraceTimerRef.current) {
       clearTimeout(farewellGraceTimerRef.current);
       farewellGraceTimerRef.current = null;
     }
-    liveCall.endCall();
+    liveCall.endCall(true);
   };
 
   const handleScreenTouch = () => {
@@ -316,7 +451,7 @@ export default function CallScreen() {
     }
   };
 
-  // When session completes, navigate directly to dedicated full-screen completion page
+  // When session completes, navigate directly to analyzing screen before showing completion scorecard
   useEffect(() => {
     if (liveCall.missionReport) {
       setLatestSessionReport({
@@ -324,7 +459,7 @@ export default function CallScreen() {
         callParams: params,
       });
       router.replace({
-        pathname: '/onboarding/complete',
+        pathname: '/onboarding/analyzing' as any,
         params: {
           roadmapLevelId: liveCall.missionReport.roadmapLevelId || '',
           levelNumber: String(liveCall.missionReport.levelNumber || ''),
@@ -568,6 +703,32 @@ export default function CallScreen() {
               currentText={liveCall.subtitles}
               isSpeaking={liveCall.status === 'speaking'}
               isWebOrDesktop={isWebOrDesktop}
+              translationText={translationText}
+              isTranslationVisible={isTranslationVisible}
+              isTranslating={isTranslating}
+              onToggleTranslation={handleToggleTranslation}
+            />
+
+            {/* Hint Suggestion Card (Image 2 Design: "Try saying:") */}
+            {isHintVisible && !!hintData && (
+              <View style={styles.hintCardWrapper}>
+                <HintSuggestionCard
+                  hintEnglish={hintData.hintEnglish}
+                  hintSinhala={hintData.hintSinhala}
+                  onDismiss={() => setIsHintVisible(false)}
+                  isWebOrDesktop={isWebOrDesktop}
+                />
+              </View>
+            )}
+          </View>
+
+          {/* Floating Hint Button in Bottom Right Corner (Image 1 Design) */}
+          <View style={styles.floatingHintContainer} pointerEvents="box-none">
+            <HintFloatingButton
+              onPress={handleToggleHint}
+              isLoading={isHintLoading}
+              isActive={isHintVisible}
+              disabled={liveCall.status === 'connecting' || liveCall.status === 'idle'}
             />
           </View>
 
@@ -608,6 +769,25 @@ export default function CallScreen() {
         }}
         onAllow={liveCall.requestMicrophoneAndStart}
         errorType={liveCall.permissionErrorType}
+      />
+
+      {/* Force End Call Confirmation Popup using CommonPopup */}
+      <CommonPopup
+        visible={showForceEndPopup}
+        onClose={() => setShowForceEndPopup(false)}
+        preset="custom"
+        title="Force End Call?"
+        titleHighlight="Force End"
+        subtitle="This will force end the call immediately without waiting for Maya to finish concluding."
+        imageSource={require('@/assets/images/mayaclock.png')}
+        primaryButtonText="End Call"
+        primaryButtonVariant="danger"
+        primaryButtonIcon={<EndCallIcon size={18} color="#FFFFFF" />}
+        showPrimaryArrow={false}
+        onPrimaryPress={handleForceEnd}
+        footerButtonText="Wait for Maya to finish"
+        onFooterButtonPress={() => setShowForceEndPopup(false)}
+        showCloseButton={true}
       />
     </SafeAreaView>
   );
@@ -1046,5 +1226,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#475569',
     lineHeight: 17,
+  },
+  hintCardWrapper: {
+    width: '100%',
+    alignItems: 'center',
+    marginTop: 16,
+    zIndex: 15,
+  },
+  floatingHintContainer: {
+    position: 'absolute',
+    bottom: 24,
+    right: 20,
+    zIndex: 35,
   },
 });

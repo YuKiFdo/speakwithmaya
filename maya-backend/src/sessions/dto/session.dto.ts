@@ -224,3 +224,41 @@ export class QueryUsageDto {
   @IsString()
   model?: string;
 }
+
+export class TranslateDto {
+  @IsString()
+  text!: string;
+
+  @IsOptional()
+  @IsString()
+  targetLang?: string;
+
+  @IsOptional()
+  @IsString()
+  sourceLang?: string;
+}
+
+export class GenerateHintDto {
+  @IsString()
+  question!: string;
+
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
+
+  @IsOptional()
+  @IsString()
+  topic?: string;
+
+  @IsOptional()
+  @IsString()
+  level?: string;
+
+  @IsOptional()
+  @IsString()
+  scenarioId?: string;
+
+  @IsOptional()
+  @IsString()
+  userName?: string;
+}

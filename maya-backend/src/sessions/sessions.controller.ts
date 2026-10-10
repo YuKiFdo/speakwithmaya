@@ -11,11 +11,27 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { SessionsService } from './sessions.service.js';
-import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto } from './dto/session.dto.js';
+import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto } from './dto/session.dto.js';
 
 @Controller('v1')
 export class SessionsController {
   constructor(private readonly sessionsService: SessionsService) {}
+
+  @Post('sessions/translate')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async translate(
+    @Body() dto: TranslateDto,
+  ) {
+    return this.sessionsService.translateText(dto);
+  }
+
+  @Post('sessions/hint')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async getHint(
+    @Body() dto: GenerateHintDto,
+  ) {
+    return this.sessionsService.generateHint(dto);
+  }
 
   @Post('session-token')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))

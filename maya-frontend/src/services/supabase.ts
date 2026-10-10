@@ -48,8 +48,11 @@ const getBackendBaseUrl = (): string => {
     if (hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
       return 'https://maya-backend.icyisland-5baf2c26.southeastasia-01.azurewebsites.net';
     }
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://127.0.0.1:3000';
+    }
   }
-  return process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3000';
+  return process.env.EXPO_PUBLIC_BACKEND_URL || 'http://127.0.0.1:3000';
 };
 
 /**

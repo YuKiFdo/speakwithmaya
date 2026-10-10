@@ -26,10 +26,14 @@ import { sanitizeModelText } from '@/utils/text-sanitizer';
 const USE_SERVER_LIVE = process.env.EXPO_PUBLIC_USE_SERVER_LIVE !== 'false';
 
 export const getBackendBaseUrl = (): string => {
-  // Local web development: always point to local NestJS backend on port 3000
+  // Local web development: point to IPv4 127.0.0.1 loopback to avoid IPv6 localhost collisions
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:3000';
+    const hostname = window.location.hostname;
+    if (hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
+      return 'https://maya-backend.icyisland-5baf2c26.southeastasia-01.azurewebsites.net';
+    }
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://127.0.0.1:3000';
     }
   }
 
@@ -38,10 +42,10 @@ export const getBackendBaseUrl = (): string => {
       const metroHost = Constants.expoConfig?.hostUri?.split(':')[0];
       return metroHost ? `http://${metroHost}:3000` : 'http://10.0.2.2:3000';
     }
-    return 'http://localhost:3000';
+    return 'http://127.0.0.1:3000';
   }
 
-  let url = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3000';
+  let url = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://127.0.0.1:3000';
   if (Platform.OS !== 'web' && url.includes('localhost')) {
     const metroHost = Constants.expoConfig?.hostUri?.split(':')[0];
     if (metroHost) {
@@ -1269,12 +1273,37 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     transportRef.current.sendCurriculumPacingCue?.(nextObjectiveId, nextObjectiveTitle);
   }, []);
 
+  const requestGracefulHangup = useCallback(() => {
+    console.log('[useLiveCall] 🛑 User initiated call conclusion -> muting mic & dispatching conclude cue to Maya');
+
+    // 1. Immediately mute mic so user speech stops streaming and echo is clamped
+    isMutedRef.current = true;
+    setIsMuted(true);
+
+    // 2. Mark concluding state
+    isConcludingRef.current = true;
+    hasSpokenFarewellRef.current = false;
+
+    // 3. Send conclude call wrap-up cue to Maya
+    transportRef.current.sendTimeWrapupCue?.(0);
+
+    // 4. Safety guard: if Maya takes >12s or network fails to produce audio, auto-end call cleanly
+    if (concludeTimerRef.current) clearTimeout(concludeTimerRef.current);
+    concludeTimerRef.current = setTimeout(() => {
+      console.log('[useLiveCall] Farewell wrapup safety timer elapsed (12s) -> auto-ending call');
+      isConcludingRef.current = false;
+      endCallRef.current?.(true);
+    }, 12000);
+  }, []);
+
   return {
     status,
+    sessionId: sessionIdRef.current,
     secondsElapsed,
     subtitles,
     previousSubtitles,
     isMuted,
+    isConcluding: isConcludingRef.current,
     feedbackVisible,
     feedbackData,
     tokens,
@@ -1287,6 +1316,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     requestMicrophoneAndStart,
     startCall,
     endCall,
+    requestGracefulHangup,
     toggleMute,
     closeFeedbackModal,
     resumeAudio,
