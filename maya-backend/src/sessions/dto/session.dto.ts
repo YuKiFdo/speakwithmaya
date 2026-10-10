@@ -262,3 +262,53 @@ export class GenerateHintDto {
   @IsString()
   userName?: string;
 }
+
+export class SessionAnalysisTurnDto {
+  @IsString()
+  role!: 'user' | 'model';
+
+  @IsString()
+  text!: string;
+
+  @IsOptional()
+  @IsNumber()
+  turnIndex?: number;
+
+  @IsOptional()
+  @IsString()
+  timestamp?: string;
+}
+
+export class AnalyzeSessionDto {
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SessionAnalysisTurnDto)
+  turns!: SessionAnalysisTurnDto[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  activeHints?: string[];
+
+  @IsOptional()
+  @IsString()
+  topic?: string;
+
+  @IsOptional()
+  @IsString()
+  level?: string;
+}
+
+export class SessionTtsDto {
+  @IsString()
+  text!: string;
+
+  @IsOptional()
+  @IsString()
+  voice?: string;
+}
+

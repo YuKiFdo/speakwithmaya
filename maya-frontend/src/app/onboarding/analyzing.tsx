@@ -13,6 +13,12 @@ import Svg, { Circle, Path, Defs, LinearGradient, Stop } from 'react-native-svg'
 import { Ionicons, Feather, MaterialIcons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
+import {
+  playScanningSound,
+  stopScanningSound,
+  playStepPop,
+  playAnalysisCompleteSound,
+} from '@/services/sound/sound-service';
 
 interface AnalysisStep {
   id: string;
@@ -53,6 +59,19 @@ const ANALYSIS_STEPS: AnalysisStep[] = [
   },
 ];
 
+// Strip out React Native Web's synthetic collapsable attribute before passing to SVG circle on Web
+const BaseCircle = Platform.OS === 'web'
+  ? React.forwardRef<any, any>(({ collapsable, ...props }, ref) => <Circle ref={ref} {...props} />)
+  : Circle;
+
+if (Platform.OS === 'web') {
+  (BaseCircle as any).displayName = 'WebSafeCircle';
+}
+
+const AnimatedCircle = Animated.createAnimatedComponent(BaseCircle);
+const RADIUS = 98;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
 export default function AnalyzingScreen() {
   const params = useLocalSearchParams();
   const { isPhone } = useBreakpoint();
@@ -60,6 +79,15 @@ export default function AnalyzingScreen() {
 
   // Active step index (0, 1, 2, 3, 4=done)
   const [activeStepIndex, setActiveStepIndex] = useState(0);
+
+  // Circular progress fill animation (starts at ~4% and smoothly fills to 100%)
+  const progressAnim = useRef(new Animated.Value(0.04)).current;
+  const strokeDashoffset = useRef(
+    progressAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [CIRCUMFERENCE, 0],
+    }),
+  ).current;
 
   // Animations for center wave bars
   const wave1Anim = useRef(new Animated.Value(0.4)).current;
@@ -71,6 +99,73 @@ export default function AnalyzingScreen() {
   // Pulse animation for outer concentric radar rings
   const radarPulseAnim = useRef(new Animated.Value(1)).current;
   const radarRotateAnim = useRef(new Animated.Value(0)).current;
+
+  // Celebratory circle jump & smooth screen fade-out animations
+  const jumpTranslateYAnim = useRef(new Animated.Value(0)).current;
+  const jumpScaleAnim = useRef(new Animated.Value(1)).current;
+  const screenFadeAnim = useRef(new Animated.Value(1)).current;
+  const hasTriggeredJumpRef = useRef(false);
+
+  // Checkmark spring pop animations for each of the 4 steps
+  const checkPopAnims = useRef(ANALYSIS_STEPS.map(() => new Animated.Value(0))).current;
+
+  // Staggered cascade entrance animations for the 4 step rows
+  const stepFadeAnims = useRef(ANALYSIS_STEPS.map(() => new Animated.Value(0))).current;
+
+  const triggerCompleteJump = () => {
+    if (hasTriggeredJumpRef.current) return;
+    hasTriggeredJumpRef.current = true;
+    console.log('[AnalyzingScreen] 🚀 Triggering snappy celebratory circle jump!');
+
+    Animated.parallel([
+      // Vertical jump: joyful leap up (200ms) then snap land (160ms)
+      Animated.sequence([
+        Animated.timing(jumpTranslateYAnim, {
+          toValue: -24,
+          duration: 200,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(jumpTranslateYAnim, {
+          toValue: 0,
+          duration: 160,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]),
+      // Scale pop: expand up (1.16) then snap back to normal (1.0)
+      Animated.sequence([
+        Animated.timing(jumpScaleAnim, {
+          toValue: 1.16,
+          duration: 200,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(jumpScaleAnim, {
+          toValue: 1.0,
+          duration: 160,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]),
+      // Smooth fade-out starts during landing so there is zero dead wait time
+      Animated.sequence([
+        Animated.delay(180),
+        Animated.timing(screenFadeAnim, {
+          toValue: 0,
+          duration: 180,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]),
+    ]).start(() => {
+      // Immediately navigate to next screen upon jump completion!
+      router.replace({
+        pathname: '/onboarding/complete',
+        params: params as any,
+      });
+    });
+  };
 
   // Waveform dancing loop
   useEffect(() => {
@@ -124,39 +219,97 @@ export default function AnalyzingScreen() {
     };
   }, []);
 
-  // Step progression sequence: advance through steps over ~3.4s then navigate to complete screen
+  // Staggered cascade entrance for the 4 step rows on screen load
   useEffect(() => {
-    const t1 = setTimeout(() => setActiveStepIndex(1), 850);
-    const t2 = setTimeout(() => setActiveStepIndex(2), 1700);
-    const t3 = setTimeout(() => setActiveStepIndex(3), 2550);
-    const t4 = setTimeout(() => setActiveStepIndex(4), 3300);
+    const entranceAnims = stepFadeAnims.map((anim, idx) =>
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: 260,
+        delay: idx * 90,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      })
+    );
+    Animated.parallel(entranceAnims).start();
+  }, []);
 
-    const tNavigate = setTimeout(() => {
-      router.replace({
-        pathname: '/onboarding/complete',
-        params: params as any,
-      });
-    }, 3800);
+  // Step progression, audio effects, and circular bar fill sequence
+  useEffect(() => {
+    console.log('[AnalyzingScreen] 🎬 Screen mounted, initiating playScanningSound()');
+    playScanningSound();
+
+    let lastStep = 0;
+    const listenerId = progressAnim.addListener(({ value }) => {
+      let step = 0;
+      if (value >= 0.96) step = 4;
+      else if (value >= 0.72) step = 3;
+      else if (value >= 0.48) step = 2;
+      else if (value >= 0.24) step = 1;
+
+      if (step !== lastStep) {
+        console.log(`[AnalyzingScreen] 📍 Milestone crossed: step ${step} (progress: ${(value * 100).toFixed(0)}%)`);
+        lastStep = step;
+        setActiveStepIndex(step);
+
+        // Spring pop the checkmark for the just-completed step one by one!
+        if (step >= 1 && step <= 4) {
+          const completedIdx = step - 1;
+          checkPopAnims[completedIdx].setValue(0);
+          Animated.spring(checkPopAnims[completedIdx], {
+            toValue: 1,
+            friction: 4.5,
+            tension: 85,
+            useNativeDriver: Platform.OS !== 'web',
+          }).start();
+          playStepPop(completedIdx);
+        }
+      }
+    });
+
+    // Animate circular bar from ~4% to 100% full circle over ~3.2s
+    Animated.timing(progressAnim, {
+      toValue: 1,
+      duration: 3200,
+      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+      useNativeDriver: false,
+    }).start(({ finished }) => {
+      if (finished) {
+        // Allow a clear, satisfying 360ms pause where all 4 steps are visibly checked
+        // before playing celebratory victory sound and jumping!
+        setTimeout(() => {
+          playAnalysisCompleteSound();
+          triggerCompleteJump();
+        }, 360);
+      }
+    });
 
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      clearTimeout(t4);
-      clearTimeout(tNavigate);
+      progressAnim.removeListener(listenerId);
+      stopScanningSound();
     };
   }, []);
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
+      <Animated.View
+        style={[
+          styles.container,
+          isWebOrDesktop && styles.containerDesktop,
+          { opacity: screenFadeAnim },
+        ]}
+      >
 
         {/* Top Graphic: Radar Sonar Circles + Blue Arc + Dancing Waves */}
         <View style={styles.graphicSection}>
           <Animated.View
             style={[
               styles.radarWrapper,
-              { transform: [{ scale: radarPulseAnim }] },
+              {
+                transform: [
+                  { translateY: jumpTranslateYAnim },
+                  { scale: Animated.multiply(radarPulseAnim, jumpScaleAnim) },
+                ],
+              },
             ]}
           >
             {/* SVG concentric circles and progress arc */}
@@ -189,13 +342,29 @@ export default function AnalyzingScreen() {
                 opacity={0.65}
               />
 
-              {/* Accent top-right quarter arc (exact match to Image) */}
-              <Path
-                d="M 120 22 A 98 98 0 0 1 218 120"
+              {/* Background circular track */}
+              <Circle
+                cx="120"
+                cy="120"
+                r="98"
+                stroke="#E0F2FE"
+                strokeWidth="8"
+                fill="none"
+                opacity={0.65}
+              />
+
+              {/* Animated filling circular progress bar */}
+              <AnimatedCircle
+                cx="120"
+                cy="120"
+                r="98"
                 stroke="url(#arcGrad)"
                 strokeWidth="8"
                 strokeLinecap="round"
                 fill="none"
+                strokeDasharray={`${CIRCUMFERENCE} ${CIRCUMFERENCE}`}
+                strokeDashoffset={strokeDashoffset}
+                transform="rotate(-90 120 120)"
               />
 
               {/* Orbiting accent dots */}
@@ -236,16 +405,56 @@ export default function AnalyzingScreen() {
             const isPending = activeStepIndex < index;
 
             return (
-              <View key={step.id} style={styles.stepItem}>
-                {/* Step Icon Badge */}
-                <View
+              <Animated.View
+                key={step.id}
+                style={[
+                  styles.stepItem,
+                  {
+                    opacity: stepFadeAnims[index],
+                    transform: [
+                      {
+                        translateY: stepFadeAnims[index].interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [12, 0],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                {/* Step Icon Badge with lively spring pop when completed */}
+                <Animated.View
                   style={[
                     styles.iconCircle,
                     (isCurrent || isCompleted) ? styles.iconCircleActive : styles.iconCirclePending,
+                    isCompleted && {
+                      transform: [
+                        {
+                          scale: checkPopAnims[index].interpolate({
+                            inputRange: [0, 0.6, 1],
+                            outputRange: [0.85, 1.15, 1.0],
+                          }),
+                        },
+                      ],
+                    },
                   ]}
                 >
                   {isCompleted ? (
-                    <Ionicons name="checkmark" size={20} color="#0284C7" />
+                    <Animated.View
+                      style={{
+                        transform: [
+                          {
+                            scale: checkPopAnims[index].interpolate({
+                              inputRange: [0, 0.6, 1],
+                              outputRange: [0.1, 1.35, 1.0],
+                            }),
+                          },
+                        ],
+                        opacity: checkPopAnims[index],
+                      }}
+                    >
+                      <Ionicons name="checkmark" size={22} color="#0284C7" />
+                    </Animated.View>
                   ) : step.iconType === 'material' ? (
                     <MaterialIcons
                       name={step.iconName as any}
@@ -265,7 +474,7 @@ export default function AnalyzingScreen() {
                       color={isCurrent ? '#0284C7' : '#94A3B8'}
                     />
                   )}
-                </View>
+                </Animated.View>
 
                 {/* Step Text Info */}
                 <View style={styles.stepTextWrapper}>
@@ -279,12 +488,12 @@ export default function AnalyzingScreen() {
                   </Text>
                   <Text style={styles.stepSubtitle}>{step.subtitle}</Text>
                 </View>
-              </View>
+              </Animated.View>
             );
           })}
         </View>
 
-      </View>
+      </Animated.View>
     </SafeAreaView>
   );
 }

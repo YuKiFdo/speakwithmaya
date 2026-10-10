@@ -33,6 +33,7 @@ import { HintFloatingButton } from '@/components/call/hint-floating-button';
 import { HintSuggestionCard } from '@/components/call/hint-suggestion-card';
 import { fetchTranslation, fetchHint, HintResponse } from '@/services/assistance/assistance-service';
 import { CommonPopup } from '@/components/ui/common-popup';
+import { triggerHaptic, playMicroChime } from '@/utils/haptics-audio';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -127,7 +128,6 @@ export default function CallScreen() {
 
   const [hintData, setHintData] = useState<HintResponse | null>(null);
   const [isHintVisible, setIsHintVisible] = useState(false);
-  const [isHintLoading, setIsHintLoading] = useState(false);
 
   const translationTargetPromptRef = useRef<string>('');
   const pendingTranslationAfterSpeakingRef = useRef<boolean>(false);
@@ -143,7 +143,6 @@ export default function CallScreen() {
 
       setIsHintVisible(false);
       setHintData(null);
-      setIsHintLoading(false);
     }
   }, [liveCall.status]);
 
@@ -205,6 +204,26 @@ export default function CallScreen() {
     setIsTranslating(false);
   };
 
+  // Background prefetch: when Maya finishes speaking a prompt, silently fetch hint so it's ready instantly
+  useEffect(() => {
+    if (liveCall.status === 'listening' && !hintData) {
+      const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
+      if (question) {
+        fetchHint(question, {
+          topic: effectiveTopic,
+          level: params.level,
+          scenarioId: params.scenarioId,
+          userName: effectiveUserName,
+          sessionId: liveCall.sessionId,
+        }).then((res) => {
+          if (res) {
+            setHintData(res);
+          }
+        });
+      }
+    }
+  }, [liveCall.status, liveCall.subtitles, liveCall.previousSubtitles]);
+
   const handleToggleHint = async () => {
     if (isHintVisible) {
       setIsHintVisible(false);
@@ -216,8 +235,9 @@ export default function CallScreen() {
       return;
     }
 
+    // If tapped before background prefetch completed, show immediately and resolve in background
+    setIsHintVisible(true);
     const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
-    setIsHintLoading(true);
     const res = await fetchHint(question, {
       topic: effectiveTopic,
       level: params.level,
@@ -225,11 +245,9 @@ export default function CallScreen() {
       userName: effectiveUserName,
       sessionId: liveCall.sessionId,
     });
-    setIsHintLoading(false);
 
     if (res) {
       setHintData(res);
-      setIsHintVisible(true);
     }
   };
 
@@ -277,12 +295,12 @@ export default function CallScreen() {
   const isCallConnectionLost = (connection.isLost || !connection.isOnline) && liveCall.status !== 'ended';
   const isSlowNetwork = liveCall.isSlowResponse || connection.isWeak;
 
-  const isSessionEndingNear = (remainingSeconds <= 30 && liveCall.secondsElapsed > 0) || isFarewellPhase || isConcludingCall;
+  const isNaturalTimeRunningOut = (remainingSeconds <= 30 && liveCall.secondsElapsed > 0) || isFarewellPhase;
 
   // Priority:
   // 1. Critical connection alerts (connection lost / reconnecting) - active throughout the session
   // 2. Slow network / delayed response warning (>3.5s waiting for Maya response or backpressure)
-  // 3. Session ending countdown & farewell wrap-up (takes top priority as time nears end)
+  // 3. Session ending countdown & farewell wrap-up (only during natural time expiration, NOT when user manually ends early)
   // 4. Ambient network notices (weak connection, connection restored)
   const activeToastPreset: ToastPillPreset | null = isCallConnectionLost
     ? 'connection-lost'
@@ -290,7 +308,9 @@ export default function CallScreen() {
     ? 'reconnecting'
     : liveCall.isSlowResponse
     ? 'slow-connection'
-    : (isSessionEndingNear || isConcludingCall)
+    : isConcludingCall
+    ? null
+    : isNaturalTimeRunningOut
     ? 'session-ends'
     : connection.toastPreset;
 
@@ -485,7 +505,7 @@ export default function CallScreen() {
           <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
 
           {/* Ambient Edge Aura for Speaking State */}
-          <AmbientGlow type="blue-aura" opacity={blueAuraAnim} />
+          <AmbientGlow type="blue-aura" opacity={blueAuraAnim} scale={blueScaleAnim} />
 
           {/* Top Bar Header */}
           {isWebOrDesktop ? (
@@ -722,18 +742,19 @@ export default function CallScreen() {
             )}
           </View>
 
-          {/* Floating Hint Button in Bottom Right Corner (Image 1 Design) */}
-          <View style={styles.floatingHintContainer} pointerEvents="box-none">
-            <HintFloatingButton
-              onPress={handleToggleHint}
-              isLoading={isHintLoading}
-              isActive={isHintVisible}
-              disabled={liveCall.status === 'connecting' || liveCall.status === 'idle'}
-            />
-          </View>
+          {/* Floating Hint Button in Bottom Right Corner (Image 1 Design - hidden when hint is showing) */}
+          {!isHintVisible && (
+            <View style={styles.floatingHintContainer} pointerEvents="box-none">
+              <HintFloatingButton
+                onPress={handleToggleHint}
+                isActive={isHintVisible}
+                disabled={liveCall.status === 'connecting' || liveCall.status === 'idle'}
+              />
+            </View>
+          )}
 
           {/* Bottom Purple Ambient Glow for Listening State (Speech-Reactive) */}
-          <AmbientGlow type="purple-bottom" opacity={purpleGlowAnim} />
+          <AmbientGlow type="purple-bottom" opacity={purpleGlowAnim} scale={purpleScaleAnim} />
         </View>
       </Pressable>
     </View>

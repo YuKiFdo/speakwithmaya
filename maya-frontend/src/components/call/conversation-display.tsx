@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
 import { TranslationToggleButton } from './translation-toggle-button';
+import { triggerHaptic } from '@/utils/haptics-audio';
 
 interface ConversationDisplayProps {
   previousText?: string;
@@ -23,8 +24,6 @@ interface ConversationDisplayProps {
 
 /**
  * Returns large, confident typography matching the official design reference.
- * Typography size is calculated from the full sentence length so the font
- * stays rock-solid and stable throughout the word-by-word voice stream.
  */
 function getPromptTypography(textLength: number, isDesktop: boolean) {
   if (isDesktop) {
@@ -35,13 +34,10 @@ function getPromptTypography(textLength: number, isDesktop: boolean) {
 
   // Mobile Typography:
   if (textLength <= 70) {
-    // Standard conversational prompt (e.g. "That's great! What do you usually do on weekends?")
     return { fontSize: 27, lineHeight: 38 };
   } else if (textLength <= 140) {
-    // Moderate response
     return { fontSize: 23.5, lineHeight: 33 };
   } else {
-    // Multi-sentence longer reply
     return { fontSize: 20.5, lineHeight: 29 };
   }
 }
@@ -58,125 +54,117 @@ function ConversationDisplayComponent({
 }: ConversationDisplayProps) {
   const scrollRef = useRef<ScrollView>(null);
 
-  // Progressive word-by-word reveal synchronized with voice playback rate
-  const [revealedWordCount, setRevealedWordCount] = useState<number>(0);
-  const wordsRef = useRef<string[]>([]);
-  const timerRef = useRef<any>(null);
+  // Progressive word-by-word pacing engine
+  const [displayedCount, setDisplayedCount] = useState<number>(0);
+  const tickerTimerRef = useRef<any>(null);
   const lastProcessedTextRef = useRef<string>('');
 
-  // Transition animations for previous and current turns
+  // Transition animations for previous turn
   const prevFadeAnim = useRef(new Animated.Value(0.5)).current;
   const prevSlideAnim = useRef(new Animated.Value(0)).current;
 
-  const currentFadeAnim = useRef(new Animated.Value(1)).current;
-  const currentSlideAnim = useRef(new Animated.Value(0)).current;
-
-  // Dancing audio wave indicator bars while Maya is speaking
-  const wave1Anim = useRef(new Animated.Value(0.3)).current;
-  const wave2Anim = useRef(new Animated.Value(0.7)).current;
-  const wave3Anim = useRef(new Animated.Value(0.4)).current;
-  const wave4Anim = useRef(new Animated.Value(0.8)).current;
-  const wave5Anim = useRef(new Animated.Value(0.35)).current;
+  // Translation text fade-in animation
+  const translationAnim = useRef(new Animated.Value(0)).current;
 
   const prevTextRef = useRef<string>(previousText || '');
 
+  // Parse all words from incoming speech stream
+  const fullRawText = (currentText || '').trim();
+  const allTargetWords = useMemo(() => {
+    if (!fullRawText) return [];
+    return fullRawText.split(/\s+/).filter(Boolean);
+  }, [fullRawText]);
+
   // Full length of the active sentence for stable font sizing
-  const fullSentence = currentText?.trim() || previousText?.trim() || '';
+  const fullSentence = fullRawText || previousText?.trim() || '';
   const { fontSize, lineHeight } = useMemo(
     () => getPromptTypography(fullSentence.length, isWebOrDesktop),
     [fullSentence.length, isWebOrDesktop]
   );
 
-  // Voice-Synchronized Word Reveal Engine:
-  // Paces words at ~360ms–400ms matching Maya's natural conversational cadence (~140 wpm)
-  // with natural pauses on punctuation marks.
+  // 1. Detect turn changes and reset word count
   useEffect(() => {
-    const trimmed = (currentText || '').trim();
-    if (!trimmed) {
-      setRevealedWordCount(0);
+    if (!fullRawText) {
+      setDisplayedCount(0);
       lastProcessedTextRef.current = '';
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
+      if (tickerTimerRef.current) {
+        clearTimeout(tickerTimerRef.current);
+        tickerTimerRef.current = null;
       }
       return;
     }
 
-    const words = trimmed.split(/\s+/);
-    wordsRef.current = words;
-
-    // Detect if a fresh new turn started
-    const isBrandNewTurn =
+    // Detect if this is a brand new sentence/turn
+    const isNewTurn =
       !lastProcessedTextRef.current ||
-      !trimmed.startsWith(lastProcessedTextRef.current.slice(0, Math.min(12, lastProcessedTextRef.current.length)));
+      !fullRawText.startsWith(
+        lastProcessedTextRef.current.slice(0, Math.min(10, lastProcessedTextRef.current.length))
+      );
 
-    if (isBrandNewTurn && trimmed !== lastProcessedTextRef.current) {
-      lastProcessedTextRef.current = trimmed;
-      setRevealedWordCount(1);
+    if (isNewTurn && fullRawText !== lastProcessedTextRef.current) {
+      lastProcessedTextRef.current = fullRawText;
+      // Start immediately with word 1 for instant response
+      setDisplayedCount(1);
     } else {
-      lastProcessedTextRef.current = trimmed;
+      lastProcessedTextRef.current = fullRawText;
     }
+  }, [fullRawText]);
 
-    // When Maya stops speaking (turn ended or barge-in), immediately reveal full text
-    if (!isSpeaking) {
-      setRevealedWordCount(words.length);
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
+  // 2. Silky-smooth progressive word ticker
+  useEffect(() => {
+    // If all words are already displayed, stop ticking
+    if (displayedCount >= allTargetWords.length) {
+      if (tickerTimerRef.current) {
+        clearTimeout(tickerTimerRef.current);
+        tickerTimerRef.current = null;
       }
       return;
     }
 
-    // Schedule progressive reveal of words synced with speech rate
-    const scheduleNextWord = (currentIdx: number) => {
-      if (currentIdx >= wordsRef.current.length) {
-        timerRef.current = null;
-        return;
-      }
+    // How many words behind the audio stream are we?
+    const wordsBehind = allTargetWords.length - displayedCount;
 
-      const justRevealedWord = wordsRef.current[currentIdx - 1] || '';
+    // Natural conversational English cadence:
+    // ~175ms per word (~160 words per minute, natural speech rate)
+    let nextDelay = 175;
 
-      // Conversational audio cadence: ~360ms per word (~145 words/min)
-      let wordDelay = 360;
-      if (/[.?!]$/.test(justRevealedWord)) {
-        wordDelay += 280; // Natural sentence boundary breath pause
-      } else if (/[,;:\-]$/.test(justRevealedWord)) {
-        wordDelay += 140; // Natural comma/clause pause
-      }
-
-      timerRef.current = setTimeout(() => {
-        setRevealedWordCount((prev) => {
-          const next = prev + 1;
-          scheduleNextWord(next);
-          return next;
-        });
-      }, wordDelay);
-    };
-
-    if (!timerRef.current && isSpeaking) {
-      scheduleNextWord(revealedWordCount || 1);
+    if (!isSpeaking) {
+      // Maya has finished speaking: smoothly glide through remaining words
+      nextDelay = 65;
+    } else if (wordsBehind > 4) {
+      // Catch up smoothly if stream buffered
+      nextDelay = 95;
+    } else if (wordsBehind > 2) {
+      nextDelay = 130;
     }
+
+    // Natural punctuation rhythm
+    const lastRevealedWord = allTargetWords[displayedCount - 1] || '';
+    if (isSpeaking && /[.?!]$/.test(lastRevealedWord)) {
+      nextDelay += 140; // Sentence boundary pause
+    } else if (isSpeaking && /[,;:\-]$/.test(lastRevealedWord)) {
+      nextDelay += 65; // Clause pause
+    }
+
+    tickerTimerRef.current = setTimeout(() => {
+      setDisplayedCount((prev) => Math.min(prev + 1, allTargetWords.length));
+    }, nextDelay);
 
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
+      if (tickerTimerRef.current) {
+        clearTimeout(tickerTimerRef.current);
+        tickerTimerRef.current = null;
       }
     };
-  }, [currentText, isSpeaking]);
+  }, [displayedCount, allTargetWords.length, isSpeaking]);
 
-  // Smooth upward glide & fade transition when switching turns
+  // 3. Smooth upward glide & fade transition when previous turn changes
   useEffect(() => {
     if (previousText && previousText !== prevTextRef.current) {
       prevTextRef.current = previousText;
 
-      // Start previous text from active position and animate upward & faded
       prevFadeAnim.setValue(0.85);
       prevSlideAnim.setValue(8);
-
-      // Start current text slightly below and fade in to 100%
-      currentFadeAnim.setValue(0.3);
-      currentSlideAnim.setValue(14);
 
       Animated.parallel([
         Animated.timing(prevFadeAnim, {
@@ -189,81 +177,36 @@ function ConversationDisplayComponent({
           duration: 450,
           useNativeDriver: Platform.OS !== 'web',
         }),
-        Animated.timing(currentFadeAnim, {
-          toValue: 1.0,
-          duration: 450,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(currentSlideAnim, {
-          toValue: 0,
-          duration: 450,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
       ]).start();
     }
   }, [previousText]);
 
-  // Live dancing waveform animation when Maya is actively speaking
+  // 4. Animate translation text fade-in
   useEffect(() => {
-    let anim: Animated.CompositeAnimation | null = null;
-    if (isSpeaking) {
-      anim = Animated.loop(
-        Animated.parallel([
-          Animated.sequence([
-            Animated.timing(wave1Anim, { toValue: 1.0, duration: 240, useNativeDriver: Platform.OS !== 'web' }),
-            Animated.timing(wave1Anim, { toValue: 0.25, duration: 280, useNativeDriver: Platform.OS !== 'web' }),
-          ]),
-          Animated.sequence([
-            Animated.timing(wave2Anim, { toValue: 0.2, duration: 210, useNativeDriver: Platform.OS !== 'web' }),
-            Animated.timing(wave2Anim, { toValue: 1.0, duration: 290, useNativeDriver: Platform.OS !== 'web' }),
-          ]),
-          Animated.sequence([
-            Animated.timing(wave3Anim, { toValue: 1.0, duration: 260, useNativeDriver: Platform.OS !== 'web' }),
-            Animated.timing(wave3Anim, { toValue: 0.3, duration: 240, useNativeDriver: Platform.OS !== 'web' }),
-          ]),
-          Animated.sequence([
-            Animated.timing(wave4Anim, { toValue: 0.25, duration: 280, useNativeDriver: Platform.OS !== 'web' }),
-            Animated.timing(wave4Anim, { toValue: 0.95, duration: 220, useNativeDriver: Platform.OS !== 'web' }),
-          ]),
-          Animated.sequence([
-            Animated.timing(wave5Anim, { toValue: 0.9, duration: 230, useNativeDriver: Platform.OS !== 'web' }),
-            Animated.timing(wave5Anim, { toValue: 0.2, duration: 270, useNativeDriver: Platform.OS !== 'web' }),
-          ]),
-        ])
-      );
-      anim.start();
+    if (isTranslationVisible && translationText) {
+      Animated.timing(translationAnim, {
+        toValue: 1,
+        duration: 260,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
     } else {
-      Animated.parallel([
-        Animated.timing(wave1Anim, { toValue: 0, duration: 200, useNativeDriver: Platform.OS !== 'web' }),
-        Animated.timing(wave2Anim, { toValue: 0, duration: 200, useNativeDriver: Platform.OS !== 'web' }),
-        Animated.timing(wave3Anim, { toValue: 0, duration: 200, useNativeDriver: Platform.OS !== 'web' }),
-        Animated.timing(wave4Anim, { toValue: 0, duration: 200, useNativeDriver: Platform.OS !== 'web' }),
-        Animated.timing(wave5Anim, { toValue: 0, duration: 200, useNativeDriver: Platform.OS !== 'web' }),
-      ]).start();
+      translationAnim.setValue(0);
     }
+  }, [isTranslationVisible, translationText]);
 
-    return () => {
-      if (anim) anim.stop();
-    };
-  }, [isSpeaking]);
-
-  // Auto-scroll as words progressively reveal
+  // 5. Auto-scroll as words progressively reveal
   useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
-  }, [revealedWordCount, currentText]);
+  }, [displayedCount, fullRawText]);
 
-  // Compute text to display: progressive words up to revealedWordCount
-  const displayedCurrentText = useMemo(() => {
-    if (currentText && currentText.trim()) {
-      if (!isSpeaking) {
-        return currentText.trim();
-      }
-      const words = currentText.trim().split(/\s+/);
-      const count = Math.min(Math.max(1, revealedWordCount), words.length);
-      return words.slice(0, count).join(' ');
+  // Compute words currently visible on screen
+  const visibleWords = useMemo(() => {
+    if (!allTargetWords.length) {
+      return (previousText || '').trim().split(/\s+/).filter(Boolean);
     }
-    return previousText?.trim() || '';
-  }, [currentText, isSpeaking, revealedWordCount, previousText]);
+    const count = Math.min(displayedCount, allTargetWords.length);
+    return allTargetWords.slice(0, count);
+  }, [allTargetWords, displayedCount, previousText]);
 
   const hasPrevious = !!(
     previousText &&
@@ -271,13 +214,36 @@ function ConversationDisplayComponent({
     previousText.trim() !== currentText?.trim()
   );
 
-  const hasContent = !!displayedCurrentText;
+  const hasContent = visibleWords.length > 0;
   if (!hasContent) {
     return null;
   }
 
+  // True when all words have finished appearing and Maya has stopped speaking
+  const isTextFinished = !isSpeaking && (displayedCount >= allTargetWords.length || !currentText?.trim());
+
   return (
     <View style={[styles.outerContainer, isWebOrDesktop && styles.outerContainerDesktop]}>
+      {/* CSS Keyframe for silky smooth word fade & soft glide */}
+      {Platform.OS === 'web' && (
+        <style>{`
+          @keyframes wordGlideIn {
+            0% {
+              opacity: 0;
+              transform: translateY(3px);
+            }
+            100% {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+          .maya-word-glide {
+            display: inline-block;
+            animation: wordGlideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          }
+        `}</style>
+      )}
+
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
@@ -288,7 +254,7 @@ function ConversationDisplayComponent({
           scrollRef.current?.scrollToEnd({ animated: true });
         }}
       >
-        {/* 1. Previous Model Turn (Faded, elevated upward with smooth transition) */}
+        {/* 1. Previous Model Turn (Faded upward with smooth transition) */}
         {hasPrevious && !!currentText?.trim() && (
           <Animated.View
             style={[
@@ -309,16 +275,8 @@ function ConversationDisplayComponent({
           </Animated.View>
         )}
 
-        {/* 2. Current Active Model Turn (Progressive word-by-word reveal synchronized with voice) */}
-        <Animated.View
-          style={[
-            styles.currentWrapper,
-            {
-              opacity: currentFadeAnim,
-              transform: [{ translateY: currentSlideAnim }],
-            },
-          ]}
-        >
+        {/* 2. Current Active Model Turn (Smooth word-by-word streaming) */}
+        <View style={styles.currentWrapper}>
           <Text
             style={[
               styles.promptText,
@@ -326,126 +284,112 @@ function ConversationDisplayComponent({
               isWebOrDesktop && styles.promptTextDesktop,
             ]}
           >
-            {displayedCurrentText}
+            {visibleWords.map((word, idx) => (
+              <Text
+                key={`${word}-${idx}`}
+                style={[
+                  styles.wordItem,
+                  Platform.OS === 'web' ? ({ className: 'maya-word-glide' } as any) : null,
+                ]}
+              >
+                {word}{' '}
+              </Text>
+            ))}
           </Text>
 
-          {/* Sinhala Translation of Active Prompt (Image 2 Design) */}
+          {/* Sinhala Translation of Active Prompt (Clean text directly underneath matching reference) */}
           {isTranslationVisible && !!translationText && (
-            <Text
+            <Animated.Text
               style={[
                 styles.sinhalaTranslationText,
                 isWebOrDesktop && styles.sinhalaTranslationTextDesktop,
+                { opacity: translationAnim },
               ]}
             >
               {translationText}
-            </Text>
+            </Animated.Text>
           )}
 
-          {/* Translation Toggle Pill Button (Image 1 & 2 Design) */}
-          {!!onToggleTranslation && !!displayedCurrentText && (
+          {/* Translation Toggle Pill Button (ONLY appears when all words have finished appearing) */}
+          {!!onToggleTranslation && isTextFinished && (
             <TranslationToggleButton
               isExpanded={Boolean(isTranslationVisible)}
               isLoading={isTranslating}
-              onToggle={onToggleTranslation}
+              onToggle={() => {
+                triggerHaptic('light');
+                onToggleTranslation();
+              }}
             />
           )}
-
-          {/* Dancing Audio Waveform Bars (Active while Maya is speaking) */}
-          {isSpeaking && (
-            <View style={styles.waveContainer}>
-              <Animated.View style={[styles.waveBar, { transform: [{ scaleY: wave1Anim }] }]} />
-              <Animated.View style={[styles.waveBar, { transform: [{ scaleY: wave2Anim }] }]} />
-              <Animated.View style={[styles.waveBar, { transform: [{ scaleY: wave3Anim }] }]} />
-              <Animated.View style={[styles.waveBar, { transform: [{ scaleY: wave4Anim }] }]} />
-              <Animated.View style={[styles.waveBar, { transform: [{ scaleY: wave5Anim }] }]} />
-            </View>
-          )}
-        </Animated.View>
+        </View>
       </ScrollView>
     </View>
   );
 }
 
+export const ConversationDisplay = React.memo(ConversationDisplayComponent);
+
 const styles = StyleSheet.create({
   outerContainer: {
     width: '100%',
-    minHeight: 140,
-    maxHeight: 380,
-    paddingHorizontal: 16,
+    maxHeight: 280,
     justifyContent: 'center',
-    alignItems: 'center',
+    paddingHorizontal: 4,
   },
   outerContainerDesktop: {
-    maxWidth: 720,
-    minHeight: 170,
-    maxHeight: 440,
-    paddingHorizontal: 24,
-  },
-  sinhalaTranslationText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 16,
-    lineHeight: 25,
-    color: '#1E293B',
-    textAlign: 'center',
-    marginTop: 10,
-    paddingHorizontal: 12,
-  },
-  sinhalaTranslationTextDesktop: {
-    fontSize: 18,
-    lineHeight: 28,
+    maxHeight: 340,
+    maxWidth: 680,
+    alignSelf: 'center',
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   previousWrapper: {
-    width: '100%',
+    marginBottom: 8,
     alignItems: 'center',
-    marginBottom: 10,
-    paddingHorizontal: 8,
   },
   previousText: {
-    ...fontStyle('outfit', 'medium'),
-    fontSize: 16,
-    color: '#94a3b8',
+    ...fontStyle('outfit', 'regular'),
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#94A3B8',
     textAlign: 'center',
-    lineHeight: 23,
-    letterSpacing: -0.2,
   },
   previousTextDesktop: {
-    fontSize: 18,
-    lineHeight: 26,
+    fontSize: 17,
+    lineHeight: 25,
   },
   currentWrapper: {
-    width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },
   promptText: {
     ...fontStyle('outfit', 'bold'),
-    color: '#0f172a',
+    color: '#0F172A',
     textAlign: 'center',
     letterSpacing: -0.4,
   },
   promptTextDesktop: {
-    maxWidth: 680,
+    letterSpacing: -0.5,
   },
-  waveContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    height: 28,
-    marginTop: 18,
+  wordItem: {
+    color: '#0F172A',
   },
-  waveBar: {
-    width: 4,
-    height: 24,
-    backgroundColor: '#0ea5e9', // Maya sky-blue
-    borderRadius: 2,
+  sinhalaTranslationText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 16.5,
+    lineHeight: 25,
+    color: '#334155',
+    textAlign: 'center',
+    letterSpacing: -0.1,
+    marginTop: 14,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+  },
+  sinhalaTranslationTextDesktop: {
+    fontSize: 18.5,
+    lineHeight: 27,
   },
 });
-
-export const ConversationDisplay = React.memo(ConversationDisplayComponent);

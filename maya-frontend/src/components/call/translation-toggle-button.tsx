@@ -64,7 +64,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 7,
     borderRadius: 20,
-    backgroundColor: '#ffffff',
+    // backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#E2E8F0',
     gap: 6,
@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
     }),
   },
   pressed: {
-    backgroundColor: '#F8FAFC',
+    // backgroundColor: '#F8FAFC',
     borderColor: '#CBD5E1',
     transform: [{ scale: 0.98 }],
   },

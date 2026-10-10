@@ -8,7 +8,6 @@ import {
   Pressable,
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
-import { Feather } from '@expo/vector-icons';
 
 interface HintSuggestionCardProps {
   hintEnglish: string;
@@ -54,35 +53,30 @@ export function HintSuggestionCard({
         },
       ]}
     >
-      {/* Pill Badge: Try saying: */}
-      <View style={styles.badgeRow}>
-        <View style={styles.badgePill}>
-          <Text style={styles.badgeText}>Try saying:</Text>
+      <Pressable
+        onPress={onDismiss}
+        style={{ width: '100%', alignItems: 'center' }}
+        disabled={!onDismiss}
+      >
+        {/* Pill Badge: Try saying: */}
+        <View style={styles.badgeRow}>
+          <View style={styles.badgePill}>
+            <Text style={styles.badgeText}>Try saying:</Text>
+          </View>
         </View>
-        {onDismiss && (
-          <Pressable
-            onPress={onDismiss}
-            style={({ pressed }) => [styles.dismissBtn, pressed && styles.dismissPressed]}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Close hint"
-          >
-            <Feather name="x" size={16} color="#94A3B8" />
-          </Pressable>
-        )}
-      </View>
 
-      {/* Suggested English sentence */}
-      <Text style={[styles.englishText, isWebOrDesktop && styles.englishTextDesktop]}>
-        {hintEnglish}
-      </Text>
-
-      {/* Sinhala translation of the suggested sentence */}
-      {!!hintSinhala && (
-        <Text style={[styles.sinhalaText, isWebOrDesktop && styles.sinhalaTextDesktop]}>
-          {hintSinhala}
+        {/* Suggested English sentence */}
+        <Text style={[styles.englishText, isWebOrDesktop && styles.englishTextDesktop]}>
+          {hintEnglish}
         </Text>
-      )}
+
+        {/* Sinhala translation of the suggested sentence */}
+        {!!hintSinhala && (
+          <Text style={[styles.sinhalaText, isWebOrDesktop && styles.sinhalaTextDesktop]}>
+            {hintSinhala}
+          </Text>
+        )}
+      </Pressable>
     </Animated.View>
   );
 }
@@ -108,7 +102,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   badgePill: {
-    backgroundColor: '#ffffff',
+    // backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#E2E8F0',
     borderRadius: 20,
@@ -130,19 +124,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#334155',
     letterSpacing: -0.2,
-  },
-  dismissBtn: {
-    position: 'absolute',
-    right: 4,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F1F5F9',
-  },
-  dismissPressed: {
-    opacity: 0.7,
   },
   englishText: {
     ...fontStyle('outfit', 'bold'),

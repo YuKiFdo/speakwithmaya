@@ -28,6 +28,7 @@ interface ClientSessionState {
   opusPcmBuffer: Buffer;
   userSpeechActive: boolean;
   hasDispatchedGreeting: boolean;
+  isGreetingInProgress: boolean;
   userTranscriptAccumulator: string;
   modelTranscriptAccumulator: string;
   lastStudentTranscript: string;
@@ -109,6 +110,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       opusPcmBuffer: Buffer.alloc(0),
       userSpeechActive: false,
       hasDispatchedGreeting: false,
+      isGreetingInProgress: false,
       userTranscriptAccumulator: '',
       modelTranscriptAccumulator: '',
       lastStudentTranscript: '',
@@ -402,6 +404,10 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       case 'interrupt': {
         // User barge-in signal
+        if (state.isGreetingInProgress) {
+          this.logger.debug(`[${state.sessionId}] Suppressing user interrupt while opening greeting is in progress`);
+          return;
+        }
         if (state.geminiSession) {
           this.logger.log(`[${state.sessionId}] User barge-in interrupt signal received`);
           this.addSessionLog(state, 'user_interrupt');
@@ -504,6 +510,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const state = this.clients.get(client);
     if (!state?.geminiSession || !state.isConnectedToGemini) return;
 
+    if (state.isGreetingInProgress) {
+      // Opening turn greeting is in progress. Suppress user mic audio and activityStart
+      // so ambient noise or early mic streaming does not cancel/interrupt Maya's initial greeting.
+      return;
+    }
+
     try {
       // Manual VAD: signal activityStart on the first chunk of a new speech burst.
       // Gemini will not process audio until it receives this signal.
@@ -529,6 +541,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private async handleEndOfTurn(state: ClientSessionState) {
     if (!state.geminiSession || !state.isConnectedToGemini) return;
+
+    if (state.isGreetingInProgress) {
+      this.logger.debug(`[${state.sessionId}] Suppressing handleEndOfTurn during opening greeting`);
+      return;
+    }
 
     try {
       this.logger.log(`[${state.sessionId}] 🚀 Turn Complete: Sending activityEnd to Gemini Live`);
@@ -572,6 +589,18 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.logger.log(`[${state.sessionId}] Connecting to Gemini Live API (${this.liveModel})...`);
       this.addSessionLog(state, 'gemini_connecting', `model=${this.liveModel}`);
+
+      const isFreshSession = !dto.isReconnect && !dto.memory;
+      if (isFreshSession && greetingPrompt) {
+        state.isGreetingInProgress = true;
+        // Safety timeout: after 15s, guarantee audio input is un-shielded even if greeting fails
+        setTimeout(() => {
+          if (state.isGreetingInProgress) {
+            this.logger.warn(`[${state.sessionId}] Greeting safety timer expired (15s) — unlocking user audio input`);
+            state.isGreetingInProgress = false;
+          }
+        }, 15000);
+      }
 
       let session: any = null;
 
@@ -648,7 +677,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             const isFreshSession = !dto.isReconnect && !dto.memory;
             if (isFreshSession && greetingPrompt && session && !state.hasDispatchedGreeting) {
               state.hasDispatchedGreeting = true;
-              this.logger.log(`[${state.sessionId}] Dispatching opening turn greeting prompt`);
+              state.isGreetingInProgress = true;
+              this.logger.log(`[${state.sessionId}] Dispatching opening turn greeting prompt (audio input shielded)`);
               this.addSessionLog(state, 'greeting_dispatched');
 
               // Start latency timer for greeting response
@@ -666,6 +696,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
               });
             } else if (!isFreshSession && !state.hasDispatchedGreeting) {
               state.hasDispatchedGreeting = true;
+              state.isGreetingInProgress = false;
               this.logger.log(`[${state.sessionId}] Reconnected session / existing memory present -> skipping opening greeting prompt`);
               this.addSessionLog(state, 'greeting_skipped_reconnect');
             }
@@ -699,10 +730,10 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       state.geminiSession = session;
 
       // If onopen fired before await returned and greeting wasn't sent yet
-      const isFreshSession = !dto.isReconnect && !dto.memory;
       if (isFreshSession && greetingPrompt && state.isConnectedToGemini && session && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
-        this.logger.log(`[${state.sessionId}] Ensuring opening turn greeting prompt is dispatched`);
+        state.isGreetingInProgress = true;
+        this.logger.log(`[${state.sessionId}] Ensuring opening turn greeting prompt is dispatched (audio input shielded)`);
         this.addSessionLog(state, 'greeting_dispatched_fallback');
 
         // Start latency timer for greeting response
@@ -861,6 +892,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Only print turn complete summary when the model actually responded or when user turn finished
       if (state.hasModelSpokenThisTurn || modelText) {
+        if (state.isGreetingInProgress) {
+          this.logger.log(`[${state.sessionId}] 🌟 Opening greeting successfully completed — client audio gate unlocked`);
+          state.isGreetingInProgress = false;
+        }
+
         this.logger.log(
           `[${state.sessionId}] 🤖 [Model Turn Complete]\n` +
           `   🗣️ User Said: "${userText || '(untranscribed / audio speech)'}"\n` +
@@ -891,6 +927,10 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // 4. Interrupted Event
     if (serverContent?.interrupted) {
+      if (state.isGreetingInProgress) {
+        this.logger.warn(`[${state.sessionId}] 🛡️ Shielded: ignoring interruption during opening greeting generation`);
+        return;
+      }
       this.logger.log(`[${state.sessionId}] ⚡ [Interrupted] User voice interrupted model response`);
       state.modelTranscriptAccumulator = '';
       state.hasModelSpokenThisTurn = false;

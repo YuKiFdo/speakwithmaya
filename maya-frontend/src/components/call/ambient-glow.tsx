@@ -5,26 +5,33 @@ import Svg, { Defs, LinearGradient, RadialGradient, Rect, Stop } from 'react-nat
 interface AmbientGlowProps {
   type: 'purple-bottom' | 'blue-aura';
   opacity: Animated.Value;
+  scale?: Animated.Value;
 }
 
-export function AmbientGlow({ type, opacity }: AmbientGlowProps) {
+export function AmbientGlow({ type, opacity, scale }: AmbientGlowProps) {
   if (type === 'purple-bottom') {
     return (
       <Animated.View
         pointerEvents="none"
-        style={[styles.purpleBottom, { opacity }]}
+        style={[
+          styles.purpleBottom,
+          {
+            opacity,
+            transform: scale ? [{ scale }] : undefined,
+          },
+        ]}
       >
         <Svg width="100%" height="100%">
           <Defs>
             {/* Full-width vertical gradient to spread edge-to-edge across the bottom */}
             <LinearGradient id="purpleBottomLinear" x1="0" y1="1" x2="0" y2="0">
-              <Stop offset="0%" stopColor="#d946ef" stopOpacity="0.65" />
-              <Stop offset="18%" stopColor="#c026d3" stopOpacity="0.45" />
-              <Stop offset="45%" stopColor="#a855f7" stopOpacity="0.22" />
-              <Stop offset="72%" stopColor="#c084fc" stopOpacity="0.07" />
+              <Stop offset="0%" stopColor="#d946ef" stopOpacity="0.75" />
+              <Stop offset="20%" stopColor="#c026d3" stopOpacity="0.52" />
+              <Stop offset="48%" stopColor="#a855f7" stopOpacity="0.26" />
+              <Stop offset="75%" stopColor="#c084fc" stopOpacity="0.08" />
               <Stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
             </LinearGradient>
-            {/* Subtle center warm glow */}
+            {/* Center warm voice focus glow */}
             <RadialGradient
               id="purpleBottomRadial"
               cx="50%"
@@ -33,8 +40,8 @@ export function AmbientGlow({ type, opacity }: AmbientGlowProps) {
               fx="50%"
               fy="100%"
             >
-              <Stop offset="0%" stopColor="#c026d3" stopOpacity="0.30" />
-              <Stop offset="40%" stopColor="#d946ef" stopOpacity="0.15" />
+              <Stop offset="0%" stopColor="#c026d3" stopOpacity="0.45" />
+              <Stop offset="40%" stopColor="#d946ef" stopOpacity="0.22" />
               <Stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
             </RadialGradient>
           </Defs>
@@ -45,14 +52,21 @@ export function AmbientGlow({ type, opacity }: AmbientGlowProps) {
     );
   }
 
+  // Maya Electric Sky-Blue Speaking Aura ('blue-aura')
   return (
     <Animated.View
       pointerEvents="none"
-      style={[styles.blueAura, { opacity }]}
+      style={[
+        styles.blueAura,
+        {
+          opacity,
+          transform: scale ? [{ scale }] : undefined,
+        },
+      ]}
     >
       <Svg width="100%" height="100%">
         <Defs>
-          {/* Gentle, wide-radius ambient sky-blue vignette for Maya speaking */}
+          {/* Ambient sky-blue perimeter vignette for Maya speaking */}
           <RadialGradient
             id="blueAuraGrad"
             cx="50%"
@@ -62,10 +76,10 @@ export function AmbientGlow({ type, opacity }: AmbientGlowProps) {
             fy="50%"
           >
             <Stop offset="0%" stopColor="#ffffff" stopOpacity="0" />
-            <Stop offset="42%" stopColor="#ffffff" stopOpacity="0" />
-            <Stop offset="65%" stopColor="#bae6fd" stopOpacity="0.25" />
-            <Stop offset="85%" stopColor="#38bdf8" stopOpacity="0.40" />
-            <Stop offset="100%" stopColor="#0ea5e9" stopOpacity="0.48" />
+            <Stop offset="38%" stopColor="#ffffff" stopOpacity="0" />
+            <Stop offset="65%" stopColor="#bae6fd" stopOpacity="0.32" />
+            <Stop offset="85%" stopColor="#38bdf8" stopOpacity="0.48" />
+            <Stop offset="100%" stopColor="#0ea5e9" stopOpacity="0.62" />
           </RadialGradient>
         </Defs>
         <Rect x="0" y="0" width="100%" height="100%" fill="url(#blueAuraGrad)" />
@@ -80,7 +94,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 380,
+    height: 400,
     zIndex: 1,
     overflow: 'hidden',
   },

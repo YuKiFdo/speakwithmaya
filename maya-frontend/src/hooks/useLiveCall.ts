@@ -157,6 +157,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const hasSpokenFarewellRef = useRef<boolean>(false);
   const concludeTimerRef = useRef<any>(null);
   const isModelSpeakingRef = useRef<boolean>(false);
+  const isFirstGreetingPendingRef = useRef<boolean>(false);
   const echoHangoverUntilRef = useRef<number>(0);
   const lastUserVolUpdateRef = useRef<number>(0);
   const lastUserVolValueRef = useRef<number>(0);
@@ -305,6 +306,15 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         setEvaluationResult(null);
         testScoresRef.current.clear();
         evaluationResultRef.current = null;
+
+        // Fresh session: gate microphone until Maya finishes speaking her opening turn greeting
+        isFirstGreetingPendingRef.current = true;
+        setTimeout(() => {
+          if (isFirstGreetingPendingRef.current) {
+            console.warn('[useLiveCall] Initial greeting safety timeout expired (12s) — unlocking mic');
+            isFirstGreetingPendingRef.current = false;
+          }
+        }, 12000);
       }
 
       // 1. Initialize Audio Player
@@ -313,6 +323,12 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           const isSpeaking = pState === 'speaking';
           isModelSpeakingRef.current = isSpeaking;
           if (!isSpeaking) {
+            // Once Maya's opening greeting audio finishes playing through speakers, ensure mic is unlocked
+            if (isFirstGreetingPendingRef.current) {
+              console.log('[useLiveCall] 🌟 Initial greeting audio playback completed — unlocking mic');
+              isFirstGreetingPendingRef.current = false;
+            }
+
             // Echo hangover: give phone speaker 300ms to silence and room reverb to decay
             echoHangoverUntilRef.current = Date.now() + 300;
             setModelVolume(0);
@@ -358,16 +374,18 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             isConcludingRef.current ||
             statusRef.current === 'reconnecting' ||
             statusRef.current === 'ended' ||
+            isFirstGreetingPendingRef.current ||
             Date.now() < echoHangoverUntilRef.current
           );
         },
         onAudioData: (pcm16: ArrayBuffer) => {
-          // Half-duplex acoustic echo gate: clamp mic while model is actively outputting audio, farewell concluding, or reconnecting
+          // Half-duplex acoustic echo gate: clamp mic while model is actively outputting audio, farewell concluding, reconnecting, or awaiting opening greeting
           const isBlocked =
             isMutedRef.current ||
             isConcludingRef.current ||
             statusRef.current === 'reconnecting' ||
             statusRef.current === 'ended' ||
+            isFirstGreetingPendingRef.current ||
             (isModelSpeakingRef.current && Date.now() < echoHangoverUntilRef.current);
 
           if (!isBlocked && transportRef.current.isConnected()) {
@@ -383,7 +401,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             isMutedRef.current ||
             isConcludingRef.current ||
             statusRef.current === 'reconnecting' ||
-            statusRef.current === 'ended';
+            statusRef.current === 'ended' ||
+            isFirstGreetingPendingRef.current;
 
           // Require >= 4 chunks (~320ms of genuine speech) so small noise spikes don't trigger turn completion
           if (!isBlocked && userChunksSentRef.current >= 4 && transportRef.current.isConnected()) {
@@ -679,6 +698,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             }
             activeRoleRef.current = null;
 
+            if (isFirstGreetingPendingRef.current) {
+              console.log('[useLiveCall] 🌟 Initial greeting turn complete');
+              isFirstGreetingPendingRef.current = false;
+            }
+
             // If Gemini called conclude_call:
             if (isConcludingRef.current) {
               if (hasSpokenFarewellRef.current) {
@@ -702,6 +726,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             // If concluding, ignore stray interruptions to let Maya finish her farewell completely
             if (isConcludingRef.current) {
               console.log('[useLiveCall] Ignoring interruption during call conclusion farewell');
+              return;
+            }
+
+            if (isFirstGreetingPendingRef.current) {
+              console.log('[useLiveCall] Ignoring interruption while initial greeting is pending');
               return;
             }
 
@@ -992,6 +1021,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     setIsSlowResponse(false);
     reconnectAttemptsRef.current = 0;
     isConcludingRef.current = false;
+    isFirstGreetingPendingRef.current = false;
     resumptionHandleRef.current = null;
 
     // 1. Immediately teardown audio & transport
