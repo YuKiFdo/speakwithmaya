@@ -181,6 +181,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const userChunksSentRef = useRef<number>(0);
   const rateMultiplierRef = useRef<number>(Number((0.37 + Math.random() * 0.03).toFixed(4)));
   const endCallRef = useRef<((shouldNavigate?: boolean) => Promise<void>) | null>(null);
+  const lastModelAudioChunkTimeRef = useRef<number>(Date.now());
 
   const reconnectAttemptsRef = useRef<number>(0);
   const reconnectTimerRef = useRef<any>(null);
@@ -280,6 +281,24 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     };
   }, [status]);
 
+  // Speaking Watchdog: prevents Maya from ever being frozen in 'speaking' with user mic muted
+  useEffect(() => {
+    if (status === 'speaking' || isModelSpeakingRef.current) {
+      const interval = setInterval(() => {
+        const now = Date.now();
+        const timeSinceLastChunk = now - lastModelAudioChunkTimeRef.current;
+        if (timeSinceLastChunk > 3500 && modelVolume === 0) {
+          console.warn('[useLiveCall] ⚠️ Model speaking watchdog elapsed: no audio received for 3.5s -> auto-recovering to listening');
+          isModelSpeakingRef.current = false;
+          isFirstGreetingPendingRef.current = false;
+          playerRef.current.clear();
+          setStatus('listening');
+        }
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [status, modelVolume]);
+
   const scheduleReconnect = useCallback(() => {
     if (statusRef.current === 'ended' || isConcludingRef.current) return;
 
@@ -341,10 +360,14 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         setIsConnected(false);
         setTimeout(() => {
           if (isFirstGreetingPendingRef.current) {
-            console.warn('[useLiveCall] Initial greeting safety timeout expired (12s) — unlocking mic');
+            console.warn('[useLiveCall] Initial greeting safety timeout expired (7s) — unlocking mic');
             isFirstGreetingPendingRef.current = false;
+            if (modelVolume === 0) {
+              isModelSpeakingRef.current = false;
+              setStatus('listening');
+            }
           }
-        }, 12000);
+        }, 7000);
       }
 
       // 1. Initialize Audio Player
@@ -603,6 +626,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             }
 
             isModelSpeakingRef.current = true;
+            lastModelAudioChunkTimeRef.current = Date.now();
             userChunksSentRef.current = 0;
 
             // Turn response arrived: clear timer and record turnaround latency
@@ -646,6 +670,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             }
 
             isModelSpeakingRef.current = true;
+            lastModelAudioChunkTimeRef.current = Date.now();
             userChunksSentRef.current = 0;
 
             if (isConcludingRef.current) {
@@ -1424,6 +1449,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
     if (buffered.length > 0) {
       isModelSpeakingRef.current = true;
+      lastModelAudioChunkTimeRef.current = Date.now();
       setStatus('speaking');
       buffered.forEach((item) => {
         if (item.type === 'samples') {

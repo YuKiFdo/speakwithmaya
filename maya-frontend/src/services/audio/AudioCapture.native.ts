@@ -61,7 +61,7 @@ export class NativeAudioCapture implements IAudioCapture {
       let speechChunkCount = 0;
       let hangoverRemaining = 0;
       const preRollBuffer: ArrayBuffer[] = [];
-      const HANGOVER_CHUNKS = 10; // ~1000ms conversational pause window before closing speech turn
+      const HANGOVER_CHUNKS = 16; // ~1600ms natural thinking & breathing window for English learners
 
       this.bufferSub = stream.addListener('audioStreamBuffer', (event: any) => {
         if (!this.isRec) return;

@@ -381,23 +381,24 @@ export default function CallScreen() {
 
     if (isNowConnected && !hasTransitionedRef.current) {
       hasTransitionedRef.current = true;
-      console.log('[call.tsx] 📞 Call connected! Playing chime once before transitioning to call screen.');
+      console.log('[call.tsx] 📞 Call connected! Transitioning to call screen & releasing greeting immediately.');
 
-      // Play call connected chime ONCE
-      playCallConnectedSound(() => {
-        console.log('[call.tsx] 🔔 Chime finished -> moving to call screen and releasing model greeting audio');
-        // 1. Release Maya's greeting audio now that chime has finished playing
-        liveCall.releaseGreeting?.();
+      // 1. Release Maya's greeting audio immediately so it is not delayed or held
+      liveCall.releaseGreeting?.();
 
-        // 2. Smoothly crossfade from ConnectingView into active CallScreen
-        Animated.timing(connectingFadeAnim, {
-          toValue: 0,
-          duration: 380,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: Platform.OS !== 'web',
-        }).start(() => {
-          setConnectingVisible(false);
-        });
+      // 2. Play call connected chime in the background (non-blocking)
+      try {
+        playCallConnectedSound();
+      } catch {}
+
+      // 3. Smoothly crossfade from ConnectingView into active CallScreen
+      Animated.timing(connectingFadeAnim, {
+        toValue: 0,
+        duration: 380,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start(() => {
+        setConnectingVisible(false);
       });
     }
   }, [liveCall.isConnected, liveCall.status]);
@@ -509,10 +510,9 @@ export default function CallScreen() {
   };
 
   const handleScreenTouch = () => {
-    if (liveCall.status === 'speaking') {
+    liveCall.resumeAudio();
+    if (liveCall.status === 'speaking' && liveCall.modelVolume > 0.08) {
       liveCall.interrupt();
-    } else {
-      liveCall.resumeAudio();
     }
   };
 

@@ -18,6 +18,30 @@ export class WebAudioPlayer implements IAudioPlayer {
       } catch {}
     }
 
+    // iOS Safari WebAudio unlock: play 1-sample silent buffer directly to destination
+    try {
+      const silentBuffer = this.audioCtx.createBuffer(1, 1, 24000);
+      const source = this.audioCtx.createBufferSource();
+      source.buffer = silentBuffer;
+      source.connect(this.audioCtx.destination);
+      source.start(0);
+    } catch {}
+
+    // Global interaction listener to immediately un-suspend AudioContext on user touch/click
+    if (typeof window !== 'undefined') {
+      const unlockAudio = () => {
+        if (this.audioCtx && (this.audioCtx.state === 'suspended' || (this.audioCtx as any).state === 'interrupted')) {
+          this.audioCtx.resume().then(() => {
+            console.log('[WebAudioPlayer] 🔊 AudioContext resumed via user touch/click, state:', this.audioCtx?.state);
+          }).catch(() => {});
+        }
+      };
+      window.addEventListener('touchstart', unlockAudio, { passive: true });
+      window.addEventListener('touchend', unlockAudio, { passive: true });
+      window.addEventListener('click', unlockAudio, { passive: true });
+      window.addEventListener('pointerdown', unlockAudio, { passive: true });
+    }
+
     await this.audioCtx.audioWorklet.addModule('/audio-player-processor.js');
 
     this.playerNode = new AudioWorkletNode(this.audioCtx, 'pcm-player-processor');
@@ -36,7 +60,7 @@ export class WebAudioPlayer implements IAudioPlayer {
   }
 
   async resume(): Promise<void> {
-    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+    if (this.audioCtx && (this.audioCtx.state === 'suspended' || (this.audioCtx as any).state === 'interrupted')) {
       try {
         await this.audioCtx.resume();
         console.log('[WebAudioPlayer] AudioContext resumed successfully, state:', this.audioCtx.state);

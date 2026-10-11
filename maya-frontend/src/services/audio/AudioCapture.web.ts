@@ -48,7 +48,7 @@ export class WebAudioCapture implements IAudioCapture {
       let candidateChunks: ArrayBuffer[] = [];
       let candidateMaxRms = 0;
       const preRollBuffer: ArrayBuffer[] = [];
-      const HANGOVER_CHUNKS = 8; // ~640ms natural pause window, matching Gemini server-side VAD (500-600ms)
+      const HANGOVER_CHUNKS = 20; // ~1600ms (1.6s) natural thinking & breathing window for English learners
 
       this.workletNode.port.onmessage = (event) => {
         if (!this.recording) return;
