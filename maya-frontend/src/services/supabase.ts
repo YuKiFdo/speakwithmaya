@@ -54,14 +54,14 @@ const getBackendBaseUrl = (): string => {
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://127.0.0.1:3000';
     }
-    if (hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
-      return 'https://maya-backend.icyisland-5baf2c26.southeastasia-01.azurewebsites.net';
+    if (hostname.includes('azurecontainerapps.io') || hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
+      return 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io';
     }
     const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
     if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
       return envUrl;
     }
-    return 'https://maya-backend.icyisland-5baf2c26.southeastasia-01.azurewebsites.net';
+    return 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io';
   }
   return process.env.EXPO_PUBLIC_BACKEND_URL || 'http://127.0.0.1:3000';
 };
