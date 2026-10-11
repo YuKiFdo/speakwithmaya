@@ -204,6 +204,11 @@ export class SessionsService {
   private readonly sessionTurnAudioMap = new Map<string, Map<number, string>>();
   private lastSavedSessionId: string | null = null;
   private readonly inFlightHintPromises = new Map<string, Promise<{ hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number; tokens?: { promptTokens: number; outputTokens: number; totalTokens: number } }>>();
+  private readonly ttsAudioCache = new Map<string, { audioBase64: string; mimeType: string }>();
+  private piperSession: any = null;
+  private piperConfig: any = null;
+  private piperG2p: any = null;
+  private piperInitPromise: Promise<boolean> | null = null;
   private genAiClient: GoogleGenAI | null = null;
 
   constructor(
@@ -2348,8 +2353,6 @@ Provide one short, natural, practical model answer the student can say in respon
     return hintGenerationPromise;
   }
 
-  private ttsAudioCache = new Map<string, { audioBase64: string; mimeType: string }>();
-
   private pcmToWavBase64(pcmBuffer: Buffer, sampleRate: number = 24000, numChannels: number = 1): string {
     const byteRate = sampleRate * numChannels * 2;
     const blockAlign = numChannels * 2;
@@ -2373,52 +2376,110 @@ Provide one short, natural, practical model answer the student can say in respon
     return wavData.toString('base64');
   }
 
+  private float32ToPcm16Buffer(samples: Float32Array): Buffer {
+    const buf = Buffer.alloc(samples.length * 2);
+    for (let i = 0; i < samples.length; i++) {
+      const clamped = Math.max(-1, Math.min(1, samples[i]));
+      const int16 = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+      buf.writeInt16LE(int16, i * 2);
+    }
+    return buf;
+  }
+
+  private async initPiper(): Promise<boolean> {
+    if (this.piperSession && this.piperG2p && this.piperConfig) {
+      return true;
+    }
+    if (this.piperInitPromise) {
+      return this.piperInitPromise;
+    }
+
+    this.piperInitPromise = (async () => {
+      try {
+        const ort = await import('onnxruntime-node');
+        // @ts-ignore
+        const { G2P } = await import('@piper-plus/g2p');
+        const path = await import('path');
+        const fs = await import('fs');
+
+        const candidateDirs = [
+          path.resolve(process.cwd(), 'assets/piper'),
+          path.resolve(process.cwd(), '../assets/piper'),
+          path.resolve(process.cwd(), 'maya-backend/assets/piper'),
+        ];
+
+        let foundDir: string | null = null;
+        for (const dir of candidateDirs) {
+          if (fs.existsSync(path.join(dir, 'en_US-amy-medium.onnx')) && fs.existsSync(path.join(dir, 'en_US-amy-medium.onnx.json'))) {
+            foundDir = dir;
+            break;
+          }
+        }
+
+        if (!foundDir) {
+          this.logger.warn(`[PiperTTS] Model files not found in any candidate directory: ${candidateDirs.join(', ')}`);
+          return false;
+        }
+
+        const modelPath = path.join(foundDir, 'en_US-amy-medium.onnx');
+        const configPath = path.join(foundDir, 'en_US-amy-medium.onnx.json');
+
+        this.piperConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        const ortModule = (ort as any).default || ort;
+        this.piperSession = await ortModule.InferenceSession.create(modelPath);
+        this.piperG2p = await G2P.create({ languages: ['en'] });
+
+        this.logger.log(`[PiperTTS] Offline Piper Amy neural voice initialized from ${modelPath}`);
+        return true;
+      } catch (err: any) {
+        this.logger.warn(`[PiperTTS] Failed initializing Piper: ${err?.message}`);
+        return false;
+      } finally {
+        this.piperInitPromise = null;
+      }
+    })();
+
+    return this.piperInitPromise;
+  }
+
   async generateTtsAudio(dto: SessionTtsDto): Promise<{ audioBase64: string; mimeType: string }> {
     const text = (dto.text || '').trim();
     if (!text) {
       return { audioBase64: '', mimeType: 'audio/wav' };
     }
-    const voice = dto.voice || 'Callirrhoe';
+    const voice = dto.voice || 'Amy';
     const cacheKey = `${voice}:${text}`;
     if (this.ttsAudioCache.has(cacheKey)) {
       return this.ttsAudioCache.get(cacheKey)!;
     }
 
-    const apiKey = this.geminiApiKey;
-    if (apiKey) {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
-        const res = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-preview-tts',
-          contents: [{ role: 'user', parts: [{ text }] }],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: voice,
-                },
-              },
-            },
-          },
-        });
+    try {
+      const ready = await this.initPiper();
+      if (ready && this.piperSession && this.piperG2p && this.piperConfig) {
+        const ort = await import('onnxruntime-node');
+        const ortModule = (ort as any).default || ort;
+        const encoded = this.piperG2p.encode(text, this.piperConfig.phoneme_id_map, { language: 'en' });
+        const phonemeIds = encoded.phonemeIds;
 
-        const parts = res.candidates?.[0]?.content?.parts || [];
-        for (const p of parts) {
-          if (p.inlineData && p.inlineData.data) {
-            const rawPcm = Buffer.from(p.inlineData.data, 'base64');
-            const wavBase64 = this.pcmToWavBase64(rawPcm, 24000, 1);
-            const result = {
-              audioBase64: wavBase64,
-              mimeType: 'audio/wav',
-            };
-            this.ttsAudioCache.set(cacheKey, result);
-            return result;
-          }
-        }
-      } catch (err: any) {
-        this.logger.warn(`Gemini TTS audio generation failed for "${text}": ${err?.message}`);
+        const feeds = {
+          input: new ortModule.Tensor('int64', new BigInt64Array(phonemeIds.map((id: number) => BigInt(id))), [1, phonemeIds.length]),
+          input_lengths: new ortModule.Tensor('int64', new BigInt64Array([BigInt(phonemeIds.length)]), [1]),
+          scales: new ortModule.Tensor('float32', new Float32Array([0.667, 0.95, 0.8]), [3]),
+        };
+
+        const result = await this.piperSession.run(feeds);
+        const sampleRate = this.piperConfig.audio?.sample_rate || 22050;
+        const pcmBuffer = this.float32ToPcm16Buffer(result.output.data);
+        const wavBase64 = this.pcmToWavBase64(pcmBuffer, sampleRate, 1);
+        const resObj = {
+          audioBase64: wavBase64,
+          mimeType: 'audio/wav',
+        };
+        this.ttsAudioCache.set(cacheKey, resObj);
+        return resObj;
       }
+    } catch (piperErr: any) {
+      this.logger.warn(`[PiperTTS] Synthesis failed for "${text}": ${piperErr?.message}`);
     }
 
     return { audioBase64: '', mimeType: 'audio/wav' };

@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Headers,
+  Res,
   UsePipes,
   ValidationPipe,
   UnauthorizedException,
@@ -55,6 +56,25 @@ export class SessionsController {
     @Body() dto: SessionTtsDto,
   ) {
     return this.sessionsService.generateTtsAudio(dto);
+  }
+
+  @Get('sessions/tts')
+  async streamTtsAudio(
+    @Query('text') text: string,
+    @Res() res: any,
+  ) {
+    const cleanText = (text || '').trim();
+    if (!cleanText) {
+      return res.status(400).send('Missing text parameter');
+    }
+    const audioObj = await this.sessionsService.generateTtsAudio({ text: cleanText });
+    if (!audioObj.audioBase64) {
+      return res.status(500).send('Synthesis failed');
+    }
+    const buf = Buffer.from(audioObj.audioBase64, 'base64');
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(buf);
   }
 
   @Post('session-token')
