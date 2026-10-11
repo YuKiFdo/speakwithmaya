@@ -12,10 +12,12 @@ const HINT_BUTTON_ASSET = require('@/assets/sounds/hint button press.mp3');
 const OTHER_BUTTON_ASSET = require('@/assets/sounds/other button press.mp3');
 const UNDERSTOOD_BUTTON_ASSET = require('@/assets/sounds/understood button press.mp3');
 const MAYA_WELCOME_ASSET = require('@/assets/sounds/maya-welcome.wav');
+const MAYA_NAME_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-name.wav');
 
 let audioCtx: AudioContext | null = null;
 let activeWhooshNodes: { noise: AudioBufferSourceNode; gain: GainNode } | null = null;
 let welcomeAudioPlayer: HTMLAudioElement | null = null;
+let namePromptAudioPlayer: HTMLAudioElement | null = null;
 
 function getAudioContext(): AudioContext | null {
   if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -640,4 +642,73 @@ export function stopMayaWelcomeVoice(): void {
     welcomeAudioPlayer = null;
   }
 }
+
+/**
+ * 7. Maya's Onboarding Name Prompt Voice
+ * Plays Kokoro-82M cheerful neural voice (Heart + Sky blend)
+ * "Hi! I'm Maya, your personal English speaking coach. What should I call you?"
+ */
+export function playMayaNamePromptVoice(callbacks?: {
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (err: any) => void;
+}): void {
+  stopMayaNamePromptVoice();
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(MAYA_NAME_PROMPT_ASSET);
+      if (uri) {
+        const audio = new Audio(uri);
+        namePromptAudioPlayer = audio;
+        audio.volume = 1.0;
+
+        audio.onplay = () => {
+          callbacks?.onStart?.();
+        };
+
+        audio.onended = () => {
+          if (namePromptAudioPlayer === audio) {
+            namePromptAudioPlayer = null;
+          }
+          callbacks?.onEnd?.();
+        };
+
+        audio.onerror = (e) => {
+          if (namePromptAudioPlayer === audio) {
+            namePromptAudioPlayer = null;
+          }
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (namePromptAudioPlayer === audio) {
+              namePromptAudioPlayer = null;
+            }
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaNamePromptVoice(): void {
+  if (namePromptAudioPlayer) {
+    try {
+      namePromptAudioPlayer.pause();
+      namePromptAudioPlayer.currentTime = 0;
+    } catch {}
+    namePromptAudioPlayer = null;
+  }
+}
+
 
