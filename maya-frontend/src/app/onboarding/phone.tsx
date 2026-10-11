@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Pressable,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Animated,
   Easing,
@@ -335,7 +336,15 @@ export default function PhoneScreen() {
                     onChangeText={setPhone}
                     keyboardType="phone-pad"
                     returnKeyType="done"
-                    onSubmitEditing={handleSendCode}
+                    blurOnSubmit={true}
+                    onSubmitEditing={() => {
+                      Keyboard.dismiss();
+                    }}
+                    onKeyPress={(e: any) => {
+                      if (e?.nativeEvent?.key === 'Enter') {
+                        Keyboard.dismiss();
+                      }
+                    }}
                   />
                 </View>
               </Animated.View>

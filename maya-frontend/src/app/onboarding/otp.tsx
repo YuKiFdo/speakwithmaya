@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Pressable,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Animated,
   Easing,
@@ -167,6 +168,8 @@ export default function OtpScreen() {
   const handleKeyPress = (e: any, index: number) => {
     if (e.nativeEvent.key === 'Backspace' && !otp[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
+    } else if (e.nativeEvent.key === 'Enter') {
+      Keyboard.dismiss();
     }
   };
 
@@ -265,6 +268,11 @@ export default function OtpScreen() {
                       onChangeText={(text) => handleOtpChange(text, idx)}
                       onKeyPress={(e) => handleKeyPress(e, idx)}
                       keyboardType="number-pad"
+                      returnKeyType="done"
+                      blurOnSubmit={true}
+                      onSubmitEditing={() => {
+                        Keyboard.dismiss();
+                      }}
                       maxLength={idx === 0 ? OTP_LENGTH : 1}
                       selectTextOnFocus
                       accessibilityLabel={`Digit ${idx + 1}`}

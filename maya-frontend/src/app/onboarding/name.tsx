@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Pressable,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Animated,
   Easing,
@@ -309,7 +310,15 @@ export default function NameScreen() {
                 autoCapitalize="words"
                 autoCorrect={false}
                 returnKeyType="done"
-                onSubmitEditing={handleContinue}
+                blurOnSubmit={true}
+                onSubmitEditing={() => {
+                  Keyboard.dismiss();
+                }}
+                onKeyPress={(e: any) => {
+                  if (e?.nativeEvent?.key === 'Enter') {
+                    Keyboard.dismiss();
+                  }
+                }}
               />
             </Animated.View>
 
