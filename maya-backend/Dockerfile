@@ -1,7 +1,7 @@
 # -------------------------------------------------------------
 # Stage 1: Build the NestJS application
 # -------------------------------------------------------------
-FROM node:22-alpine AS builder
+FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -24,7 +24,7 @@ RUN npm prune --omit=dev --legacy-peer-deps
 # -------------------------------------------------------------
 # Stage 2: Production Runtime
 # -------------------------------------------------------------
-FROM node:22-alpine AS runner
+FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
 
@@ -34,10 +34,11 @@ ENV PORT=3000
 # Run as non-root user for security
 USER node
 
-# Copy production dependencies and built output from builder
+# Copy production dependencies, built output, and offline neural assets from builder
 COPY --chown=node:node --from=builder /app/package*.json ./
 COPY --chown=node:node --from=builder /app/node_modules/ ./node_modules/
 COPY --chown=node:node --from=builder /app/dist/ ./dist/
+COPY --chown=node:node assets/ ./assets/
 
 EXPOSE 3000
 

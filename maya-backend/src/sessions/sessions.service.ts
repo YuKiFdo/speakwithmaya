@@ -2386,6 +2386,21 @@ Provide one short, natural, practical model answer the student can say in respon
     return buf;
   }
 
+  private async getOrtModule(): Promise<any> {
+    try {
+      const ort = await import('onnxruntime-node');
+      return (ort as any).default || ort;
+    } catch (e: any) {
+      this.logger.log(`[PiperTTS] onnxruntime-node native loader unavailable (${e?.message}), falling back to onnxruntime-web...`);
+      const ortWeb = await import('onnxruntime-web');
+      const ortWebModule = (ortWeb as any).default || ortWeb;
+      if (ortWebModule?.env?.wasm) {
+        ortWebModule.env.wasm.numThreads = 1;
+      }
+      return ortWebModule;
+    }
+  }
+
   private async initPiper(): Promise<boolean> {
     if (this.piperSession && this.piperG2p && this.piperConfig) {
       return true;
@@ -2396,7 +2411,7 @@ Provide one short, natural, practical model answer the student can say in respon
 
     this.piperInitPromise = (async () => {
       try {
-        const ort = await import('onnxruntime-node');
+        const ortModule = await this.getOrtModule();
         // @ts-ignore
         const { G2P } = await import('@piper-plus/g2p');
         const path = await import('path');
@@ -2406,6 +2421,7 @@ Provide one short, natural, practical model answer the student can say in respon
           path.resolve(process.cwd(), 'assets/piper'),
           path.resolve(process.cwd(), '../assets/piper'),
           path.resolve(process.cwd(), 'maya-backend/assets/piper'),
+          '/app/assets/piper',
         ];
 
         let foundDir: string | null = null;
@@ -2425,7 +2441,6 @@ Provide one short, natural, practical model answer the student can say in respon
         const configPath = path.join(foundDir, 'en_US-amy-medium.onnx.json');
 
         this.piperConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        const ortModule = (ort as any).default || ort;
         this.piperSession = await ortModule.InferenceSession.create(modelPath);
         this.piperG2p = await G2P.create({ languages: ['en'] });
 
@@ -2456,8 +2471,7 @@ Provide one short, natural, practical model answer the student can say in respon
     try {
       const ready = await this.initPiper();
       if (ready && this.piperSession && this.piperG2p && this.piperConfig) {
-        const ort = await import('onnxruntime-node');
-        const ortModule = (ort as any).default || ort;
+        const ortModule = await this.getOrtModule();
         const encoded = this.piperG2p.encode(text, this.piperConfig.phoneme_id_map, { language: 'en' });
         const phonemeIds = encoded.phonemeIds;
 
