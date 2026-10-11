@@ -549,7 +549,7 @@ STAGE 1: GUIDED PRACTICE & ACTIVE TEACHING (COACH MODE)
   * STRICT RULE: NEVER say "Task 1", "Task 2", "First task", "Second task", or robotic task numbers! Introduce each topic naturally.
 - Language Protocol:
   * ALL coaching, explanations, encouragement, acknowledgments, and corrections: Use warm, natural everyday spoken Sri Lankan Singlish (කතා කරන බසින්).
-  * STRICT ANTI-HINDI & ANTI-DEVANAGARI MANDATE: You must NEVER generate Hindi words or Devanagari script (e.g. absolutely NO 'कार्यालय', 'में', 'का' or any character in Unicode range U+0900-U+097F). Sri Lankan students speak Sinhala and English, NOT Hindi! Write exclusively in Sinhala script (Unicode U+0D80-U+0DFF) and Latin English.
+  * STRICT SCRIPT & LANGUAGE PURITY: You must NEVER speak or output Arabic (العربية), Farsi/Persian (فارسی), Urdu (اردو), Hindi words or Devanagari script (e.g. absolutely NO 'कार्यालय', 'में', 'का' or any character in Unicode range U+0900-U+097F or U+0600-U+06FF). Sri Lankan students speak Sinhala and English, NOT Arabic or Hindi! Write and speak exclusively in standard Sinhala script (Unicode U+0D80-U+0DFF) and Latin English.
   * MODERN SRI LANKAN LOANWORDS (NO FORMAL SANSKRIT): When explaining in Sinhala, naturally use common Sri Lankan English loanwords: say "office එක" / "office එකක" (NEVER formal "කාර්යාලය" or Hindi "कार्यालय"), "restaurant එක" (NEVER "භෝජනාගාරය"), "sentence එක" (NEVER "වාක්‍යය"), "meeting එක" (NEVER "රැස්වීම").
   * NATURAL SPOKEN TRANSITIONS (NO CORRUPTED CONJUNCTS): When transitioning to a new topic or task, always use natural phrasing: say "දැන් අපි ... ගැන කතා කරමු" (using 'ගැන' for 'about'). NEVER invent or hallucinate garbled words or archaic stacked conjuncts (බැඳි අකුරු) like 'බග්ග'.
   * Prompts & Questions to the student: ALWAYS ask or prompt in English! The student must practice speaking English!
@@ -701,9 +701,9 @@ ${dto.sinhalaStyle === 'deep_guidance' ? `BILINGUAL TEACHING (DEEP GUIDANCE MODE
 
 - IF STUDENT RESPONDS IN SINHALA: Model the natural English sentence aloud ("ඔයාට පුළුවන් '...' කියලා කියන්න") and encourage them to try saying it.
 - SCRIPT & ACOUSTICS: Keep English in Latin alphabet. Ignore ambient noise/murmurs.
-- STRICT SCRIPT PURITY (ZERO HINDI / ZERO DEVANAGARI):
-  * ABSOLUTELY FORBIDDEN: NEVER output Hindi, Devanagari characters (e.g. absolutely NO 'कार्यालय'), Tamil, or any non-Sinhala script. Sri Lankan students speak Sinhala and English.
-  * All Sinhala text, explanations, and subtitles MUST use standard Sinhala script (U+0D80 to U+0DFF) and Latin English.
+- STRICT SCRIPT PURITY (ZERO ARABIC / ZERO FARSI / ZERO HINDI / ZERO DEVANAGARI):
+  * ABSOLUTELY FORBIDDEN: NEVER output or speak Arabic (العربية), Farsi/Persian (فارسی), Urdu (اردو), Hindi/Devanagari characters (e.g. absolutely NO 'कार्यालय'), Tamil, or ANY non-Sinhala script or vocabulary. Sri Lankan students speak Sinhala and English.
+  * All Sinhala speech, text, explanations, and subtitles MUST use standard Sinhala script (Unicode U+0D80 to U+0DFF) and Latin English.
   * Use everyday Sri Lankan Singlish loanwords ("office එක", "sentence එක", "restaurant එක", "meeting එක") instead of formal Sanskritized words.
   * Use natural spoken phrases like "දැන් අපි ... ගැන කතා කරමු". NEVER hallucinate corrupted words or rare stacked conjuncts like "බග්ග".
 - INAUDIBLE / CUT-OFF / UNINTELLIGIBLE SPEECH: If student's speech is cut off, too quiet, inaudible, or unintelligible, NEVER invent or hallucinate topics, stories, or random facts. Politely ask them to repeat or clarify (e.g. "මට පැහැදිලිව ඇහුණේ නැහැ, ආයෙත් කියන්න පුළුවන්ද? Could you repeat that?").
@@ -2142,6 +2142,18 @@ STRICT RESTRICTIONS:
     return Array.from(this.recentDiagnostics.values()).reverse();
   }
 
+  private isValidSinhala(text: string): boolean {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    // Must contain at least one Sinhala Unicode character (U+0D80 to U+0DFF)
+    const hasSinhalaChar = /[\u0D80-\u0DFF]/.test(trimmed);
+    // Must NOT contain Arabic (U+0600-U+06FF, U+FB50-U+FDFF, U+FE70-U+FEFF),
+    // Devanagari/Hindi (U+0900-U+097F), or Hebrew (U+0590-U+05FF) characters
+    const hasForbiddenScript = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0900-\u097F\u0590-\u05FF]/.test(trimmed);
+    return hasSinhalaChar && !hasForbiddenScript;
+  }
+
   async translateText(dto: TranslateDto): Promise<{ translatedText: string }> {
     const text = (dto.text || '').trim();
     if (!text) {
@@ -2164,7 +2176,7 @@ STRICT RESTRICTIONS:
         const data = await res.json();
         if (Array.isArray(data) && data[0]) {
           const translated = (typeof data[0] === 'string' ? data[0] : String(data[0])).trim();
-          if (translated) {
+          if (translated && (targetLang !== 'si' || this.isValidSinhala(translated))) {
             this.translationCache.set(cacheKey, translated);
             return { translatedText: translated };
           }
@@ -2181,7 +2193,7 @@ STRICT RESTRICTIONS:
       if (res.ok) {
         const data = await res.json();
         const translated = data?.responseData?.translatedText?.trim();
-        if (translated) {
+        if (translated && (targetLang !== 'si' || this.isValidSinhala(translated))) {
           this.translationCache.set(cacheKey, translated);
           return { translatedText: translated };
         }
@@ -2190,18 +2202,24 @@ STRICT RESTRICTIONS:
       this.logger.debug(`MyMemory translation failed: ${err?.message}`);
     }
 
-    // 3. Fallback: Gemini 3.1 Flash-Lite for natural spoken Sinhala translation
+    // 3. Fallback: Gemini for natural spoken Sinhala translation
     const apiKey = this.geminiApiKey;
     if (apiKey) {
       try {
-        const ai = new GoogleGenAI({ apiKey });
-        const prompt = `Translate the following English phrase into natural, spoken Sri Lankan Sinhala (use natural conversational Sinhala, NOT archaic or book Sinhala):\n"${text}"\nOutput ONLY the Sinhala translation, without quotes or additional text.`;
+        const ai = this.genAiClient || new GoogleGenAI({ apiKey });
+        const prompt = `Translate the following English phrase into natural, spoken Sri Lankan Sinhala.
+Phrase: "${text}"
+
+STRICT SCRIPT RULES:
+- Write ONLY in Sinhala script (Unicode U+0D80 to U+0DFF) and Latin English loanwords.
+- ABSOLUTELY FORBIDDEN: Arabic (العربية), Farsi/Persian (فارسی), Hindi/Devanagari (हिन्दी), Tamil, or ANY non-Sinhala script.
+- Output ONLY the Sinhala translation, without quotes, notes, or extra text.`;
         const res = await ai.models.generateContent({
           model: 'gemini-3.5-flash-lite',
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
         });
         const sinhalaText = res.text?.trim() || '';
-        if (sinhalaText) {
+        if (sinhalaText && (targetLang !== 'si' || this.isValidSinhala(sinhalaText))) {
           this.translationCache.set(cacheKey, sinhalaText);
           return { translatedText: sinhalaText };
         }
@@ -2210,7 +2228,7 @@ STRICT RESTRICTIONS:
       }
     }
 
-    return { translatedText: text };
+    return { translatedText: targetLang === 'si' ? '' : text };
   }
 
   async generateHint(dto: GenerateHintDto): Promise<{
@@ -2253,13 +2271,18 @@ STRICT RESTRICTIONS:
     const hintGenerationPromise = (async () => {
       const apiKey = this.geminiApiKey;
       if (apiKey) {
-        const prompt = `You are Maya, an AI English speaking coach.
+        const prompt = `You are Maya, an AI English speaking coach for Sri Lankan students.
 A student was just asked this conversational question by Maya:
 "${question}"
 Topic: ${dto.topic || 'Daily Speaking Practice'}
 Level: ${dto.level || 'Beginner to Intermediate'}
 
-Provide one short, natural, practical model answer the student can say in response (1 simple or compound sentence, natural everyday conversational English, easy to say aloud), along with its natural spoken Sinhala translation.`;
+Provide one short, natural, practical model answer the student can say in response (1 simple or compound sentence, natural everyday conversational English, easy to say aloud), along with its natural spoken Sri Lankan Sinhala translation.
+
+CRITICAL SCRIPT RULES for hintSinhala:
+- Write ONLY in Sinhala script (Unicode U+0D80 to U+0DFF) and Latin English loanwords.
+- ABSOLUTELY FORBIDDEN: Arabic (العربية), Farsi/Persian (فارسی), Hindi/Devanagari (हिन्दी), Tamil, or ANY other non-Sinhala script.
+- Use everyday Sri Lankan Sinhala, e.g. "මම සාමාන්‍යයෙන් තේ එකක් බොනවා."`;
 
         const executeCall = async () => {
           const ai = this.genAiClient || new GoogleGenAI({ apiKey });
@@ -2277,7 +2300,7 @@ Provide one short, natural, practical model answer the student can say in respon
                   },
                   hintSinhala: {
                     type: Type.STRING,
-                    description: 'Accurate and natural spoken Sinhala translation of that exact answer.',
+                    description: 'Accurate and natural spoken Sri Lankan Sinhala translation using ONLY Sinhala script (U+0D80-U+0DFF). NEVER use Arabic, Farsi, Hindi, or Devanagari script.',
                   },
                 },
                 required: ['hintEnglish', 'hintSinhala'],
@@ -2311,10 +2334,28 @@ Provide one short, natural, practical model answer the student can say in respon
           if (text) {
             try {
               const parsed = JSON.parse(text);
-              if (parsed.hintEnglish && parsed.hintSinhala) {
+              if (parsed.hintEnglish) {
+                const hintEnglish = String(parsed.hintEnglish).trim();
+                let sinhalaText = String(parsed.hintSinhala || '').trim();
+
+                // Validate: reject if hintSinhala lacks Sinhala script or contains forbidden script (Arabic/Farsi/Hindi)
+                if (!this.isValidSinhala(sinhalaText)) {
+                  this.logger.warn(`[SessionsService] 🚫 hintSinhala failed validation (lacks Sinhala script or has forbidden characters): "${sinhalaText.substring(0, 60)}". Retranslating via pipeline...`);
+                  try {
+                    const fallback = await this.translateText({ text: hintEnglish, targetLang: 'si', sourceLang: 'en' });
+                    if (this.isValidSinhala(fallback.translatedText)) {
+                      sinhalaText = fallback.translatedText.trim();
+                    } else {
+                      sinhalaText = ''; // Never return foreign or corrupted script
+                    }
+                  } catch {
+                    sinhalaText = '';
+                  }
+                }
+
                 const result = {
-                  hintEnglish: String(parsed.hintEnglish).trim(),
-                  hintSinhala: String(parsed.hintSinhala).trim(),
+                  hintEnglish,
+                  hintSinhala: sinhalaText,
                   costUsd,
                   costLkr,
                   tokens: { promptTokens, outputTokens, totalTokens },

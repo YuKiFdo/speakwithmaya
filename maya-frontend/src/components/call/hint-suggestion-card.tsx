@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
 import { triggerHaptic } from '@/utils/haptics-audio';
+import { isValidSinhalaText } from '@/services/assistance/assistance-service';
 
 interface HintSuggestionCardProps {
   hintEnglish: string;
@@ -72,7 +73,7 @@ export function HintSuggestionCard({
         </Text>
 
         {/* Sinhala translation of the suggested sentence */}
-        {!!hintSinhala && (
+        {!!hintSinhala && isValidSinhalaText(hintSinhala) && (
           <Text style={[styles.sinhalaText, isWebOrDesktop && styles.sinhalaTextDesktop]}>
             {hintSinhala}
           </Text>

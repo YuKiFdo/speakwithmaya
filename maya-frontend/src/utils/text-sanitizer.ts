@@ -35,7 +35,12 @@ export function sanitizeModelText(text: string | null | undefined): string {
     cleaned = cleaned.replace(/[\u0900-\u097F]+/g, '').replace(/\s{2,}/g, ' ');
   }
 
-  // 3. Fix known phonetic hallucinations in spoken Sinhala transcripts
+  // 3. Strip rogue Arabic, Farsi, Persian, Urdu characters (U+0600 to U+06FF, U+0750 to U+077F, U+08A0 to U+08FF, U+FB50 to U+FDFF, U+FE70 to U+FEFF)
+  if (/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(cleaned)) {
+    cleaned = cleaned.replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '').replace(/\s{2,}/g, ' ');
+  }
+
+  // 4. Fix known phonetic hallucinations in spoken Sinhala transcripts
   for (const [pattern, replacement] of SINHALA_HALLUCINATION_MAP) {
     cleaned = cleaned.replace(pattern, replacement);
   }
