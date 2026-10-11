@@ -4,6 +4,7 @@ import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, G
 import { RoadmapService } from '../roadmap/roadmap.service.js';
 import { parseCanonicalLessonContent, formatCanonicalLessonContent } from '../roadmap/dto/roadmap.dto.js';
 import { randomUUID, createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import { GoogleGenAI, Type } from '@google/genai';
 
 export function toValidUuid(str?: string): string {
@@ -2486,7 +2487,6 @@ Provide one short, natural, practical model answer the student can say in respon
    * espeak-ng outputs IPA that exactly matches what Piper models were trained on.
    */
   private espeakTextToIpa(text: string, voice: string = 'en-us'): string {
-    const { execSync } = require('child_process');
     // --ipa: output IPA, -q: quiet (no audio), -v: voice
     // espeak-ng outputs IPA with stress marks, word boundaries, etc.
     const cleanText = text.replace(/"/g, '\\"').replace(/\n/g, ' ').substring(0, 2000);
