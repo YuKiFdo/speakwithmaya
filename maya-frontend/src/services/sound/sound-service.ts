@@ -23,12 +23,21 @@ const GOAL_AUDIO_ASSETS: Record<string, any> = {
   'exams': require('@/assets/sounds/maya-goal-exams.wav'),
 };
 
+const CHALLENGE_AUDIO_ASSETS: Record<string, any> = {
+  'speaking-confidently': require('@/assets/sounds/maya-challenge-confidence.wav'),
+  'getting-stuck': require('@/assets/sounds/maya-challenge-stuck.wav'),
+  'listening': require('@/assets/sounds/maya-challenge-listening.wav'),
+  'grammar': require('@/assets/sounds/maya-challenge-grammar.wav'),
+  'vocabulary': require('@/assets/sounds/maya-challenge-vocab.wav'),
+};
+
 let audioCtx: AudioContext | null = null;
 let activeWhooshNodes: { noise: AudioBufferSourceNode; gain: GainNode } | null = null;
 let welcomeAudioPlayer: HTMLAudioElement | null = null;
 let namePromptAudioPlayer: HTMLAudioElement | null = null;
 let phonePromptAudioPlayer: HTMLAudioElement | null = null;
 let goalAudioPlayer: HTMLAudioElement | null = null;
+let challengeAudioPlayer: HTMLAudioElement | null = null;
 
 function getAudioContext(): AudioContext | null {
   if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -865,6 +874,83 @@ export function stopMayaGoalFeedbackVoice(): void {
     goalAudioPlayer = null;
   }
 }
+
+/**
+ * 10. Maya's Personalized Challenge Selection Feedback Voices
+ * Plays tailored encouragement when user selects their biggest challenge.
+ */
+export function playMayaChallengeFeedbackVoice(
+  challengeId: string,
+  callbacks?: {
+    onStart?: () => void;
+    onEnd?: () => void;
+    onError?: (err: any) => void;
+  },
+): void {
+  stopMayaChallengeFeedbackVoice();
+
+  const asset = CHALLENGE_AUDIO_ASSETS[challengeId];
+  if (!asset) {
+    callbacks?.onEnd?.();
+    return;
+  }
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(asset);
+      if (uri) {
+        const audio = new Audio(uri);
+        challengeAudioPlayer = audio;
+        audio.volume = 1.0;
+
+        audio.onplay = () => {
+          callbacks?.onStart?.();
+        };
+
+        audio.onended = () => {
+          if (challengeAudioPlayer === audio) {
+            challengeAudioPlayer = null;
+          }
+          callbacks?.onEnd?.();
+        };
+
+        audio.onerror = (e) => {
+          if (challengeAudioPlayer === audio) {
+            challengeAudioPlayer = null;
+          }
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (challengeAudioPlayer === audio) {
+              challengeAudioPlayer = null;
+            }
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaChallengeFeedbackVoice(): void {
+  if (challengeAudioPlayer) {
+    try {
+      challengeAudioPlayer.pause();
+      challengeAudioPlayer.currentTime = 0;
+    } catch {}
+    challengeAudioPlayer = null;
+  }
+}
+
 
 
 
