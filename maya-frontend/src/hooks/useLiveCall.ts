@@ -22,6 +22,7 @@ import { MissionReportData, MissionObjectiveResult } from '@/components/roadmap/
 import { getLogTimestamp } from '@/utils/time';
 import { sanitizeModelText } from '@/utils/text-sanitizer';
 import { createWavBlobUrlFromPcm } from '@/utils/audio-wav';
+import { registerMicSuppressor } from '@/services/sound/sound-service';
 
 // Default to true (Server-to-Server NestJS Gateway) unless explicitly set to 'false'
 const USE_SERVER_LIVE = process.env.EXPO_PUBLIC_USE_SERVER_LIVE !== 'false';
@@ -206,6 +207,18 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   useEffect(() => {
     tokensRef.current = tokens;
   }, [tokens]);
+
+  // Register mic suppressor: mutes mic capture & VAD whenever UI sounds (e.g. Hint button chime) play
+  useEffect(() => {
+    const unregister = registerMicSuppressor((durationMs: number) => {
+      echoHangoverUntilRef.current = Math.max(echoHangoverUntilRef.current, Date.now() + durationMs);
+    });
+    return unregister;
+  }, []);
+
+  const suppressMicFor = useCallback((durationMs: number = 1000) => {
+    echoHangoverUntilRef.current = Math.max(echoHangoverUntilRef.current, Date.now() + durationMs);
+  }, []);
 
   // Session seconds counter & mid-session curriculum pacing check
   // Uses monotonic wall-clock delta to prevent drift or freeze on component re-render
@@ -396,14 +409,15 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           );
         },
         onAudioData: (pcm16: ArrayBuffer) => {
-          // Half-duplex acoustic echo gate: clamp mic while model is actively outputting audio, farewell concluding, reconnecting, or awaiting opening greeting
+          // Half-duplex acoustic echo gate: clamp mic while model is actively outputting audio, farewell concluding, reconnecting, awaiting greeting, or UI sound/hangover active
           const isBlocked =
             isMutedRef.current ||
             isConcludingRef.current ||
             statusRef.current === 'reconnecting' ||
             statusRef.current === 'ended' ||
             isFirstGreetingPendingRef.current ||
-            (isModelSpeakingRef.current && Date.now() < echoHangoverUntilRef.current);
+            isModelSpeakingRef.current ||
+            Date.now() < echoHangoverUntilRef.current;
 
           if (!isBlocked && transportRef.current.isConnected()) {
             userChunksSentRef.current++;
@@ -420,7 +434,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             isConcludingRef.current ||
             statusRef.current === 'reconnecting' ||
             statusRef.current === 'ended' ||
-            isFirstGreetingPendingRef.current;
+            isFirstGreetingPendingRef.current ||
+            isModelSpeakingRef.current ||
+            Date.now() < echoHangoverUntilRef.current;
 
           // Require >= 4 chunks (~320ms of genuine speech) so small noise spikes don't trigger turn completion
           if (!isBlocked && userChunksSentRef.current >= 4 && transportRef.current.isConnected()) {
@@ -1460,6 +1476,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     turns: turnsRef.current,
     isConnected,
     releaseGreeting,
+    suppressMicFor,
   };
 }
 

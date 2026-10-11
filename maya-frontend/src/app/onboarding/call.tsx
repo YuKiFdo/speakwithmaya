@@ -250,6 +250,9 @@ export default function CallScreen() {
   }, [liveCall.status, liveCall.subtitles, liveCall.previousSubtitles]);
 
   const handleToggleHint = async () => {
+    // Suppress mic capture & VAD for 1.1s so Hint button chime never leaks into Gemini Live
+    liveCall.suppressMicFor?.(1100);
+
     if (isHintVisible) {
       setIsHintVisible(false);
       return;
@@ -1306,7 +1309,7 @@ const styles = StyleSheet.create({
   },
   floatingHintContainer: {
     position: 'absolute',
-    bottom: 24,
+    bottom: Platform.select({ web: 38, default: 28 }),
     right: 20,
     zIndex: 35,
   },

@@ -114,6 +114,32 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
   }, 1000);
 }
 
+type MicSuppressor = (durationMs: number) => void;
+let activeMicSuppressor: MicSuppressor | null = null;
+
+/**
+ * Register a mic suppressor callback (e.g., from useLiveCall) to temporarily
+ * mute mic capture and VAD whenever UI sounds play during a call.
+ */
+export function registerMicSuppressor(suppressor: MicSuppressor | null): () => void {
+  activeMicSuppressor = suppressor;
+  return () => {
+    if (activeMicSuppressor === suppressor) {
+      activeMicSuppressor = null;
+    }
+  };
+}
+
+export function suppressMicDuringSound(durationMs: number): void {
+  if (activeMicSuppressor) {
+    try {
+      activeMicSuppressor(durationMs);
+    } catch (e) {
+      console.warn('[sound-service] Error calling activeMicSuppressor:', e);
+    }
+  }
+}
+
 /**
  * Universal sound player using HTMLAudioElement with instant overlapping cloning
  * and automatic fallback to Web Audio synthesis.
@@ -123,7 +149,11 @@ export function playSoundAsset(
   volume: number = 0.75,
   fallbackFn?: () => void,
   onEnded?: () => void,
+  maxDurationMs?: number,
 ): void {
+  const estimatedDuration = maxDurationMs || 1000;
+  suppressMicDuringSound(estimatedDuration + 250);
+
   let hasTriggeredEnded = false;
   const notifyEnded = () => {
     if (!hasTriggeredEnded) {
@@ -141,14 +171,31 @@ export function playSoundAsset(
         player.volume = Math.max(0, Math.min(1, volume));
 
         player.onended = notifyEnded;
-        // Fallback timeout in case browser onended does not fire
-        setTimeout(notifyEnded, 2200);
+        const endTimeoutMs = maxDurationMs ? maxDurationMs : 2200;
+        setTimeout(notifyEnded, endTimeoutMs);
+
+        if (maxDurationMs) {
+          setTimeout(() => {
+            try {
+              player.pause();
+              player.currentTime = 0;
+            } catch {}
+          }, maxDurationMs);
+        }
 
         player.play().catch(() => {
           try {
             audio.currentTime = 0;
             audio.volume = Math.max(0, Math.min(1, volume));
             audio.onended = notifyEnded;
+            if (maxDurationMs) {
+              setTimeout(() => {
+                try {
+                  audio.pause();
+                  audio.currentTime = 0;
+                } catch {}
+              }, maxDurationMs);
+            }
             audio.play().catch(() => {
               if (fallbackFn) fallbackFn();
               notifyEnded();
@@ -205,12 +252,19 @@ export function playGoodJobSound(): void {
 /**
  * Hint Button Press Sound (hint button press.mp3)
  * Plays when the user taps the Hint lightbulb button during a call.
+ * Uses gentle 0.40 volume and caps playback to 900ms to prevent acoustic leakage into mic.
  */
 export function playHintButtonSound(): void {
   console.log('[sound-service] 💡 playHintButtonSound() called');
-  playSoundAsset(HINT_BUTTON_ASSET, 0.8, () => {
-    playStepPop(2);
-  });
+  playSoundAsset(
+    HINT_BUTTON_ASSET,
+    0.4,
+    () => {
+      playStepPop(2);
+    },
+    undefined,
+    900,
+  );
 }
 
 /**
@@ -219,9 +273,15 @@ export function playHintButtonSound(): void {
  */
 export function playOtherButtonSound(): void {
   console.log('[sound-service] 🔘 playOtherButtonSound() called');
-  playSoundAsset(OTHER_BUTTON_ASSET, 0.75, () => {
-    playStepPop(0);
-  });
+  playSoundAsset(
+    OTHER_BUTTON_ASSET,
+    0.45,
+    () => {
+      playStepPop(0);
+    },
+    undefined,
+    600,
+  );
 }
 
 /**
@@ -230,9 +290,15 @@ export function playOtherButtonSound(): void {
  */
 export function playUnderstoodTapSound(): void {
   console.log('[sound-service] 👍 playUnderstoodTapSound() called');
-  playSoundAsset(UNDERSTOOD_BUTTON_ASSET, 0.8, () => {
-    playSynthesizedUnderstoodTap();
-  });
+  playSoundAsset(
+    UNDERSTOOD_BUTTON_ASSET,
+    0.5,
+    () => {
+      playSynthesizedUnderstoodTap();
+    },
+    undefined,
+    800,
+  );
 }
 
 export const playUnderstoodButtonSound = playUnderstoodTapSound;
