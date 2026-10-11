@@ -16,6 +16,9 @@ const MAYA_NAME_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-name.wav
 const MAYA_PHONE_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-phone.wav');
 const MAYA_GOAL_PROMPT_ASSET = require('@/assets/sounds/maya-goal-prompt.wav');
 const MAYA_CHALLENGE_PROMPT_ASSET = require('@/assets/sounds/maya-challenge-prompt.wav');
+const MAYA_LEVEL_PROMPT_ASSET = require('@/assets/sounds/maya-level-prompt.wav');
+const MAYA_EMPLOYMENT_PROMPT_ASSET = require('@/assets/sounds/maya-employment-prompt.wav');
+const MAYA_DAILY_GOAL_PROMPT_ASSET = require('@/assets/sounds/maya-daily-goal-prompt.wav');
 
 const GOAL_AUDIO_ASSETS: Record<string, any> = {
   'better-job': require('@/assets/sounds/maya-goal-job.wav'),
@@ -33,6 +36,28 @@ const CHALLENGE_AUDIO_ASSETS: Record<string, any> = {
   'vocabulary': require('@/assets/sounds/maya-challenge-vocab.wav'),
 };
 
+const LEVEL_AUDIO_ASSETS: Record<string, any> = {
+  'beginner': require('@/assets/sounds/maya-level-beginner.wav'),
+  'intermediate': require('@/assets/sounds/maya-level-intermediate.wav'),
+  'upper-intermediate': require('@/assets/sounds/maya-level-upper-intermediate.wav'),
+  'advanced': require('@/assets/sounds/maya-level-advanced.wav'),
+};
+
+const EMPLOYMENT_AUDIO_ASSETS: Record<string, any> = {
+  'full-time': require('@/assets/sounds/maya-employment-full-time.wav'),
+  'part-time': require('@/assets/sounds/maya-employment-part-time.wav'),
+  'student': require('@/assets/sounds/maya-employment-student.wav'),
+  'looking-for-job': require('@/assets/sounds/maya-employment-looking-for-job.wav'),
+  'other': require('@/assets/sounds/maya-employment-other.wav'),
+};
+
+const DAILY_GOAL_AUDIO_ASSETS: Record<string, any> = {
+  '5-min': require('@/assets/sounds/maya-daily-goal-5min.wav'),
+  '10-min': require('@/assets/sounds/maya-daily-goal-10min.wav'),
+  '15-min': require('@/assets/sounds/maya-daily-goal-15min.wav'),
+  '30-min': require('@/assets/sounds/maya-daily-goal-30min.wav'),
+};
+
 let audioCtx: AudioContext | null = null;
 let activeWhooshNodes: { noise: AudioBufferSourceNode; gain: GainNode } | null = null;
 let welcomeAudioPlayer: HTMLAudioElement | null = null;
@@ -40,8 +65,14 @@ let namePromptAudioPlayer: HTMLAudioElement | null = null;
 let phonePromptAudioPlayer: HTMLAudioElement | null = null;
 let goalPromptAudioPlayer: HTMLAudioElement | null = null;
 let challengePromptAudioPlayer: HTMLAudioElement | null = null;
+let levelPromptAudioPlayer: HTMLAudioElement | null = null;
+let employmentPromptAudioPlayer: HTMLAudioElement | null = null;
+let dailyGoalPromptAudioPlayer: HTMLAudioElement | null = null;
 let goalAudioPlayer: HTMLAudioElement | null = null;
 let challengeAudioPlayer: HTMLAudioElement | null = null;
+let levelAudioPlayer: HTMLAudioElement | null = null;
+let employmentAudioPlayer: HTMLAudioElement | null = null;
+let dailyGoalAudioPlayer: HTMLAudioElement | null = null;
 
 function getAudioContext(): AudioContext | null {
   if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -838,6 +869,25 @@ export function preloadAllOnboardingVoicesInOrder(): void {
     CHALLENGE_AUDIO_ASSETS['listening'],
     CHALLENGE_AUDIO_ASSETS['grammar'],
     CHALLENGE_AUDIO_ASSETS['vocabulary'],
+    // Screen 6: Level Question Prompt & Selections
+    MAYA_LEVEL_PROMPT_ASSET,
+    LEVEL_AUDIO_ASSETS['beginner'],
+    LEVEL_AUDIO_ASSETS['intermediate'],
+    LEVEL_AUDIO_ASSETS['upper-intermediate'],
+    LEVEL_AUDIO_ASSETS['advanced'],
+    // Screen 7: Employment Question Prompt & Selections
+    MAYA_EMPLOYMENT_PROMPT_ASSET,
+    EMPLOYMENT_AUDIO_ASSETS['full-time'],
+    EMPLOYMENT_AUDIO_ASSETS['part-time'],
+    EMPLOYMENT_AUDIO_ASSETS['student'],
+    EMPLOYMENT_AUDIO_ASSETS['looking-for-job'],
+    EMPLOYMENT_AUDIO_ASSETS['other'],
+    // Screen 8: Daily Goal Question Prompt & Selections
+    MAYA_DAILY_GOAL_PROMPT_ASSET,
+    DAILY_GOAL_AUDIO_ASSETS['5-min'],
+    DAILY_GOAL_AUDIO_ASSETS['10-min'],
+    DAILY_GOAL_AUDIO_ASSETS['15-min'],
+    DAILY_GOAL_AUDIO_ASSETS['30-min'],
   ];
 
   let delay = 100;
@@ -855,6 +905,441 @@ export function preloadAllOnboardingVoicesInOrder(): void {
     }, delay);
     delay += 180; // Smooth sequential stream without freezing browser thread
   });
+}
+
+/**
+ * 8d. Maya's Level Question Prompt Voice
+ * "What's your current level? Be honest -- I'll meet you right where you are!"
+ */
+export function playMayaLevelPromptVoice(callbacks?: {
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (err: any) => void;
+}): void {
+  stopMayaLevelPromptVoice();
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(MAYA_LEVEL_PROMPT_ASSET);
+      if (uri) {
+        const audio = getPreloadedAudio(uri);
+        levelPromptAudioPlayer = audio;
+        audio.currentTime = 0;
+        audio.volume = 1.0;
+
+        audio.onplay = () => callbacks?.onStart?.();
+        audio.onended = () => {
+          if (levelPromptAudioPlayer === audio) levelPromptAudioPlayer = null;
+          callbacks?.onEnd?.();
+        };
+        audio.onerror = (e) => {
+          if (levelPromptAudioPlayer === audio) levelPromptAudioPlayer = null;
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (levelPromptAudioPlayer === audio) levelPromptAudioPlayer = null;
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaLevelPromptVoice(): void {
+  if (levelPromptAudioPlayer) {
+    try {
+      levelPromptAudioPlayer.onended = null;
+      levelPromptAudioPlayer.onerror = null;
+      levelPromptAudioPlayer.pause();
+      levelPromptAudioPlayer.currentTime = 0;
+    } catch {}
+    levelPromptAudioPlayer = null;
+  }
+}
+
+/**
+ * 8e. Maya's Employment Question Prompt Voice
+ * "What is your current employment status? This helps us personalise your practice sessions!"
+ */
+export function playMayaEmploymentPromptVoice(callbacks?: {
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (err: any) => void;
+}): void {
+  stopMayaEmploymentPromptVoice();
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(MAYA_EMPLOYMENT_PROMPT_ASSET);
+      if (uri) {
+        const audio = getPreloadedAudio(uri);
+        employmentPromptAudioPlayer = audio;
+        audio.currentTime = 0;
+        audio.volume = 1.0;
+
+        audio.onplay = () => callbacks?.onStart?.();
+        audio.onended = () => {
+          if (employmentPromptAudioPlayer === audio) employmentPromptAudioPlayer = null;
+          callbacks?.onEnd?.();
+        };
+        audio.onerror = (e) => {
+          if (employmentPromptAudioPlayer === audio) employmentPromptAudioPlayer = null;
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (employmentPromptAudioPlayer === audio) employmentPromptAudioPlayer = null;
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaEmploymentPromptVoice(): void {
+  if (employmentPromptAudioPlayer) {
+    try {
+      employmentPromptAudioPlayer.onended = null;
+      employmentPromptAudioPlayer.onerror = null;
+      employmentPromptAudioPlayer.pause();
+      employmentPromptAudioPlayer.currentTime = 0;
+    } catch {}
+    employmentPromptAudioPlayer = null;
+  }
+}
+
+/**
+ * 8f. Maya's Daily Goal Question Prompt Voice
+ * "How much can you practice daily? Even five or ten minutes a day makes a HUGE difference!"
+ */
+export function playMayaDailyGoalPromptVoice(callbacks?: {
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (err: any) => void;
+}): void {
+  stopMayaDailyGoalPromptVoice();
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(MAYA_DAILY_GOAL_PROMPT_ASSET);
+      if (uri) {
+        const audio = getPreloadedAudio(uri);
+        dailyGoalPromptAudioPlayer = audio;
+        audio.currentTime = 0;
+        audio.volume = 1.0;
+
+        audio.onplay = () => callbacks?.onStart?.();
+        audio.onended = () => {
+          if (dailyGoalPromptAudioPlayer === audio) dailyGoalPromptAudioPlayer = null;
+          callbacks?.onEnd?.();
+        };
+        audio.onerror = (e) => {
+          if (dailyGoalPromptAudioPlayer === audio) dailyGoalPromptAudioPlayer = null;
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (dailyGoalPromptAudioPlayer === audio) dailyGoalPromptAudioPlayer = null;
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaDailyGoalPromptVoice(): void {
+  if (dailyGoalPromptAudioPlayer) {
+    try {
+      dailyGoalPromptAudioPlayer.onended = null;
+      dailyGoalPromptAudioPlayer.onerror = null;
+      dailyGoalPromptAudioPlayer.pause();
+      dailyGoalPromptAudioPlayer.currentTime = 0;
+    } catch {}
+    dailyGoalPromptAudioPlayer = null;
+  }
+}
+
+/**
+ * Preload all Maya Level Voice audio assets into memory
+ */
+export function preloadLevelVoices(): void {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const promptUri = getAssetUri(MAYA_LEVEL_PROMPT_ASSET);
+      if (promptUri) getPreloadedAudio(promptUri).load();
+      Object.values(LEVEL_AUDIO_ASSETS).forEach((asset) => {
+        const uri = getAssetUri(asset);
+        if (uri) getPreloadedAudio(uri).load();
+      });
+    } catch (e) {
+      console.warn('[sound-service] preloadLevelVoices error:', e);
+    }
+  }
+}
+
+/**
+ * Maya's Level Selection Feedback Voice
+ */
+export function playMayaLevelFeedbackVoice(
+  levelId: string,
+  callbacks?: {
+    onStart?: () => void;
+    onEnd?: () => void;
+    onError?: (err: any) => void;
+  },
+): void {
+  stopMayaLevelPromptVoice();
+  stopMayaLevelFeedbackVoice();
+
+  const asset = LEVEL_AUDIO_ASSETS[levelId];
+  if (!asset) {
+    callbacks?.onEnd?.();
+    return;
+  }
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(asset);
+      if (uri) {
+        const audio = getPreloadedAudio(uri);
+        levelAudioPlayer = audio;
+        audio.currentTime = 0;
+        audio.volume = 1.0;
+
+        audio.onplay = () => callbacks?.onStart?.();
+        audio.onended = () => {
+          if (levelAudioPlayer === audio) levelAudioPlayer = null;
+          callbacks?.onEnd?.();
+        };
+        audio.onerror = (e) => {
+          if (levelAudioPlayer === audio) levelAudioPlayer = null;
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (levelAudioPlayer === audio) levelAudioPlayer = null;
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaLevelFeedbackVoice(): void {
+  if (levelAudioPlayer) {
+    try {
+      levelAudioPlayer.onended = null;
+      levelAudioPlayer.onerror = null;
+      levelAudioPlayer.pause();
+      levelAudioPlayer.currentTime = 0;
+    } catch {}
+    levelAudioPlayer = null;
+  }
+}
+
+/**
+ * Preload all Maya Employment Voice audio assets into memory
+ */
+export function preloadEmploymentVoices(): void {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const promptUri = getAssetUri(MAYA_EMPLOYMENT_PROMPT_ASSET);
+      if (promptUri) getPreloadedAudio(promptUri).load();
+      Object.values(EMPLOYMENT_AUDIO_ASSETS).forEach((asset) => {
+        const uri = getAssetUri(asset);
+        if (uri) getPreloadedAudio(uri).load();
+      });
+    } catch (e) {
+      console.warn('[sound-service] preloadEmploymentVoices error:', e);
+    }
+  }
+}
+
+/**
+ * Maya's Employment Selection Feedback Voice
+ */
+export function playMayaEmploymentFeedbackVoice(
+  employmentId: string,
+  callbacks?: {
+    onStart?: () => void;
+    onEnd?: () => void;
+    onError?: (err: any) => void;
+  },
+): void {
+  stopMayaEmploymentPromptVoice();
+  stopMayaEmploymentFeedbackVoice();
+
+  const asset = EMPLOYMENT_AUDIO_ASSETS[employmentId];
+  if (!asset) {
+    callbacks?.onEnd?.();
+    return;
+  }
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(asset);
+      if (uri) {
+        const audio = getPreloadedAudio(uri);
+        employmentAudioPlayer = audio;
+        audio.currentTime = 0;
+        audio.volume = 1.0;
+
+        audio.onplay = () => callbacks?.onStart?.();
+        audio.onended = () => {
+          if (employmentAudioPlayer === audio) employmentAudioPlayer = null;
+          callbacks?.onEnd?.();
+        };
+        audio.onerror = (e) => {
+          if (employmentAudioPlayer === audio) employmentAudioPlayer = null;
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (employmentAudioPlayer === audio) employmentAudioPlayer = null;
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaEmploymentFeedbackVoice(): void {
+  if (employmentAudioPlayer) {
+    try {
+      employmentAudioPlayer.onended = null;
+      employmentAudioPlayer.onerror = null;
+      employmentAudioPlayer.pause();
+      employmentAudioPlayer.currentTime = 0;
+    } catch {}
+    employmentAudioPlayer = null;
+  }
+}
+
+/**
+ * Preload all Maya Daily Goal Voice audio assets into memory
+ */
+export function preloadDailyGoalVoices(): void {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const promptUri = getAssetUri(MAYA_DAILY_GOAL_PROMPT_ASSET);
+      if (promptUri) getPreloadedAudio(promptUri).load();
+      Object.values(DAILY_GOAL_AUDIO_ASSETS).forEach((asset) => {
+        const uri = getAssetUri(asset);
+        if (uri) getPreloadedAudio(uri).load();
+      });
+    } catch (e) {
+      console.warn('[sound-service] preloadDailyGoalVoices error:', e);
+    }
+  }
+}
+
+/**
+ * Maya's Daily Goal Selection Feedback Voice
+ */
+export function playMayaDailyGoalFeedbackVoice(
+  dailyGoalId: string,
+  callbacks?: {
+    onStart?: () => void;
+    onEnd?: () => void;
+    onError?: (err: any) => void;
+  },
+): void {
+  stopMayaDailyGoalPromptVoice();
+  stopMayaDailyGoalFeedbackVoice();
+
+  const asset = DAILY_GOAL_AUDIO_ASSETS[dailyGoalId];
+  if (!asset) {
+    callbacks?.onEnd?.();
+    return;
+  }
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(asset);
+      if (uri) {
+        const audio = getPreloadedAudio(uri);
+        dailyGoalAudioPlayer = audio;
+        audio.currentTime = 0;
+        audio.volume = 1.0;
+
+        audio.onplay = () => callbacks?.onStart?.();
+        audio.onended = () => {
+          if (dailyGoalAudioPlayer === audio) dailyGoalAudioPlayer = null;
+          callbacks?.onEnd?.();
+        };
+        audio.onerror = (e) => {
+          if (dailyGoalAudioPlayer === audio) dailyGoalAudioPlayer = null;
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (dailyGoalAudioPlayer === audio) dailyGoalAudioPlayer = null;
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaDailyGoalFeedbackVoice(): void {
+  if (dailyGoalAudioPlayer) {
+    try {
+      dailyGoalAudioPlayer.onended = null;
+      dailyGoalAudioPlayer.onerror = null;
+      dailyGoalAudioPlayer.pause();
+      dailyGoalAudioPlayer.currentTime = 0;
+    } catch {}
+    dailyGoalAudioPlayer = null;
+  }
 }
 
 /**
