@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -20,17 +21,148 @@ import {
   playMayaNamePromptVoice,
   stopMayaNamePromptVoice,
 } from '@/services/sound/sound-service';
+import { MayaPrimaryButton } from '@/components/ui';
 
 export default function NameScreen() {
   const [name, setName] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [showQuestion, setShowQuestion] = useState(false);
+  const [showInput, setShowInput] = useState(false);
   const { isDesktop, isTablet } = useBreakpoint();
 
-  // Subtle soundwave animations for speaking state
+  const inputRef = useRef<TextInput>(null);
+
+  // Timed Choreography Animated Values
+  const cardOpacityAnim = useRef(new Animated.Value(0)).current;
+  const cardSlideAnim = useRef(new Animated.Value(16)).current;
+
+  const questionOpacityAnim = useRef(new Animated.Value(0)).current;
+  const questionSlideAnim = useRef(new Animated.Value(12)).current;
+
+  const inputOpacityAnim = useRef(new Animated.Value(0)).current;
+  const inputSlideAnim = useRef(new Animated.Value(14)).current;
+
+  const buttonOpacityAnim = useRef(new Animated.Value(0)).current;
+  const buttonSlideAnim = useRef(new Animated.Value(14)).current;
+
+  // Soundwave animation bars
   const wave1 = useRef(new Animated.Value(0.4)).current;
   const wave2 = useRef(new Animated.Value(0.8)).current;
   const wave3 = useRef(new Animated.Value(0.5)).current;
 
+  // 1. Initial entrance on mount: Card appears & voice starts
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(cardOpacityAnim, {
+        toValue: 1,
+        duration: 400,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.spring(cardSlideAnim, {
+        toValue: 0,
+        friction: 7,
+        tension: 45,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+
+    // Voice starts speaking line 1
+    const voiceTimer = setTimeout(() => {
+      try {
+        playMayaNamePromptVoice({
+          onStart: () => setIsSpeaking(true),
+          onEnd: () => setIsSpeaking(false),
+          onError: () => setIsSpeaking(false),
+        });
+      } catch {}
+    }, 350);
+
+    // 2. Timing sequence: "What should I call you?" appears at ~2000ms
+    const questionTimer = setTimeout(() => {
+      setShowQuestion(true);
+      Animated.parallel([
+        Animated.timing(questionOpacityAnim, {
+          toValue: 1,
+          duration: 400,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.spring(questionSlideAnim, {
+          toValue: 0,
+          friction: 6,
+          tension: 40,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start();
+    }, 2000);
+
+    // 3. Timing sequence: Input box appears at ~3600ms
+    const inputTimer = setTimeout(() => {
+      setShowInput(true);
+      Animated.parallel([
+        Animated.timing(inputOpacityAnim, {
+          toValue: 1,
+          duration: 450,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.spring(inputSlideAnim, {
+          toValue: 0,
+          friction: 6,
+          tension: 45,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start(() => {
+        // Subtle auto-focus on input once visible
+        inputRef.current?.focus();
+      });
+    }, 3600);
+
+    return () => {
+      clearTimeout(voiceTimer);
+      clearTimeout(questionTimer);
+      clearTimeout(inputTimer);
+      stopMayaNamePromptVoice();
+    };
+  }, []);
+
+  // 4. Timing sequence: Button appears when user types their name
+  const isNameEntered = name.trim().length > 0;
+  useEffect(() => {
+    if (isNameEntered) {
+      Animated.parallel([
+        Animated.timing(buttonOpacityAnim, {
+          toValue: 1,
+          duration: 320,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.spring(buttonSlideAnim, {
+          toValue: 0,
+          friction: 6,
+          tension: 45,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(buttonOpacityAnim, {
+          toValue: 0,
+          duration: 200,
+          easing: Easing.in(Easing.ease),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(buttonSlideAnim, {
+          toValue: 12,
+          duration: 200,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start();
+    }
+  }, [isNameEntered]);
+
+  // Soundwave animation while Maya is speaking
   useEffect(() => {
     let waveLoop: Animated.CompositeAnimation | null = null;
     if (isSpeaking) {
@@ -59,24 +191,6 @@ export default function NameScreen() {
     return () => waveLoop?.stop();
   }, [isSpeaking]);
 
-  // Autoplay voice greeting on mount
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        playMayaNamePromptVoice({
-          onStart: () => setIsSpeaking(true),
-          onEnd: () => setIsSpeaking(false),
-          onError: () => setIsSpeaking(false),
-        });
-      } catch {}
-    }, 450);
-
-    return () => {
-      clearTimeout(timer);
-      stopMayaNamePromptVoice();
-    };
-  }, []);
-
   const handleToggleVoice = () => {
     if (isSpeaking) {
       stopMayaNamePromptVoice();
@@ -93,6 +207,7 @@ export default function NameScreen() {
   };
 
   const handleContinue = () => {
+    if (!name.trim()) return;
     stopMayaNamePromptVoice();
     setIsSpeaking(false);
     router.replace({
@@ -118,46 +233,74 @@ export default function NameScreen() {
             <ProgressBar progress={0.15} />
           </View>
 
-          {/* Main Card Stack */}
+          {/* Main Choreographed Stack */}
           <StepTransition style={styles.body}>
-            {/* Card 1: Maya Greeting Card */}
-            <Pressable
-              onPress={handleToggleVoice}
-              style={({ pressed }) => [
-                styles.promptCard,
-                pressed && styles.promptCardPressed,
-                isSpeaking && styles.promptCardSpeaking,
+            {/* Card 1: Maya Greeting Card (Animates on mount) */}
+            <Animated.View
+              style={[
+                styles.promptCardWrapper,
+                {
+                  opacity: cardOpacityAnim,
+                  transform: [{ translateY: cardSlideAnim }],
+                },
               ]}
-              accessibilityRole="button"
-              accessibilityLabel="Listen to Maya"
             >
-              <View style={styles.cardHeaderRow}>
-                <Text style={styles.cardGreeting}>
-                  Hi! I'm Maya, your personal English speaking coach. 👋
-                </Text>
+              <Pressable
+                onPress={handleToggleVoice}
+                style={({ pressed }) => [
+                  styles.promptCard,
+                  pressed && styles.promptCardPressed,
+                  isSpeaking && styles.promptCardSpeaking,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Listen to Maya"
+              >
+                <View style={styles.cardHeaderRow}>
+                  <Text style={styles.cardGreeting}>
+                    Hi! I'm Maya, your personal English speaking coach. 👋
+                  </Text>
 
-                {/* Speaker / Pulsing Soundwave badge */}
-                <View style={styles.speakerBadge}>
-                  {isSpeaking ? (
-                    <View style={styles.soundWaveRow}>
-                      <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave1 }] }]} />
-                      <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave2 }] }]} />
-                      <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave3 }] }]} />
-                    </View>
-                  ) : (
-                    <Ionicons name="volume-medium" size={15} color="#2563EB" />
-                  )}
+                  {/* Speaker badge */}
+                  <View style={styles.speakerBadge}>
+                    {isSpeaking ? (
+                      <View style={styles.soundWaveRow}>
+                        <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave1 }] }]} />
+                        <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave2 }] }]} />
+                        <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave3 }] }]} />
+                      </View>
+                    ) : (
+                      <Ionicons name="volume-medium" size={15} color="#0284C7" />
+                    )}
+                  </View>
                 </View>
-              </View>
 
-              <Text style={styles.cardQuestion}>
-                What should I call you?
-              </Text>
-            </Pressable>
+                {/* Question line: Timed reveal */}
+                <Animated.View
+                  style={{
+                    opacity: questionOpacityAnim,
+                    transform: [{ translateY: questionSlideAnim }],
+                  }}
+                >
+                  <Text style={styles.cardQuestion}>
+                    What should I call you?
+                  </Text>
+                </Animated.View>
+              </Pressable>
+            </Animated.View>
 
-            {/* Card 2: Input Box */}
-            <View style={styles.inputWrapper}>
+            {/* Card 2: Input Box (Timed reveal) */}
+            <Animated.View
+              style={[
+                styles.inputWrapper,
+                {
+                  opacity: inputOpacityAnim,
+                  transform: [{ translateY: inputSlideAnim }],
+                },
+              ]}
+              pointerEvents={showInput ? 'auto' : 'none'}
+            >
               <TextInput
+                ref={inputRef}
                 style={styles.textInput}
                 placeholder="Your first name..."
                 placeholderTextColor="#94A3B8"
@@ -168,20 +311,26 @@ export default function NameScreen() {
                 returnKeyType="done"
                 onSubmitEditing={handleContinue}
               />
-            </View>
+            </Animated.View>
 
-            {/* Card 3: Continue Button placed directly below input */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.ctaButton,
-                pressed && styles.ctaButtonPressed,
+            {/* Card 3: Common MayaPrimaryButton (Appears when typed, feedback style + sound) */}
+            <Animated.View
+              style={[
+                styles.buttonWrapper,
+                {
+                  opacity: buttonOpacityAnim,
+                  transform: [{ translateY: buttonSlideAnim }],
+                },
               ]}
-              onPress={handleContinue}
-              accessibilityRole="button"
-              accessibilityLabel="Continue"
+              pointerEvents={isNameEntered ? 'auto' : 'none'}
             >
-              <Text style={styles.ctaButtonText}>Continue</Text>
-            </Pressable>
+              <MayaPrimaryButton
+                label="Continue"
+                onPress={handleContinue}
+                height={58}
+                borderRadius={20}
+              />
+            </Animated.View>
           </StepTransition>
         </View>
       </KeyboardAvoidingView>
@@ -222,6 +371,9 @@ const styles = StyleSheet.create({
   },
 
   /* Card 1: Prompt Card */
+  promptCardWrapper: {
+    width: '100%',
+  },
   promptCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 22,
@@ -229,7 +381,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    gap: 12,
+    gap: 14,
     ...Platform.select({
       web: {
         boxShadow: '0 4px 20px rgba(15, 23, 42, 0.05)',
@@ -284,7 +436,7 @@ const styles = StyleSheet.create({
   soundWaveBar: {
     width: 2.5,
     height: 12,
-    backgroundColor: '#2563EB',
+    backgroundColor: '#0284C7',
     borderRadius: 1.5,
   },
   cardQuestion: {
@@ -295,7 +447,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
 
-  /* Card 2: Input */
+  /* Card 2: Input Box */
   inputWrapper: {
     width: '100%',
   },
@@ -326,36 +478,8 @@ const styles = StyleSheet.create({
   },
 
   /* Card 3: Action Button */
-  ctaButton: {
-    backgroundColor: '#2563EB',
+  buttonWrapper: {
     width: '100%',
-    height: 58,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 8px 24px rgba(37, 99, 235, 0.35)',
-        cursor: 'pointer',
-      } as any,
-      default: {
-        shadowColor: '#2563EB',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.35,
-        shadowRadius: 18,
-        elevation: 6,
-      },
-    }),
-  },
-  ctaButtonPressed: {
-    backgroundColor: '#1D4ED8',
-    transform: [{ scale: 0.985 }],
-  },
-  ctaButtonText: {
-    ...fontStyle('outfit', 'bold'),
-    color: '#FFFFFF',
-    fontSize: 17.5,
-    letterSpacing: -0.2,
+    marginTop: 6,
   },
 });

@@ -16,11 +16,16 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { fontStyle } from '@/theme/fonts';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Defs, LinearGradient, Stop, Rect, Path } from 'react-native-svg';
-import { playMayaWelcomeVoice, stopMayaWelcomeVoice } from '@/services/sound/sound-service';
+import {
+  playMayaWelcomeVoice,
+  stopMayaWelcomeVoice,
+} from '@/services/sound/sound-service';
+import { MayaPrimaryButton } from '@/components/ui';
 
 export default function WelcomeScreen() {
   const { isDesktop, isTablet } = useBreakpoint();
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [buttonVisible, setButtonVisible] = useState(false);
 
   // Animations
   const floatAnim = useRef(new Animated.Value(0)).current;
@@ -29,6 +34,12 @@ export default function WelcomeScreen() {
   const soundWave1 = useRef(new Animated.Value(0.4)).current;
   const soundWave2 = useRef(new Animated.Value(0.8)).current;
   const soundWave3 = useRef(new Animated.Value(0.5)).current;
+
+  // Staged entrance animations
+  const heroFadeAnim = useRef(new Animated.Value(0)).current;
+  const textFadeAnim = useRef(new Animated.Value(0)).current;
+  const buttonSlideAnim = useRef(new Animated.Value(24)).current;
+  const buttonOpacityAnim = useRef(new Animated.Value(0)).current;
 
   // Maya avatar subtle breathing / floating animation
   useEffect(() => {
@@ -52,24 +63,61 @@ export default function WelcomeScreen() {
     return () => floatLoop.stop();
   }, []);
 
-  // Speech bubble entrance animation
+  // Screen entrance choreography
   useEffect(() => {
+    // 1. Hero Avatar fades in
+    Animated.timing(heroFadeAnim, {
+      toValue: 1,
+      duration: 500,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+
+    // 2. Speech bubble pops in
     Animated.parallel([
       Animated.timing(bubbleOpacityAnim, {
         toValue: 1,
         duration: 450,
-        delay: 250,
+        delay: 200,
         useNativeDriver: Platform.OS !== 'web',
       }),
       Animated.spring(bubbleScaleAnim, {
         toValue: 1,
         friction: 6,
         tension: 40,
-        delay: 250,
+        delay: 200,
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
+
+    // 3. Text section smoothly slides up
+    Animated.timing(textFadeAnim, {
+      toValue: 1,
+      duration: 600,
+      delay: 350,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
   }, []);
+
+  // Show button with smooth spring animation
+  const triggerButtonAppearance = () => {
+    setButtonVisible(true);
+    Animated.parallel([
+      Animated.timing(buttonOpacityAnim, {
+        toValue: 1,
+        duration: 450,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.spring(buttonSlideAnim, {
+        toValue: 0,
+        friction: 6,
+        tension: 45,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+  };
 
   // Soundwave animation when Maya is speaking
   useEffect(() => {
@@ -100,7 +148,7 @@ export default function WelcomeScreen() {
     return () => waveLoop?.stop();
   }, [isSpeaking]);
 
-  // Maya cheerful neural voice introduction
+  // Maya friendly voice introduction
   const handlePlayVoiceIntro = () => {
     if (isSpeaking) {
       stopMayaWelcomeVoice();
@@ -110,26 +158,50 @@ export default function WelcomeScreen() {
 
     setIsSpeaking(true);
     playMayaWelcomeVoice({
-      onStart: () => setIsSpeaking(true),
-      onEnd: () => setIsSpeaking(false),
-      onError: () => setIsSpeaking(false),
+      onStart: () => {
+        setIsSpeaking(true);
+      },
+      onEnd: () => {
+        setIsSpeaking(false);
+        triggerButtonAppearance();
+      },
+      onError: () => {
+        setIsSpeaking(false);
+        triggerButtonAppearance();
+      },
     });
   };
 
-  // Attempt autoplay on mount (gracefully handles browser autoplay restrictions)
+  // Autoplay voice greeting on mount and sequence button reveal
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const speechTimer = setTimeout(() => {
       try {
         playMayaWelcomeVoice({
-          onStart: () => setIsSpeaking(true),
-          onEnd: () => setIsSpeaking(false),
-          onError: () => setIsSpeaking(false),
+          onStart: () => {
+            setIsSpeaking(true);
+          },
+          onEnd: () => {
+            setIsSpeaking(false);
+            triggerButtonAppearance();
+          },
+          onError: () => {
+            setIsSpeaking(false);
+            triggerButtonAppearance();
+          },
         });
-      } catch {}
-    }, 600);
+      } catch {
+        triggerButtonAppearance();
+      }
+    }, 500);
+
+    // Guaranteed fallback: reveal button after 3.2s so user is never blocked
+    const buttonTimer = setTimeout(() => {
+      triggerButtonAppearance();
+    }, 3200);
 
     return () => {
-      clearTimeout(timer);
+      clearTimeout(speechTimer);
+      clearTimeout(buttonTimer);
       stopMayaWelcomeVoice();
     };
   }, []);
@@ -154,7 +226,12 @@ export default function WelcomeScreen() {
           ]}
         >
           {/* Top Section: Maya 3D Avatar with Speech Bubble */}
-          <View style={styles.heroAvatarWrapper}>
+          <Animated.View
+            style={[
+              styles.heroAvatarWrapper,
+              { opacity: heroFadeAnim },
+            ]}
+          >
             {/* Animated Speech Bubble pointing to Maya */}
             <Animated.View
               style={[
@@ -230,10 +307,10 @@ export default function WelcomeScreen() {
                 </View>
               </Animated.View>
             </Pressable>
-          </View>
+          </Animated.View>
 
           {/* Center Content: Main Heading & Subtitle */}
-          <View style={styles.textSection}>
+          <Animated.View style={[styles.textSection, { opacity: textFadeAnim }]}>
             <Text style={styles.headingTitle}>
               Meet <Text style={styles.highlightName}>Maya</Text>,{'\n'}
               your AI English{'\n'}
@@ -243,26 +320,30 @@ export default function WelcomeScreen() {
             <Text style={styles.subtext}>
               Maya helps you practice real conversations, correct your mistakes, and speak with confidence.
             </Text>
-          </View>
+          </Animated.View>
 
           {/* Bottom Footer: Social Proof & Primary CTA Button */}
-          <View style={styles.footerSection}>
+          <Animated.View
+            style={[
+              styles.footerSection,
+              {
+                opacity: buttonOpacityAnim,
+                transform: [{ translateY: buttonSlideAnim }],
+              },
+            ]}
+          >
             <Text style={styles.socialProofText}>
               Join <Text style={styles.socialProofBold}>10,000+ students</Text> already learning
             </Text>
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.ctaButton,
-                pressed && styles.ctaButtonPressed,
-              ]}
+            {/* Common Maya Primary Button with feedback style, glow & sound */}
+            <MayaPrimaryButton
+              label="Get Started"
               onPress={handleGetStarted}
-              accessibilityRole="button"
-              accessibilityLabel="Get Started"
-            >
-              <Text style={styles.ctaButtonText}>Get Started →</Text>
-            </Pressable>
-          </View>
+              height={58}
+              borderRadius={22}
+            />
+          </Animated.View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -426,7 +507,7 @@ const styles = StyleSheet.create({
     maxWidth: 324,
   },
 
-  /* Footer & Action Button */
+  /* Footer Section */
   footerSection: {
     width: '100%',
     alignItems: 'center',
@@ -442,36 +523,5 @@ const styles = StyleSheet.create({
   socialProofBold: {
     ...fontStyle('inter', 'semiBold'),
     color: '#334155',
-  },
-  ctaButton: {
-    backgroundColor: '#2563EB',
-    width: '100%',
-    height: 58,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      web: {
-        boxShadow: '0 8px 24px rgba(37, 99, 235, 0.38)',
-        cursor: 'pointer',
-      } as any,
-      default: {
-        shadowColor: '#2563EB',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.38,
-        shadowRadius: 18,
-        elevation: 6,
-      },
-    }),
-  },
-  ctaButtonPressed: {
-    backgroundColor: '#1D4ED8',
-    transform: [{ scale: 0.985 }],
-  },
-  ctaButtonText: {
-    ...fontStyle('outfit', 'bold'),
-    color: '#ffffff',
-    fontSize: 18,
-    letterSpacing: -0.2,
   },
 });
