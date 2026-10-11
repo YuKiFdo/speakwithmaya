@@ -27,6 +27,8 @@ yarn-error.log*
 .env.*
 !.env.example
 
-# OS Files
-.DS_Store
-Thumbs.db
+# Temporary & Scratch
+scratch/
+*/scratch/
+.system_generated/
+

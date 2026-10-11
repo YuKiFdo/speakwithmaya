@@ -248,3 +248,99 @@ export function playAnalysisCompleteSound(): void {
     console.error('[sound-service] Complete sound error:', err);
   }
 }
+
+/**
+ * 4. Juicy Gamified "Understood" Button Click Pop
+ * Crisp, modern affirmative tap with a bright rising resonant chime
+ */
+export function playUnderstoodTapSound(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+
+    // 1. Subtle acoustic tactile click
+    const clickOsc = ctx.createOscillator();
+    const clickGain = ctx.createGain();
+    clickOsc.type = 'triangle';
+    clickOsc.frequency.setValueAtTime(1400, now);
+    clickOsc.frequency.exponentialRampToValueAtTime(320, now + 0.025);
+
+    clickGain.gain.setValueAtTime(0.4, now);
+    clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.025);
+
+    clickOsc.connect(clickGain);
+    clickGain.connect(ctx.destination);
+
+    clickOsc.start(now);
+    clickOsc.stop(now + 0.025);
+
+    // 2. Bright, rewarding melodic chime (D5 -> A5 rising tone)
+    const tones = [587.33, 880.00];
+    tones.forEach((freq, idx) => {
+      const startTime = now + idx * 0.035;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+
+      gain.gain.setValueAtTime(0.001, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.35, startTime + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.16);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(startTime);
+      osc.stop(startTime + 0.16);
+    });
+  } catch (err) {
+    console.warn('[sound-service] Understood tap sound error:', err);
+  }
+}
+
+/**
+ * 5. Celebratory "Finish Review" Victory Fanfare
+ * Joyful ascending triad chime (C5 -> E5 -> G5 -> C6) with warm shimmer
+ */
+export function playFinishReviewFanfare(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+    const notes = [523.25, 659.25, 783.99, 1046.50];
+
+    notes.forEach((freq, idx) => {
+      const startTime = now + idx * 0.055;
+      const duration = 0.55;
+
+      const osc = ctx.createOscillator();
+      const harmonic = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+
+      harmonic.type = 'triangle';
+      harmonic.frequency.setValueAtTime(freq * 1.5, startTime);
+
+      gain.gain.setValueAtTime(0.001, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.45, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+      osc.connect(gain);
+      harmonic.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(startTime);
+      harmonic.start(startTime);
+      osc.stop(startTime + duration);
+      harmonic.stop(startTime + duration);
+    });
+  } catch (err) {
+    console.warn('[sound-service] Finish review fanfare error:', err);
+  }
+}

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback, useTransition } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,11 @@ import {
   Platform,
   useWindowDimensions,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Radii } from '@/theme/tokens';
 import { fontStyle } from '@/theme/fonts';
@@ -61,6 +63,7 @@ export interface TranscriptTurn {
   speaker: 'user' | 'ai';
   time: string;
   message: string;
+  audioUrl?: string | null;
   correction?: CorrectionItem;
 }
 
@@ -75,6 +78,11 @@ export interface HistorySession {
   durationSeconds: number;
   correctionsCount: number;
   recordingLengthString: string;
+  fullConversationAudioUrl?: string | null;
+  userAudioUrl?: string | null;
+  modelAudioUrl?: string | null;
+  user_rating?: number | null;
+  user_feedback?: string | null;
   transcript: TranscriptTurn[];
   corrections?: CorrectionItem[];
   scores?: {
@@ -86,13 +94,32 @@ export interface HistorySession {
 }
 
 
-// ─── MOCK DATA ───────────────────────────────────────────────────────────────
+// Helper to generate dynamic conversational speech amplitude envelope
+function generateSpeechEnvelopeBars(count = 42): number[] {
+  const result: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const phase = (i / count) * Math.PI * 4;
+    const wave = Math.abs(Math.sin(phase) * Math.cos(phase * 1.35));
+    const randomVariation = 0.75 + (Math.sin(i * 11.7) * 0.25);
+    const h = Math.max(8, Math.min(38, Math.round(wave * 32 * randomVariation + 8)));
+    result.push(h);
+  }
+  return result;
+}
 
-const WAVEFORM_HEIGHTS = [
-  12, 18, 26, 32, 22, 16, 28, 36, 30, 24, 18, 34, 40, 28, 20, 32,
-  24, 16, 26, 34, 22, 14, 28, 36, 30, 20, 16, 30, 38, 24, 18, 26,
-  34, 20, 14, 24, 32, 28, 18, 12,
-];
+function formatAudioTime(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const m = Math.floor(s / 60);
+  const remainingS = s % 60;
+  return `${m}:${remainingS < 10 ? '0' : ''}${remainingS}`;
+}
+
+function withCacheBust(url?: string | null): string {
+  if (!url) return '';
+  const clean = url.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+  const sep = clean.includes('?') ? '&' : '?';
+  return `${clean}${sep}_cb=${Date.now()}`;
+}
 
 
 
@@ -131,6 +158,245 @@ function getModeBadgeBg(mode: PracticeMode): string {
   }
 }
 
+// In-memory module cache so navigating to the History tab is instant
+let cachedHistorySessions: HistorySession[] | null = null;
+const waveformBarsCache = new Map<string, number[]>();
+
+// Inject web animation styles once
+if (Platform.OS === 'web' && typeof document !== 'undefined') {
+  const styleId = 'history-animation-keyframes';
+  if (!document.getElementById(styleId)) {
+    const styleTag = document.createElement('style');
+    styleTag.id = styleId;
+    styleTag.innerHTML = `
+      @keyframes historyDetailFadeIn {
+        from {
+          opacity: 0.35;
+          transform: translateY(5px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    `;
+    document.head.appendChild(styleTag);
+  }
+}
+
+interface SessionCardProps {
+  item: HistorySession;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+  onTogglePlay: (e: any, item: HistorySession) => void;
+  isPlayingThisSession: boolean;
+  isAudioUnreachable: boolean;
+}
+
+const DesktopSessionCard = React.memo(function DesktopSessionCard({
+  item,
+  isSelected,
+  onSelect,
+  onTogglePlay,
+  isPlayingThisSession,
+  isAudioUnreachable,
+}: SessionCardProps) {
+  const hasAudio = Boolean(
+    (item.fullConversationAudioUrl && !isAudioUnreachable) ||
+    (item.userAudioUrl && !isAudioUnreachable) ||
+    (item.modelAudioUrl && !isAudioUnreachable) ||
+    (item.transcript && item.transcript.some((t) => Boolean(t.audioUrl && !isAudioUnreachable)))
+  );
+
+  return (
+    <Pressable
+      style={({ pressed, hovered }: any) => [
+        styles.sessionCard,
+        hovered && !isSelected && styles.sessionCardHovered,
+        isSelected && styles.sessionCardSelected,
+        pressed && styles.sessionCardPressed,
+      ]}
+      onPress={() => onSelect(item.id)}
+    >
+      {/* Mode Icon in Colored Square */}
+      <View
+        style={[
+          styles.modeIconSquare,
+          { backgroundColor: getModeBadgeBg(item.mode) },
+          isSelected && styles.modeIconSquareSelected,
+        ]}
+      >
+        {renderModeIcon(item.mode, 20)}
+      </View>
+
+      {/* Center Info */}
+      <View style={styles.sessionCardCenter}>
+        <Text style={styles.sessionCardTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+        <View style={styles.sessionMetaRow}>
+          <View style={styles.metaItem}>
+            <CalendarSmallIcon color="#94A3B8" size={12} />
+            <Text style={styles.metaText}>{item.dateString}</Text>
+          </View>
+          <Text style={styles.metaDot}>•</Text>
+          <View style={styles.metaItem}>
+            <ClockSmallIcon color="#94A3B8" size={12} />
+            <Text style={styles.metaText}>{item.timeString}</Text>
+          </View>
+          <Text style={styles.metaDot}>•</Text>
+          <View style={styles.metaItem}>
+            <TimerSmallIcon color="#94A3B8" size={12} />
+            <Text style={styles.metaText}>{item.durationString}</Text>
+          </View>
+          <Text style={styles.metaDot}>•</Text>
+          <View style={styles.metaItem}>
+            <RefreshCorrectionsIcon color="#94A3B8" size={12} />
+            <Text style={styles.metaText}>
+              {item.correctionsCount}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Right Side: Play Button & Options */}
+      <View style={styles.sessionCardActions}>
+        {hasAudio ? (
+          <Pressable
+            style={({ pressed }: any) => [
+              styles.cardPlayButton,
+              pressed && { transform: [{ scale: 0.92 }] },
+            ]}
+            onPress={(e) => onTogglePlay(e, item)}
+            accessibilityRole="button"
+            accessibilityLabel="Play conversation recording"
+          >
+            {isPlayingThisSession ? (
+              <HistoryPauseIcon size={34} color="#2B5BFF" />
+            ) : (
+              <HistoryPlayIcon size={34} color="#2B5BFF" />
+            )}
+          </Pressable>
+        ) : (
+          <View
+            style={styles.cardNoAudioPill}
+            accessibilityLabel="Voice recording not available"
+          >
+            <Ionicons name="mic-off-outline" size={13} color="#94A3B8" />
+            <Text style={styles.cardNoAudioPillText}>No audio</Text>
+          </View>
+        )}
+        <Pressable
+          style={styles.cardMoreButton}
+          onPress={(e) => e.stopPropagation?.()}
+          hitSlop={8}
+        >
+          <MoreVerticalIcon color="#94A3B8" size={16} />
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+});
+
+const MobileSessionCard = React.memo(function MobileSessionCard({
+  item,
+  isSelected,
+  onSelect,
+  onTogglePlay,
+  isPlayingThisSession,
+  isAudioUnreachable,
+}: SessionCardProps) {
+  const hasAudio = Boolean(
+    (item.fullConversationAudioUrl && !isAudioUnreachable) ||
+    (item.userAudioUrl && !isAudioUnreachable) ||
+    (item.modelAudioUrl && !isAudioUnreachable) ||
+    (item.transcript && item.transcript.some((t) => Boolean(t.audioUrl && !isAudioUnreachable)))
+  );
+
+  return (
+    <Pressable
+      style={({ pressed, hovered }: any) => [
+        styles.mobileSessionCard,
+        hovered && !isSelected && styles.sessionCardHovered,
+        isSelected && styles.mobileSessionCardSelected,
+        pressed && styles.mobileSessionCardPressed,
+      ]}
+      onPress={() => onSelect(item.id)}
+    >
+      <View
+        style={[
+          styles.modeIconSquare,
+          { backgroundColor: getModeBadgeBg(item.mode) },
+          isSelected && styles.modeIconSquareSelected,
+        ]}
+      >
+        {renderModeIcon(item.mode, 22)}
+      </View>
+
+      <View style={styles.sessionCardCenter}>
+        <Text style={styles.sessionCardTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+        <View style={styles.mobileCardMetaGrid}>
+          <View style={styles.metaItem}>
+            <CalendarSmallIcon color="#94A3B8" size={12} />
+            <Text style={styles.metaText}>{item.dateString}</Text>
+          </View>
+          <View style={styles.metaItem}>
+            <ClockSmallIcon color="#94A3B8" size={12} />
+            <Text style={styles.metaText}>{item.timeString}</Text>
+          </View>
+          <View style={styles.metaItem}>
+            <TimerSmallIcon color="#94A3B8" size={12} />
+            <Text style={styles.metaText}>{item.durationString}</Text>
+          </View>
+          <View style={styles.metaItem}>
+            <RefreshCorrectionsIcon color="#94A3B8" size={12} />
+            <Text style={styles.metaText}>
+              {item.correctionsCount} corrections
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.sessionCardActions}>
+        {hasAudio ? (
+          <Pressable
+            style={({ pressed }: any) => [
+              styles.cardPlayButton,
+              pressed && { transform: [{ scale: 0.92 }] },
+            ]}
+            onPress={(e) => onTogglePlay(e, item)}
+            accessibilityRole="button"
+            accessibilityLabel="Play conversation recording"
+          >
+            {isPlayingThisSession ? (
+              <HistoryPauseIcon size={34} color="#2B5BFF" />
+            ) : (
+              <HistoryPlayIcon size={34} color="#2B5BFF" />
+            )}
+          </Pressable>
+        ) : (
+          <View
+            style={styles.cardNoAudioPill}
+            accessibilityLabel="Voice recording not available"
+          >
+            <Ionicons name="mic-off-outline" size={13} color="#94A3B8" />
+            <Text style={styles.cardNoAudioPillText}>No audio</Text>
+          </View>
+        )}
+        <Pressable
+          style={styles.cardMoreButton}
+          onPress={(e) => e.stopPropagation?.()}
+          hitSlop={8}
+        >
+          <MoreVerticalIcon color="#94A3B8" size={18} />
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+});
+
 export default function HistoryScreen() {
   const params = useLocalSearchParams<{ name?: string }>();
   const displayName = params.name || 'Tharindu Fernando';
@@ -148,14 +414,65 @@ export default function HistoryScreen() {
   const [selectedMode, setSelectedMode] = useState<PracticeMode>('all');
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
 
-  // Selected session (defaults to null, auto-selected on load)
+  // Immediate UI selection state for instantaneous card animation
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  // Heavy detail view state (transitioned concurrently to keep list clicks 60fps)
+  const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+
+  const handleSelectSession = useCallback((id: string | null) => {
+    setSelectedSessionId(id);
+    startTransition(() => {
+      setDetailSessionId(id);
+    });
+  }, [startTransition]);
 
   // Audio Playback State
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackProgress, setPlaybackProgress] = useState(0.35); // 35% played by default matching design
+  const [playbackProgress, setPlaybackProgress] = useState(0);
+  const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
+  const [totalDurationSeconds, setTotalDurationSeconds] = useState(0);
+  const [waveformBars, setWaveformBars] = useState<number[]>(() => generateSpeechEnvelopeBars(42));
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [collapsedCorrections, setCollapsedCorrections] = useState<Record<string, boolean>>({});
+  const [playingTurnId, setPlayingTurnId] = useState<string | null>(null);
+  const [unreachableAudioUrls, setUnreachableAudioUrls] = useState<Set<string>>(new Set());
+
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeAudioSessionIdRef = useRef<string | null>(null);
+  const playlistIndexRef = useRef<number>(-1);
+  const isPlaylistModeRef = useRef<boolean>(false);
+
+  // Stop active audio helper
+  const stopAudio = () => {
+    isPlaylistModeRef.current = false;
+    playlistIndexRef.current = -1;
+    if (activeAudioRef.current) {
+      try {
+        activeAudioRef.current.pause();
+        activeAudioRef.current.currentTime = 0;
+      } catch {}
+      activeAudioRef.current = null;
+    }
+    activeAudioSessionIdRef.current = null;
+    setIsPlaying(false);
+    setPlayingTurnId(null);
+    setPlaybackProgress(0);
+    setCurrentTimeSeconds(0);
+  };
+
+  useEffect(() => {
+    return () => {
+      stopAudio();
+    };
+  }, []);
+
+  // When switching selected session, stop previous audio
+  useEffect(() => {
+    if (activeAudioSessionIdRef.current && selectedSessionId && activeAudioSessionIdRef.current !== selectedSessionId) {
+      stopAudio();
+    }
+  }, [selectedSessionId]);
 
   // Transcript scroll ref for "Jump to Next Correction"
   const transcriptScrollRef = useRef<ScrollView>(null);
@@ -163,13 +480,15 @@ export default function HistoryScreen() {
   const lastCorrectionIndexScrolled = useRef<number>(-1);
 
   // Dynamic & cached practice sessions
-  const [allSessions, setAllSessions] = useState<HistorySession[]>([]);
+  const [allSessions, setAllSessions] = useState<HistorySession[]>(() => cachedHistorySessions || []);
+  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedHistorySessions || cachedHistorySessions.length === 0);
 
 
   // Synchronize desktop selection
   useEffect(() => {
     if (isDesktop && !selectedSessionId && allSessions.length > 0) {
       setSelectedSessionId(allSessions[0].id);
+      setDetailSessionId(allSessions[0].id);
     }
   }, [isDesktop, selectedSessionId, allSessions]);
 
@@ -237,7 +556,7 @@ export default function HistoryScreen() {
 
           // Deduplicate consecutive identical turns (e.g. from historical duplicate events)
           const rawTurns = r.turns && r.turns.length > 0 ? r.turns : [];
-          const turnsList: Array<{ role: 'user' | 'model'; text: string; timestamp?: string }> = [];
+          const turnsList: Array<{ role: 'user' | 'model'; text: string; audioUrl?: string | null; timestamp?: string }> = [];
           for (const t of rawTurns) {
             const prev = turnsList[turnsList.length - 1];
             if (!prev || prev.role !== t.role || prev.text.trim() !== t.text.trim()) {
@@ -330,6 +649,7 @@ export default function HistoryScreen() {
               speaker: t.role === 'model' ? 'ai' : 'user',
               time: turnTimeString,
               message: t.text,
+              audioUrl: t.audioUrl || null,
               correction: turnCorrections[i],
             };
           });
@@ -343,6 +663,7 @@ export default function HistoryScreen() {
                 speaker: 'user',
                 time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
                 message: c.originalText,
+                audioUrl: null,
                 correction: {
                   id: c.id,
                   countText: c.countText,
@@ -358,6 +679,7 @@ export default function HistoryScreen() {
                 speaker: 'ai',
                 time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
                 message: `Great speaking! Remember: ${c.whyExplanation}`,
+                audioUrl: null,
               });
             });
           }
@@ -369,6 +691,7 @@ export default function HistoryScreen() {
               speaker: 'ai',
               time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
               message: 'Practice session completed successfully.',
+              audioUrl: null,
             });
           }
 
@@ -394,6 +717,11 @@ export default function HistoryScreen() {
             recordingLengthString,
             durationSeconds: r.duration_seconds || 60,
             correctionsCount: rawCorrections.length,
+            fullConversationAudioUrl: r.fullConversationAudioUrl || null,
+            userAudioUrl: r.userAudioUrl || null,
+            modelAudioUrl: r.modelAudioUrl || null,
+            user_rating: r.user_rating ?? null,
+            user_feedback: r.user_feedback ?? null,
             scores: {
               overall: r.overall_score || 85,
               fluency: r.fluency_score || 84,
@@ -413,17 +741,23 @@ export default function HistoryScreen() {
           };
         });
 
+        cachedHistorySessions = converted;
         setAllSessions(converted);
+        setIsLoading(false);
 
-        // Automatically select the latest real session
+        // Automatically select the latest real session for desktop
         if (converted.length > 0) {
-          setSelectedSessionId((prev) => (!prev ? converted[0].id : prev));
+          setSelectedSessionId((prev) => (prev ? prev : isDesktop ? converted[0].id : null));
+          setDetailSessionId((prev) => (prev ? prev : isDesktop ? converted[0].id : null));
         }
       } else {
         setAllSessions([]);
+        setIsLoading(false);
       }
+    }).catch(() => {
+      setIsLoading(false);
     });
-  }, []);
+  }, [isDesktop]);
 
 
 
@@ -458,22 +792,408 @@ export default function HistoryScreen() {
 
   // Currently Selected Session
   const activeSession = useMemo(() => {
+    const targetId = detailSessionId || selectedSessionId;
     return (
-      allSessions.find((s) => s.id === selectedSessionId) || allSessions[0]
+      allSessions.find((s) => s.id === targetId) || (isDesktop ? allSessions[0] : null)
     );
-  }, [allSessions, selectedSessionId]);
+  }, [allSessions, detailSessionId, selectedSessionId, isDesktop]);
+
+  // Check if active session has any stored audio recordings
+  const hasActiveRecording = useMemo(() => {
+    if (!activeSession) return false;
+    const hasFull = Boolean(activeSession.fullConversationAudioUrl && !unreachableAudioUrls.has(activeSession.fullConversationAudioUrl));
+    const hasUser = Boolean(activeSession.userAudioUrl && !unreachableAudioUrls.has(activeSession.userAudioUrl));
+    const hasModel = Boolean(activeSession.modelAudioUrl && !unreachableAudioUrls.has(activeSession.modelAudioUrl));
+    const hasTurns = Boolean(
+      activeSession.transcript &&
+      activeSession.transcript.some((t) => Boolean(t.audioUrl && !unreachableAudioUrls.has(t.audioUrl)))
+    );
+
+    return hasFull || hasUser || hasModel || hasTurns;
+  }, [activeSession, unreachableAudioUrls]);
 
 
-  // Playback Toggle
-  const togglePlay = () => {
-    setIsPlaying((prev) => !prev);
+  // Extract volume levels from actual audio file or speech envelope
+  useEffect(() => {
+    if (!activeSession) return;
+    const durSec = activeSession.durationSeconds || 17;
+    setTotalDurationSeconds(durSec);
+    setCurrentTimeSeconds(0);
+    setPlaybackProgress(0);
+
+    // If already computed and cached, load instantly!
+    if (waveformBarsCache.has(activeSession.id)) {
+      setWaveformBars(waveformBarsCache.get(activeSession.id)!);
+      return;
+    }
+
+    const audioUrl = (activeSession.fullConversationAudioUrl || activeSession.userAudioUrl || activeSession.modelAudioUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+
+    if (!audioUrl || unreachableAudioUrls.has(audioUrl) || typeof window === 'undefined') {
+      const generated = generateSpeechEnvelopeBars(42);
+      waveformBarsCache.set(activeSession.id, generated);
+      setWaveformBars(generated);
+      return;
+    }
+
+    let isMounted = true;
+    const numBars = 42;
+
+    // Small delay ensures decoding does not compete with the smooth active selection transition
+    const decodeTimer = setTimeout(async () => {
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) {
+          if (isMounted) {
+            const gen = generateSpeechEnvelopeBars(numBars);
+            waveformBarsCache.set(activeSession.id, gen);
+            setWaveformBars(gen);
+          }
+          return;
+        }
+
+        const res = await fetch(withCacheBust(audioUrl));
+        if (!res.ok) {
+          if (isMounted) {
+            setUnreachableAudioUrls((prev) => new Set(prev).add(audioUrl));
+            const gen = generateSpeechEnvelopeBars(numBars);
+            waveformBarsCache.set(activeSession.id, gen);
+            setWaveformBars(gen);
+          }
+          return;
+        }
+
+        const arrayBuffer = await res.arrayBuffer();
+        const audioCtx = new AudioContextClass();
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        const channelData = audioBuffer.getChannelData(0);
+
+        if (!channelData || channelData.length === 0) {
+          if (isMounted) {
+            const gen = generateSpeechEnvelopeBars(numBars);
+            waveformBarsCache.set(activeSession.id, gen);
+            setWaveformBars(gen);
+          }
+          return;
+        }
+
+        const samplesPerBar = Math.floor(channelData.length / numBars);
+        const extracted: number[] = [];
+
+        for (let i = 0; i < numBars; i++) {
+          let sumSquares = 0;
+          const start = i * samplesPerBar;
+          for (let j = 0; j < samplesPerBar; j++) {
+            const val = channelData[start + j] || 0;
+            sumSquares += val * val;
+          }
+          const rms = Math.sqrt(sumSquares / Math.max(1, samplesPerBar));
+          // Scale RMS amplitude into height between 7px and 38px
+          const barHeight = Math.max(7, Math.min(38, Math.round(rms * 160 + 8)));
+          extracted.push(barHeight);
+        }
+
+        if (isMounted && extracted.length === numBars) {
+          waveformBarsCache.set(activeSession.id, extracted);
+          setWaveformBars(extracted);
+          if (audioBuffer.duration && audioBuffer.duration > 0) {
+            setTotalDurationSeconds(Math.round(audioBuffer.duration));
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setUnreachableAudioUrls((prev) => new Set(prev).add(audioUrl));
+          const gen = generateSpeechEnvelopeBars(numBars);
+          waveformBarsCache.set(activeSession.id, gen);
+          setWaveformBars(gen);
+        }
+      }
+    }, 60);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(decodeTimer);
+    };
+  }, [activeSession?.id, activeSession?.fullConversationAudioUrl, activeSession?.userAudioUrl, unreachableAudioUrls]);
+
+  // Play individual turn in conversational sequential playlist (REAL RECORDED AUDIO ONLY)
+  const playTurnInSequence = (session: HistorySession, turnIdx: number) => {
+    const turns = session.transcript;
+    if (turnIdx >= turns.length) {
+      stopAudio();
+      return;
+    }
+
+    // Find next turn with real audio recording
+    let targetIdx = turnIdx;
+    while (targetIdx < turns.length && !turns[targetIdx].audioUrl) {
+      targetIdx++;
+    }
+
+    if (targetIdx >= turns.length) {
+      stopAudio();
+      return;
+    }
+
+    playlistIndexRef.current = targetIdx;
+    const turn = turns[targetIdx];
+    setPlayingTurnId(turn.id);
+    setPlaybackProgress(targetIdx / Math.max(1, turns.length));
+
+    const cleanAudioUrl = withCacheBust(turn.audioUrl);
+
+    if (cleanAudioUrl && typeof window !== 'undefined') {
+      const audio = new Audio(cleanAudioUrl);
+      audio.playbackRate = playbackSpeed;
+
+      audio.ontimeupdate = () => {
+        if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+          setCurrentTimeSeconds(Math.round(audio.currentTime));
+        }
+      };
+
+      audio.onended = () => {
+        if (isPlaylistModeRef.current) {
+          playTurnInSequence(session, targetIdx + 1);
+        } else {
+          stopAudio();
+        }
+      };
+
+      audio.onerror = () => {
+        if (isPlaylistModeRef.current) {
+          playTurnInSequence(session, targetIdx + 1);
+        } else {
+          stopAudio();
+        }
+      };
+
+      activeAudioRef.current = audio;
+      audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch(() => {
+        if (isPlaylistModeRef.current) {
+          playTurnInSequence(session, targetIdx + 1);
+        } else {
+          stopAudio();
+        }
+      });
+    } else if (isPlaylistModeRef.current) {
+      playTurnInSequence(session, targetIdx + 1);
+    } else {
+      stopAudio();
+    }
+  };
+
+  // Full Session Playback Toggle (Maya -> You -> Maya -> You in proper order)
+  const togglePlay = (targetSession?: HistorySession) => {
+    const session = targetSession || activeSession;
+    if (!session) return;
+
+    // If currently playing this session -> pause it
+    if (isPlaying && activeAudioSessionIdRef.current === session.id) {
+      if (activeAudioRef.current) {
+        try {
+          activeAudioRef.current.pause();
+        } catch {}
+      }
+      setIsPlaying(false);
+      return;
+    }
+
+    // If playing a different session -> stop previous first
+    if (activeAudioRef.current && activeAudioSessionIdRef.current !== session.id) {
+      stopAudio();
+    }
+
+    // If resuming after pause on the same session (single audio element)
+    if (activeAudioRef.current && activeAudioSessionIdRef.current === session.id && !isPlaylistModeRef.current) {
+      activeAudioRef.current.playbackRate = playbackSpeed;
+      activeAudioRef.current.play().then(() => {
+        setIsPlaying(true);
+      }).catch((e) => {
+        console.warn('Audio resume error:', e);
+        setIsPlaying(false);
+      });
+      return;
+    }
+
+    // If resuming playlist mode after pause
+    if (isPlaylistModeRef.current && activeAudioSessionIdRef.current === session.id && playlistIndexRef.current >= 0) {
+      playTurnInSequence(session, playlistIndexRef.current);
+      return;
+    }
+
+    // Priority 1: Full conversation audio URL (Maya & User stitched in proper chronological order)
+    const rawFullAudioUrl = session.fullConversationAudioUrl || '';
+    const fullAudioUrl = withCacheBust(rawFullAudioUrl);
+
+    if (fullAudioUrl && typeof window !== 'undefined') {
+      try {
+        const audio = new Audio(fullAudioUrl);
+        audio.playbackRate = playbackSpeed;
+
+        audio.ontimeupdate = () => {
+          if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+            setPlaybackProgress(audio.currentTime / audio.duration);
+            setCurrentTimeSeconds(Math.round(audio.currentTime));
+            setTotalDurationSeconds(Math.round(audio.duration));
+          }
+        };
+
+        audio.onended = () => {
+          setIsPlaying(false);
+          setPlaybackProgress(0);
+          setCurrentTimeSeconds(0);
+          setPlayingTurnId(null);
+        };
+
+        audio.onerror = () => {
+          console.log('[History] full_conversation.wav failed to load, falling back to sequential turn playlist');
+          isPlaylistModeRef.current = true;
+          activeAudioSessionIdRef.current = session.id;
+          setIsPlaying(true);
+          playTurnInSequence(session, 0);
+        };
+
+        activeAudioRef.current = audio;
+        activeAudioSessionIdRef.current = session.id;
+        isPlaylistModeRef.current = false;
+
+        audio.play().then(() => {
+          setIsPlaying(true);
+        }).catch(() => {
+          isPlaylistModeRef.current = true;
+          activeAudioSessionIdRef.current = session.id;
+          setIsPlaying(true);
+          playTurnInSequence(session, 0);
+        });
+        return;
+      } catch (err) {
+        console.warn('[History] Error starting full conversation audio:', err);
+      }
+    }
+
+    // Priority 2: Fallback to Sequential Turn Playlist in proper order
+    if (session.transcript && session.transcript.some(t => t.audioUrl)) {
+      isPlaylistModeRef.current = true;
+      activeAudioSessionIdRef.current = session.id;
+      setIsPlaying(true);
+      playTurnInSequence(session, 0);
+      return;
+    }
+
+    // Priority 3: Fallback to userAudioUrl or modelAudioUrl if available
+    const fallbackUrl = (session.userAudioUrl || session.modelAudioUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+    if (fallbackUrl && typeof window !== 'undefined') {
+      try {
+        const audio = new Audio(fallbackUrl);
+        audio.playbackRate = playbackSpeed;
+        audio.ontimeupdate = () => {
+          if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+            setPlaybackProgress(audio.currentTime / audio.duration);
+            setCurrentTimeSeconds(Math.round(audio.currentTime));
+            setTotalDurationSeconds(Math.round(audio.duration));
+          }
+        };
+        audio.onended = () => {
+          setIsPlaying(false);
+          setPlaybackProgress(0);
+          setCurrentTimeSeconds(0);
+        };
+        activeAudioRef.current = audio;
+        activeAudioSessionIdRef.current = session.id;
+        audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+      } catch {}
+    }
+  };
+
+  const handleCardTogglePlay = useCallback((e: any, item: HistorySession) => {
+    e.stopPropagation?.();
+    setSelectedSessionId(item.id);
+    startTransition(() => {
+      setDetailSessionId(item.id);
+    });
+    togglePlay(item);
+  }, [togglePlay]);
+
+  // Play individual turn audio (You or Maya) - REAL RECORDED AUDIO ONLY
+  const togglePlayTurn = (turn: TranscriptTurn, session: HistorySession) => {
+    // If currently playing this exact turn -> pause/stop
+    if (playingTurnId === turn.id) {
+      stopAudio();
+      return;
+    }
+
+    // Stop previous audio
+    stopAudio();
+
+    const turnAudioUrl = (turn.audioUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+    if (!turnAudioUrl || typeof window !== 'undefined' && !window.Audio) {
+      console.warn('[History] No audio recording clip available for turn', turn.id);
+      return;
+    }
+
+    activeAudioSessionIdRef.current = session.id;
+    setPlayingTurnId(turn.id);
+    setIsPlaying(true);
+
+    const playUrl = withCacheBust(turn.audioUrl);
+    const audio = new Audio(playUrl);
+    audio.playbackRate = playbackSpeed;
+
+    audio.ontimeupdate = () => {
+      if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+        setPlaybackProgress(audio.currentTime / audio.duration);
+        setCurrentTimeSeconds(Math.round(audio.currentTime));
+        setTotalDurationSeconds(Math.round(audio.duration));
+      }
+    };
+
+    audio.onended = () => {
+      setPlayingTurnId(null);
+      setIsPlaying(false);
+      setPlaybackProgress(0);
+      setCurrentTimeSeconds(0);
+    };
+
+    audio.onerror = () => {
+      console.warn('[History] Failed to load turn audio clip:', turnAudioUrl);
+      setPlayingTurnId(null);
+      setIsPlaying(false);
+    };
+
+    activeAudioRef.current = audio;
+    audio.play().catch((err) => {
+      console.warn('[History] Playback error on turn audio:', err);
+      setPlayingTurnId(null);
+      setIsPlaying(false);
+    });
   };
 
   // Speed Toggle: 1.0x -> 1.25x -> 1.5x -> 2.0x -> 1.0x
   const cyclePlaybackSpeed = () => {
     const speeds = [1.0, 1.25, 1.5, 2.0];
     const nextIdx = (speeds.indexOf(playbackSpeed) + 1) % speeds.length;
-    setPlaybackSpeed(speeds[nextIdx]);
+    const nextSpeed = speeds[nextIdx];
+    setPlaybackSpeed(nextSpeed);
+    if (activeAudioRef.current) {
+      activeAudioRef.current.playbackRate = nextSpeed;
+    }
+  };
+
+  const handleSeek = (fraction: number) => {
+    setPlaybackProgress(fraction);
+    if (activeAudioRef.current && activeAudioRef.current.duration && !isNaN(activeAudioRef.current.duration)) {
+      const newTime = fraction * activeAudioRef.current.duration;
+      activeAudioRef.current.currentTime = newTime;
+      setCurrentTimeSeconds(Math.round(newTime));
+    } else if (isPlaylistModeRef.current && activeSession?.transcript) {
+      const targetIdx = Math.floor(fraction * activeSession.transcript.length);
+      playTurnInSequence(activeSession, Math.min(targetIdx, activeSession.transcript.length - 1));
+    } else if (totalDurationSeconds > 0) {
+      setCurrentTimeSeconds(Math.round(fraction * totalDurationSeconds));
+    }
   };
 
   // Toggle single correction accordion
@@ -510,6 +1230,357 @@ export default function HistoryScreen() {
     { id: 'phone', label: 'Phone Call' },
     { id: 'travel', label: 'Travel English' },
   ];
+
+  // Helper to render session detail view (shared between Desktop Right Column and Mobile Active View)
+  const renderSessionDetailContent = () => {
+    if (!activeSession) return null;
+
+    return (
+      <ScrollView
+        ref={transcriptScrollRef}
+        style={styles.detailScroll}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.detailScrollContent}
+      >
+        {/* Session Header Box */}
+        <View style={styles.detailHeaderBox}>
+          <View style={styles.detailHeaderLeft}>
+            <View
+              style={[
+                styles.detailModeSquare,
+                { backgroundColor: getModeBadgeBg(activeSession.mode) },
+              ]}
+            >
+              {renderModeIcon(activeSession.mode, 24)}
+            </View>
+            <View style={styles.detailHeaderTextGroup}>
+              <Text style={styles.detailSessionTitle}>
+                {activeSession.title}
+              </Text>
+              <View style={styles.detailMetaRow}>
+                <View style={styles.metaItem}>
+                  <CalendarSmallIcon color="#94A3B8" size={12} />
+                  <Text style={styles.metaText}>{activeSession.dateString}</Text>
+                </View>
+                <Text style={styles.metaDot}>•</Text>
+                <View style={styles.metaItem}>
+                  <ClockSmallIcon color="#94A3B8" size={12} />
+                  <Text style={styles.metaText}>{activeSession.timeString}</Text>
+                </View>
+                <Text style={styles.metaDot}>•</Text>
+                <View style={styles.metaItem}>
+                  <TimerSmallIcon color="#94A3B8" size={12} />
+                  <Text style={styles.metaText}>{activeSession.durationString}</Text>
+                </View>
+                <Text style={styles.metaDot}>•</Text>
+                <View style={styles.metaItem}>
+                  <RefreshCorrectionsIcon color="#94A3B8" size={12} />
+                  <Text style={styles.metaText}>
+                    {activeSession.correctionsCount} corrections
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          <Pressable
+            style={styles.closeDetailButton}
+            hitSlop={10}
+            onPress={() => setSelectedSessionId(null)}
+          >
+            <CloseCrossIcon size={18} color="#94A3B8" />
+          </Pressable>
+        </View>
+
+        {/* ── VOICE RECORDING SECTION ── */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionHeaderTitle}>Voice Recording</Text>
+          <View style={styles.voiceRecordingCard}>
+            {hasActiveRecording ? (
+              <View style={styles.voicePlayerRow}>
+                {/* Play/Pause Button */}
+                <Pressable
+                  style={styles.voicePlayButton}
+                  onPress={() => togglePlay()}
+                  accessibilityRole="button"
+                  accessibilityLabel={isPlaying ? 'Pause recording' : 'Play recording'}
+                >
+                  {isPlaying ? (
+                    <HistoryPauseIcon size={44} color="#2B5BFF" />
+                  ) : (
+                    <HistoryPlayIcon size={44} color="#2B5BFF" />
+                  )}
+                </Pressable>
+
+                {/* Waveform Visualizer */}
+                <View style={styles.waveformContainer}>
+                  {waveformBars.map((barHeight, idx) => {
+                    const fraction = idx / waveformBars.length;
+                    const isPlayed = fraction <= playbackProgress;
+                    return (
+                      <Pressable
+                        key={idx}
+                        onPress={() => handleSeek(fraction)}
+                        hitSlop={{ top: 8, bottom: 8, left: 1, right: 1 }}
+                        style={styles.waveformBarTouch}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Seek to ${Math.round(fraction * 100)}%`}
+                      >
+                        <View
+                          style={[
+                            styles.waveformBar,
+                            {
+                              height: barHeight,
+                              backgroundColor: isPlayed ? '#2B5BFF' : '#CBD5E1',
+                            },
+                          ]}
+                        />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {/* Time & Speed Controls */}
+                <Text style={styles.voiceDurationText}>
+                  {isPlaying || currentTimeSeconds > 0
+                    ? `${formatAudioTime(currentTimeSeconds)} / ${formatAudioTime(totalDurationSeconds || activeSession.durationSeconds || 17)}`
+                    : activeSession.recordingLengthString || formatAudioTime(totalDurationSeconds || 17)}
+                </Text>
+                <Pressable
+                  style={styles.speedPill}
+                  onPress={cyclePlaybackSpeed}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Change speed: current ${playbackSpeed.toFixed(1)}x`}
+                >
+                  <Text style={styles.speedPillText}>
+                    {playbackSpeed.toFixed(1)}x
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              /* Recording Not Available State */
+              <View style={styles.noRecordingRow}>
+                <View style={styles.noRecordingIconCircle}>
+                  <Ionicons name="mic-off-outline" size={22} color="#64748B" />
+                </View>
+                <View style={styles.noRecordingTextCol}>
+                  <View style={styles.noRecordingHeadingRow}>
+                    <Text style={styles.noRecordingTitle}>Recording Not Available</Text>
+                    <View style={styles.noRecordingExpiredTag}>
+                      <Text style={styles.noRecordingExpiredTagText}>7-Day Retention</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.noRecordingSubtitle}>
+                    Voice audio is retained for 7 days in accordance with privacy rules. The complete transcript, grammar analysis, and corrections are permanently saved below.
+                  </Text>
+                </View>
+                <View style={styles.noRecordingDurationBadge}>
+                  <Ionicons name="time-outline" size={13} color="#64748B" />
+                  <Text style={styles.noRecordingBadgeText}>{activeSession.durationString}</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Auto-remove notice */}
+            <View style={styles.recordingNoticeRow}>
+              <Ionicons name="information-circle-outline" size={14} color="#94A3B8" />
+              <Text style={styles.noticeText}>
+                {hasActiveRecording
+                  ? 'This recording will be automatically removed within 7 days in accordance with privacy rules.'
+                  : 'Audio recordings expire after 7 days. Text transcripts and AI suggestions are saved permanently.'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* ── SESSION TRANSCRIPT SECTION ── */}
+        <View style={styles.sectionContainer}>
+          <View style={styles.transcriptSectionHeader}>
+            <Text style={styles.sectionHeaderTitle}>Session Transcript</Text>
+            {Boolean(activeSession.correctionsCount > 0 || (activeSession.transcript && activeSession.transcript.some((t) => Boolean(t.correction)))) && (
+              <Pressable
+                style={styles.jumpCorrectionButton}
+                onPress={handleJumpToNextCorrection}
+                accessibilityRole="button"
+                accessibilityLabel="Jump to next grammar correction"
+              >
+                <NextCorrectionIcon color="#0057FF" size={13} />
+                <Text style={styles.jumpCorrectionText}>
+                  Jump to Next Correction
+                </Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* Transcript turns */}
+          <View style={styles.transcriptList}>
+            {activeSession.transcript.map((turn) => {
+              const isUser = turn.speaker === 'user';
+              return (
+                <View
+                  key={turn.id}
+                  style={styles.turnRow}
+                  onLayout={(e) => {
+                    correctionPositions.current[turn.id] =
+                      e.nativeEvent.layout.y;
+                  }}
+                >
+                  {/* Avatar */}
+                  <View
+                    style={[
+                      styles.turnAvatarCircle,
+                      isUser
+                        ? styles.userAvatarCircle
+                        : styles.aiAvatarCircle,
+                    ]}
+                  >
+                    {isUser ? (
+                      <ModeUserAvatarIcon size={16} color="#64748B" />
+                    ) : (
+                      renderModeIcon(activeSession.mode, 16)
+                    )}
+                  </View>
+
+                  {/* Turn Content */}
+                  <View style={styles.turnContentCol}>
+                    <View style={styles.speakerHeaderRow}>
+                      <View style={styles.speakerNameCol}>
+                        <Text style={styles.speakerNameText}>
+                          {isUser ? 'You' : 'AI'}
+                        </Text>
+                        <Text style={styles.speakerTimeText}>{turn.time}</Text>
+                      </View>
+                      {Boolean(turn.audioUrl) && (
+                        <Pressable
+                          style={[
+                            styles.turnPlayButton,
+                            playingTurnId === turn.id && styles.turnPlayButtonActive,
+                          ]}
+                          onPress={() => togglePlayTurn(turn, activeSession)}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Play ${isUser ? 'your' : 'AI'} audio turn`}
+                        >
+                          {playingTurnId === turn.id ? (
+                            <Ionicons name="pause" size={12} color="#2B5BFF" />
+                          ) : (
+                            <Ionicons name="volume-medium" size={13} color="#64748B" />
+                          )}
+                          <Text
+                            style={[
+                              styles.turnPlayText,
+                              playingTurnId === turn.id && styles.turnPlayTextActive,
+                            ]}
+                          >
+                            {playingTurnId === turn.id ? 'Playing' : 'Listen'}
+                          </Text>
+                        </Pressable>
+                      )}
+                    </View>
+
+                    {/* Message Bubble */}
+                    <View
+                      style={[
+                        styles.turnBubble,
+                        isUser
+                          ? styles.userTurnBubble
+                          : styles.aiTurnBubble,
+                        playingTurnId === turn.id && styles.turnBubblePlaying,
+                      ]}
+                    >
+                      <Text style={styles.turnBubbleText}>{turn.message}</Text>
+                    </View>
+
+                    {turn.correction && (
+                      <View style={styles.correctionCard}>
+                        <Pressable
+                          style={styles.correctionHeaderRow}
+                          onPress={() =>
+                            toggleCorrectionCollapse(turn.correction!.id)
+                          }
+                        >
+                          <View style={styles.correctionTitleLeft}>
+                            <View style={styles.redCrossCircle}>
+                              <Text style={styles.redCrossMark}>✕</Text>
+                            </View>
+                            <Text style={styles.correctionCountText}>
+                              {turn.correction.countText}
+                            </Text>
+                            <Text style={styles.correctionChevron}>
+                              {collapsedCorrections[turn.correction.id]
+                                ? '∨'
+                                : '∧'}
+                            </Text>
+                          </View>
+
+                          <View style={styles.correctionHeaderRight}>
+                            {Boolean(turn.audioUrl || activeSession.fullConversationAudioUrl) && (
+                              <Pressable
+                                style={styles.audioSpeakerButton}
+                                onPress={() => {
+                                  if (turn.audioUrl) {
+                                    togglePlayTurn(turn, activeSession);
+                                  } else {
+                                    togglePlay(activeSession);
+                                  }
+                                }}
+                                hitSlop={6}
+                              >
+                                <VolumeSpeakerIcon color="#94A3B8" size={16} />
+                              </Pressable>
+                            )}
+                            <Image
+                              source={require('@/assets/images/maya-avatar.png')}
+                              style={styles.miniMayaAvatar}
+                            />
+                          </View>
+                        </Pressable>
+
+                        {!collapsedCorrections[turn.correction.id] && (
+                          <View style={styles.correctionBody}>
+                            <View style={styles.comparisonBoxesRow}>
+                              <View style={styles.originalPhraseBox}>
+                                <View style={styles.phraseLine}>
+                                  <Text style={styles.phraseCross}>✕ </Text>
+                                  <Text style={styles.originalStrikethroughText}>
+                                    {turn.correction.originalText}
+                                  </Text>
+                                </View>
+                                <Text style={styles.phraseLabel}>Original</Text>
+                              </View>
+
+                              <Text style={styles.comparisonArrow}>→</Text>
+
+                              <View style={styles.correctedPhraseBox}>
+                                <View style={styles.phraseLine}>
+                                  <Text style={styles.phraseCheck}>✓ </Text>
+                                  <Text style={styles.correctedGreenText}>
+                                    {turn.correction.correctedText}
+                                  </Text>
+                                </View>
+                                <Text style={styles.phraseLabel}>Corrected</Text>
+                              </View>
+                            </View>
+
+                            <View style={styles.whyExplanationRow}>
+                              <Text style={styles.whyPrefix}>Why: </Text>
+                              <Text style={styles.whyExplanationText}>
+                                {turn.correction.whyExplanation}
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      </ScrollView>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -605,7 +1676,20 @@ export default function HistoryScreen() {
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={styles.desktopSessionsScrollContent}
                   >
-                    {Object.keys(groupedSessions).length === 0 ? (
+                    {isLoading ? (
+                      <View style={styles.skeletonContainer}>
+                        {[1, 2, 3, 4, 5].map((idx) => (
+                          <View key={idx} style={styles.skeletonCard}>
+                            <View style={styles.skeletonIconBox} />
+                            <View style={styles.skeletonInfoCol}>
+                              <View style={styles.skeletonTitleBar} />
+                              <View style={styles.skeletonMetaBar} />
+                            </View>
+                            <View style={styles.skeletonPlayCircle} />
+                          </View>
+                        ))}
+                      </View>
+                    ) : Object.keys(groupedSessions).length === 0 ? (
                       <View style={styles.emptyResultsBox}>
                         <Text style={styles.emptyResultsText}>
                           No conversations found matching your search.
@@ -615,83 +1699,21 @@ export default function HistoryScreen() {
                       Object.entries(groupedSessions).map(([groupTitle, sessions]) => (
                         <View key={groupTitle} style={styles.groupContainer}>
                           <Text style={styles.groupHeaderTitle}>{groupTitle}</Text>
-                          {sessions.map((item) => {
-                            const isSelected = item.id === activeSession?.id;
-                            return (
-                              <Pressable
-                                key={item.id}
-                                style={[
-                                  styles.sessionCard,
-                                  isSelected && styles.sessionCardSelected,
-                                ]}
-                                onPress={() => setSelectedSessionId(item.id)}
-                              >
-                                {/* Mode Icon in Colored Square */}
-                                <View
-                                  style={[
-                                    styles.modeIconSquare,
-                                    { backgroundColor: getModeBadgeBg(item.mode) },
-                                  ]}
-                                >
-                                  {renderModeIcon(item.mode, 20)}
-                                </View>
-
-                                {/* Center Info */}
-                                <View style={styles.sessionCardCenter}>
-                                  <Text style={styles.sessionCardTitle} numberOfLines={1}>
-                                    {item.title}
-                                  </Text>
-                                  <View style={styles.sessionMetaRow}>
-                                    <View style={styles.metaItem}>
-                                      <CalendarSmallIcon color="#94A3B8" size={12} />
-                                      <Text style={styles.metaText}>{item.dateString}</Text>
-                                    </View>
-                                    <Text style={styles.metaDot}>•</Text>
-                                    <View style={styles.metaItem}>
-                                      <ClockSmallIcon color="#94A3B8" size={12} />
-                                      <Text style={styles.metaText}>{item.timeString}</Text>
-                                    </View>
-                                    <Text style={styles.metaDot}>•</Text>
-                                    <View style={styles.metaItem}>
-                                      <TimerSmallIcon color="#94A3B8" size={12} />
-                                      <Text style={styles.metaText}>{item.durationString}</Text>
-                                    </View>
-                                    <Text style={styles.metaDot}>•</Text>
-                                    <View style={styles.metaItem}>
-                                      <RefreshCorrectionsIcon color="#94A3B8" size={12} />
-                                      <Text style={styles.metaText}>
-                                        {item.correctionsCount}
-                                      </Text>
-                                    </View>
-                                  </View>
-                                </View>
-
-                                {/* Right Side: Play Button & Options */}
-                                <View style={styles.sessionCardActions}>
-                                  <Pressable
-                                    style={styles.cardPlayButton}
-                                    onPress={() => {
-                                      setSelectedSessionId(item.id);
-                                      togglePlay();
-                                    }}
-                                  >
-                                    {isSelected && isPlaying ? (
-                                      <HistoryPauseIcon size={34} color="#2B5BFF" />
-                                    ) : (
-                                      <HistoryPlayIcon size={34} color="#2B5BFF" />
-                                    )}
-                                  </Pressable>
-                                  <Pressable
-                                    style={styles.cardMoreButton}
-                                    onPress={() => {}}
-                                    hitSlop={8}
-                                  >
-                                    <MoreVerticalIcon color="#94A3B8" size={16} />
-                                  </Pressable>
-                                </View>
-                              </Pressable>
-                            );
-                          })}
+                          {sessions.map((item) => (
+                            <DesktopSessionCard
+                              key={item.id}
+                              item={item}
+                              isSelected={item.id === (selectedSessionId || activeSession?.id)}
+                              onSelect={handleSelectSession}
+                              onTogglePlay={handleCardTogglePlay}
+                              isPlayingThisSession={item.id === activeAudioSessionIdRef.current && isPlaying}
+                              isAudioUnreachable={Boolean(
+                                (item.fullConversationAudioUrl && unreachableAudioUrls.has(item.fullConversationAudioUrl)) ||
+                                (item.userAudioUrl && unreachableAudioUrls.has(item.userAudioUrl)) ||
+                                (item.modelAudioUrl && unreachableAudioUrls.has(item.modelAudioUrl))
+                              )}
+                            />
+                          ))}
                         </View>
                       ))
                     )}
@@ -700,10 +1722,24 @@ export default function HistoryScreen() {
 
                 {/* ── RIGHT COLUMN: SELECTED SESSION DETAIL ── */}
                 <View style={styles.desktopDetailColumn}>
-                  {activeSession ? (
+                  {isLoading ? (
+                    <View style={styles.emptyDetailContainer}>
+                      <ActivityIndicator size="large" color="#0057FF" style={{ marginBottom: 16 }} />
+                      <Text style={styles.loadingStateTitle}>Loading conversations...</Text>
+                      <Text style={styles.loadingStateSubtitle}>
+                        Retrieving your past speaking sessions and AI feedback.
+                      </Text>
+                    </View>
+                  ) : activeSession ? (
                     <ScrollView
+                      key={activeSession.id}
                       ref={transcriptScrollRef}
-                      style={styles.detailScroll}
+                      style={[
+                        styles.detailScroll,
+                        Platform.OS === 'web' && ({
+                          animation: 'historyDetailFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+                        } as any),
+                      ]}
                       showsVerticalScrollIndicator={false}
                       contentContainerStyle={styles.detailScrollContent}
                     >
@@ -757,55 +1793,85 @@ export default function HistoryScreen() {
                       <View style={styles.sectionContainer}>
                         <Text style={styles.sectionHeaderTitle}>Voice Recording</Text>
                         <View style={styles.voiceRecordingCard}>
-                          <View style={styles.voicePlayerRow}>
-                            {/* Play/Pause Button */}
-                            <Pressable style={styles.voicePlayButton} onPress={togglePlay}>
-                              {isPlaying ? (
-                                <HistoryPauseIcon size={44} color="#2B5BFF" />
-                              ) : (
-                                <HistoryPlayIcon size={44} color="#2B5BFF" />
-                              )}
-                            </Pressable>
+                          {hasActiveRecording ? (
+                            <View style={styles.voicePlayerRow}>
+                              {/* Play/Pause Button */}
+                              <Pressable style={styles.voicePlayButton} onPress={() => togglePlay()}>
+                                {isPlaying ? (
+                                  <HistoryPauseIcon size={44} color="#2B5BFF" />
+                                ) : (
+                                  <HistoryPlayIcon size={44} color="#2B5BFF" />
+                                )}
+                              </Pressable>
 
-                            {/* Waveform Visualizer */}
-                            <View style={styles.waveformContainer}>
-                              {WAVEFORM_HEIGHTS.map((barHeight, idx) => {
-                                const fraction = idx / WAVEFORM_HEIGHTS.length;
-                                const isPlayed = fraction <= playbackProgress;
-                                return (
-                                  <View
-                                    key={idx}
-                                    style={[
-                                      styles.waveformBar,
-                                      {
-                                        height: barHeight,
-                                        backgroundColor: isPlayed ? '#2B5BFF' : '#CBD5E1',
-                                      },
-                                    ]}
-                                  />
-                                );
-                              })}
-                            </View>
+                              {/* Waveform Visualizer */}
+                              <View style={styles.waveformContainer}>
+                                {waveformBars.map((barHeight, idx) => {
+                                  const fraction = idx / waveformBars.length;
+                                  const isPlayed = fraction <= playbackProgress;
+                                  return (
+                                    <Pressable
+                                      key={idx}
+                                      onPress={() => handleSeek(fraction)}
+                                      hitSlop={{ top: 8, bottom: 8, left: 1, right: 1 }}
+                                      style={styles.waveformBarTouch}
+                                      accessibilityRole="button"
+                                      accessibilityLabel={`Seek to ${Math.round(fraction * 100)}%`}
+                                    >
+                                      <View
+                                        style={[
+                                          styles.waveformBar,
+                                          {
+                                            height: barHeight,
+                                            backgroundColor: isPlayed ? '#2B5BFF' : '#CBD5E1',
+                                          },
+                                        ]}
+                                      />
+                                    </Pressable>
+                                  );
+                                })}
+                              </View>
 
-                            {/* Time & Speed Controls */}
-                            <Text style={styles.voiceDurationText}>
-                              {activeSession.recordingLengthString}
-                            </Text>
-                            <Pressable
-                              style={styles.speedPill}
-                              onPress={cyclePlaybackSpeed}
-                            >
-                              <Text style={styles.speedPillText}>
-                                {playbackSpeed.toFixed(1)}x
+                              {/* Time & Speed Controls */}
+                              <Text style={styles.voiceDurationText}>
+                                {isPlaying || currentTimeSeconds > 0
+                                  ? `${formatAudioTime(currentTimeSeconds)} / ${formatAudioTime(totalDurationSeconds || activeSession.durationSeconds || 17)}`
+                                  : activeSession.recordingLengthString || formatAudioTime(totalDurationSeconds || 17)}
                               </Text>
-                            </Pressable>
-                          </View>
+                              <Pressable
+                                style={styles.speedPill}
+                                onPress={cyclePlaybackSpeed}
+                              >
+                                <Text style={styles.speedPillText}>
+                                  {playbackSpeed.toFixed(1)}x
+                                </Text>
+                              </Pressable>
+                            </View>
+                          ) : (
+                            /* Recording Not Available State */
+                            <View style={styles.noRecordingRow}>
+                              <View style={styles.noRecordingIconCircle}>
+                                <Ionicons name="mic-off-outline" size={20} color="#94A3B8" />
+                              </View>
+                              <View style={styles.noRecordingTextCol}>
+                                <Text style={styles.noRecordingTitle}>Recording Not Available</Text>
+                                <Text style={styles.noRecordingSubtitle}>
+                                  Voice recording is not stored for this session or was removed after the 7-day retention period. Text transcript is saved below.
+                                </Text>
+                              </View>
+                              <View style={styles.noRecordingBadge}>
+                                <Text style={styles.noRecordingBadgeText}>{activeSession.durationString}</Text>
+                              </View>
+                            </View>
+                          )}
 
                           {/* Auto-remove notice */}
                           <View style={styles.recordingNoticeRow}>
                             <Text style={styles.noticeIconCircle}>ⓘ</Text>
                             <Text style={styles.noticeText}>
-                              This recording will be automatically removed within 7 days.
+                              {hasActiveRecording
+                                ? 'This recording will be automatically removed within 7 days in accordance with privacy rules.'
+                                : 'Audio recordings expire after 7 days. Text transcripts and AI suggestions are saved permanently.'}
                             </Text>
                           </View>
                         </View>
@@ -815,15 +1881,19 @@ export default function HistoryScreen() {
                       <View style={styles.sectionContainer}>
                         <View style={styles.transcriptSectionHeader}>
                           <Text style={styles.sectionHeaderTitle}>Session Transcript</Text>
-                          <Pressable
-                            style={styles.jumpCorrectionButton}
-                            onPress={handleJumpToNextCorrection}
-                          >
-                            <NextCorrectionIcon color="#0057FF" size={13} />
-                            <Text style={styles.jumpCorrectionText}>
-                              Jump to Next Correction
-                            </Text>
-                          </Pressable>
+                          {Boolean(activeSession.correctionsCount > 0 || (activeSession.transcript && activeSession.transcript.some((t) => Boolean(t.correction)))) && (
+                            <Pressable
+                              style={styles.jumpCorrectionButton}
+                              onPress={handleJumpToNextCorrection}
+                              accessibilityRole="button"
+                              accessibilityLabel="Jump to next grammar correction"
+                            >
+                              <NextCorrectionIcon color="#0057FF" size={13} />
+                              <Text style={styles.jumpCorrectionText}>
+                                Jump to Next Correction
+                              </Text>
+                            </Pressable>
+                          )}
                         </View>
 
                         {/* Transcript turns */}
@@ -857,12 +1927,40 @@ export default function HistoryScreen() {
 
                                 {/* Turn Content */}
                                 <View style={styles.turnContentCol}>
-                                  {/* Speaker Name & Time */}
+                                  {/* Speaker Name, Time & Audio Play Button */}
                                   <View style={styles.speakerHeaderRow}>
-                                    <Text style={styles.speakerNameText}>
-                                      {isUser ? 'You' : 'AI'}
-                                    </Text>
-                                    <Text style={styles.speakerTimeText}>{turn.time}</Text>
+                                    <View style={styles.speakerHeaderLeft}>
+                                      <Text style={styles.speakerNameText}>
+                                        {isUser ? 'You' : 'AI'}
+                                      </Text>
+                                      <Text style={styles.speakerTimeText}>{turn.time}</Text>
+                                    </View>
+                                    {Boolean(hasActiveRecording && turn.audioUrl && !unreachableAudioUrls.has(turn.audioUrl)) && (
+                                      <Pressable
+                                        style={[
+                                          styles.turnPlayButton,
+                                          playingTurnId === turn.id && styles.turnPlayButtonActive,
+                                        ]}
+                                        onPress={() => togglePlayTurn(turn, activeSession)}
+                                        hitSlop={8}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`Play ${isUser ? 'your' : 'AI'} audio turn`}
+                                      >
+                                        {playingTurnId === turn.id ? (
+                                          <Ionicons name="pause" size={12} color="#2B5BFF" />
+                                        ) : (
+                                          <Ionicons name="volume-medium" size={13} color="#64748B" />
+                                        )}
+                                        <Text
+                                          style={[
+                                            styles.turnPlayText,
+                                            playingTurnId === turn.id && styles.turnPlayTextActive,
+                                          ]}
+                                        >
+                                          {playingTurnId === turn.id ? 'Playing' : 'Listen'}
+                                        </Text>
+                                      </Pressable>
+                                    )}
                                   </View>
 
                                   {/* Message Bubble */}
@@ -872,6 +1970,7 @@ export default function HistoryScreen() {
                                       isUser
                                         ? styles.userTurnBubble
                                         : styles.aiTurnBubble,
+                                      playingTurnId === turn.id && styles.turnBubblePlaying,
                                     ]}
                                   >
                                     <Text style={styles.turnBubbleText}>{turn.message}</Text>
@@ -902,13 +2001,21 @@ export default function HistoryScreen() {
                                         </View>
 
                                         <View style={styles.correctionHeaderRight}>
-                                          <Pressable
-                                            style={styles.audioSpeakerButton}
-                                            onPress={() => {}}
-                                            hitSlop={6}
-                                          >
-                                            <VolumeSpeakerIcon color="#94A3B8" size={16} />
-                                          </Pressable>
+                                          {Boolean(hasActiveRecording && (turn.audioUrl || activeSession.fullConversationAudioUrl)) && (
+                                            <Pressable
+                                              style={styles.audioSpeakerButton}
+                                              onPress={() => {
+                                                if (turn.audioUrl) {
+                                                  togglePlayTurn(turn, activeSession);
+                                                } else {
+                                                  togglePlay(activeSession);
+                                                }
+                                              }}
+                                              hitSlop={6}
+                                            >
+                                              <VolumeSpeakerIcon color="#94A3B8" size={16} />
+                                            </Pressable>
+                                          )}
                                           <Image
                                             source={require('@/assets/images/maya-avatar.png')}
                                             style={styles.miniMayaAvatar}
@@ -977,14 +2084,22 @@ export default function HistoryScreen() {
             </View>
           ) : (
             // ─── MOBILE VIEW: LIST VIEW OR DETAIL VIEW ────────────────────
-            selectedSessionId ? (
+            selectedSessionId && activeSession ? (
               // ── MOBILE DETAIL VIEW ──
-              <View style={styles.mobileDetailContainer}>
+              <View
+                key={activeSession.id}
+                style={[
+                  styles.mobileDetailContainer,
+                  Platform.OS === 'web' && ({
+                    animation: 'historyDetailFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+                  } as any),
+                ]}
+              >
                 {/* Mobile Sub-Header: Back Button, Mode Icon & Title */}
                 <View style={styles.mobileDetailTopNav}>
                   <Pressable
                     style={styles.mobileBackButton}
-                    onPress={() => setSelectedSessionId(null)}
+                    onPress={() => handleSelectSession(null)}
                     hitSlop={10}
                   >
                     <ChevronLeftIcon size={20} color="#0F172A" />
@@ -1044,51 +2159,81 @@ export default function HistoryScreen() {
                   <View style={styles.sectionContainer}>
                     <Text style={styles.sectionHeaderTitle}>Voice Recording</Text>
                     <View style={styles.voiceRecordingCard}>
-                      <View style={styles.voicePlayerRow}>
-                        <Pressable style={styles.voicePlayButton} onPress={togglePlay}>
-                          {isPlaying ? (
-                            <HistoryPauseIcon size={42} color="#2B5BFF" />
-                          ) : (
-                            <HistoryPlayIcon size={42} color="#2B5BFF" />
-                          )}
-                        </Pressable>
+                      {hasActiveRecording ? (
+                        <View style={styles.voicePlayerRow}>
+                          <Pressable style={styles.voicePlayButton} onPress={() => togglePlay()}>
+                            {isPlaying ? (
+                              <HistoryPauseIcon size={42} color="#2B5BFF" />
+                            ) : (
+                              <HistoryPlayIcon size={42} color="#2B5BFF" />
+                            )}
+                          </Pressable>
 
-                        <View style={styles.waveformContainer}>
-                          {WAVEFORM_HEIGHTS.slice(0, 32).map((barHeight, idx) => {
-                            const fraction = idx / 32;
-                            const isPlayed = fraction <= playbackProgress;
-                            return (
-                              <View
-                                key={idx}
-                                style={[
-                                  styles.waveformBar,
-                                  {
-                                    height: barHeight,
-                                    backgroundColor: isPlayed ? '#2B5BFF' : '#CBD5E1',
-                                  },
-                                ]}
-                              />
-                            );
-                          })}
-                        </View>
+                          <View style={styles.waveformContainer}>
+                            {waveformBars.slice(0, 32).map((barHeight, idx) => {
+                              const fraction = idx / 32;
+                              const isPlayed = fraction <= playbackProgress;
+                              return (
+                                <Pressable
+                                  key={idx}
+                                  onPress={() => handleSeek(fraction)}
+                                  hitSlop={{ top: 8, bottom: 8, left: 1, right: 1 }}
+                                  style={styles.waveformBarTouch}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Seek to ${Math.round(fraction * 100)}%`}
+                                >
+                                  <View
+                                    style={[
+                                      styles.waveformBar,
+                                      {
+                                        height: barHeight,
+                                        backgroundColor: isPlayed ? '#2B5BFF' : '#CBD5E1',
+                                      },
+                                    ]}
+                                  />
+                                </Pressable>
+                              );
+                            })}
+                          </View>
 
-                        <Text style={styles.voiceDurationText}>
-                          {activeSession.recordingLengthString}
-                        </Text>
-                        <Pressable
-                          style={styles.speedPill}
-                          onPress={cyclePlaybackSpeed}
-                        >
-                          <Text style={styles.speedPillText}>
-                            {playbackSpeed.toFixed(1)}x
+                          <Text style={styles.voiceDurationText}>
+                            {isPlaying || currentTimeSeconds > 0
+                              ? `${formatAudioTime(currentTimeSeconds)} / ${formatAudioTime(totalDurationSeconds || activeSession.durationSeconds || 17)}`
+                              : activeSession.recordingLengthString || formatAudioTime(totalDurationSeconds || 17)}
                           </Text>
-                        </Pressable>
-                      </View>
+                          <Pressable
+                            style={styles.speedPill}
+                            onPress={cyclePlaybackSpeed}
+                          >
+                            <Text style={styles.speedPillText}>
+                              {playbackSpeed.toFixed(1)}x
+                            </Text>
+                          </Pressable>
+                        </View>
+                      ) : (
+                        /* Recording Not Available State */
+                        <View style={styles.noRecordingRow}>
+                          <View style={styles.noRecordingIconCircle}>
+                            <Ionicons name="mic-off-outline" size={20} color="#94A3B8" />
+                          </View>
+                          <View style={styles.noRecordingTextCol}>
+                            <Text style={styles.noRecordingTitle}>Recording Not Available</Text>
+                            <Text style={styles.noRecordingSubtitle}>
+                              Voice recording is not stored for this session or was removed after the 7-day retention period. Text transcript is saved below.
+                            </Text>
+                          </View>
+                          <View style={styles.noRecordingBadge}>
+                            <Text style={styles.noRecordingBadgeText}>{activeSession.durationString}</Text>
+                          </View>
+                        </View>
+                      )}
 
                       <View style={styles.recordingNoticeRow}>
                         <Text style={styles.noticeIconCircle}>ⓘ</Text>
                         <Text style={styles.noticeText}>
-                          This recording will be automatically removed within 7 days.
+                          {hasActiveRecording
+                            ? 'This recording will be automatically removed within 7 days in accordance with privacy rules.'
+                            : 'Audio recordings expire after 7 days. Text transcripts and AI suggestions are saved permanently.'}
                         </Text>
                       </View>
                     </View>
@@ -1098,15 +2243,19 @@ export default function HistoryScreen() {
                   <View style={styles.sectionContainer}>
                     <View style={styles.transcriptSectionHeader}>
                       <Text style={styles.sectionHeaderTitle}>Session Transcript</Text>
-                      <Pressable
-                        style={styles.jumpCorrectionButton}
-                        onPress={handleJumpToNextCorrection}
-                      >
-                        <NextCorrectionIcon color="#0057FF" size={13} />
-                        <Text style={styles.jumpCorrectionText}>
-                          Jump to Next Correction
-                        </Text>
-                      </Pressable>
+                      {Boolean(activeSession.correctionsCount > 0 || (activeSession.transcript && activeSession.transcript.some((t) => Boolean(t.correction)))) && (
+                        <Pressable
+                          style={styles.jumpCorrectionButton}
+                          onPress={handleJumpToNextCorrection}
+                          accessibilityRole="button"
+                          accessibilityLabel="Jump to next grammar correction"
+                        >
+                          <NextCorrectionIcon color="#0057FF" size={13} />
+                          <Text style={styles.jumpCorrectionText}>
+                            Jump to Next Correction
+                          </Text>
+                        </Pressable>
+                      )}
                     </View>
 
                     {/* Messages */}
@@ -1138,19 +2287,50 @@ export default function HistoryScreen() {
                             </View>
 
                             <View style={styles.turnContentCol}>
+                              {/* Speaker Name, Time & Audio Play Button */}
                               <View style={styles.speakerHeaderRow}>
-                                <Text style={styles.speakerNameText}>
-                                  {isUser ? 'You' : 'AI'}
-                                </Text>
-                                <Text style={styles.speakerTimeText}>{turn.time}</Text>
+                                <View style={styles.speakerHeaderLeft}>
+                                  <Text style={styles.speakerNameText}>
+                                    {isUser ? 'You' : 'AI'}
+                                  </Text>
+                                  <Text style={styles.speakerTimeText}>{turn.time}</Text>
+                                </View>
+                                {Boolean(hasActiveRecording && turn.audioUrl && !unreachableAudioUrls.has(turn.audioUrl)) && (
+                                  <Pressable
+                                    style={[
+                                      styles.turnPlayButton,
+                                      playingTurnId === turn.id && styles.turnPlayButtonActive,
+                                    ]}
+                                    onPress={() => togglePlayTurn(turn, activeSession)}
+                                    hitSlop={8}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Play ${isUser ? 'your' : 'AI'} audio turn`}
+                                  >
+                                    {playingTurnId === turn.id ? (
+                                      <Ionicons name="pause" size={12} color="#2B5BFF" />
+                                    ) : (
+                                      <Ionicons name="volume-medium" size={13} color="#64748B" />
+                                    )}
+                                    <Text
+                                      style={[
+                                        styles.turnPlayText,
+                                        playingTurnId === turn.id && styles.turnPlayTextActive,
+                                      ]}
+                                    >
+                                      {playingTurnId === turn.id ? 'Playing' : 'Listen'}
+                                    </Text>
+                                  </Pressable>
+                                )}
                               </View>
 
+                              {/* Message Bubble */}
                               <View
                                 style={[
                                   styles.turnBubble,
                                   isUser
                                     ? styles.userTurnBubble
                                     : styles.aiTurnBubble,
+                                  playingTurnId === turn.id && styles.turnBubblePlaying,
                                 ]}
                               >
                                 <Text style={styles.turnBubbleText}>{turn.message}</Text>
@@ -1179,13 +2359,21 @@ export default function HistoryScreen() {
                                     </View>
 
                                     <View style={styles.correctionHeaderRight}>
-                                      <Pressable
-                                        style={styles.audioSpeakerButton}
-                                        onPress={() => {}}
-                                        hitSlop={6}
-                                      >
-                                        <VolumeSpeakerIcon color="#94A3B8" size={16} />
-                                      </Pressable>
+                                      {Boolean(hasActiveRecording && (turn.audioUrl || activeSession.fullConversationAudioUrl)) && (
+                                        <Pressable
+                                          style={styles.audioSpeakerButton}
+                                          onPress={() => {
+                                            if (turn.audioUrl) {
+                                              togglePlayTurn(turn, activeSession);
+                                            } else {
+                                              togglePlay(activeSession);
+                                            }
+                                          }}
+                                          hitSlop={6}
+                                        >
+                                          <VolumeSpeakerIcon color="#94A3B8" size={16} />
+                                        </Pressable>
+                                      )}
                                       <Image
                                         source={require('@/assets/images/maya-avatar.png')}
                                         style={styles.miniMayaAvatar}
@@ -1282,7 +2470,20 @@ export default function HistoryScreen() {
                 </View>
 
                 {/* Grouped Sessions */}
-                {Object.keys(groupedSessions).length === 0 ? (
+                {isLoading ? (
+                  <View style={styles.skeletonContainer}>
+                    {[1, 2, 3, 4].map((idx) => (
+                      <View key={idx} style={styles.skeletonCard}>
+                        <View style={styles.skeletonIconBox} />
+                        <View style={styles.skeletonInfoCol}>
+                          <View style={styles.skeletonTitleBar} />
+                          <View style={styles.skeletonMetaBar} />
+                        </View>
+                        <View style={styles.skeletonPlayCircle} />
+                      </View>
+                    ))}
+                  </View>
+                ) : Object.keys(groupedSessions).length === 0 ? (
                   <View style={styles.emptyResultsBox}>
                     <Text style={styles.emptyResultsText}>
                       No conversations found matching your search.
@@ -1293,66 +2494,19 @@ export default function HistoryScreen() {
                     <View key={groupTitle} style={styles.groupContainer}>
                       <Text style={styles.groupHeaderTitle}>{groupTitle}</Text>
                       {sessions.map((item) => (
-                        <Pressable
+                        <MobileSessionCard
                           key={item.id}
-                          style={styles.mobileSessionCard}
-                          onPress={() => setSelectedSessionId(item.id)}
-                        >
-                          <View
-                            style={[
-                              styles.modeIconSquare,
-                              { backgroundColor: getModeBadgeBg(item.mode) },
-                            ]}
-                          >
-                            {renderModeIcon(item.mode, 22)}
-                          </View>
-
-                          <View style={styles.sessionCardCenter}>
-                            <Text style={styles.sessionCardTitle} numberOfLines={1}>
-                              {item.title}
-                            </Text>
-                            <View style={styles.mobileCardMetaGrid}>
-                              <View style={styles.metaItem}>
-                                <CalendarSmallIcon color="#94A3B8" size={12} />
-                                <Text style={styles.metaText}>{item.dateString}</Text>
-                              </View>
-                              <View style={styles.metaItem}>
-                                <ClockSmallIcon color="#94A3B8" size={12} />
-                                <Text style={styles.metaText}>{item.timeString}</Text>
-                              </View>
-                              <View style={styles.metaItem}>
-                                <TimerSmallIcon color="#94A3B8" size={12} />
-                                <Text style={styles.metaText}>{item.durationString}</Text>
-                              </View>
-                              <View style={styles.metaItem}>
-                                <RefreshCorrectionsIcon color="#94A3B8" size={12} />
-                                <Text style={styles.metaText}>
-                                  {item.correctionsCount} corrections
-                                </Text>
-                              </View>
-                            </View>
-                          </View>
-
-                          <View style={styles.sessionCardActions}>
-                            <Pressable
-                              style={styles.cardPlayButton}
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                setSelectedSessionId(item.id);
-                                togglePlay();
-                              }}
-                            >
-                              <HistoryPlayIcon size={36} color="#2B5BFF" />
-                            </Pressable>
-                            <Pressable
-                              style={styles.cardMoreButton}
-                              onPress={(e) => e.stopPropagation()}
-                              hitSlop={8}
-                            >
-                              <MoreVerticalIcon color="#94A3B8" size={18} />
-                            </Pressable>
-                          </View>
-                        </Pressable>
+                          item={item}
+                          isSelected={item.id === selectedSessionId}
+                          onSelect={handleSelectSession}
+                          onTogglePlay={handleCardTogglePlay}
+                          isPlayingThisSession={item.id === activeAudioSessionIdRef.current && isPlaying}
+                          isAudioUnreachable={Boolean(
+                            (item.fullConversationAudioUrl && unreachableAudioUrls.has(item.fullConversationAudioUrl)) ||
+                            (item.userAudioUrl && unreachableAudioUrls.has(item.userAudioUrl)) ||
+                            (item.modelAudioUrl && unreachableAudioUrls.has(item.modelAudioUrl))
+                          )}
+                        />
                       ))}
                     </View>
                   ))
@@ -1440,23 +2594,27 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+    ...(Platform.OS === 'web' ? { overflow: 'hidden' } : {}),
   },
   layoutRoot: {
     flex: 1,
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
+    ...(Platform.OS === 'web' ? { overflow: 'hidden', width: '100%' } : {}),
   },
   mainContainer: {
     flex: 1,
+    minWidth: 0,
     backgroundColor: '#FFFFFF',
     display: 'flex',
     flexDirection: 'column',
+    ...(Platform.OS === 'web' ? { overflow: 'hidden' } : {}),
   },
 
   // ── Desktop Top Header ──
   desktopTopHeader: {
     height: 64,
-    paddingHorizontal: 40,
+    paddingHorizontal: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
@@ -1495,38 +2653,42 @@ const styles = StyleSheet.create({
   // ── Desktop Master-Detail Layout ──
   desktopMasterDetailContainer: {
     flex: 1,
-    paddingHorizontal: 40,
-    paddingTop: 24,
-    paddingBottom: 24,
+    minWidth: 0,
+    paddingHorizontal: 28,
+    paddingTop: 20,
+    paddingBottom: 20,
+    ...(Platform.OS === 'web' ? { overflow: 'hidden' } : {}),
   },
   desktopTitleSection: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   screenMainTitle: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 32,
+    fontSize: 28,
     color: '#0F172A',
     letterSpacing: -0.5,
   },
   screenSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 15,
+    fontSize: 14,
     color: '#64748B',
-    marginTop: 4,
+    marginTop: 3,
   },
   desktopColumnsRow: {
     flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
-    gap: 32,
+    gap: 24,
   },
 
   // ── Desktop Left List Column ──
   desktopListColumn: {
-    width: 390,
+    width: 420,
+    flexShrink: 0,
     flexDirection: 'column',
     borderRightWidth: 1,
     borderRightColor: '#F1F5F9',
-    paddingRight: 24,
+    paddingRight: 20,
   },
   searchBarContainer: {
     flexDirection: 'row',
@@ -1538,6 +2700,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     height: 44,
     marginBottom: 16,
+    marginHorizontal: 2,
     gap: 10,
   },
   searchInput: {
@@ -1551,6 +2714,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   desktopSessionsScrollContent: {
+    paddingTop: 4,
+    paddingHorizontal: 2,
     paddingBottom: 40,
   },
 
@@ -1568,7 +2733,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#E2E8F0',
     borderRadius: Radii.xl,
     padding: 14,
@@ -1576,7 +2741,8 @@ const styles = StyleSheet.create({
     gap: 12,
     ...(Platform.OS === 'web'
       ? {
-          transition: 'all 0.15s ease',
+          cursor: 'pointer',
+          transition: 'all 0.18s cubic-bezier(0.34, 1.56, 0.64, 1)',
           boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
         }
       : {
@@ -1587,10 +2753,37 @@ const styles = StyleSheet.create({
           elevation: 1,
         }),
   },
+  sessionCardHovered: {
+    borderColor: '#CBD5E1',
+    transform: [{ translateY: -2 }],
+    ...(Platform.OS === 'web'
+      ? {
+          boxShadow: '0 6px 16px rgba(15, 23, 42, 0.06)',
+        }
+      : {}),
+  },
+  sessionCardPressed: {
+    transform: [{ scale: 0.985 }],
+    opacity: 0.96,
+  },
   sessionCardSelected: {
     borderColor: '#3B82F6',
     borderWidth: 1.5,
     backgroundColor: '#F8FAFC',
+    ...(Platform.OS === 'web'
+      ? {
+          boxShadow: '0 2px 10px rgba(59, 130, 246, 0.12), 0 1px 2px rgba(0,0,0,0.02)',
+        }
+      : {
+          shadowColor: '#3B82F6',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.1,
+          shadowRadius: 4,
+          elevation: 2,
+        }),
+  },
+  modeIconSquareSelected: {
+    transform: [{ scale: 1.05 }],
   },
   modeIconSquare: {
     width: 44,
@@ -1722,19 +2915,29 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    height: 40,
+    height: 42,
     gap: 3,
+    paddingHorizontal: 4,
+  },
+  waveformBarTouch: {
+    flex: 1,
+    height: 42,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   waveformBar: {
-    flex: 1,
-    borderRadius: 2,
+    width: '100%',
     minWidth: 2.5,
+    maxWidth: 5,
+    borderRadius: 2,
   },
   voiceDurationText: {
     ...fontStyle('inter', 'medium'),
     fontSize: 13,
     color: '#0F172A',
     marginLeft: 4,
+    minWidth: 72,
+    textAlign: 'right',
   },
   speedPill: {
     backgroundColor: '#FFFFFF',
@@ -1814,8 +3017,13 @@ const styles = StyleSheet.create({
   speakerHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
     marginBottom: 6,
+  },
+  speakerHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   speakerNameText: {
     ...fontStyle('outfit', 'semiBold'),
@@ -1827,10 +3035,37 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#94A3B8',
   },
+  turnPlayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+  },
+  turnPlayButtonActive: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#93C5FD',
+  },
+  turnPlayText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#64748B',
+  },
+  turnPlayTextActive: {
+    color: '#2B5BFF',
+  },
   turnBubble: {
     borderRadius: Radii.lg,
     paddingHorizontal: 14,
     paddingVertical: 10,
+  },
+  turnBubblePlaying: {
+    borderColor: '#2B5BFF',
+    borderWidth: 1.5,
+    backgroundColor: '#F0F7FF',
   },
   userTurnBubble: {
     backgroundColor: '#F8FAFC',
@@ -2039,17 +3274,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#E2E8F0',
     borderRadius: Radii.xl,
     padding: 14,
     marginBottom: 10,
     gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    ...(Platform.OS === 'web'
+      ? {
+          cursor: 'pointer',
+          transition: 'all 0.18s cubic-bezier(0.34, 1.56, 0.64, 1)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+        }
+      : {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.04,
+          shadowRadius: 3,
+          elevation: 1,
+        }),
+  },
+  mobileSessionCardPressed: {
+    transform: [{ scale: 0.985 }],
+    opacity: 0.96,
+  },
+  mobileSessionCardSelected: {
+    borderColor: '#3B82F6',
+    borderWidth: 1.5,
+    backgroundColor: '#F8FAFC',
+    ...(Platform.OS === 'web'
+      ? {
+          boxShadow: '0 2px 10px rgba(59, 130, 246, 0.12), 0 1px 2px rgba(0,0,0,0.02)',
+        }
+      : {
+          shadowColor: '#3B82F6',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.1,
+          shadowRadius: 4,
+          elevation: 2,
+        }),
   },
   mobileCardMetaGrid: {
     flexDirection: 'row',
@@ -2186,5 +3449,160 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#2563EB',
     fontWeight: 'bold',
+  },
+
+  // ── No Audio & Unavailable Recording Styles ──
+  cardNoAudioPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: Radii.pill,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  cardNoAudioPillText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#64748B',
+  },
+  noRecordingRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: Radii.lg,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  noRecordingIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#EEF2F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  noRecordingTextCol: {
+    flex: 1,
+  },
+  noRecordingHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+    flexWrap: 'wrap',
+  },
+  noRecordingTitle: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 14,
+    color: '#1E293B',
+  },
+  noRecordingExpiredTag: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: Radii.sm,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  noRecordingExpiredTagText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 10,
+    color: '#92400E',
+  },
+  noRecordingSubtitle: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#64748B',
+    lineHeight: 18,
+  },
+  noRecordingBadge: {
+    backgroundColor: '#EEF2F6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radii.md,
+    alignSelf: 'flex-start',
+  },
+  noRecordingDurationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2F6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radii.md,
+    alignSelf: 'flex-start',
+  },
+  noRecordingBadgeText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#64748B',
+  },
+  speakerNameCol: {
+    flexDirection: 'column',
+  },
+
+  // ── Skeleton & Loading States ──
+  skeletonContainer: {
+    paddingVertical: 8,
+    gap: 10,
+  },
+  skeletonCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: Radii.lg,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    gap: 12,
+  },
+  skeletonIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: Radii.md,
+    backgroundColor: '#F1F5F9',
+  },
+  skeletonInfoCol: {
+    flex: 1,
+    gap: 8,
+  },
+  skeletonTitleBar: {
+    width: '65%',
+    height: 14,
+    borderRadius: Radii.sm,
+    backgroundColor: '#E2E8F0',
+  },
+  skeletonMetaBar: {
+    width: '45%',
+    height: 10,
+    borderRadius: Radii.sm,
+    backgroundColor: '#F1F5F9',
+  },
+  skeletonPlayCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#F1F5F9',
+  },
+  loadingStateTitle: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 16,
+    color: '#0F172A',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  loadingStateSubtitle: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#94A3B8',
+    textAlign: 'center',
+    maxWidth: 280,
+    lineHeight: 18,
   },
 });

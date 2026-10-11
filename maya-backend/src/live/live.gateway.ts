@@ -7,8 +7,9 @@ import {
 import { Logger } from '@nestjs/common';
 import { WebSocket, RawData } from 'ws';
 import { GoogleGenAI, Modality, ActivityHandling } from '@google/genai';
-import { SessionsService } from '../sessions/sessions.service.js';
+import { SessionsService, toValidUuid } from '../sessions/sessions.service.js';
 import { CreateSessionTokenDto } from '../sessions/dto/session.dto.js';
+import { randomUUID } from 'node:crypto';
 
 let OpusScriptClass: any = null;
 import('opusscript')
@@ -26,6 +27,15 @@ interface ClientSessionState {
   supportsOpus: boolean;
   opusEncoder?: any;
   opusPcmBuffer: Buffer;
+  userAudioChunks: Buffer[];
+  currentUserTurnAudioChunks: Buffer[];
+  userTurnAudioMap: Map<number, Buffer>;
+  userTurnCount: number;
+  modelAudioChunks: Buffer[];
+  currentModelTurnAudioChunks: Buffer[];
+  modelTurnAudioMap: Map<number, Buffer>;
+  modelTurnCount: number;
+  chronologicalAudioTurns: Array<{ speaker: 'user' | 'model'; turnIdx: number; pcm: Buffer; sampleRate: number }>;
   userSpeechActive: boolean;
   hasDispatchedGreeting: boolean;
   isGreetingInProgress: boolean;
@@ -98,7 +108,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleConnection(client: WebSocket) {
-    const sessionId = `gw-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const sessionId = randomUUID();
     this.logger.log(`[${sessionId}] Client connected over WebSocket`);
 
     const state: ClientSessionState = {
@@ -108,6 +118,15 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       supportsOpus: false,
       opusEncoder: null,
       opusPcmBuffer: Buffer.alloc(0),
+      userAudioChunks: [],
+      currentUserTurnAudioChunks: [],
+      userTurnAudioMap: new Map(),
+      userTurnCount: 0,
+      modelAudioChunks: [],
+      currentModelTurnAudioChunks: [],
+      modelTurnAudioMap: new Map(),
+      modelTurnCount: 0,
+      chronologicalAudioTurns: [],
       userSpeechActive: false,
       hasDispatchedGreeting: false,
       isGreetingInProgress: false,
@@ -221,6 +240,63 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         .catch((e: any) => {
           this.logger.warn(`[${sid}] Failed to save diagnostics: ${e?.message}`);
         });
+
+      // If user was still speaking when call closed, commit final turn audio
+      if (state.currentUserTurnAudioChunks.length > 0) {
+        const turnBuffer = Buffer.concat(state.currentUserTurnAudioChunks);
+        state.userTurnAudioMap.set(state.userTurnCount, turnBuffer);
+        state.chronologicalAudioTurns.push({
+          speaker: 'user',
+          turnIdx: state.userTurnCount,
+          pcm: turnBuffer,
+          sampleRate: 16000,
+        });
+        state.userTurnCount++;
+        state.currentUserTurnAudioChunks = [];
+      }
+
+      // If model was still speaking when call closed, commit final turn audio
+      if (state.currentModelTurnAudioChunks.length > 0) {
+        const modelBuffer = Buffer.concat(state.currentModelTurnAudioChunks);
+        state.modelTurnAudioMap.set(state.modelTurnCount, modelBuffer);
+        state.chronologicalAudioTurns.push({
+          speaker: 'model',
+          turnIdx: state.modelTurnCount,
+          pcm: modelBuffer,
+          sampleRate: 24000,
+        });
+        state.modelTurnCount++;
+        state.currentModelTurnAudioChunks = [];
+      }
+
+      // Flush any final pending user turn audio
+      this.commitPendingUserTurnAudio(state);
+
+      // Save user, model, per-turn audio recordings, and chronological conversation to Supabase Storage
+      if (
+        state.userAudioChunks.length > 0 ||
+        state.modelAudioChunks.length > 0 ||
+        state.userTurnAudioMap.size > 0 ||
+        state.modelTurnAudioMap.size > 0
+      ) {
+        const userPcm = state.userAudioChunks.length > 0 ? Buffer.concat(state.userAudioChunks) : undefined;
+        const modelPcm = state.modelAudioChunks.length > 0 ? Buffer.concat(state.modelAudioChunks) : undefined;
+        this.logger.log(
+          `[${sid}] 💾 Finalizing and saving session audio recordings to Supabase (${state.userTurnAudioMap.size} user turns, ${state.modelTurnAudioMap.size} model turns, ${state.chronologicalAudioTurns.length} chronological turns)...`,
+        );
+        this.sessionsService
+          .saveSessionAudioRecordings(
+            state.sessionId,
+            userPcm,
+            modelPcm,
+            state.userTurnAudioMap,
+            state.modelTurnAudioMap,
+            state.chronologicalAudioTurns,
+          )
+          .catch((e: any) => {
+            this.logger.warn(`[${sid}] Failed saving session audio recordings: ${e?.message}`);
+          });
+      }
 
       if (state.geminiSession) {
         try {
@@ -352,7 +428,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       case 'start_session': {
         const dto: CreateSessionTokenDto = message.options || {};
         if (message.options?.sessionId) {
-          state.sessionId = message.options.sessionId;
+          state.sessionId = toValidUuid(message.options.sessionId);
         }
         state.dto = dto;
 
@@ -508,7 +584,14 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private async handleAudioChunk(client: WebSocket, buffer: Buffer) {
     const state = this.clients.get(client);
-    if (!state?.geminiSession || !state.isConnectedToGemini) return;
+    if (!state) return;
+
+    if (buffer && buffer.length > 0) {
+      state.userAudioChunks.push(buffer);
+      state.currentUserTurnAudioChunks.push(buffer);
+    }
+
+    if (!state.geminiSession || !state.isConnectedToGemini) return;
 
     if (state.isGreetingInProgress) {
       // Opening turn greeting is in progress. Suppress user mic audio and activityStart
@@ -566,6 +649,33 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch (err: any) {
       this.logger.error(`[${state.sessionId}] handleEndOfTurn error: ${err?.message}`);
       this.addSessionLog(state, 'end_of_turn_error', err?.message);
+    }
+  }
+
+  private commitPendingUserTurnAudio(state: ClientSessionState) {
+    if (state.currentUserTurnAudioChunks.length === 0) return;
+    const turnBuffer = Buffer.concat(state.currentUserTurnAudioChunks);
+    state.currentUserTurnAudioChunks = [];
+
+    // Filter out sub-400ms mic pops/coughs that have no real words
+    if (turnBuffer.length >= 12800) {
+      const currentTurnIdx = state.userTurnCount;
+      state.userTurnAudioMap.set(currentTurnIdx, turnBuffer);
+      state.chronologicalAudioTurns.push({
+        speaker: 'user',
+        turnIdx: currentTurnIdx,
+        pcm: turnBuffer,
+        sampleRate: 16000,
+      });
+      this.logger.log(
+        `[${state.sessionId}] 🎙️ Committed verified user turn ${currentTurnIdx} audio (${(turnBuffer.length / 1024).toFixed(1)} KB)`
+      );
+      state.userTurnCount++;
+
+      // Progressively upload turn audio in background so it is instantly available in Cloud storage
+      this.sessionsService
+        .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, turnBuffer, 'user')
+        .catch(() => {});
     }
   }
 
@@ -768,11 +878,21 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const serverContent = response.serverContent;
 
+    // If Gemini started responding or transcribing, commit any verified pending user speech audio
+    if (serverContent?.inputTranscription || serverContent?.modelTurn) {
+      this.commitPendingUserTurnAudio(state);
+    }
+
     // 1. Process Model Audio Turn Chunks
     if (serverContent?.modelTurn?.parts) {
       for (const part of serverContent.modelTurn.parts) {
         if (part.inlineData?.data) {
           state.hasModelSpokenThisTurn = true;
+          const chunkBuffer = Buffer.from(part.inlineData.data, 'base64');
+          if (chunkBuffer.length > 0) {
+            state.modelAudioChunks.push(chunkBuffer);
+            state.currentModelTurnAudioChunks.push(chunkBuffer);
+          }
 
           // Latency measurement: first audio chunk after activityEnd
           if (state.awaitingGeminiResponse && state.turnEndTimestamp) {
@@ -903,6 +1023,50 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           `   💬 Maya Replied: "${modelText || '(audio only)'}"`
         );
         this.addSessionLog(state, 'model_turn_complete', `user="${userText?.slice(0, 80)}" maya="${modelText?.slice(0, 80)}"`);
+
+        // Commit isolated model turn audio
+        if (state.currentModelTurnAudioChunks.length > 0) {
+          const modelTurnBuffer = Buffer.concat(state.currentModelTurnAudioChunks);
+          const currentTurnIdx = state.modelTurnCount;
+          state.modelTurnAudioMap.set(currentTurnIdx, modelTurnBuffer);
+          state.chronologicalAudioTurns.push({
+            speaker: 'model',
+            turnIdx: currentTurnIdx,
+            pcm: modelTurnBuffer,
+            sampleRate: 24000,
+          });
+          this.logger.log(`[${state.sessionId}] 🤖 Captured model turn ${currentTurnIdx} audio (${(modelTurnBuffer.length / 1024).toFixed(1)} KB)`);
+          state.modelTurnCount++;
+          state.currentModelTurnAudioChunks = [];
+
+          this.sessionsService
+            .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, modelTurnBuffer, 'model')
+            .catch(() => {});
+        } else if (modelText) {
+          // If Gemini sent a text turn without audio (e.g. initial greeting prompt),
+          // increment modelTurnCount and synthesize TTS so subsequent turns never shift!
+          const currentTurnIdx = state.modelTurnCount;
+          state.modelTurnCount++;
+          this.sessionsService
+            .generateTtsAudio({ text: modelText, voice: 'Callirrhoe' })
+            .then((tts) => {
+              if (tts?.audioBase64) {
+                const wavBuf = Buffer.from(tts.audioBase64, 'base64');
+                const pcm24 = wavBuf.length > 44 ? wavBuf.subarray(44) : wavBuf;
+                state.modelTurnAudioMap.set(currentTurnIdx, pcm24);
+                state.chronologicalAudioTurns.push({
+                  speaker: 'model',
+                  turnIdx: currentTurnIdx,
+                  pcm: pcm24,
+                  sampleRate: 24000,
+                });
+                this.sessionsService
+                  .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, pcm24, 'model')
+                  .catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
 
         // Turn fully complete: clear accumulators for the next conversational exchange
         state.userTranscriptAccumulator = '';

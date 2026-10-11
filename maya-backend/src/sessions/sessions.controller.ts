@@ -11,7 +11,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { SessionsService } from './sessions.service.js';
-import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto } from './dto/session.dto.js';
+import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto, AnalyzeSessionDto, SessionTtsDto, SessionReviewDto } from './dto/session.dto.js';
 
 @Controller('v1')
 export class SessionsController {
@@ -31,6 +31,30 @@ export class SessionsController {
     @Body() dto: GenerateHintDto,
   ) {
     return this.sessionsService.generateHint(dto);
+  }
+
+  @Post('sessions/analyze')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async analyzeSession(
+    @Body() dto: AnalyzeSessionDto,
+  ) {
+    return this.sessionsService.analyzeSession(dto);
+  }
+
+  @Post('sessions/review')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async saveReview(
+    @Body() dto: SessionReviewDto,
+  ) {
+    return this.sessionsService.saveSessionReview(dto);
+  }
+
+  @Post('sessions/tts')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async getTtsAudio(
+    @Body() dto: SessionTtsDto,
+  ) {
+    return this.sessionsService.generateTtsAudio(dto);
   }
 
   @Post('session-token')

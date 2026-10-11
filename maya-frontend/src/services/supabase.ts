@@ -26,9 +26,15 @@ export interface SessionHistoryRecord {
   grammar_score: number;
   pronunciation_score: number;
   status: 'active' | 'completed' | 'dropped';
+  fullConversationAudioUrl?: string | null;
+  userAudioUrl?: string | null;
+  modelAudioUrl?: string | null;
+  user_rating?: number | null;
+  user_feedback?: string | null;
   turns?: Array<{
     role: 'user' | 'model';
     text: string;
+    audioUrl?: string | null;
     timestamp?: string;
   }>;
   corrections?: Array<{
@@ -45,12 +51,17 @@ export interface SessionHistoryRecord {
 const getBackendBaseUrl = (): string => {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     const hostname = window.location.hostname;
-    if (hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
-      return 'https://maya-backend.icyisland-5baf2c26.southeastasia-01.azurewebsites.net';
-    }
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://127.0.0.1:3000';
     }
+    if (hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
+      return 'https://maya-backend.icyisland-5baf2c26.southeastasia-01.azurewebsites.net';
+    }
+    const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+    if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+      return envUrl;
+    }
+    return 'https://maya-backend.icyisland-5baf2c26.southeastasia-01.azurewebsites.net';
   }
   return process.env.EXPO_PUBLIC_BACKEND_URL || 'http://127.0.0.1:3000';
 };
@@ -148,11 +159,17 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
           grammar_score: s.grammar_score || 82,
           pronunciation_score: s.pronunciation_score || 86,
           status: s.status || 'completed',
+          fullConversationAudioUrl: s.full_conversation_audio_url || s.fullConversationAudioUrl || null,
+          userAudioUrl: s.user_audio_url || s.userAudioUrl || null,
+          modelAudioUrl: s.model_audio_url || s.modelAudioUrl || null,
+          user_rating: s.user_rating ?? null,
+          user_feedback: s.user_feedback ?? null,
           turns: (s.session_turns || [])
             .sort((a: any, b: any) => (a.turn_order || 0) - (b.turn_order || 0))
             .map((t: any) => ({
               role: t.role,
               text: t.text_transcript,
+              audioUrl: t.audio_url || t.audioUrl || null,
               timestamp: t.timestamp || t.created_at,
             })),
           corrections: (s.grammar_corrections || []).map((c: any) => ({

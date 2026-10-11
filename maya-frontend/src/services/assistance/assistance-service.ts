@@ -3,7 +3,8 @@ import { getAuthHeaders } from '@/services/supabase';
 
 // In-memory frontend caches to prevent redundant network fetches
 const translationMemory = new Map<string, string>();
-const hintMemory = new Map<string, { hintEnglish: string; hintSinhala: string }>();
+const hintMemory = new Map<string, HintResponse>();
+const inFlightHintPromises = new Map<string, Promise<HintResponse | null>>();
 
 export interface HintResponse {
   hintEnglish: string;
@@ -53,6 +54,8 @@ export async function fetchTranslation(text: string): Promise<string> {
 /**
  * Generates an English suggested reply and its Sinhala translation
  * for Maya's current spoken question.
+ * Uses in-flight deduplication and normalized caching to guarantee
+ * only one fetch happens per prompt.
  */
 export async function fetchHint(
   question: string,
@@ -61,38 +64,51 @@ export async function fetchHint(
   const trimmed = (question || '').trim();
   if (!trimmed) return null;
 
-  const cacheKey = `${options?.level || 'all'}:${trimmed}`;
+  const normQuestion = trimmed.toLowerCase().replace(/[?!.,]/g, '').trim();
+  const cacheKey = `${options?.level || 'all'}:${normQuestion}`;
+
   if (hintMemory.has(cacheKey)) {
     return hintMemory.get(cacheKey)!;
   }
 
-  try {
-    const backendBaseUrl = getBackendBaseUrl();
-    const authHeaders = await getAuthHeaders();
-
-    const res = await fetch(`${backendBaseUrl}/v1/sessions/hint`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({
-        question: trimmed,
-        sessionId: options?.sessionId,
-        topic: options?.topic,
-        level: options?.level,
-        scenarioId: options?.scenarioId,
-        userName: options?.userName,
-      }),
-    });
-
-    if (res.ok) {
-      const data: HintResponse = await res.json();
-      if (data?.hintEnglish && data?.hintSinhala) {
-        hintMemory.set(cacheKey, data);
-        return data;
-      }
-    }
-  } catch (err) {
-    console.warn('[assistance-service] Error fetching hint:', err);
+  // If a request for this exact question is already pending, reuse the same promise
+  if (inFlightHintPromises.has(cacheKey)) {
+    return inFlightHintPromises.get(cacheKey)!;
   }
 
-  return null;
+  const fetchPromise = (async () => {
+    try {
+      const backendBaseUrl = getBackendBaseUrl();
+      const authHeaders = await getAuthHeaders();
+
+      const res = await fetch(`${backendBaseUrl}/v1/sessions/hint`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          question: trimmed,
+          sessionId: options?.sessionId,
+          topic: options?.topic,
+          level: options?.level,
+          scenarioId: options?.scenarioId,
+          userName: options?.userName,
+        }),
+      });
+
+      if (res.ok) {
+        const data: HintResponse = await res.json();
+        if (data?.hintEnglish && data?.hintSinhala) {
+          hintMemory.set(cacheKey, data);
+          return data;
+        }
+      }
+    } catch (err) {
+      console.warn('[assistance-service] Error fetching hint:', err);
+    } finally {
+      inFlightHintPromises.delete(cacheKey);
+    }
+    return null;
+  })();
+
+  inFlightHintPromises.set(cacheKey, fetchPromise);
+  return fetchPromise;
 }

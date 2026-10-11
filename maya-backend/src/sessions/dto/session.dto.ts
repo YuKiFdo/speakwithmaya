@@ -312,3 +312,19 @@ export class SessionTtsDto {
   voice?: string;
 }
 
+export class SessionReviewDto {
+  @IsString()
+  sessionId!: string;
+
+  @IsNumber()
+  rating!: number;
+
+  @IsOptional()
+  @IsString()
+  feedback?: string;
+
+  @IsOptional()
+  @IsString()
+  roadmapLevelId?: string;
+}
+

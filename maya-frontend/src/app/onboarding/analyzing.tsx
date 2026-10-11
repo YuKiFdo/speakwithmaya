@@ -19,6 +19,9 @@ import {
   playStepPop,
   playAnalysisCompleteSound,
 } from '@/services/sound/sound-service';
+import { getBackendBaseUrl } from '@/hooks/useLiveCall';
+import { getLatestSessionReport, setLatestFeedbackItems, getLatestFeedbackItems, FeedbackItem } from '@/utils/session-report-store';
+import { warmUpSpeechVoices } from '@/utils/maya-voice-fallback';
 
 interface AnalysisStep {
   id: string;
@@ -116,6 +119,7 @@ export default function AnalyzingScreen() {
     if (hasTriggeredJumpRef.current) return;
     hasTriggeredJumpRef.current = true;
     console.log('[AnalyzingScreen] 🚀 Triggering snappy celebratory circle jump!');
+    warmUpSpeechVoices();
 
     Animated.parallel([
       // Vertical jump: joyful leap up (200ms) then snap land (160ms)
@@ -159,11 +163,19 @@ export default function AnalyzingScreen() {
         }),
       ]),
     ]).start(() => {
-      // Immediately navigate to next screen upon jump completion!
-      router.replace({
-        pathname: '/onboarding/complete',
-        params: params as any,
-      });
+      // Navigate to feedback screen if AI generated items, otherwise straight to completion
+      const fbItems = getLatestFeedbackItems();
+      if (fbItems && fbItems.length > 0) {
+        router.replace({
+          pathname: '/onboarding/feedback' as any,
+          params: params as any,
+        });
+      } else {
+        router.replace({
+          pathname: '/onboarding/complete' as any,
+          params: params as any,
+        });
+      }
     });
   };
 
@@ -238,6 +250,103 @@ export default function AnalyzingScreen() {
     console.log('[AnalyzingScreen] 🎬 Screen mounted, initiating playScanningSound()');
     playScanningSound();
 
+    let isCancelled = false;
+    let initialAnim: Animated.CompositeAnimation | null = null;
+    let isApiDone = false;
+    let hasCompleted = false;
+
+    const finishSequence = () => {
+      if (hasCompleted || isCancelled) return;
+      hasCompleted = true;
+      console.log('[AnalyzingScreen] ✅ Both animation and AI analysis completed! Triggering celebration.');
+      setTimeout(() => {
+        playAnalysisCompleteSound();
+        triggerCompleteJump();
+      }, 400);
+    };
+
+    const completeProgressTo100 = () => {
+      if (isCancelled || hasCompleted) return;
+      if (initialAnim) {
+        initialAnim.stop();
+      }
+      Animated.timing(progressAnim, {
+        toValue: 1,
+        duration: 650,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start(({ finished }) => {
+        if (finished) {
+          finishSequence();
+        }
+      });
+    };
+
+    // Parallel Gemini analysis API call
+    const runAnalysisApi = async () => {
+      try {
+        const report = getLatestSessionReport();
+        const backendBaseUrl = getBackendBaseUrl();
+        const activeSessionId =
+          (params.sessionId as string) ||
+          report?.id ||
+          (report as any)?.sessionId ||
+          report?.callParams?.sessionId ||
+          '';
+
+        console.log(`[AnalyzingScreen] 📡 Requesting session analysis from backend for session ${activeSessionId}...`);
+        const res = await fetch(`${backendBaseUrl}/v1/sessions/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: activeSessionId,
+            turns: report?.sessionTurns || [],
+            activeHints: report?.activeHints || [],
+            topic: report?.topic || report?.levelTitle,
+            level: report?.callParams?.level,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.items && Array.isArray(data.items)) {
+            const rawSupabaseUrl = data.userAudioUrl || '';
+            const supabaseAudioUrl = rawSupabaseUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+            const itemsWithAudio: FeedbackItem[] = data.items.map((item: any) => {
+              const matchingTurn = report?.sessionTurns?.find((t) => t.turnIndex === item.userTurnIndex);
+              const rawCandidate = item.userAudioUrl || supabaseAudioUrl || matchingTurn?.audioUrl || '';
+              const candidate = rawCandidate.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+              // Strictly avoid dead in-memory blob URLs (blob:http://...) which fail with net::ERR_FILE_NOT_FOUND
+              const safeAudioUrl = candidate && !candidate.startsWith('blob:') ? candidate : '';
+              return {
+                ...item,
+                userAudioUrl: safeAudioUrl,
+              };
+            });
+            console.log(`[AnalyzingScreen] 🎯 Loaded ${itemsWithAudio.length} personalized feedback items (Supabase audio: ${supabaseAudioUrl})`);
+            setLatestFeedbackItems(itemsWithAudio);
+          }
+        }
+      } catch (err) {
+        console.warn('[AnalyzingScreen] Session analysis API call failed (using fallback):', err);
+      } finally {
+        isApiDone = true;
+        // Smoothly animate from the holding position to 100% and finish
+        completeProgressTo100();
+      }
+    };
+
+    runAnalysisApi();
+
+    // Safety timeout: 45s fallback in case network completely drops or backend is unavailable
+    const safetyTimer = setTimeout(() => {
+      if (!isApiDone) {
+        console.log('[AnalyzingScreen] ⏱️ 45s safety timeout reached, proceeding gracefully');
+        isApiDone = true;
+        completeProgressTo100();
+      }
+    }, 45000);
+
     let lastStep = 0;
     const listenerId = progressAnim.addListener(({ value }) => {
       let step = 0;
@@ -266,24 +375,24 @@ export default function AnalyzingScreen() {
       }
     });
 
-    // Animate circular bar from ~4% to 100% full circle over ~3.2s
-    Animated.timing(progressAnim, {
-      toValue: 1,
-      duration: 3200,
-      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+    // Phase 1: Animate circular bar through steps 1-3 to ~88% over 5.2s, then hold at step 4 until API returns
+    initialAnim = Animated.timing(progressAnim, {
+      toValue: 0.88,
+      duration: 5200,
+      easing: Easing.bezier(0.2, 0.6, 0.3, 1),
       useNativeDriver: false,
-    }).start(({ finished }) => {
-      if (finished) {
-        // Allow a clear, satisfying 360ms pause where all 4 steps are visibly checked
-        // before playing celebratory victory sound and jumping!
-        setTimeout(() => {
-          playAnalysisCompleteSound();
-          triggerCompleteJump();
-        }, 360);
+    });
+
+    initialAnim.start(({ finished }) => {
+      if (finished && isApiDone) {
+        completeProgressTo100();
       }
     });
 
     return () => {
+      isCancelled = true;
+      if (initialAnim) initialAnim.stop();
+      clearTimeout(safetyTimer);
       progressAnim.removeListener(listenerId);
       stopScanningSound();
     };

@@ -21,20 +21,25 @@ import { MicPermissionErrorType } from '@/components/call/microphone-permission-
 import { MissionReportData, MissionObjectiveResult } from '@/components/roadmap/mission-report-modal';
 import { getLogTimestamp } from '@/utils/time';
 import { sanitizeModelText } from '@/utils/text-sanitizer';
+import { createWavBlobUrlFromPcm } from '@/utils/audio-wav';
 
 // Default to true (Server-to-Server NestJS Gateway) unless explicitly set to 'false'
 const USE_SERVER_LIVE = process.env.EXPO_PUBLIC_USE_SERVER_LIVE !== 'false';
 
 export const getBackendBaseUrl = (): string => {
-  // Local web development: point to IPv4 127.0.0.1 loopback to avoid IPv6 localhost collisions
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     const hostname = window.location.hostname;
-    if (hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
-      return 'https://maya-backend.icyisland-5baf2c26.southeastasia-01.azurewebsites.net';
-    }
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://127.0.0.1:3000';
     }
+    if (hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
+      return 'https://maya-backend.icyisland-5baf2c26.southeastasia-01.azurewebsites.net';
+    }
+    const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+    if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+      return envUrl;
+    }
+    return 'https://maya-backend.icyisland-5baf2c26.southeastasia-01.azurewebsites.net';
   }
 
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
@@ -139,7 +144,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const currentModelTextRef = useRef<string>('');
   const currentUserTextRef = useRef<string>('');
   const activeRoleRef = useRef<'user' | 'model' | null>(null);
-  const turnsRef = useRef<Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>([]);
+  const currentUserTurnPcmChunksRef = useRef<ArrayBuffer[]>([]);
+  const lastUserTurnAudioUrlRef = useRef<string>('');
+  const turnsRef = useRef<Array<{ role: 'user' | 'model'; text: string; timestamp: string; turnIndex?: number; audioUrl?: string }>>([]);
   const correctionsRef = useRef<Array<{
     studentSaid: string;
     moreNatural: string;
@@ -393,6 +400,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             // 16kHz PCM 16-bit mono = 32,000 bytes per second
             userSpeakingSecondsRef.current += (pcm16.byteLength / 32000);
             transportRef.current.sendAudioChunk(pcm16);
+            currentUserTurnPcmChunksRef.current.push(pcm16.slice(0));
           }
         },
         onVoiceEnd: () => {
@@ -406,6 +414,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
           // Require >= 4 chunks (~320ms of genuine speech) so small noise spikes don't trigger turn completion
           if (!isBlocked && userChunksSentRef.current >= 4 && transportRef.current.isConnected()) {
+            if (currentUserTurnPcmChunksRef.current.length > 0) {
+              const wavUrl = createWavBlobUrlFromPcm(currentUserTurnPcmChunksRef.current, 16000);
+              lastUserTurnAudioUrlRef.current = wavUrl;
+            }
+            currentUserTurnPcmChunksRef.current = [];
             transportRef.current.sendEndOfTurn();
             userChunksSentRef.current = 0;
 
@@ -416,8 +429,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               console.warn('[useLiveCall] ⚠️ Response delay > 3.5s — waiting for Maya response');
               setIsSlowResponse(true);
             }, 3500);
-          } else if (userChunksSentRef.current < 4) {
+          } else {
             // Discard transient mic click or throat clear without signaling turn complete
+            currentUserTurnPcmChunksRef.current = [];
             userChunksSentRef.current = 0;
           }
         },
@@ -645,7 +659,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
                     role: 'user',
                     text: textToPush,
                     timestamp: new Date().toISOString(),
+                    turnIndex: turnsRef.current.length,
+                    audioUrl: lastUserTurnAudioUrlRef.current,
                   });
+                  lastUserTurnAudioUrlRef.current = '';
                 }
                 currentUserTextRef.current = '';
               }
@@ -1024,6 +1041,35 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     isFirstGreetingPendingRef.current = false;
     resumptionHandleRef.current = null;
 
+    // Flush any pending text into turns before teardown
+    if (currentUserTextRef.current.trim()) {
+      const textToPush = currentUserTextRef.current.trim();
+      const lastTurn = turnsRef.current[turnsRef.current.length - 1];
+      if (!lastTurn || lastTurn.role !== 'user' || lastTurn.text !== textToPush) {
+        turnsRef.current.push({
+          role: 'user',
+          text: textToPush,
+          timestamp: new Date().toISOString(),
+          turnIndex: turnsRef.current.length,
+          audioUrl: lastUserTurnAudioUrlRef.current,
+        });
+      }
+      currentUserTextRef.current = '';
+    }
+
+    if (currentModelTextRef.current.trim()) {
+      const textToPush = sanitizeModelText(currentModelTextRef.current.trim());
+      const lastTurn = turnsRef.current[turnsRef.current.length - 1];
+      if (!lastTurn || lastTurn.role !== 'model' || lastTurn.text !== textToPush) {
+        turnsRef.current.push({
+          role: 'model',
+          text: textToPush,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      currentModelTextRef.current = '';
+    }
+
     // 1. Immediately teardown audio & transport
     try {
       transportRef.current.sendAudioStreamEnd();
@@ -1362,6 +1408,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     activePracticeTask,
     testScores,
     evaluationResult,
+    turns: turnsRef.current,
   };
 }
 

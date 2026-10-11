@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS public.sessions (
   fluency_score INTEGER DEFAULT 82,
   grammar_score INTEGER DEFAULT 78,
   pronunciation_score INTEGER DEFAULT 80,
+  user_rating INTEGER,
+  user_feedback TEXT,
   status TEXT CHECK (status IN ('active', 'completed', 'dropped')) DEFAULT 'active',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -157,5 +159,23 @@ ALTER TABLE public.session_diagnostics ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Service role access session diagnostics" ON public.session_diagnostics;
 CREATE POLICY "Service role access session diagnostics" ON public.session_diagnostics
   FOR ALL USING (true);
+
+-- 9. Storage Buckets (Recordings & Session Transcripts)
+-- Bucket: 'session-recordings' (public: true)
+-- Files stored per session:
+--   - ${sessionId}/user_recording.wav  (PCM 16-bit, 16kHz mono audio)
+--   - ${sessionId}/model_recording.wav (PCM 16-bit, 24kHz mono audio)
+--   - ${sessionId}/conversation.json   (Full ordered conversation turns, metadata, and recording URLs)
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('session-recordings', 'session-recordings', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+CREATE POLICY "Public read session recordings"
+ON storage.objects FOR SELECT
+USING (bucket_id = 'session-recordings');
+
+CREATE POLICY "Service role upload session recordings"
+ON storage.objects FOR ALL
+USING (bucket_id = 'session-recordings');
 
 

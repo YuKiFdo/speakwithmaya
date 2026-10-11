@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   ScrollView,
   useWindowDimensions,
   Platform,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -16,9 +18,172 @@ import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getLatestSessionReport, ExtendedSessionReport } from '@/utils/session-report-store';
+import { playUnderstoodTapSound, playFinishReviewFanfare } from '@/services/sound/sound-service';
+
+const GLOW_PARTICLES = [
+  { id: 1, left: '12%', top: '65%', size: 4, delay: '0s', duration: '2.5s' },
+  { id: 2, left: '26%', top: '75%', size: 3, delay: '0.6s', duration: '2.8s' },
+  { id: 3, left: '42%', top: '55%', size: 5, delay: '1.2s', duration: '2.3s' },
+  { id: 4, left: '60%', top: '70%', size: 3.5, delay: '0.3s', duration: '2.7s' },
+  { id: 5, left: '76%', top: '60%', size: 4.5, delay: '1.7s', duration: '2.4s' },
+  { id: 6, left: '88%', top: '72%', size: 3, delay: '0.9s', duration: '2.9s' },
+  { id: 7, left: '34%', top: '40%', size: 3, delay: '1.4s', duration: '2.2s' },
+  { id: 8, left: '68%', top: '35%', size: 4, delay: '2.0s', duration: '2.6s' },
+];
+
+function GlowingParticle({ p }: { p: (typeof GLOW_PARTICLES)[0] }) {
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const delayMs = parseFloat(p.delay) * 1000;
+    const durationMs = parseFloat(p.duration) * 1000;
+
+    let isMounted = true;
+    const timer = setTimeout(() => {
+      if (!isMounted) return;
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(anim, {
+            toValue: 1,
+            duration: durationMs,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+          Animated.timing(anim, {
+            toValue: 0,
+            duration: 0,
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+        ])
+      ).start();
+    }, delayMs);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  const translateY = anim.interpolate({
+    inputRange: [0, 0.25, 0.75, 1],
+    outputRange: [0, -6, -16, -24],
+  });
+
+  const scale = anim.interpolate({
+    inputRange: [0, 0.25, 0.75, 1],
+    outputRange: [0.6, 1.2, 0.9, 0.3],
+  });
+
+  const opacity = anim.interpolate({
+    inputRange: [0, 0.25, 0.75, 1],
+    outputRange: [0, 0.95, 0.75, 0],
+  });
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.glowParticle,
+        {
+          left: p.left as any,
+          top: p.top as any,
+          width: p.size,
+          height: p.size,
+          borderRadius: p.size / 2,
+          opacity,
+          transform: [{ translateY }, { scale }],
+          boxShadow: '0 0 6px #FFFFFF, 0 0 12px #93C5FD, 0 0 18px #38BDF8',
+        },
+      ]}
+    />
+  );
+}
+
+const COMPLETE_ANIMATION_CSS = `
+@keyframes completeFadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes completeAvatarPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.78) translateY(20px);
+  }
+  65% {
+    transform: scale(1.04) translateY(-3px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes mayaParticleFloat {
+  0% {
+    transform: translateY(0px) scale(0.6);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.95;
+    transform: translateY(-6px) scale(1.2);
+  }
+  75% {
+    opacity: 0.75;
+    transform: translateY(-16px) scale(0.9);
+  }
+  100% {
+    transform: translateY(-24px) scale(0.3);
+    opacity: 0;
+  }
+}
+
+.maya-particle-1 { animation: mayaParticleFloat 2.5s ease-in-out 0s infinite !important; }
+.maya-particle-2 { animation: mayaParticleFloat 2.8s ease-in-out 0.6s infinite !important; }
+.maya-particle-3 { animation: mayaParticleFloat 2.3s ease-in-out 1.2s infinite !important; }
+.maya-particle-4 { animation: mayaParticleFloat 2.7s ease-in-out 0.3s infinite !important; }
+.maya-particle-5 { animation: mayaParticleFloat 2.4s ease-in-out 1.7s infinite !important; }
+.maya-particle-6 { animation: mayaParticleFloat 2.9s ease-in-out 0.9s infinite !important; }
+.maya-particle-7 { animation: mayaParticleFloat 2.2s ease-in-out 1.4s infinite !important; }
+.maya-particle-8 { animation: mayaParticleFloat 2.6s ease-in-out 2.0s infinite !important; }
+
+@keyframes mayaButtonGlowPulse {
+  0%, 100% {
+    box-shadow: 0 8px 24px rgba(0, 122, 255, 0.42), 0 0 16px rgba(56, 189, 248, 0.35);
+  }
+  50% {
+    box-shadow: 0 10px 32px rgba(0, 122, 255, 0.65), 0 0 24px rgba(56, 189, 248, 0.6);
+  }
+}
+
+@keyframes mayaShimmerSweep {
+  0% {
+    transform: translateX(-150%) skewX(-20deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.55;
+  }
+  40% {
+    transform: translateX(250%) skewX(-20deg);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(250%) skewX(-20deg);
+    opacity: 0;
+  }
+}
+`;
 
 export default function SessionCompleteScreen() {
   const params = useLocalSearchParams<{
+    sessionId?: string;
     roadmapLevelId?: string;
     levelNumber?: string;
     levelTitle?: string;
@@ -147,12 +312,54 @@ export default function SessionCompleteScreen() {
     }
   }
 
+  const avatarAnim = useRef(new Animated.Value(0)).current;
+  const titleAnim = useRef(new Animated.Value(0)).current;
+  const statsAnim = useRef(new Animated.Value(0)).current;
+  const buttonAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.stagger(90, [
+      Animated.spring(avatarAnim, {
+        toValue: 1,
+        friction: 5.5,
+        tension: 80,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(titleAnim, {
+        toValue: 1,
+        duration: 360,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(statsAnim, {
+        toValue: 1,
+        duration: 400,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.spring(buttonAnim, {
+        toValue: 1,
+        friction: 6.5,
+        tension: 75,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+  }, []);
+
   // Button handlers
   const handlePrimaryPress = () => {
-    if (isGeneral) {
-      router.replace('/history');
-    } else if (isPassed) {
-      router.replace('/(tabs)/roadmap');
+    playUnderstoodTapSound();
+    const activeSessionId = params.sessionId || report?.id || (report as any)?.sessionId || '';
+    if (isGeneral || isPassed) {
+      router.replace({
+        pathname: '/onboarding/session-review' as any,
+        params: {
+          sessionId: activeSessionId,
+          roadmapLevelId: params.roadmapLevelId || '',
+          isGeneral: String(isGeneral),
+          isPassed: String(isPassed),
+        },
+      });
     } else {
       // Re-attempt level with same parameters
       if (report?.callParams) {
@@ -161,22 +368,27 @@ export default function SessionCompleteScreen() {
           params: report.callParams,
         });
       } else {
-        router.replace('/(tabs)/roadmap');
+        router.replace({
+          pathname: '/onboarding/session-review' as any,
+          params: {
+            sessionId: activeSessionId,
+            roadmapLevelId: params.roadmapLevelId || '',
+            isGeneral: String(isGeneral),
+            isPassed: String(isPassed),
+          },
+        });
       }
     }
   };
 
   const handleSecondaryPress = () => {
-    if (!isGeneral) {
-      router.replace('/(tabs)/roadmap');
-    } else {
-      router.replace('/(tabs)/roadmap');
-    }
+    playUnderstoodTapSound();
+    router.replace('/(tabs)/roadmap');
   };
 
   const primaryButtonText = isGeneral
-    ? "Let's Review →"
-    : (isPassed ? 'Continue to Roadmap →' : 'Try Again ');
+    ? 'Done'
+    : (isPassed ? 'Done' : 'Try Again');
 
   const secondaryButtonText = isGeneral
     ? 'Back to home'
@@ -188,6 +400,9 @@ export default function SessionCompleteScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      {Platform.OS === 'web' && (
+        <style dangerouslySetInnerHTML={{ __html: COMPLETE_ANIMATION_CSS }} />
+      )}
       <View style={[styles.mainWrapper, !isPhone && styles.mainWrapperDesktop]}>
         <ScrollView
           style={styles.scrollArea}
@@ -198,7 +413,30 @@ export default function SessionCompleteScreen() {
           {/* Top Content (Avatar, Title, Metrics) */}
           <View style={styles.topContentGroup}>
             {/* Top Maya Avatar with Soft Radial Background Aura */}
-            <View style={[styles.avatarSection, { width: avatarSize + 20, height: avatarSize }]}>
+            <Animated.View
+              style={[
+                styles.avatarSection,
+                {
+                  width: avatarSize + 20,
+                  height: avatarSize,
+                  opacity: avatarAnim,
+                  transform: [
+                    {
+                      scale: avatarAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.72, 1],
+                      }),
+                    },
+                    {
+                      translateY: avatarAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [24, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
               <View
                 style={[
                   styles.avatarGlowCircle,
@@ -239,96 +477,143 @@ export default function SessionCompleteScreen() {
                   <Rect x="0" y="0" width="100%" height="100%" fill="url(#whiteFadeBlendComplete)" />
                 </Svg>
               </View>
-            </View>
+            </Animated.View>
 
             {/* Heading and Subtitle */}
-            <View style={styles.titleSection}>
+            <Animated.View
+              style={[
+                styles.titleSection,
+                {
+                  opacity: titleAnim,
+                  transform: [
+                    {
+                      translateY: titleAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [18, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
               <Text style={styles.title}>{titleText}</Text>
               <Text style={styles.subtitle}>{report?.feedbackEnglish || subtitleText}</Text>
-            </View>
+            </Animated.View>
 
-            {/* Row 1: Talk Time & XP Earned Pill Cards */}
-            <View style={styles.rowOneStats}>
-              {/* Talk Time */}
-              <View style={styles.pillStatCard}>
-                <View style={styles.clockIconBadge}>
-                  <Ionicons name="time-outline" size={20} color="#2563EB" />
+            {/* Stats Group Animated entrance */}
+            <Animated.View
+              style={{
+                width: '100%',
+                alignItems: 'center',
+                opacity: statsAnim,
+                transform: [
+                  {
+                    translateY: statsAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [20, 0],
+                    }),
+                  },
+                ],
+              }}
+            >
+              {/* Row 1: Talk Time & XP Earned Pill Cards */}
+              <View style={styles.rowOneStats}>
+                {/* Talk Time */}
+                <View style={styles.pillStatCard}>
+                  <View style={styles.clockIconBadge}>
+                    <Ionicons name="time-outline" size={20} color="#2563EB" />
+                  </View>
+                  <View style={styles.statTexts}>
+                    <Text style={styles.statValueBold}>{talkMins} min</Text>
+                    <Text style={styles.statLabelMuted}>Talk time</Text>
+                  </View>
                 </View>
-                <View style={styles.statTexts}>
-                  <Text style={styles.statValueBold}>{talkMins} min</Text>
-                  <Text style={styles.statLabelMuted}>Talk time</Text>
+
+                {/* XP Earned */}
+                <View style={styles.pillStatCard}>
+                  <View style={styles.starIconBadge}>
+                    <Ionicons name="star" size={18} color="#EAB308" />
+                  </View>
+                  <View style={styles.statTexts}>
+                    <Text style={styles.statValueBold}>+{xpEarned} XP</Text>
+                    <Text style={styles.statLabelMuted}>Earned today</Text>
+                  </View>
                 </View>
               </View>
 
-              {/* XP Earned */}
-              <View style={styles.pillStatCard}>
-                <View style={styles.starIconBadge}>
-                  <Ionicons name="star" size={18} color="#EAB308" />
+              {/* Row 2: 3-Metric Summary Card (Session Time | Sentences | Score) */}
+              <View style={styles.threeMetricCard}>
+                {/* Column 1: Session Time */}
+                <View style={styles.metricColumn}>
+                  <View style={styles.metricIconBadge}>
+                    <Ionicons name="time-outline" size={17} color="#3B82F6" />
+                  </View>
+                  <Text style={styles.metricValueText}>{formattedSessionTime}</Text>
+                  <Text style={styles.metricLabelText}>Session time</Text>
                 </View>
-                <View style={styles.statTexts}>
-                  <Text style={styles.statValueBold}>+{xpEarned} XP</Text>
-                  <Text style={styles.statLabelMuted}>Earned today</Text>
+
+                {/* Divider Line */}
+                <View style={styles.metricDivider} />
+
+                {/* Column 2: Sentences Spoken */}
+                <View style={styles.metricColumn}>
+                  <View style={styles.metricIconBadge}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={17} color="#3B82F6" />
+                  </View>
+                  <Text style={styles.metricValueText}>{sentencesCount}</Text>
+                  <Text style={styles.metricLabelText}>Sentences</Text>
+                </View>
+
+                {/* Divider Line */}
+                <View style={styles.metricDivider} />
+
+                {/* Column 3: Score % */}
+                <View style={styles.metricColumn}>
+                  <View
+                    style={[
+                      styles.metricIconBadge,
+                      !isPassed && !isGeneral && styles.metricIconBadgeRetry,
+                    ]}
+                  >
+                    <Ionicons
+                      name="star"
+                      size={17}
+                      color={isPassed || isGeneral ? '#3B82F6' : '#D97706'}
+                    />
+                  </View>
+                  <Text
+                    style={[
+                      styles.metricValueText,
+                      !isPassed && !isGeneral && styles.metricValueTextRetry,
+                    ]}
+                  >
+                    {overallScore}%
+                  </Text>
+                  <Text style={styles.metricLabelText}>
+                    {isGeneral ? 'Fluency Score' : 'Roleplay Score'}
+                  </Text>
                 </View>
               </View>
-            </View>
-
-            {/* Row 2: 3-Metric Summary Card (Session Time | Sentences | Score) */}
-            <View style={styles.threeMetricCard}>
-              {/* Column 1: Session Time */}
-              <View style={styles.metricColumn}>
-                <View style={styles.metricIconBadge}>
-                  <Ionicons name="time-outline" size={17} color="#3B82F6" />
-                </View>
-                <Text style={styles.metricValueText}>{formattedSessionTime}</Text>
-                <Text style={styles.metricLabelText}>Session time</Text>
-              </View>
-
-              {/* Divider Line */}
-              <View style={styles.metricDivider} />
-
-              {/* Column 2: Sentences Spoken */}
-              <View style={styles.metricColumn}>
-                <View style={styles.metricIconBadge}>
-                  <Ionicons name="chatbubble-ellipses-outline" size={17} color="#3B82F6" />
-                </View>
-                <Text style={styles.metricValueText}>{sentencesCount}</Text>
-                <Text style={styles.metricLabelText}>Sentences</Text>
-              </View>
-
-              {/* Divider Line */}
-              <View style={styles.metricDivider} />
-
-              {/* Column 3: Score % */}
-              <View style={styles.metricColumn}>
-                <View
-                  style={[
-                    styles.metricIconBadge,
-                    !isPassed && !isGeneral && styles.metricIconBadgeRetry,
-                  ]}
-                >
-                  <Ionicons
-                    name="star"
-                    size={17}
-                    color={isPassed || isGeneral ? '#3B82F6' : '#D97706'}
-                  />
-                </View>
-                <Text
-                  style={[
-                    styles.metricValueText,
-                    !isPassed && !isGeneral && styles.metricValueTextRetry,
-                  ]}
-                >
-                  {overallScore}%
-                </Text>
-                <Text style={styles.metricLabelText}>
-                  {isGeneral ? 'Fluency Score' : 'Roleplay Score'}
-                </Text>
-              </View>
-            </View>
+            </Animated.View>
           </View>
 
           {/* Action Buttons (Pinned at Bottom) */}
-          <View style={styles.actionButtonsContainer}>
+          <Animated.View
+            style={[
+              styles.actionButtonsContainer,
+              {
+                opacity: buttonAnim,
+                transform: [
+                  {
+                    translateY: buttonAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [24, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             {/* Primary Action Button */}
             <Pressable
               style={({ pressed }) => [
@@ -338,21 +623,32 @@ export default function SessionCompleteScreen() {
               onPress={handlePrimaryPress}
               accessibilityRole="button"
             >
+              {/* Shimmer sweep ray */}
+              {Platform.OS === 'web' && (
+                <View pointerEvents="none" style={styles.shimmerRay} />
+              )}
+
+              {/* Glowing floating particles */}
+              {GLOW_PARTICLES.map((p) => (
+                <GlowingParticle key={p.id} p={p} />
+              ))}
+
               <Text style={styles.primaryButtonText}>{primaryButtonText}</Text>
             </Pressable>
 
-            {/* Secondary Action Button */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && styles.secondaryButtonPressed,
-              ]}
-              onPress={handleSecondaryPress}
-              accessibilityRole="button"
-            >
-              <Text style={styles.secondaryButtonText}>{secondaryButtonText}</Text>
-            </Pressable>
-          </View>
+            {!isPassed && !isGeneral && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && styles.secondaryButtonPressed,
+                ]}
+                onPress={handleSecondaryPress}
+                accessibilityRole="button"
+              >
+                <Text style={styles.secondaryButtonText}>{secondaryButtonText}</Text>
+              </Pressable>
+            )}
+          </Animated.View>
         </ScrollView>
       </View>
     </SafeAreaView>
@@ -459,6 +755,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 14,
+    ...Platform.select({
+      web: {
+        animationKeyframes: 'completeFadeUp',
+        animationDuration: '0.65s',
+        animationDelay: '0.28s',
+        animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        animationFillMode: 'both',
+      } as any,
+    }),
   },
   pillStatCard: {
     flex: 1,
@@ -516,6 +821,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
+    ...Platform.select({
+      web: {
+        animationKeyframes: 'completeFadeUp',
+        animationDuration: '0.65s',
+        animationDelay: '0.38s',
+        animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        animationFillMode: 'both',
+      } as any,
+    }),
   },
   metricColumn: {
     flex: 1,
@@ -560,33 +874,75 @@ const styles = StyleSheet.create({
     marginTop: 'auto',
     paddingTop: 12,
     marginBottom: Platform.select({
-      web: 16,
-      ios: 10,
-      default: 10,
+      web: 24,
+      ios: 12,
+      default: 12,
+    }),
+    ...Platform.select({
+      web: {
+        animationKeyframes: 'completeFadeUp',
+        animationDuration: '0.65s',
+        animationDelay: '0.48s',
+        animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        animationFillMode: 'both',
+      } as any,
     }),
   },
   primaryButton: {
+    position: 'relative',
     width: '100%',
-    backgroundColor: '#007AFF',
-    height: 52,
-    borderRadius: 16,
-    flexDirection: 'row',
-    justifyContent: 'center',
+    height: 56,
+    backgroundColor: '#006BE5',
+    borderRadius: 22,
     alignItems: 'center',
-    shadowColor: '#007AFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.22,
-    shadowRadius: 10,
-    elevation: 4,
+    justifyContent: 'center',
+    overflow: 'hidden',
+    boxShadow: '0 8px 24px rgba(0, 107, 229, 0.42), 0 0 16px rgba(56, 189, 248, 0.35)',
+    ...Platform.select({
+      web: {
+        backgroundImage: 'linear-gradient(180deg, #087FF5 0%, #006BE5 100%)',
+        animationKeyframes: 'mayaButtonGlowPulse',
+        animationDuration: '3s',
+        animationTimingFunction: 'ease-in-out',
+        animationIterationCount: 'infinite',
+        cursor: 'pointer',
+        userSelect: 'none',
+        transition: 'transform 0.1s ease',
+      } as any,
+      default: {
+        elevation: 6,
+      },
+    }),
   },
   primaryButtonPressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.99 }],
+    transform: [{ scale: 0.985 }],
+    opacity: 0.92,
   },
   primaryButtonText: {
     ...fontStyle('outfit', 'semiBold'),
-    fontSize: 16,
-    color: '#FFFFFF',
+    fontSize: 17,
+    color: '#ffffff',
+  },
+  shimmerRay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: '45%',
+    ...Platform.select({
+      web: {
+        backgroundImage:
+          'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.28) 50%, transparent 100%)',
+        animationKeyframes: 'mayaShimmerSweep',
+        animationDuration: '3.5s',
+        animationTimingFunction: 'ease-in-out',
+        animationIterationCount: 'infinite',
+      } as any,
+    }),
+  },
+  glowParticle: {
+    position: 'absolute',
+    backgroundColor: '#FFFFFF',
+    zIndex: 1,
   },
   secondaryButton: {
     width: '100%',

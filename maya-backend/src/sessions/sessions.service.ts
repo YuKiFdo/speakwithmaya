@@ -1,10 +1,71 @@
 import { Injectable, Logger, UnauthorizedException, Optional } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto } from './dto/session.dto.js';
+import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto, AnalyzeSessionDto, SessionTtsDto, SessionReviewDto } from './dto/session.dto.js';
 import { RoadmapService } from '../roadmap/roadmap.service.js';
 import { parseCanonicalLessonContent, formatCanonicalLessonContent } from '../roadmap/dto/roadmap.dto.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { GoogleGenAI, Type } from '@google/genai';
+
+export function toValidUuid(str?: string): string {
+  if (!str) return randomUUID();
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str)) {
+    return str;
+  }
+  const hash = createHash('md5').update(str).digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
+
+export function encodePcmToWav(
+  pcmBuffer: Buffer,
+  sampleRate: number = 16000,
+  numChannels: number = 1,
+  bitDepth: number = 16,
+): Buffer {
+  const byteRate = sampleRate * numChannels * (bitDepth / 8);
+  const blockAlign = numChannels * (bitDepth / 8);
+  const dataSize = pcmBuffer.length;
+  const headerSize = 44;
+  const buffer = Buffer.alloc(headerSize + dataSize);
+
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(numChannels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(byteRate, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(bitDepth, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataSize, 40);
+
+  pcmBuffer.copy(buffer, 44);
+  return buffer;
+}
+
+export function resamplePcm16Mono(inputBuffer: Buffer, fromRate: number, toRate: number): Buffer {
+  if (fromRate === toRate || inputBuffer.length === 0) return inputBuffer;
+  const numInputSamples = Math.floor(inputBuffer.length / 2);
+  const ratio = toRate / fromRate;
+  const numOutputSamples = Math.floor(numInputSamples * ratio);
+  const outBuffer = Buffer.alloc(numOutputSamples * 2);
+
+  for (let i = 0; i < numOutputSamples; i++) {
+    const srcIndex = i / ratio;
+    const srcIndexFloor = Math.floor(srcIndex);
+    const srcIndexCeil = Math.min(srcIndexFloor + 1, numInputSamples - 1);
+    const weight = srcIndex - srcIndexFloor;
+
+    const s1 = inputBuffer.readInt16LE(srcIndexFloor * 2);
+    const s2 = inputBuffer.readInt16LE(srcIndexCeil * 2);
+    const interpolated = Math.round(s1 * (1 - weight) + s2 * weight);
+    const clamped = Math.max(-32768, Math.min(32767, interpolated));
+    outBuffer.writeInt16LE(clamped, i * 2);
+  }
+  return outBuffer;
+}
 
 export interface UsageRecord {
   id: string;
@@ -139,13 +200,23 @@ export class SessionsService {
   private readonly hintCache = new Map<string, { hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number }>();
   private readonly sessionHintUsage = new Map<string, { count: number; totalTokens: number; costUsd: number; costLkr: number }>();
 
+  private readonly sessionRecordingsMap = new Map<string, { userAudioUrl?: string; modelAudioUrl?: string }>();
+  private readonly sessionTurnAudioMap = new Map<string, Map<number, string>>();
+  private lastSavedSessionId: string | null = null;
+  private readonly inFlightHintPromises = new Map<string, Promise<{ hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number; tokens?: { promptTokens: number; outputTokens: number; totalTokens: number } }>>();
+  private genAiClient: GoogleGenAI | null = null;
+
   constructor(
     @Optional() private readonly roadmapService?: RoadmapService,
   ) {
     this.geminiApiKey = process.env.GEMINI_API_KEY;
     this.liveModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
+    if (this.geminiApiKey) {
+      this.genAiClient = new GoogleGenAI({ apiKey: this.geminiApiKey });
+    }
 
-    const supabaseUrl = process.env.SUPABASE_URL;
+    const rawSupabaseUrl = process.env.SUPABASE_URL || 'https://clfjfhdsjwkzgxwoolgp.supabase.co';
+    const supabaseUrl = rawSupabaseUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
     const supabaseKey =
       process.env.SUPABASE_SECRET_KEY ||
       process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -155,8 +226,281 @@ export class SessionsService {
     if (supabaseUrl && supabaseKey) {
       this.supabase = createClient(supabaseUrl, supabaseKey);
       this.logger.log('Connected to Supabase client');
+      this.ensureRecordingsBucket().catch((e) => {
+        this.logger.warn(`Failed ensuring storage bucket: ${e?.message}`);
+      });
     } else {
       this.logger.warn('SUPABASE_URL or keys not configured; running in local fallback mode');
+    }
+  }
+
+  async ensureRecordingsBucket(): Promise<void> {
+    if (!this.supabase) return;
+    try {
+      const { data: buckets } = await this.supabase.storage.listBuckets();
+      if (!buckets?.some((b) => b.name === 'session-recordings')) {
+        await this.supabase.storage.createBucket('session-recordings', { public: true });
+        this.logger.log('Created Supabase storage bucket "session-recordings"');
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not verify/create storage bucket: ${err?.message}`);
+    }
+  }
+
+  async saveSessionAudioRecordings(
+    sessionId: string,
+    userPcm?: Buffer,
+    modelPcm?: Buffer,
+    userTurnAudioMap?: Map<number, Buffer>,
+    modelTurnAudioMap?: Map<number, Buffer>,
+    chronologicalTurns?: Array<{ speaker: 'user' | 'model'; turnIdx: number; pcm: Buffer; sampleRate: number }>,
+  ): Promise<{ userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string; turnAudioUrls?: Map<number, string> }> {
+    const validSessionId = toValidUuid(sessionId);
+    if (!this.supabase) return {};
+
+    await this.ensureRecordingsBucket();
+
+    let userAudioUrl: string | undefined;
+    let modelAudioUrl: string | undefined;
+    let fullConversationAudioUrl: string | undefined;
+
+    try {
+      if (userPcm && userPcm.length > 0) {
+        const userWav = encodePcmToWav(userPcm, 16000);
+        const userFilePath = `${validSessionId}/user_recording.wav`;
+        const { error: userErr } = await this.supabase.storage
+          .from('session-recordings')
+          .upload(userFilePath, userWav, {
+            contentType: 'audio/wav',
+            upsert: true,
+          });
+
+        if (userErr) {
+          this.logger.error(`Failed to upload user recording: ${userErr.message}`);
+        } else {
+          const { data: pubData } = this.supabase.storage
+            .from('session-recordings')
+            .getPublicUrl(userFilePath);
+          userAudioUrl = (pubData?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+          this.logger.log(`[SessionsService] 🎙️ Saved user audio recording to Supabase: ${userAudioUrl} (${(userWav.length / 1024).toFixed(1)} KB)`);
+        }
+      }
+
+      if (modelPcm && modelPcm.length > 0) {
+        const modelWav = encodePcmToWav(modelPcm, 24000);
+        const modelFilePath = `${validSessionId}/model_recording.wav`;
+        const { error: modelErr } = await this.supabase.storage
+          .from('session-recordings')
+          .upload(modelFilePath, modelWav, {
+            contentType: 'audio/wav',
+            upsert: true,
+          });
+
+        if (modelErr) {
+          this.logger.error(`Failed to upload model recording: ${modelErr.message}`);
+        } else {
+          const { data: pubData } = this.supabase.storage
+            .from('session-recordings')
+            .getPublicUrl(modelFilePath);
+          modelAudioUrl = (pubData?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+          this.logger.log(`[SessionsService] 🤖 Saved model audio recording to Supabase: ${modelAudioUrl} (${(modelWav.length / 1024).toFixed(1)} KB)`);
+        }
+      }
+
+      // Synthesize full chronological conversation (Model -> User -> Model -> User in proper order)
+      if (chronologicalTurns && chronologicalTurns.length > 0) {
+        try {
+          const silence24k = Buffer.alloc(16800); // 350ms silence between conversational turns
+          const pcmSegments: Buffer[] = [];
+
+          for (const turn of chronologicalTurns) {
+            if (turn.pcm && turn.pcm.length > 0) {
+              const pcm24k = turn.sampleRate === 24000
+                ? turn.pcm
+                : resamplePcm16Mono(turn.pcm, turn.sampleRate, 24000);
+              pcmSegments.push(pcm24k);
+              pcmSegments.push(silence24k);
+            }
+          }
+
+          if (pcmSegments.length > 0) {
+            const combinedPcm = Buffer.concat(pcmSegments);
+            const fullWav = encodePcmToWav(combinedPcm, 24000);
+            const fullFilePath = `${validSessionId}/full_conversation.wav`;
+            const { error: fullErr } = await this.supabase.storage
+              .from('session-recordings')
+              .upload(fullFilePath, fullWav, {
+                contentType: 'audio/wav',
+                upsert: true,
+              });
+
+            if (!fullErr) {
+              const { data: pubData } = this.supabase.storage
+                .from('session-recordings')
+                .getPublicUrl(fullFilePath);
+              fullConversationAudioUrl = (pubData?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+              this.logger.log(`[SessionsService] 🎧 Saved chronological full conversation to Supabase: ${fullConversationAudioUrl} (${(fullWav.length / 1024).toFixed(1)} KB)`);
+            }
+          }
+        } catch (err: any) {
+          this.logger.warn(`Could not synthesize chronological full_conversation.wav: ${err?.message}`);
+        }
+      }
+
+      // Upload isolated per-turn audio clips to Supabase Storage in parallel
+      const turnUrls = new Map<number, string>();
+      const supabaseClient = this.supabase;
+
+      if (userTurnAudioMap && userTurnAudioMap.size > 0) {
+        const uploadTasks = Array.from(userTurnAudioMap.entries()).map(async ([turnIdx, turnPcm]) => {
+          if (turnPcm && turnPcm.length > 0) {
+            const turnWav = encodePcmToWav(turnPcm, 16000);
+            const turnFilePath = `${validSessionId}/turns/user_turn_${turnIdx}.wav`;
+            const { error: turnErr } = await supabaseClient.storage
+              .from('session-recordings')
+              .upload(turnFilePath, turnWav, {
+                contentType: 'audio/wav',
+                upsert: true,
+              });
+
+            if (!turnErr) {
+              const { data: turnPub } = supabaseClient.storage
+                .from('session-recordings')
+                .getPublicUrl(turnFilePath);
+              const turnUrl = (turnPub?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+              turnUrls.set(turnIdx, turnUrl);
+            }
+          }
+        });
+        await Promise.all(uploadTasks);
+      }
+
+      if (modelTurnAudioMap && modelTurnAudioMap.size > 0) {
+        const modelUploads = Array.from(modelTurnAudioMap.entries()).map(async ([turnIdx, turnPcm]) => {
+          if (turnPcm && turnPcm.length > 0) {
+            const turnWav = encodePcmToWav(turnPcm, 24000);
+            const turnFilePath = `${validSessionId}/turns/model_turn_${turnIdx}.wav`;
+            await supabaseClient.storage
+              .from('session-recordings')
+              .upload(turnFilePath, turnWav, {
+                contentType: 'audio/wav',
+                upsert: true,
+              });
+          }
+        });
+        await Promise.all(modelUploads);
+      }
+
+      this.sessionTurnAudioMap.set(validSessionId, turnUrls);
+      if (sessionId !== validSessionId) {
+        this.sessionTurnAudioMap.set(sessionId, turnUrls);
+      }
+      this.lastSavedSessionId = validSessionId;
+      this.sessionRecordingsMap.set(validSessionId, { userAudioUrl, modelAudioUrl });
+      if (sessionId !== validSessionId) {
+        this.sessionRecordingsMap.set(sessionId, { userAudioUrl, modelAudioUrl });
+      }
+
+      return { userAudioUrl, modelAudioUrl, fullConversationAudioUrl, turnAudioUrls: turnUrls };
+    } catch (err: any) {
+      this.logger.error(`Error saving session recordings: ${err?.message}`);
+      return { userAudioUrl, modelAudioUrl };
+    }
+  }
+
+  async uploadSingleTurnAudio(sessionId: string, turnIdx: number, turnPcm: Buffer, speaker: 'user' | 'model' = 'user'): Promise<string | undefined> {
+    const validSessionId = toValidUuid(sessionId);
+    if (!this.supabase || !turnPcm || turnPcm.length === 0) return undefined;
+
+    try {
+      await this.ensureRecordingsBucket();
+      const sampleRate = speaker === 'model' ? 24000 : 16000;
+      const turnWav = encodePcmToWav(turnPcm, sampleRate);
+      const turnFilePath = `${validSessionId}/turns/${speaker}_turn_${turnIdx}.wav`;
+      const { error } = await this.supabase.storage
+        .from('session-recordings')
+        .upload(turnFilePath, turnWav, {
+          contentType: 'audio/wav',
+          upsert: true,
+        });
+
+      if (!error) {
+        const { data: turnPub } = this.supabase.storage
+          .from('session-recordings')
+          .getPublicUrl(turnFilePath);
+        const turnUrl = (turnPub?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+        if (speaker === 'user') {
+          let map = this.sessionTurnAudioMap.get(validSessionId);
+          if (!map) {
+            map = new Map<number, string>();
+            this.sessionTurnAudioMap.set(validSessionId, map);
+          }
+          map.set(turnIdx, turnUrl);
+        }
+        return turnUrl;
+      }
+    } catch (e: any) {
+      this.logger.warn(`Could not upload ${speaker} turn audio: ${e?.message}`);
+    }
+    return undefined;
+  }
+
+  async saveSessionTurns(sessionId: string, turns: any[], topic?: string): Promise<void> {
+    const validSessionId = toValidUuid(sessionId);
+    if (!this.supabase || !turns || turns.length === 0) return;
+
+    try {
+      // Ensure the parent session row exists in public.sessions before inserting child turns
+      await this.supabase
+        .from('sessions')
+        .upsert(
+          {
+            id: validSessionId,
+            user_id: THARINDU_USER_ID,
+            topic: topic || 'English Speaking Practice',
+            status: 'active',
+          },
+          { onConflict: 'id', ignoreDuplicates: true },
+        );
+
+      // Clean existing turns for this session to prevent duplicate entries on retry
+      await this.supabase.from('session_turns').delete().eq('session_id', validSessionId);
+
+      const turnsToInsert = turns.map((t, idx) => ({
+        session_id: validSessionId,
+        turn_order: idx + 1,
+        role: t.role === 'model' ? 'model' : 'user',
+        text_transcript: (t.text || '').trim() || '...',
+        timestamp: t.timestamp || new Date().toISOString(),
+      }));
+
+      const { error: turnsErr } = await this.supabase.from('session_turns').insert(turnsToInsert);
+      if (turnsErr) {
+        this.logger.error(`[SessionsService] Error saving turns into session_turns: ${turnsErr.message}`);
+      } else {
+        this.logger.log(`[SessionsService] ✅ Persisted ${turnsToInsert.length} turns in session_turns for session ${validSessionId}`);
+      }
+
+      // Also persist full conversation data in Supabase Storage as conversation.json
+      const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
+      const conversationPayload = {
+        sessionId: validSessionId,
+        topic: topic || 'English Speaking Practice',
+        userAudioUrl: rec?.userAudioUrl || this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl,
+        modelAudioUrl: rec?.modelAudioUrl || this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl,
+        savedAt: new Date().toISOString(),
+        turns: turnsToInsert,
+      };
+
+      await this.supabase.storage
+        .from('session-recordings')
+        .upload(`${validSessionId}/conversation.json`, Buffer.from(JSON.stringify(conversationPayload, null, 2), 'utf-8'), {
+          contentType: 'application/json',
+          upsert: true,
+        });
+      this.logger.log(`[SessionsService] 💾 Persisted conversation.json to Supabase storage for session ${validSessionId}`);
+    } catch (err: any) {
+      this.logger.error(`[SessionsService] Error saving session turns to Supabase: ${err?.message}`);
     }
   }
 
@@ -891,6 +1235,7 @@ STRICT RESTRICTIONS:
   }
 
   async finishSession(sessionId: string, userId: string = 'guest-user', dto: FinishSessionDto) {
+    const validSessionId = toValidUuid(sessionId);
     const { durationSeconds, tokensUsed, turns, grammarCorrections, scores } = dto;
 
     // Calculate usage costs strictly from Gemini tokens passed by client
@@ -928,10 +1273,14 @@ STRICT RESTRICTIONS:
     const costLkr = Number((costUsd * this.usdToLkr).toFixed(2));
 
     this.logger.log(
-      `[SessionsService] 💾 [finishSession] Saving session ${sessionId}: duration=${durationSeconds}s, scores=${JSON.stringify(scores || {})}, corrections=${grammarCorrections?.length || 0}, turns=${turns?.length || 0}, tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`,
+      `[SessionsService] 💾 [finishSession] Saving session ${validSessionId} (input: ${sessionId}): duration=${durationSeconds}s, scores=${JSON.stringify(scores || {})}, corrections=${grammarCorrections?.length || 0}, turns=${turns?.length || 0}, tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`,
     );
 
     const resolvedUserId = THARINDU_USER_ID;
+
+    const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
+    const userAudioUrl = rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined);
+    const modelAudioUrl = rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined);
 
     if (this.supabase) {
       try {
@@ -939,14 +1288,14 @@ STRICT RESTRICTIONS:
         const { data: existingLedger } = await this.supabase
           .from('usage_ledger')
           .select('id')
-          .eq('session_id', sessionId)
+          .eq('session_id', validSessionId)
           .maybeSingle();
 
         if (existingLedger) {
-          this.logger.warn(`Session ${sessionId} is already finalized in usage_ledger. Ignoring duplicate finish request.`);
+          this.logger.warn(`Session ${validSessionId} is already finalized in usage_ledger. Ignoring duplicate finish request.`);
           return {
-            sessionId,
-            sessionCode: `SM-${sessionId.slice(0, 5).toUpperCase()}`,
+            sessionId: validSessionId,
+            sessionCode: `SM-${validSessionId.slice(0, 5).toUpperCase()}`,
             status: 'completed',
             durationSeconds,
             tokensUsed: {
@@ -961,41 +1310,41 @@ STRICT RESTRICTIONS:
               costUsd,
               costLkr,
             },
+            recordings: {
+              userAudioUrl,
+              modelAudioUrl,
+            },
             correctionsRecorded: grammarCorrections?.length || 0,
             scores: scores || { overall: 85, fluency: 84, grammar: 82, pronunciation: 86 },
           };
         }
 
-        // 1. Update session status
+        // 1. Ensure/update session status in sessions table
         await this.supabase
           .from('sessions')
-          .update({
+          .upsert({
+            id: validSessionId,
+            user_id: resolvedUserId,
+            start_time: new Date(Date.now() - durationSeconds * 1000).toISOString(),
             end_time: new Date().toISOString(),
             duration_seconds: durationSeconds,
             status: 'completed',
+            topic: dto.topic || 'English Speaking Practice',
             overall_score: scores?.overall ?? 85,
             fluency_score: scores?.fluency ?? 84,
             grammar_score: scores?.grammar ?? 82,
             pronunciation_score: scores?.pronunciation ?? 86,
-          })
-          .eq('id', sessionId);
+          }, { onConflict: 'id' });
 
-        // 2. Insert turns
+        // 2. Persist full conversation turns in session_turns table & Supabase Storage conversation.json
         if (turns && turns.length > 0) {
-          const turnsToInsert = turns.map((t, idx) => ({
-            session_id: sessionId,
-            turn_order: idx + 1,
-            role: t.role,
-            text_transcript: t.text,
-            timestamp: t.timestamp || new Date().toISOString(),
-          }));
-          await this.supabase.from('session_turns').insert(turnsToInsert);
+          await this.saveSessionTurns(validSessionId, turns, dto.topic);
         }
 
         // 3. Insert grammar corrections
         if (grammarCorrections && grammarCorrections.length > 0) {
           const correctionsToInsert = grammarCorrections.map((c) => ({
-            session_id: sessionId,
+            session_id: validSessionId,
             student_said: c.studentSaid,
             more_natural: c.moreNatural,
             explanation: c.explanation,
@@ -1006,7 +1355,7 @@ STRICT RESTRICTIONS:
 
         // 4. Append to usage ledger in Supabase
         await this.supabase.from('usage_ledger').insert({
-          session_id: sessionId,
+          session_id: validSessionId,
           user_id: resolvedUserId,
           audio_in_tokens: audioInTokens,
           audio_out_tokens: audioOutTokens,
@@ -1062,11 +1411,11 @@ STRICT RESTRICTIONS:
       });
     }
 
-    const hintUsage = this.sessionHintUsage.get(sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
-    const sessionCode = `SM-${sessionId.slice(0, 5).toUpperCase()}`;
+    const hintUsage = this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
+    const sessionCode = `SM-${validSessionId.slice(0, 5).toUpperCase()}`;
 
     return {
-      sessionId,
+      sessionId: validSessionId,
       sessionCode,
       status: 'completed',
       durationSeconds,
@@ -1085,6 +1434,10 @@ STRICT RESTRICTIONS:
         hintCostUsd: hintUsage.costUsd,
         hintCostLkr: hintUsage.costLkr,
         totalWithHintsLkr: Number((costLkr + hintUsage.costLkr).toFixed(2)),
+      },
+      recordings: {
+        userAudioUrl,
+        modelAudioUrl,
       },
       correctionsRecorded: grammarCorrections?.length || 0,
       scores: scores || { overall: 85, fluency: 84, grammar: 82, pronunciation: 86 },
@@ -1437,11 +1790,46 @@ STRICT RESTRICTIONS:
     const dateObj = new Date(sess.created_at || Date.now());
     const displayDate = formatSriLankaDisplayDate(dateObj);
 
-    const mappedTurns = (turns || []).map((t: any) => ({
-      role: t.role,
-      text: t.text_transcript,
-      timestamp: t.timestamp,
-    }));
+    const validSessionId = toValidUuid(sessionId);
+    const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
+
+    // Check which audio files actually exist in Supabase storage for this session
+    let filesSet = new Set<string>();
+    if (this.supabase) {
+      try {
+        const { data: storageFiles } = await this.supabase.storage.from('session-recordings').list(validSessionId);
+        if (storageFiles) {
+          filesSet = new Set(storageFiles.map((f) => f.name));
+        }
+      } catch {}
+    }
+
+    const hasFullAudio = filesSet.has('full_conversation.wav');
+    const hasUserAudio = filesSet.has('user_recording.wav');
+    const hasModelAudio = filesSet.has('model_recording.wav');
+    const hasTurnsFolder = filesSet.has('turns');
+
+    let userTurnCounter = 0;
+    let modelTurnCounter = 0;
+    const mappedTurns = (turns || []).map((t: any) => {
+      let turnAudioUrl: string | null = null;
+      if (hasTurnsFolder) {
+        if (t.role === 'user') {
+          turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/user_turn_${userTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
+        } else {
+          turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/model_turn_${modelTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
+        }
+      }
+      if (t.role === 'user') userTurnCounter++;
+      else modelTurnCounter++;
+
+      return {
+        role: t.role,
+        text: t.text_transcript,
+        audioUrl: turnAudioUrl,
+        timestamp: t.timestamp,
+      };
+    });
 
     const mappedCorrections = (corrections || []).map((c: any) => ({
       studentSaid: c.student_said,
@@ -1482,6 +1870,17 @@ STRICT RESTRICTIONS:
       turns: mappedTurns,
       grammarCorrections: mappedCorrections,
       topic: sess.topic || 'Speaking Practice',
+      fullConversationAudioUrl: hasFullAudio
+        ? (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/full_conversation.wav`).data.publicUrl : undefined)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+        : null,
+      userAudioUrl: hasUserAudio
+        ? (rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+        : null,
+      modelAudioUrl: hasModelAudio
+        ? (rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+        : null,
+      user_rating: sess.user_rating ?? null,
+      user_feedback: sess.user_feedback ?? null,
       diagnostics: await this.getSessionDiagnostics(sessionId),
     };
   }
@@ -1506,14 +1905,64 @@ STRICT RESTRICTIONS:
         return [];
       }
 
+      // Check which sessions actually have files in Supabase storage
+      const existingSessionFolders = new Set<string>();
+      try {
+        const { data: rootList } = await this.supabase.storage.from('session-recordings').list('');
+        if (rootList) {
+          rootList.forEach((f) => existingSessionFolders.add(f.name));
+        }
+      } catch {}
+
+      // Inspect storage files in parallel for sessions that have folders
+      const sessionFilesMap = new Map<string, Set<string>>();
+      const sbClient = this.supabase;
+      if (sbClient) {
+        await Promise.all(
+          Array.from(existingSessionFolders).map(async (folderName) => {
+            try {
+              const { data: files } = await sbClient.storage.from('session-recordings').list(folderName);
+              if (files) {
+                sessionFilesMap.set(folderName, new Set(files.map((f) => f.name)));
+              }
+            } catch {}
+          }),
+        );
+      }
+
       return (sessions || []).map((sess: any) => {
+        const validSessionId = toValidUuid(sess.id);
+        const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sess.id);
+
+        const filesSet = sessionFilesMap.get(validSessionId);
+        const hasFullAudio = filesSet ? filesSet.has('full_conversation.wav') : false;
+        const hasUserAudio = filesSet ? filesSet.has('user_recording.wav') : false;
+        const hasModelAudio = filesSet ? filesSet.has('model_recording.wav') : false;
+        const hasTurnsFolder = filesSet ? filesSet.has('turns') : false;
+
+        let userTurnCounter = 0;
+        let modelTurnCounter = 0;
         const mappedTurns = (sess.session_turns || [])
           .sort((a: any, b: any) => (a.turn_order || 0) - (b.turn_order || 0))
-          .map((t: any) => ({
-            role: t.role,
-            text: t.text_transcript,
-            timestamp: t.timestamp || t.created_at,
-          }));
+          .map((t: any) => {
+            let turnAudioUrl: string | null = null;
+            if (hasTurnsFolder) {
+              if (t.role === 'user') {
+                turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/user_turn_${userTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
+              } else {
+                turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/model_turn_${modelTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
+              }
+            }
+            if (t.role === 'user') userTurnCounter++;
+            else modelTurnCounter++;
+
+            return {
+              role: t.role,
+              text: t.text_transcript,
+              audioUrl: turnAudioUrl,
+              timestamp: t.timestamp || t.created_at,
+            };
+          });
 
         const mappedCorrections = (sess.grammar_corrections || []).map((c: any) => ({
           id: c.id,
@@ -1523,6 +1972,18 @@ STRICT RESTRICTIONS:
           highlightWords: c.highlight_words || [],
           timestamp: c.created_at,
         }));
+
+        let userAudioUrl = hasUserAudio
+          ? (rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+          : null;
+
+        let modelAudioUrl = hasModelAudio
+          ? (rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+          : null;
+
+        let fullConversationAudioUrl = hasFullAudio
+          ? (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/full_conversation.wav`).data.publicUrl : undefined)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+          : null;
 
         return {
           id: sess.id,
@@ -1536,6 +1997,11 @@ STRICT RESTRICTIONS:
           grammar_score: sess.grammar_score ?? 82,
           pronunciation_score: sess.pronunciation_score ?? 86,
           status: sess.status || 'completed',
+          fullConversationAudioUrl: fullConversationAudioUrl || null,
+          userAudioUrl: userAudioUrl || null,
+          modelAudioUrl: modelAudioUrl || null,
+          user_rating: sess.user_rating ?? null,
+          user_feedback: sess.user_feedback ?? null,
           turns: mappedTurns,
           corrections: mappedCorrections,
         };
@@ -1716,7 +2182,7 @@ STRICT RESTRICTIONS:
         const ai = new GoogleGenAI({ apiKey });
         const prompt = `Translate the following English phrase into natural, spoken Sri Lankan Sinhala (use natural conversational Sinhala, NOT archaic or book Sinhala):\n"${text}"\nOutput ONLY the Sinhala translation, without quotes or additional text.`;
         const res = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
+          model: 'gemini-3.5-flash-lite',
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
         });
         const sinhalaText = res.text?.trim() || '';
@@ -1742,17 +2208,18 @@ STRICT RESTRICTIONS:
     const question = (dto.question || '').trim();
     if (!question) {
       return {
-        hintEnglish: 'I usually relax at home and meet my friends.',
-        hintSinhala: 'මම සාමාන්‍යයෙන් ගෙදරදී විවේක ගන්නවා සහ මගේ යාළුවෝ හමුවෙනවා.',
+        hintEnglish: '',
+        hintSinhala: '',
         costUsd: 0,
         costLkr: 0,
       };
     }
 
-    const cacheKey = `${dto.level || 'all'}:${dto.topic || 'all'}:${question}`;
+    const norm = question.toLowerCase().replace(/[?!.,]/g, '').trim();
+    const cacheKey = `${dto.level || 'all'}:${dto.topic || 'all'}:${norm}`;
+
     if (this.hintCache.has(cacheKey)) {
       const cached = this.hintCache.get(cacheKey)!;
-      // If sessionId provided, log count
       if (dto.sessionId) {
         const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
         this.sessionHintUsage.set(dto.sessionId, {
@@ -1763,10 +2230,14 @@ STRICT RESTRICTIONS:
       return cached;
     }
 
-    const apiKey = this.geminiApiKey;
-    if (apiKey) {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
+    // Deduplicate in-flight generation requests so multiple concurrent calls share the single Gemini response
+    if (this.inFlightHintPromises.has(cacheKey)) {
+      return this.inFlightHintPromises.get(cacheKey)!;
+    }
+
+    const hintGenerationPromise = (async () => {
+      const apiKey = this.geminiApiKey;
+      if (apiKey) {
         const prompt = `You are Maya, an AI English speaking coach.
 A student was just asked this conversational question by Maya:
 "${question}"
@@ -1775,78 +2246,470 @@ Level: ${dto.level || 'Beginner to Intermediate'}
 
 Provide one short, natural, practical model answer the student can say in response (1 simple or compound sentence, natural everyday conversational English, easy to say aloud), along with its natural spoken Sinhala translation.`;
 
+        const executeCall = async () => {
+          const ai = this.genAiClient || new GoogleGenAI({ apiKey });
+          return ai.models.generateContent({
+            model: 'gemini-3.5-flash-lite',
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  hintEnglish: {
+                    type: Type.STRING,
+                    description: 'Short, natural conversational English model answer (1 sentence) the student can say.',
+                  },
+                  hintSinhala: {
+                    type: Type.STRING,
+                    description: 'Accurate and natural spoken Sinhala translation of that exact answer.',
+                  },
+                },
+                required: ['hintEnglish', 'hintSinhala'],
+              },
+              temperature: 0.3,
+            },
+          });
+        };
+
+        let res: any = null;
+        try {
+          res = await executeCall();
+        } catch (err: any) {
+          this.logger.warn(`Gemini hint generation initial attempt failed: ${err?.message || err}. Retrying...`);
+          await new Promise((r) => setTimeout(r, 500));
+          try {
+            res = await executeCall();
+          } catch (retryErr: any) {
+            this.logger.warn(`Gemini hint generation failed on retry: ${retryErr?.message || retryErr}`);
+          }
+        }
+
+        if (res) {
+          const promptTokens = res.usageMetadata?.promptTokenCount || 70;
+          const outputTokens = res.usageMetadata?.candidatesTokenCount || 35;
+          const totalTokens = promptTokens + outputTokens;
+          const costUsd = Number(((promptTokens / 1_000_000) * 0.30 + (outputTokens / 1_000_000) * 2.50).toFixed(6));
+          const costLkr = Number((costUsd * this.usdToLkr).toFixed(4));
+
+          const text = res.text?.trim() || '';
+          if (text) {
+            try {
+              const parsed = JSON.parse(text);
+              if (parsed.hintEnglish && parsed.hintSinhala) {
+                const result = {
+                  hintEnglish: String(parsed.hintEnglish).trim(),
+                  hintSinhala: String(parsed.hintSinhala).trim(),
+                  costUsd,
+                  costLkr,
+                  tokens: { promptTokens, outputTokens, totalTokens },
+                };
+
+                this.hintCache.set(cacheKey, result);
+
+                if (dto.sessionId) {
+                  const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
+                  this.sessionHintUsage.set(dto.sessionId, {
+                    count: existing.count + 1,
+                    totalTokens: existing.totalTokens + totalTokens,
+                    costUsd: Number((existing.costUsd + costUsd).toFixed(6)),
+                    costLkr: Number((existing.costLkr + costLkr).toFixed(4)),
+                  });
+                  this.logger.log(`[SessionsService] 💡 Hint generated for session ${dto.sessionId}: tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`);
+                }
+
+                return result;
+              }
+            } catch {}
+          }
+        }
+      }
+
+      return {
+        hintEnglish: '',
+        hintSinhala: '',
+        costUsd: 0,
+        costLkr: 0,
+      };
+    })().finally(() => {
+      this.inFlightHintPromises.delete(cacheKey);
+    });
+
+    this.inFlightHintPromises.set(cacheKey, hintGenerationPromise);
+    return hintGenerationPromise;
+  }
+
+  private ttsAudioCache = new Map<string, { audioBase64: string; mimeType: string }>();
+
+  private pcmToWavBase64(pcmBuffer: Buffer, sampleRate: number = 24000, numChannels: number = 1): string {
+    const byteRate = sampleRate * numChannels * 2;
+    const blockAlign = numChannels * 2;
+    const wavHeader = Buffer.alloc(44);
+
+    wavHeader.write('RIFF', 0);
+    wavHeader.writeUInt32LE(36 + pcmBuffer.length, 4);
+    wavHeader.write('WAVE', 8);
+    wavHeader.write('fmt ', 12);
+    wavHeader.writeUInt32LE(16, 16);
+    wavHeader.writeUInt16LE(1, 20); // 1 = PCM
+    wavHeader.writeUInt16LE(numChannels, 22);
+    wavHeader.writeUInt32LE(sampleRate, 24);
+    wavHeader.writeUInt32LE(byteRate, 28);
+    wavHeader.writeUInt16LE(blockAlign, 32);
+    wavHeader.writeUInt16LE(16, 34); // 16 bits per sample
+    wavHeader.write('data', 36);
+    wavHeader.writeUInt32LE(pcmBuffer.length, 40);
+
+    const wavData = Buffer.concat([wavHeader, pcmBuffer]);
+    return wavData.toString('base64');
+  }
+
+  async generateTtsAudio(dto: SessionTtsDto): Promise<{ audioBase64: string; mimeType: string }> {
+    const text = (dto.text || '').trim();
+    if (!text) {
+      return { audioBase64: '', mimeType: 'audio/wav' };
+    }
+    const voice = dto.voice || 'Callirrhoe';
+    const cacheKey = `${voice}:${text}`;
+    if (this.ttsAudioCache.has(cacheKey)) {
+      return this.ttsAudioCache.get(cacheKey)!;
+    }
+
+    const apiKey = this.geminiApiKey;
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
         const res = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
+          model: 'gemini-2.5-flash-preview-tts',
+          contents: [{ role: 'user', parts: [{ text }] }],
+          config: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: voice,
+                },
+              },
+            },
+          },
+        });
+
+        const parts = res.candidates?.[0]?.content?.parts || [];
+        for (const p of parts) {
+          if (p.inlineData && p.inlineData.data) {
+            const rawPcm = Buffer.from(p.inlineData.data, 'base64');
+            const wavBase64 = this.pcmToWavBase64(rawPcm, 24000, 1);
+            const result = {
+              audioBase64: wavBase64,
+              mimeType: 'audio/wav',
+            };
+            this.ttsAudioCache.set(cacheKey, result);
+            return result;
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Gemini TTS audio generation failed for "${text}": ${err?.message}`);
+      }
+    }
+
+    return { audioBase64: '', mimeType: 'audio/wav' };
+  }
+
+  async analyzeSession(dto: AnalyzeSessionDto): Promise<{
+    sessionId?: string;
+    userAudioUrl?: string | null;
+    modelAudioUrl?: string | null;
+    items: Array<{
+      type: 'grammar' | 'more_natural' | 'pronunciation';
+      badge: string;
+      title: string;
+      subtitle: string;
+      youSaid: string;
+      youSaidHighlight?: string;
+      youSaidDetail?: string;
+      betterWay: string;
+      betterWayHighlight?: string;
+      ipa?: string;
+      whyExplanation: string;
+      spokenIntro: string;
+      userTurnIndex: number;
+      userAudioUrl?: string | null;
+    }>;
+  }> {
+    const turns = dto.turns || [];
+    if (dto.sessionId && turns.length > 0) {
+      this.saveSessionTurns(dto.sessionId, turns, dto.topic).catch((e) => {
+        this.logger.warn(`Failed saving session turns during analysis: ${e?.message}`);
+      });
+    }
+    const activeHints = (dto.activeHints || []).map((h) => h.toLowerCase().trim());
+    const userTurns = turns
+      .map((t, idx) => ({ ...t, turnIndex: t.turnIndex ?? idx }))
+      .filter((t) => t.role === 'user' && t.text && t.text.trim().length > 0);
+
+    if (userTurns.length === 0) {
+      return { sessionId: dto.sessionId, items: [] };
+    }
+
+    // Filter out any user speech that was prompted or matches active hints
+    const nonHintUserTurns = userTurns.filter((ut) => {
+      const textLower = ut.text.toLowerCase().trim();
+      for (const hint of activeHints) {
+        if (!hint) continue;
+        if (textLower === hint || textLower.includes(hint) || hint.includes(textLower)) {
+          return false;
+        }
+        const uWords = textLower.split(/\s+/).filter(Boolean);
+        const hWords = hint.split(/\s+/).filter(Boolean);
+        if (uWords.length >= 3 && hWords.length >= 3) {
+          const common = uWords.filter((w) => hWords.includes(w));
+          if (common.length / Math.max(uWords.length, hWords.length) >= 0.7) {
+            return false;
+          }
+        }
+      }
+      return true;
+    });
+
+    const turnsToAnalyze = nonHintUserTurns.length > 0 ? nonHintUserTurns : userTurns;
+
+    const apiKey = this.geminiApiKey;
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const dialogueSummary = turns
+          .map((t, idx) => `Turn ${t.turnIndex ?? idx} [${t.role.toUpperCase()}]: ${t.text}`)
+          .join('\n');
+
+        const userUtterancesList = turnsToAnalyze
+          .map((t) => `Turn ${t.turnIndex}: "${t.text}"`)
+          .join('\n');
+
+        const prompt = `You are Maya, an expert English speaking coach.
+A student just finished an English speaking practice session.
+Here is the full conversation transcript:
+${dialogueSummary}
+
+Here are the student's spontaneous spoken sentences to analyze:
+${userUtterancesList}
+
+CRITICAL RULES:
+1. Identify 2 to 3 of the most useful, clear, and high-impact learning moments (minimum 1, maximum 3 items). Prioritize the most helpful teaching moments.
+2. For "youSaid": Provide the student's FULL spoken sentence for that turn (matching the exact audio clip recorded from the student). DO NOT truncate it to just 3 words!
+3. For "betterWay": Provide the FULL natural corrected sentence that corresponds to the student's complete spoken sentence.
+4. Classify each item into ONE of these three exact categories:
+   - "grammar": Grammatical mistake in the sentence (e.g. wrong tense, missing preposition, agreement error).
+     * title: "Let’s make this more correct."
+     * subtitle: "Here’s a sentence from your conversation and how you can improve it."
+     * badge: "Grammar correction"
+     * youSaid: the full sentence the student spoke
+     * youSaidHighlight: the specific mistaken word or phrase within that sentence (e.g. "I going")
+     * betterWay: the complete corrected sentence
+     * betterWayHighlight: the corrected word or phrase within that sentence (e.g. "I'm going")
+     * whyExplanation: concise rule under "Why this is correct" (1-2 sentences)
+     * spokenIntro: "Let's make this more correct."
+
+   - "more_natural": Grammatically understandable but awkward/stilted ESL phrasing.
+     * title: "Here’s one way to sound more fluent."
+     * subtitle: "You talked about [topic]. Let’s try a more natural way to say it."
+     * badge: "More natural"
+     * youSaid: the full sentence the student spoke
+     * betterWay: the full natural conversational sentence
+     * whyExplanation: concise reason under "Why this sounds more fluent" (1-2 sentences)
+     * spokenIntro: "Here's one way to sound more fluent."
+
+   - "pronunciation": Words that ESL learners commonly stumble on or pronounce with incorrect vowel length / stress / consonants (e.g. "beach" sounding like "beech", short vs long vowels, silent letters).
+     * title: "Let’s pronounce this better."
+     * subtitle: "Here’s a word from your conversation and how to say it more clearly."
+     * badge: "Pronunciation correction"
+     * youSaid: the specific word that was mispronounced (e.g. "beach")
+     * youSaidDetail: what it sounded like (e.g. 'It sounded like "beech".')
+     * betterWay: the correct word (e.g. "beach")
+     * ipa: standard IPA notation (e.g. "/biːtʃ/")
+     * whyExplanation: practical mouth/tongue tip under "Pronunciation tip" (1-2 sentences)
+     * spokenIntro: "Let's pronounce this better."
+
+5. Link each item to the exact "userTurnIndex" from the provided turns list.
+6. Keep all explanations concise and friendly (1-2 sentences). Do not write long paragraphs.
+7. Output structured JSON matching the schema.`;
+
+        const res = await ai.models.generateContent({
+          model: 'gemini-3.5-flash-lite',
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           config: {
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.OBJECT,
               properties: {
-                hintEnglish: {
-                  type: Type.STRING,
-                  description: 'Short, natural conversational English model answer (1 sentence) the student can say.',
-                },
-                hintSinhala: {
-                  type: Type.STRING,
-                  description: 'Accurate and natural spoken Sinhala translation of that exact answer.',
+                items: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      type: {
+                        type: Type.STRING,
+                        enum: ['grammar', 'more_natural', 'pronunciation'],
+                      },
+                      badge: { type: Type.STRING },
+                      title: { type: Type.STRING },
+                      subtitle: { type: Type.STRING },
+                      youSaid: { type: Type.STRING },
+                      youSaidHighlight: { type: Type.STRING },
+                      youSaidDetail: { type: Type.STRING },
+                      betterWay: { type: Type.STRING },
+                      betterWayHighlight: { type: Type.STRING },
+                      ipa: { type: Type.STRING },
+                      whyExplanation: { type: Type.STRING },
+                      spokenIntro: { type: Type.STRING },
+                      userTurnIndex: { type: Type.NUMBER },
+                    },
+                    required: [
+                      'type',
+                      'badge',
+                      'title',
+                      'subtitle',
+                      'youSaid',
+                      'betterWay',
+                      'whyExplanation',
+                      'spokenIntro',
+                      'userTurnIndex',
+                    ],
+                  },
                 },
               },
-              required: ['hintEnglish', 'hintSinhala'],
+              required: ['items'],
             },
-            temperature: 0.3,
+            temperature: 0.2,
+            maxOutputTokens: 1500,
           },
         });
 
-        // Calculate token usage and cost for gemini-3.1-flash-lite
-        // Pricing: Input = $0.25/1M tokens, Output = $1.50/1M tokens
-        const promptTokens = res.usageMetadata?.promptTokenCount || 70;
-        const outputTokens = res.usageMetadata?.candidatesTokenCount || 35;
-        const totalTokens = promptTokens + outputTokens;
-        const costUsd = Number(((promptTokens / 1_000_000) * 0.25 + (outputTokens / 1_000_000) * 1.50).toFixed(6));
-        const costLkr = Number((costUsd * this.usdToLkr).toFixed(4));
+        const effectiveSessionId = dto.sessionId || this.lastSavedSessionId || '';
+        const validSessionId = toValidUuid(effectiveSessionId);
+        let rec = this.sessionRecordingsMap.get(validSessionId) || (dto.sessionId ? this.sessionRecordingsMap.get(dto.sessionId) : undefined);
+        if (!rec && this.lastSavedSessionId) {
+          rec = this.sessionRecordingsMap.get(this.lastSavedSessionId);
+        }
+        let userAudioUrl = rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined);
+        if (userAudioUrl) {
+          userAudioUrl = userAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+        }
+        let modelAudioUrl = rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined);
+        if (modelAudioUrl) {
+          modelAudioUrl = modelAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+        }
 
-        const text = res.text?.trim() || '';
-        if (text) {
-          const parsed = JSON.parse(text);
-          if (parsed.hintEnglish && parsed.hintSinhala) {
-            const result = {
-              hintEnglish: String(parsed.hintEnglish).trim(),
-              hintSinhala: String(parsed.hintSinhala).trim(),
-              costUsd,
-              costLkr,
-              tokens: { promptTokens, outputTokens, totalTokens },
+        const jsonText = res.text?.trim() || '';
+        if (jsonText) {
+          const parsed = JSON.parse(jsonText);
+          if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+            this.logger.log(`[SessionsService] ✅ AI generated ${parsed.items.length} feedback items for session ${validSessionId}`);
+
+            const turnUrlsMap = this.sessionTurnAudioMap.get(validSessionId) ||
+              (dto.sessionId ? this.sessionTurnAudioMap.get(dto.sessionId) : undefined) ||
+              (this.lastSavedSessionId ? this.sessionTurnAudioMap.get(this.lastSavedSessionId) : undefined);
+
+            return {
+              sessionId: dto.sessionId,
+              userAudioUrl: userAudioUrl || null,
+              modelAudioUrl: modelAudioUrl || null,
+              items: parsed.items.slice(0, 5).map((it: any) => {
+                const turnIdx = it.userTurnIndex ?? 0;
+                let isolatedTurnAudio: string | undefined;
+
+                // Find the user turn's position in userTurns to get the exact matching audio clip index
+                let userTurnPosition = userTurns.findIndex((ut) => ut.turnIndex === turnIdx);
+                if (userTurnPosition < 0 && it.youSaid) {
+                  const normSaid = it.youSaid.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+                  userTurnPosition = userTurns.findIndex((ut) => {
+                    const normUt = (ut.text || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+                    return normUt.includes(normSaid) || normSaid.includes(normUt);
+                  });
+                }
+                const effectiveUserTurnIdx = userTurnPosition >= 0 ? userTurnPosition : turnIdx;
+
+                if (turnUrlsMap) {
+                  isolatedTurnAudio = turnUrlsMap.get(effectiveUserTurnIdx) || turnUrlsMap.get(turnIdx);
+                }
+
+                // If not found in-memory, construct the turn URL directly from Supabase storage
+                if (!isolatedTurnAudio && this.supabase) {
+                  isolatedTurnAudio = this.supabase.storage
+                    .from('session-recordings')
+                    .getPublicUrl(`${validSessionId}/turns/user_turn_${effectiveUserTurnIdx}.wav`).data.publicUrl;
+                }
+
+                const sentenceAudioUrl = isolatedTurnAudio
+                  ? isolatedTurnAudio.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp')
+                  : userAudioUrl || null;
+
+                return {
+                  ...it,
+                  userAudioUrl: sentenceAudioUrl,
+                };
+              }),
             };
-
-            this.hintCache.set(cacheKey, result);
-
-            // Record per-session hint cost in usage ledger tracker
-            if (dto.sessionId) {
-              const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
-              this.sessionHintUsage.set(dto.sessionId, {
-                count: existing.count + 1,
-                totalTokens: existing.totalTokens + totalTokens,
-                costUsd: Number((existing.costUsd + costUsd).toFixed(6)),
-                costLkr: Number((existing.costLkr + costLkr).toFixed(4)),
-              });
-              this.logger.log(`[SessionsService] 💡 Hint generated for session ${dto.sessionId}: tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`);
-            }
-
-            return result;
           }
         }
       } catch (err: any) {
-        this.logger.warn(`Gemini hint generation failed with gemini-3.1-flash-lite: ${err?.message}`);
+        this.logger.warn(`Gemini session analysis failed with gemini-3.5-flash-lite: ${err?.message}`);
       }
     }
 
-    const fallback = {
-      hintEnglish: 'I usually relax at home and spend time with my friends.',
-      hintSinhala: 'මම සාමාන්‍යයෙන් ගෙදර විවේක ගන්නවා සහ යාළුවෝ එක්ක කාලය ගත කරනවා.',
-      costUsd: 0,
-      costLkr: 0,
+    const effectiveSessionId = dto.sessionId || this.lastSavedSessionId || '';
+    const validSessionId = toValidUuid(effectiveSessionId);
+    let rec = this.sessionRecordingsMap.get(validSessionId) || (dto.sessionId ? this.sessionRecordingsMap.get(dto.sessionId) : undefined);
+    if (!rec && this.lastSavedSessionId) {
+      rec = this.sessionRecordingsMap.get(this.lastSavedSessionId);
+    }
+    let userAudioUrl = rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined);
+    if (userAudioUrl) {
+      userAudioUrl = userAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+    }
+    let modelAudioUrl = rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined);
+    if (modelAudioUrl) {
+      modelAudioUrl = modelAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+    }
+
+    // AI must return real feedback; return empty list if none generated rather than hardcoded mock data
+    return {
+      sessionId: dto.sessionId,
+      userAudioUrl: userAudioUrl || null,
+      modelAudioUrl: modelAudioUrl || null,
+      items: [],
     };
-    return fallback;
+  }
+
+  async saveSessionReview(dto: SessionReviewDto): Promise<{ success: boolean; message?: string }> {
+    const validSessionId = toValidUuid(dto.sessionId);
+    if (!this.supabase) {
+      this.logger.warn(`[SessionsService] Supabase not connected; cannot save review for ${validSessionId}`);
+      return { success: true };
+    }
+
+    try {
+      this.logger.log(`[SessionsService] 📝 Saving session review for ${validSessionId}: rating=${dto.rating}, feedback="${dto.feedback || ''}"`);
+
+      // 1. Update public.sessions table directly (user_rating and user_feedback columns)
+      const { error: sessionErr } = await this.supabase
+        .from('sessions')
+        .update({
+          user_rating: dto.rating,
+          user_feedback: dto.feedback ? dto.feedback.trim() : null,
+        })
+        .eq('id', validSessionId);
+
+      if (sessionErr) {
+        this.logger.warn(`[SessionsService] Could not update user_rating on public.sessions directly: ${sessionErr.message}`);
+      } else {
+        this.logger.log(`[SessionsService] ✅ Successfully updated user_rating and user_feedback in public.sessions for session ${validSessionId}`);
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      this.logger.error(`[SessionsService] Error in saveSessionReview: ${err?.message}`);
+      return { success: false, message: err?.message };
+    }
   }
 }
 

@@ -128,6 +128,9 @@ export default function CallScreen() {
 
   const [hintData, setHintData] = useState<HintResponse | null>(null);
   const [isHintVisible, setIsHintVisible] = useState(false);
+  const hintsHistoryRef = useRef<string[]>([]);
+  const lastPrefetchedHintPromptRef = useRef<string>('');
+  const isFetchingHintRef = useRef<boolean>(false);
 
   const translationTargetPromptRef = useRef<string>('');
   const pendingTranslationAfterSpeakingRef = useRef<boolean>(false);
@@ -143,6 +146,8 @@ export default function CallScreen() {
 
       setIsHintVisible(false);
       setHintData(null);
+      lastPrefetchedHintPromptRef.current = '';
+      isFetchingHintRef.current = false;
     }
   }, [liveCall.status]);
 
@@ -204,24 +209,38 @@ export default function CallScreen() {
     setIsTranslating(false);
   };
 
-  // Background prefetch: when Maya finishes speaking a prompt, silently fetch hint so it's ready instantly
+  // Background prefetch: when Maya finishes speaking a prompt, silently fetch hint once per turn
   useEffect(() => {
-    if (liveCall.status === 'listening' && !hintData) {
-      const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
-      if (question) {
-        fetchHint(question, {
-          topic: effectiveTopic,
-          level: params.level,
-          scenarioId: params.scenarioId,
-          userName: effectiveUserName,
-          sessionId: liveCall.sessionId,
-        }).then((res) => {
-          if (res) {
-            setHintData(res);
-          }
-        });
-      }
+    if (liveCall.status !== 'listening') return;
+
+    const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
+    if (!question) return;
+
+    const norm = question.toLowerCase().trim().replace(/[?!.,]/g, '');
+    if (lastPrefetchedHintPromptRef.current === norm || isFetchingHintRef.current) {
+      return;
     }
+
+    lastPrefetchedHintPromptRef.current = norm;
+    isFetchingHintRef.current = true;
+
+    fetchHint(question, {
+      topic: effectiveTopic,
+      level: params.level,
+      scenarioId: params.scenarioId,
+      userName: effectiveUserName,
+      sessionId: liveCall.sessionId,
+    }).then((res) => {
+      isFetchingHintRef.current = false;
+      if (res) {
+        setHintData(res);
+        if (res.hintEnglish && !hintsHistoryRef.current.includes(res.hintEnglish)) {
+          hintsHistoryRef.current.push(res.hintEnglish);
+        }
+      }
+    }).catch(() => {
+      isFetchingHintRef.current = false;
+    });
   }, [liveCall.status, liveCall.subtitles, liveCall.previousSubtitles]);
 
   const handleToggleHint = async () => {
@@ -235,9 +254,11 @@ export default function CallScreen() {
       return;
     }
 
-    // If tapped before background prefetch completed, show immediately and resolve in background
+    // User tapped to view hint: show panel immediately and retrieve cached or in-flight hint
     setIsHintVisible(true);
     const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
+    if (!question) return;
+
     const res = await fetchHint(question, {
       topic: effectiveTopic,
       level: params.level,
@@ -248,6 +269,9 @@ export default function CallScreen() {
 
     if (res) {
       setHintData(res);
+      if (res.hintEnglish && !hintsHistoryRef.current.includes(res.hintEnglish)) {
+        hintsHistoryRef.current.push(res.hintEnglish);
+      }
     }
   };
 
@@ -474,13 +498,21 @@ export default function CallScreen() {
   // When session completes, navigate directly to analyzing screen before showing completion scorecard
   useEffect(() => {
     if (liveCall.missionReport) {
+      const activeSessionId = liveCall.sessionId || (liveCall.missionReport as any)?.id || '';
       setLatestSessionReport({
         ...liveCall.missionReport,
-        callParams: params,
+        id: activeSessionId,
+        callParams: {
+          ...params,
+          sessionId: activeSessionId,
+        },
+        sessionTurns: liveCall.turns,
+        activeHints: hintsHistoryRef.current,
       });
       router.replace({
         pathname: '/onboarding/analyzing' as any,
         params: {
+          sessionId: activeSessionId,
           roadmapLevelId: liveCall.missionReport.roadmapLevelId || '',
           levelNumber: String(liveCall.missionReport.levelNumber || ''),
           levelTitle: liveCall.missionReport.levelTitle || '',
