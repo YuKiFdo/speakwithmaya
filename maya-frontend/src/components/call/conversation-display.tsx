@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
 import { TranslationToggleButton } from './translation-toggle-button';
-import { triggerHaptic } from '@/utils/haptics-audio';
 
 interface ConversationDisplayProps {
   previousText?: string;
@@ -158,19 +157,6 @@ function ConversationDisplayComponent({
     };
   }, [displayedCount, allTargetWords.length, isSpeaking]);
 
-  // 2b. Tactile speech-synchronized haptic pulse as transcription words appear
-  const lastHapticTimeRef = useRef<number>(0);
-  useEffect(() => {
-    if (displayedCount > 0) {
-      const now = Date.now();
-      // Throttle to minimum 65ms so fast stream catchups produce crisp micro-pulses
-      if (now - lastHapticTimeRef.current >= 65) {
-        lastHapticTimeRef.current = now;
-        triggerHaptic('word');
-      }
-    }
-  }, [displayedCount]);
-
   // 3. Smooth upward glide & fade transition when previous turn changes
   useEffect(() => {
     if (previousText && previousText !== prevTextRef.current) {
@@ -197,7 +183,6 @@ function ConversationDisplayComponent({
   // 4. Animate translation text fade-in
   useEffect(() => {
     if (isTranslationVisible && translationText) {
-      triggerHaptic('selection');
       Animated.timing(translationAnim, {
         toValue: 1,
         duration: 260,
@@ -330,7 +315,6 @@ function ConversationDisplayComponent({
               isExpanded={Boolean(isTranslationVisible)}
               isLoading={isTranslating}
               onToggle={() => {
-                triggerHaptic('light');
                 onToggleTranslation();
               }}
             />
