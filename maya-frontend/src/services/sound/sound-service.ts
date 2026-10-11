@@ -13,11 +13,13 @@ const OTHER_BUTTON_ASSET = require('@/assets/sounds/other button press.mp3');
 const UNDERSTOOD_BUTTON_ASSET = require('@/assets/sounds/understood button press.mp3');
 const MAYA_WELCOME_ASSET = require('@/assets/sounds/maya-welcome.wav');
 const MAYA_NAME_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-name.wav');
+const MAYA_PHONE_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-phone.wav');
 
 let audioCtx: AudioContext | null = null;
 let activeWhooshNodes: { noise: AudioBufferSourceNode; gain: GainNode } | null = null;
 let welcomeAudioPlayer: HTMLAudioElement | null = null;
 let namePromptAudioPlayer: HTMLAudioElement | null = null;
+let phonePromptAudioPlayer: HTMLAudioElement | null = null;
 
 function getAudioContext(): AudioContext | null {
   if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -710,5 +712,74 @@ export function stopMayaNamePromptVoice(): void {
     namePromptAudioPlayer = null;
   }
 }
+
+/**
+ * 8. Maya's Onboarding Phone Prompt Voice
+ * Plays Kokoro-82M cheerful neural voice (Heart + Sky blend)
+ * "To continue, enter your phone number and enable your Starter Plan. Enter your mobile number to get started!"
+ */
+export function playMayaPhonePromptVoice(callbacks?: {
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (err: any) => void;
+}): void {
+  stopMayaPhonePromptVoice();
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(MAYA_PHONE_PROMPT_ASSET);
+      if (uri) {
+        const audio = new Audio(uri);
+        phonePromptAudioPlayer = audio;
+        audio.volume = 1.0;
+
+        audio.onplay = () => {
+          callbacks?.onStart?.();
+        };
+
+        audio.onended = () => {
+          if (phonePromptAudioPlayer === audio) {
+            phonePromptAudioPlayer = null;
+          }
+          callbacks?.onEnd?.();
+        };
+
+        audio.onerror = (e) => {
+          if (phonePromptAudioPlayer === audio) {
+            phonePromptAudioPlayer = null;
+          }
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (phonePromptAudioPlayer === audio) {
+              phonePromptAudioPlayer = null;
+            }
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaPhonePromptVoice(): void {
+  if (phonePromptAudioPlayer) {
+    try {
+      phonePromptAudioPlayer.pause();
+      phonePromptAudioPlayer.currentTime = 0;
+    } catch {}
+    phonePromptAudioPlayer = null;
+  }
+}
+
 
 
