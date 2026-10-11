@@ -14,6 +14,8 @@ const UNDERSTOOD_BUTTON_ASSET = require('@/assets/sounds/understood button press
 const MAYA_WELCOME_ASSET = require('@/assets/sounds/maya-welcome.wav');
 const MAYA_NAME_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-name.wav');
 const MAYA_PHONE_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-phone.wav');
+const MAYA_GOAL_PROMPT_ASSET = require('@/assets/sounds/maya-goal-prompt.wav');
+const MAYA_CHALLENGE_PROMPT_ASSET = require('@/assets/sounds/maya-challenge-prompt.wav');
 
 const GOAL_AUDIO_ASSETS: Record<string, any> = {
   'better-job': require('@/assets/sounds/maya-goal-job.wav'),
@@ -36,6 +38,8 @@ let activeWhooshNodes: { noise: AudioBufferSourceNode; gain: GainNode } | null =
 let welcomeAudioPlayer: HTMLAudioElement | null = null;
 let namePromptAudioPlayer: HTMLAudioElement | null = null;
 let phonePromptAudioPlayer: HTMLAudioElement | null = null;
+let goalPromptAudioPlayer: HTMLAudioElement | null = null;
+let challengePromptAudioPlayer: HTMLAudioElement | null = null;
 let goalAudioPlayer: HTMLAudioElement | null = null;
 let challengeAudioPlayer: HTMLAudioElement | null = null;
 
@@ -805,6 +809,10 @@ export function stopMayaPhonePromptVoice(): void {
 export function preloadGoalVoices(): void {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {
+      const promptUri = getAssetUri(MAYA_GOAL_PROMPT_ASSET);
+      if (promptUri) {
+        getPreloadedAudio(promptUri).load();
+      }
       Object.values(GOAL_AUDIO_ASSETS).forEach((asset) => {
         const uri = getAssetUri(asset);
         if (uri) {
@@ -819,11 +827,85 @@ export function preloadGoalVoices(): void {
 }
 
 /**
+ * 8b. Maya's Goal Question Prompt Voice
+ * "What's your biggest goal? Pick what matters most to you right now!"
+ */
+export function playMayaGoalPromptVoice(callbacks?: {
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (err: any) => void;
+}): void {
+  stopMayaGoalPromptVoice();
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(MAYA_GOAL_PROMPT_ASSET);
+      if (uri) {
+        const audio = getPreloadedAudio(uri);
+        goalPromptAudioPlayer = audio;
+        audio.currentTime = 0;
+        audio.volume = 1.0;
+
+        audio.onplay = () => {
+          callbacks?.onStart?.();
+        };
+
+        audio.onended = () => {
+          if (goalPromptAudioPlayer === audio) {
+            goalPromptAudioPlayer = null;
+          }
+          callbacks?.onEnd?.();
+        };
+
+        audio.onerror = (e) => {
+          if (goalPromptAudioPlayer === audio) {
+            goalPromptAudioPlayer = null;
+          }
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (goalPromptAudioPlayer === audio) {
+              goalPromptAudioPlayer = null;
+            }
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaGoalPromptVoice(): void {
+  if (goalPromptAudioPlayer) {
+    try {
+      goalPromptAudioPlayer.onended = null;
+      goalPromptAudioPlayer.onerror = null;
+      goalPromptAudioPlayer.pause();
+      goalPromptAudioPlayer.currentTime = 0;
+    } catch {}
+    goalPromptAudioPlayer = null;
+  }
+}
+
+/**
  * Preload all Maya Challenge Voice audio assets into memory
  */
 export function preloadChallengeVoices(): void {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {
+      const promptUri = getAssetUri(MAYA_CHALLENGE_PROMPT_ASSET);
+      if (promptUri) {
+        getPreloadedAudio(promptUri).load();
+      }
       Object.values(CHALLENGE_AUDIO_ASSETS).forEach((asset) => {
         const uri = getAssetUri(asset);
         if (uri) {
@@ -834,6 +916,76 @@ export function preloadChallengeVoices(): void {
     } catch (e) {
       console.warn('[sound-service] preloadChallengeVoices error:', e);
     }
+  }
+}
+
+/**
+ * 8c. Maya's Challenge Question Prompt Voice
+ * "What's hardest for you right now? Pick your biggest challenge when speaking English."
+ */
+export function playMayaChallengePromptVoice(callbacks?: {
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (err: any) => void;
+}): void {
+  stopMayaChallengePromptVoice();
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(MAYA_CHALLENGE_PROMPT_ASSET);
+      if (uri) {
+        const audio = getPreloadedAudio(uri);
+        challengePromptAudioPlayer = audio;
+        audio.currentTime = 0;
+        audio.volume = 1.0;
+
+        audio.onplay = () => {
+          callbacks?.onStart?.();
+        };
+
+        audio.onended = () => {
+          if (challengePromptAudioPlayer === audio) {
+            challengePromptAudioPlayer = null;
+          }
+          callbacks?.onEnd?.();
+        };
+
+        audio.onerror = (e) => {
+          if (challengePromptAudioPlayer === audio) {
+            challengePromptAudioPlayer = null;
+          }
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (challengePromptAudioPlayer === audio) {
+              challengePromptAudioPlayer = null;
+            }
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaChallengePromptVoice(): void {
+  if (challengePromptAudioPlayer) {
+    try {
+      challengePromptAudioPlayer.onended = null;
+      challengePromptAudioPlayer.onerror = null;
+      challengePromptAudioPlayer.pause();
+      challengePromptAudioPlayer.currentTime = 0;
+    } catch {}
+    challengePromptAudioPlayer = null;
   }
 }
 
@@ -849,6 +1001,7 @@ export function playMayaGoalFeedbackVoice(
     onError?: (err: any) => void;
   },
 ): void {
+  stopMayaGoalPromptVoice();
   stopMayaGoalFeedbackVoice();
 
   const asset = GOAL_AUDIO_ASSETS[goalId];
@@ -928,6 +1081,7 @@ export function playMayaChallengeFeedbackVoice(
     onError?: (err: any) => void;
   },
 ): void {
+  stopMayaChallengePromptVoice();
   stopMayaChallengeFeedbackVoice();
 
   const asset = CHALLENGE_AUDIO_ASSETS[challengeId];

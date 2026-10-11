@@ -17,6 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   playMayaGoalFeedbackVoice,
   stopMayaGoalFeedbackVoice,
+  playMayaGoalPromptVoice,
+  stopMayaGoalPromptVoice,
   preloadGoalVoices,
   playUnderstoodTapSound,
 } from '@/services/sound/sound-service';
@@ -78,7 +80,7 @@ export default function GoalScreen() {
     })),
   ).current;
 
-  // Staggered cascade entrance on mount + audio preloading
+  // Staggered cascade entrance on mount + question audio prompt
   useEffect(() => {
     // Preload all goal voice audio files into memory immediately on entrance
     preloadGoalVoices();
@@ -99,9 +101,14 @@ export default function GoalScreen() {
       }),
     ]).start();
 
-    // 2. Cascade cards in sequence
+    // 2. Play Maya's cheerful question prompt ("What's your biggest goal? Pick what matters most to you right now!")
+    const promptTimer = setTimeout(() => {
+      playMayaGoalPromptVoice();
+    }, 200);
+
+    // 3. Cascade cards in sequence as Maya introduces the question
     GOAL_OPTIONS.forEach((_, idx) => {
-      const delay = 100 + idx * 70;
+      const delay = 350 + idx * 80;
       setTimeout(() => {
         Animated.parallel([
           Animated.timing(cardAnims[idx].opacity, {
@@ -121,12 +128,17 @@ export default function GoalScreen() {
     });
 
     return () => {
+      clearTimeout(promptTimer);
+      stopMayaGoalPromptVoice();
       stopMayaGoalFeedbackVoice();
     };
   }, []);
 
   const handleSelectGoal = (goal: GoalOption, index: number) => {
     if (isTransitioning) return;
+
+    // Immediately stop question prompt if still playing
+    stopMayaGoalPromptVoice();
 
     setSelectedGoal(goal.id);
     setIsTransitioning(true);

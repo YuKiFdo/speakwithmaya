@@ -17,6 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   playMayaChallengeFeedbackVoice,
   stopMayaChallengeFeedbackVoice,
+  playMayaChallengePromptVoice,
+  stopMayaChallengePromptVoice,
   preloadChallengeVoices,
   playUnderstoodTapSound,
 } from '@/services/sound/sound-service';
@@ -72,7 +74,7 @@ export default function ChallengeScreen() {
     })),
   ).current;
 
-  // Staggered cascade entrance on mount + audio preloading
+  // Staggered cascade entrance on mount + question audio prompt
   useEffect(() => {
     // Preload all challenge voice audio files into memory immediately on entrance
     preloadChallengeVoices();
@@ -93,9 +95,14 @@ export default function ChallengeScreen() {
       }),
     ]).start();
 
-    // 2. Cascade cards in sequence
+    // 2. Play Maya's gentle question prompt ("What's hardest for you right now? Pick your biggest challenge when speaking English.")
+    const promptTimer = setTimeout(() => {
+      playMayaChallengePromptVoice();
+    }, 200);
+
+    // 3. Cascade cards in sequence as Maya introduces the question
     CHALLENGE_OPTIONS.forEach((_, idx) => {
-      const delay = 100 + idx * 70;
+      const delay = 350 + idx * 80;
       setTimeout(() => {
         Animated.parallel([
           Animated.timing(cardAnims[idx].opacity, {
@@ -115,12 +122,17 @@ export default function ChallengeScreen() {
     });
 
     return () => {
+      clearTimeout(promptTimer);
+      stopMayaChallengePromptVoice();
       stopMayaChallengeFeedbackVoice();
     };
   }, []);
 
   const handleSelectChallenge = (item: ChallengeOption, index: number) => {
     if (isTransitioning) return;
+
+    // Immediately stop question prompt if still playing
+    stopMayaChallengePromptVoice();
 
     setSelectedChallenge(item.id);
     setIsTransitioning(true);
