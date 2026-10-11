@@ -18,9 +18,10 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 interface ConnectingViewProps {
   onCancel?: () => void;
   style?: any;
+  isConnected?: boolean;
 }
 
-export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
+export function ConnectingView({ onCancel, style, isConnected = false }: ConnectingViewProps) {
   const [isCancelHovered, setIsCancelHovered] = useState(false);
   const [hoveredTip, setHoveredTip] = useState<number | null>(null);
   const [dotCount, setDotCount] = useState(2);
@@ -208,6 +209,7 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
                 <Animated.View
                   style={[
                     styles.orbitalRingOuter,
+                    isConnected && styles.orbitalRingOuterConnected,
                     {
                       width: heroSize,
                       height: heroSize,
@@ -224,6 +226,7 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
                 <Animated.View
                   style={[
                     styles.orbitalRingDashed,
+                    isConnected && styles.orbitalRingDashedConnected,
                     {
                       width: dashedRingSize,
                       height: dashedRingSize,
@@ -238,6 +241,7 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
                   <View
                     style={[
                       styles.satelliteDot,
+                      isConnected && styles.satelliteDotConnected,
                       {
                         top: dotOffset,
                         left: dotOffset,
@@ -250,6 +254,7 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
                   <View
                     style={[
                       styles.satelliteDot,
+                      isConnected && styles.satelliteDotConnected,
                       {
                         top: dotOffset,
                         right: dotOffset,
@@ -262,6 +267,7 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
                   <View
                     style={[
                       styles.satelliteDot,
+                      isConnected && styles.satelliteDotConnected,
                       {
                         bottom: dotOffset,
                         left: dotOffset,
@@ -274,6 +280,7 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
                   <View
                     style={[
                       styles.satelliteDot,
+                      isConnected && styles.satelliteDotConnected,
                       {
                         bottom: dotOffset,
                         right: dotOffset,
@@ -289,6 +296,7 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
                 <Animated.View
                   style={[
                     styles.orbitalRingHalo,
+                    isConnected && styles.orbitalRingHaloConnected,
                     {
                       width: haloSize,
                       height: haloSize,
@@ -302,6 +310,7 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
                 <Animated.View
                   style={[
                     styles.avatarContainer,
+                    isConnected && styles.avatarContainerConnected,
                     {
                       width: avatarContainerSize,
                       height: avatarContainerSize,
@@ -313,6 +322,7 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
                   <View
                     style={[
                       styles.avatarInnerCircle,
+                      isConnected && styles.avatarInnerCircleConnected,
                       {
                         width: avatarInnerSize,
                         height: avatarInnerSize,
@@ -332,12 +342,13 @@ export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
 
               {/* Title & Status Message */}
               <View style={styles.textSection}>
-                <Text style={styles.title}>
-                  Connecting to Maya{dotsString}
+                <Text style={[styles.title, isConnected && styles.titleConnected]}>
+                  {isConnected ? 'Connected!' : `Connecting to Maya${dotsString}`}
                 </Text>
                 <Text style={styles.subtitle}>
-                  Setting things up for your conversation.{'\n'}
-                  Maya will welcome you in just a moment.
+                  {isConnected
+                    ? 'Connected with Maya! Starting your conversation.'
+                    : `Setting things up for your conversation.\nMaya will welcome you in just a moment.`}
                 </Text>
               </View>
             </View>
@@ -583,6 +594,66 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
     textAlign: 'center',
     minHeight: 30,
+  },
+  titleConnected: {
+    color: '#15803d',
+  },
+  orbitalRingOuterConnected: {
+    borderColor: '#86efac',
+    opacity: 0.95,
+  },
+  orbitalRingDashedConnected: {
+    borderColor: '#22c55e',
+  },
+  satelliteDotConnected: {
+    backgroundColor: '#16a34a',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 0 12px rgba(34, 197, 94, 0.95)',
+      } as any,
+      default: {
+        shadowColor: '#22c55e',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.8,
+        shadowRadius: 6,
+        elevation: 5,
+      },
+    }),
+  },
+  orbitalRingHaloConnected: {
+    borderColor: '#ffffff',
+    backgroundColor: 'rgba(220, 252, 231, 0.65)',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 0 22px rgba(34, 197, 94, 0.45)',
+      } as any,
+      default: {
+        shadowColor: '#22c55e',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.5,
+        shadowRadius: 16,
+        elevation: 6,
+      },
+    }),
+  },
+  avatarContainerConnected: {
+    borderColor: '#ffffff',
+    backgroundColor: '#10b981',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 22px rgba(16, 185, 129, 0.45)',
+      } as any,
+      default: {
+        shadowColor: '#10b981',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.45,
+        shadowRadius: 16,
+        elevation: 7,
+      },
+    }),
+  },
+  avatarInnerCircleConnected: {
+    backgroundColor: '#10b981',
   },
   subtitle: {
     ...fontStyle('inter', 'regular'),

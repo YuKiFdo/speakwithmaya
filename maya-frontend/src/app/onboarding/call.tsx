@@ -381,7 +381,7 @@ export default function CallScreen() {
 
     if (isNowConnected && !hasTransitionedRef.current) {
       hasTransitionedRef.current = true;
-      console.log('[call.tsx] 📞 Call connected! Transitioning to call screen & releasing greeting immediately.');
+      console.log('[call.tsx] 📞 Call connected! Showing green Connected state & releasing greeting.');
 
       // 1. Release Maya's greeting audio immediately so it is not delayed or held
       liveCall.releaseGreeting?.();
@@ -391,15 +391,17 @@ export default function CallScreen() {
         playCallConnectedSound();
       } catch {}
 
-      // 3. Smoothly crossfade from ConnectingView into active CallScreen
-      Animated.timing(connectingFadeAnim, {
-        toValue: 0,
-        duration: 380,
-        easing: Easing.out(Easing.ease),
-        useNativeDriver: Platform.OS !== 'web',
-      }).start(() => {
-        setConnectingVisible(false);
-      });
+      // 3. Keep green "Connected!" state visible for ~700ms so user sees the rings/dots turn green, then smoothly crossfade into active CallScreen
+      setTimeout(() => {
+        Animated.timing(connectingFadeAnim, {
+          toValue: 0,
+          duration: 380,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: Platform.OS !== 'web',
+        }).start(() => {
+          setConnectingVisible(false);
+        });
+      }, 700);
     }
   }, [liveCall.isConnected, liveCall.status]);
 
@@ -823,7 +825,10 @@ export default function CallScreen() {
           ]}
           pointerEvents={liveCall.status === 'connecting' ? 'auto' : 'none'}
         >
-          <ConnectingView onCancel={handleHangup} />
+          <ConnectingView
+            onCancel={handleHangup}
+            isConnected={liveCall.isConnected || (liveCall.status !== 'connecting' && liveCall.status !== 'idle')}
+          />
         </Animated.View>
       )}
 
