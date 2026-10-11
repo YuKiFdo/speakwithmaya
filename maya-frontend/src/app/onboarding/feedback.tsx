@@ -806,7 +806,12 @@ export default function SessionFeedbackScreen() {
           style={[
             styles.bottomSection,
             isPhone && styles.bottomSectionPhone,
-            { paddingBottom: Math.max(insets.bottom + 8, Platform.select({ web: 28, default: 16 })) },
+            {
+              paddingBottom: Math.max(
+                insets.bottom + 4,
+                Platform.select({ web: isPhone ? 12 : 24, default: 16 })
+              ),
+            },
           ]}
         >
           {Platform.OS === 'web' && (
@@ -861,12 +866,27 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#ffffff',
+    ...Platform.select({
+      web: {
+        height: '100%',
+        maxHeight: '100dvh',
+        overflow: 'hidden',
+      } as any,
+    }),
   },
   container: {
     flex: 1,
     width: '100%',
     paddingHorizontal: 20,
     backgroundColor: '#ffffff',
+    ...Platform.select({
+      web: {
+        height: '100%',
+        maxHeight: '100%',
+        minHeight: 0,
+        overflow: 'hidden',
+      } as any,
+    }),
   },
   containerDesktop: {
     maxWidth: 440,
@@ -917,6 +937,12 @@ const styles = StyleSheet.create({
   /* Scroll Body */
   scrollView: {
     flex: 1,
+    ...Platform.select({
+      web: {
+        minHeight: 0,
+        flexShrink: 1,
+      } as any,
+    }),
   },
   scrollContent: {
     paddingTop: 16,
@@ -1136,6 +1162,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     gap: 10,
     backgroundColor: '#ffffff',
+    flexShrink: 0,
   },
   primaryButton: {
     position: 'relative',

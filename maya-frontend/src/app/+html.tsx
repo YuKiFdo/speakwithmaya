@@ -27,17 +27,22 @@ export default function RootHtml({ children }: PropsWithChildren) {
             __html: `
               html, body {
                 height: 100%;
+                height: 100dvh;
                 margin: 0;
                 padding: 0;
                 background-color: #FFFFFF;
                 -webkit-font-smoothing: antialiased;
                 -moz-osx-font-smoothing: grayscale;
+                overflow: hidden;
               }
               #root {
                 display: flex;
                 flex-direction: column;
                 height: 100%;
-                min-height: 100vh;
+                height: 100dvh;
+                max-height: 100dvh;
+                min-height: 100%;
+                overflow: hidden;
                 background-color: #FFFFFF;
               }
               #app-initial-loader {

@@ -9,7 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
@@ -49,6 +49,7 @@ export default function SessionReviewScreen() {
     isPassed?: string;
   }>();
 
+  const insets = useSafeAreaInsets();
   const { isPhone } = useBreakpoint();
   const isWebOrDesktop = !isPhone;
 
@@ -195,18 +196,29 @@ export default function SessionReviewScreen() {
           </ScrollView>
 
           {/* Submit Action Button pinned at bottom */}
-          <View style={styles.bottomBar}>
+          <View
+            style={[
+              styles.bottomBar,
+              {
+                paddingBottom: Math.max(
+                  insets.bottom + 4,
+                  Platform.select({ web: isPhone ? 16 : 24, default: 16 })
+                ),
+              },
+            ]}
+          >
             <Pressable
               onPress={handleSubmit}
               disabled={isSubmitting}
               style={({ pressed }) => [
                 styles.submitButton,
+                isPhone && styles.submitButtonPhone,
                 pressed && styles.submitButtonPressed,
               ]}
               accessibilityRole="button"
             >
               <View style={styles.submitButtonContent}>
-                <Text style={styles.submitButtonText}>Submit</Text>
+                <Text style={[styles.submitButtonText, isPhone && styles.submitButtonTextPhone]}>Submit</Text>
                 <Feather name="arrow-right" size={19} color="#ffffff" style={styles.submitArrow} />
               </View>
             </Pressable>
@@ -221,15 +233,37 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#ffffff',
+    ...Platform.select({
+      web: {
+        height: '100%',
+        maxHeight: '100dvh',
+        overflow: 'hidden',
+      } as any,
+    }),
   },
   keyboardAvoid: {
     flex: 1,
     backgroundColor: '#ffffff',
+    ...Platform.select({
+      web: {
+        height: '100%',
+        maxHeight: '100%',
+        minHeight: 0,
+      } as any,
+    }),
   },
   mainWrapper: {
     flex: 1,
     width: '100%',
     backgroundColor: '#ffffff',
+    ...Platform.select({
+      web: {
+        height: '100%',
+        maxHeight: '100%',
+        minHeight: 0,
+        overflow: 'hidden',
+      } as any,
+    }),
   },
   mainWrapperDesktop: {
     maxWidth: 440,
@@ -239,6 +273,12 @@ const styles = StyleSheet.create({
   scrollArea: {
     flex: 1,
     width: '100%',
+    ...Platform.select({
+      web: {
+        minHeight: 0,
+        flexShrink: 1,
+      } as any,
+    }),
   },
   scrollContent: {
     paddingHorizontal: 24,
@@ -345,12 +385,8 @@ const styles = StyleSheet.create({
   bottomBar: {
     paddingHorizontal: 24,
     paddingTop: 12,
-    paddingBottom: Platform.select({
-      web: 28,
-      ios: 20,
-      default: 20,
-    }),
     backgroundColor: '#ffffff',
+    flexShrink: 0,
   },
   submitButton: {
     width: '100%',
@@ -367,6 +403,13 @@ const styles = StyleSheet.create({
         userSelect: 'none',
       } as any,
     }),
+  },
+  submitButtonPhone: {
+    height: 48,
+    borderRadius: 18,
+  },
+  submitButtonTextPhone: {
+    fontSize: 16,
   },
   submitButtonPressed: {
     transform: [{ scale: 0.985 }],
