@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   playMayaChallengeFeedbackVoice,
   stopMayaChallengeFeedbackVoice,
+  preloadChallengeVoices,
   playUnderstoodTapSound,
 } from '@/services/sound/sound-service';
 
@@ -71,8 +72,11 @@ export default function ChallengeScreen() {
     })),
   ).current;
 
-  // Staggered cascade entrance on mount
+  // Staggered cascade entrance on mount + audio preloading
   useEffect(() => {
+    // Preload all challenge voice audio files into memory immediately on entrance
+    preloadChallengeVoices();
+
     // 1. Header fades & slides in
     Animated.parallel([
       Animated.timing(headerOpacityAnim, {
@@ -151,19 +155,19 @@ export default function ChallengeScreen() {
       }
     };
 
-    // Maya speaks personalized encouraging sentence, then transitions to next screen
+    // Maya speaks personalized encouraging sentence, waits until finish, then transitions to next screen
     playMayaChallengeFeedbackVoice(item.id, {
       onEnd: () => {
-        // Short pause after she finishes speaking for natural flow
+        // Natural breath pause after she finishes speaking her full sentence
         setTimeout(navigateNext, 300);
       },
       onError: () => {
-        setTimeout(navigateNext, 1200);
+        setTimeout(navigateNext, 600);
       },
     });
 
-    // Safety fallback: if audio fails or takes too long, navigate after 3.2s
-    setTimeout(navigateNext, 3200);
+    // Extreme fallback: only in case browser audio engine stalls completely without firing events
+    setTimeout(navigateNext, 12000);
   };
 
   return (

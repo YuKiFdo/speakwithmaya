@@ -800,6 +800,44 @@ export function stopMayaPhonePromptVoice(): void {
 }
 
 /**
+ * Preload all Maya Goal Voice audio assets into memory
+ */
+export function preloadGoalVoices(): void {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      Object.values(GOAL_AUDIO_ASSETS).forEach((asset) => {
+        const uri = getAssetUri(asset);
+        if (uri) {
+          const audio = getPreloadedAudio(uri);
+          audio.load();
+        }
+      });
+    } catch (e) {
+      console.warn('[sound-service] preloadGoalVoices error:', e);
+    }
+  }
+}
+
+/**
+ * Preload all Maya Challenge Voice audio assets into memory
+ */
+export function preloadChallengeVoices(): void {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      Object.values(CHALLENGE_AUDIO_ASSETS).forEach((asset) => {
+        const uri = getAssetUri(asset);
+        if (uri) {
+          const audio = getPreloadedAudio(uri);
+          audio.load();
+        }
+      });
+    } catch (e) {
+      console.warn('[sound-service] preloadChallengeVoices error:', e);
+    }
+  }
+}
+
+/**
  * 9. Maya's Personalized Goal Selection Feedback Voices
  * Plays tailored encouragement when user selects their goal.
  */
@@ -823,8 +861,9 @@ export function playMayaGoalFeedbackVoice(
     try {
       const uri = getAssetUri(asset);
       if (uri) {
-        const audio = new Audio(uri);
+        const audio = getPreloadedAudio(uri);
         goalAudioPlayer = audio;
+        audio.currentTime = 0;
         audio.volume = 1.0;
 
         audio.onplay = () => {
@@ -868,6 +907,8 @@ export function playMayaGoalFeedbackVoice(
 export function stopMayaGoalFeedbackVoice(): void {
   if (goalAudioPlayer) {
     try {
+      goalAudioPlayer.onended = null;
+      goalAudioPlayer.onerror = null;
       goalAudioPlayer.pause();
       goalAudioPlayer.currentTime = 0;
     } catch {}
@@ -899,8 +940,9 @@ export function playMayaChallengeFeedbackVoice(
     try {
       const uri = getAssetUri(asset);
       if (uri) {
-        const audio = new Audio(uri);
+        const audio = getPreloadedAudio(uri);
         challengeAudioPlayer = audio;
+        audio.currentTime = 0;
         audio.volume = 1.0;
 
         audio.onplay = () => {
@@ -944,6 +986,8 @@ export function playMayaChallengeFeedbackVoice(
 export function stopMayaChallengeFeedbackVoice(): void {
   if (challengeAudioPlayer) {
     try {
+      challengeAudioPlayer.onended = null;
+      challengeAudioPlayer.onerror = null;
       challengeAudioPlayer.pause();
       challengeAudioPlayer.currentTime = 0;
     } catch {}
