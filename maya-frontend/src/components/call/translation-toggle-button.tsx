@@ -6,7 +6,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 
 interface TranslationToggleButtonProps {
@@ -38,8 +38,8 @@ export function TranslationToggleButton({
       {isLoading ? (
         <ActivityIndicator size="small" color="#64748B" style={styles.spinner} />
       ) : (
-        <MaterialIcons
-          name="translate"
+        <Ionicons
+          name="language-outline"
           size={16}
           color="#64748B"
           style={styles.icon}

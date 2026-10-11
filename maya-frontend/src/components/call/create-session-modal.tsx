@@ -11,7 +11,7 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import { Ionicons, MaterialCommunityIcons, MaterialIcons, Feather } from '@expo/vector-icons';
+import { Ionicons, Feather } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 
 export type SessionDurationMinutes = 5 | 10 | 15 | 30;
@@ -387,7 +387,7 @@ export function CreateSessionModal({
                       >
                         {opt.isPremium && (
                           <View style={styles.cardTopRightBadges}>
-                            <MaterialCommunityIcons name="crown" size={13} color="#F59E0B" />
+                            <Ionicons name="sparkles" size={12} color="#F59E0B" />
                             <Ionicons name="lock-closed-outline" size={12} color="#94A3B8" />
                           </View>
                         )}
@@ -421,7 +421,7 @@ export function CreateSessionModal({
               <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
                 <View style={styles.sectionHeader}>
                   <View style={[styles.sectionIconBadge, { backgroundColor: '#E6F9F0' }]}>
-                    <MaterialIcons name="translate" size={20} color="#059669" />
+                    <Ionicons name="language-outline" size={20} color="#059669" />
                   </View>
                   <View style={styles.sectionTextGroup}>
                     <Text style={styles.sectionTitle}>Language help</Text>
@@ -520,9 +520,9 @@ export function CreateSessionModal({
                         >
                           <View style={[styles.choiceIconCircle, { backgroundColor: opt.iconBg }]}>
                             {opt.iconType === 'scale-balance' ? (
-                              <MaterialCommunityIcons name="scale-balance" size={19} color={opt.iconColor} />
+                              <Ionicons name="options-outline" size={19} color={opt.iconColor} />
                             ) : opt.iconType === 'sprout' ? (
-                              <MaterialCommunityIcons name="sprout" size={19} color={opt.iconColor} />
+                              <Ionicons name="leaf-outline" size={19} color={opt.iconColor} />
                             ) : (
                               <Ionicons name="flash-outline" size={18} color={opt.iconColor} />
                             )}
@@ -552,9 +552,9 @@ export function CreateSessionModal({
                   >
                     <View style={[styles.choiceIconCircle, { backgroundColor: currentCorrectionOpt.iconBg }]}>
                       {currentCorrectionOpt.iconType === 'scale-balance' ? (
-                        <MaterialCommunityIcons name="scale-balance" size={19} color={currentCorrectionOpt.iconColor} />
+                        <Ionicons name="options-outline" size={19} color={currentCorrectionOpt.iconColor} />
                       ) : currentCorrectionOpt.iconType === 'sprout' ? (
-                        <MaterialCommunityIcons name="sprout" size={19} color={currentCorrectionOpt.iconColor} />
+                        <Ionicons name="leaf-outline" size={19} color={currentCorrectionOpt.iconColor} />
                       ) : (
                         <Ionicons name="flash-outline" size={18} color={currentCorrectionOpt.iconColor} />
                       )}
@@ -646,7 +646,7 @@ export function CreateSessionModal({
                         ]}
                       >
                         {pickerModal === 'language' ? (
-                          <MaterialIcons name="translate" size={18} color="#059669" />
+                          <Ionicons name="language-outline" size={18} color="#059669" />
                         ) : (
                           <Ionicons name="chatbubbles-outline" size={18} color="#E11D48" />
                         )}
@@ -730,9 +730,9 @@ export function CreateSessionModal({
                             >
                               <View style={[styles.choiceIconCircle, { backgroundColor: opt.iconBg }]}>
                                 {opt.iconType === 'scale-balance' ? (
-                                  <MaterialCommunityIcons name="scale-balance" size={19} color={opt.iconColor} />
+                                  <Ionicons name="options-outline" size={19} color={opt.iconColor} />
                                 ) : opt.iconType === 'sprout' ? (
-                                  <MaterialCommunityIcons name="sprout" size={19} color={opt.iconColor} />
+                                  <Ionicons name="leaf-outline" size={19} color={opt.iconColor} />
                                 ) : (
                                   <Ionicons name="flash-outline" size={18} color={opt.iconColor} />
                                 )}

@@ -27,7 +27,7 @@ import {
   Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
 import { DesktopLoadingScreen } from '@/components/ui/desktop-loading-screen';
-
+import { Ionicons, Feather, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -35,6 +35,10 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   const [fontsLoaded, fontError] = useFonts({
+    ...Ionicons.font,
+    ...Feather.font,
+    ...MaterialIcons.font,
+    ...MaterialCommunityIcons.font,
     Outfit: Outfit_400Regular,
     'Outfit-Regular': Outfit_400Regular,
     'Outfit-Medium': Outfit_500Medium,
