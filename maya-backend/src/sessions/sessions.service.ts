@@ -1811,7 +1811,12 @@ STRICT RESTRICTIONS:
 
     let userTurnCounter = 0;
     let modelTurnCounter = 0;
-    const mappedTurns = (turns || []).map((t: any) => {
+    const mappedTurns = (turns || [])
+      .filter((t: any) => {
+        const txt = (t.text_transcript || '').trim();
+        return txt.length > 0 && txt !== '...' && txt !== '(untranscribed / audio speech)';
+      })
+      .map((t: any) => {
       let turnAudioUrl: string | null = null;
       if (hasTurnsFolder) {
         if (t.role === 'user') {
@@ -1944,6 +1949,10 @@ STRICT RESTRICTIONS:
         let modelTurnCounter = 0;
         const mappedTurns = (sess.session_turns || [])
           .sort((a: any, b: any) => (a.turn_order || 0) - (b.turn_order || 0))
+          .filter((t: any) => {
+            const txt = (t.text_transcript || '').trim();
+            return txt.length > 0 && txt !== '...' && txt !== '(untranscribed / audio speech)';
+          })
           .map((t: any) => {
             let turnAudioUrl: string | null = null;
             if (hasTurnsFolder) {

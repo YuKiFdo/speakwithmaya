@@ -654,11 +654,28 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private commitPendingUserTurnAudio(state: ClientSessionState) {
     if (state.currentUserTurnAudioChunks.length === 0) return;
+
+    // Check if Gemini actually transcribed student words for this speech segment
+    const transcribedText = (state.userTranscriptAccumulator || state.lastStudentTranscript).trim();
+
+    // If NO transcription was recognized (e.g. ambient noise, throat clearing, breathing, thinking hum),
+    // do NOT commit as an isolated user turn. This prevents creating ghost audio turns that misalign
+    // history transcript turns and audio clips!
+    if (!transcribedText) {
+      if (state.hasModelSpokenThisTurn) {
+        this.logger.debug(
+          `[${state.sessionId}] 🔇 Discarding untranscribed acoustic noise buffer (${(Buffer.concat(state.currentUserTurnAudioChunks).length / 1024).toFixed(1)} KB) - no student words recognized`
+        );
+        state.currentUserTurnAudioChunks = [];
+      }
+      return;
+    }
+
     const turnBuffer = Buffer.concat(state.currentUserTurnAudioChunks);
     state.currentUserTurnAudioChunks = [];
 
-    // Filter out sub-400ms mic pops/coughs that have no real words
-    if (turnBuffer.length >= 12800) {
+    // Filter out sub-250ms mic pops/coughs
+    if (turnBuffer.length >= 8000) {
       const currentTurnIdx = state.userTurnCount;
       state.userTurnAudioMap.set(currentTurnIdx, turnBuffer);
       state.chronologicalAudioTurns.push({
@@ -668,7 +685,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         sampleRate: 16000,
       });
       this.logger.log(
-        `[${state.sessionId}] 🎙️ Committed verified user turn ${currentTurnIdx} audio (${(turnBuffer.length / 1024).toFixed(1)} KB)`
+        `[${state.sessionId}] 🎙️ Committed verified user turn ${currentTurnIdx} audio (${(turnBuffer.length / 1024).toFixed(1)} KB) for speech: "${transcribedText.slice(0, 50)}"`
       );
       state.userTurnCount++;
 
@@ -1024,6 +1041,10 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
         this.addSessionLog(state, 'model_turn_complete', `user="${userText?.slice(0, 80)}" maya="${modelText?.slice(0, 80)}"`);
 
+        // Commit verified user turn audio for this exchange (only if student actually spoke words)
+        this.commitPendingUserTurnAudio(state);
+        state.currentUserTurnAudioChunks = [];
+
         // Commit isolated model turn audio
         if (state.currentModelTurnAudioChunks.length > 0) {
           const modelTurnBuffer = Buffer.concat(state.currentModelTurnAudioChunks);
@@ -1072,6 +1093,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         state.userTranscriptAccumulator = '';
         state.lastStudentTranscript = '';
         state.modelTranscriptAccumulator = '';
+        state.currentUserTurnAudioChunks = [];
         state.hasModelSpokenThisTurn = false;
         state.practiceTaskToolCalledThisTurn = false;
         this.safeSendToClient(state, JSON.stringify({
