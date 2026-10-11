@@ -15,7 +15,7 @@ import { Ionicons, Feather } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
-import { playUnderstoodTapSound } from '@/services/sound/sound-service';
+import { playOtherButtonSound } from '@/services/sound/sound-service';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 
 function ReviewStarIcon({
@@ -57,12 +57,12 @@ export default function SessionReviewScreen() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const handleBack = () => {
-    playUnderstoodTapSound();
+    playOtherButtonSound();
     router.back();
   };
 
   const handleClose = () => {
-    playUnderstoodTapSound();
+    playOtherButtonSound();
     navigateOut();
   };
 
@@ -78,7 +78,7 @@ export default function SessionReviewScreen() {
   const handleSubmit = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
-    playUnderstoodTapSound();
+    playOtherButtonSound();
 
     try {
       const backendBaseUrl = getBackendBaseUrl();
@@ -155,7 +155,7 @@ export default function SessionReviewScreen() {
                   <Pressable
                     key={starIndex}
                     onPress={() => {
-                      playUnderstoodTapSound();
+                      playOtherButtonSound();
                       setRating(starIndex);
                     }}
                     style={({ pressed }) => [
