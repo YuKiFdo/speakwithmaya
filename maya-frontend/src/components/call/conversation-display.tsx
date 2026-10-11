@@ -120,29 +120,27 @@ function ConversationDisplayComponent({
       return;
     }
 
-    // How many words behind the audio stream are we?
-    const wordsBehind = allTargetWords.length - displayedCount;
+    // 2. Silky-smooth progressive word ticker calibrated to natural speech timing
+    const currentRevealingWord = allTargetWords[displayedCount] || '';
+    const cleanWord = currentRevealingWord.replace(/[^\w]/g, '');
 
-    // Natural conversational English cadence:
-    // ~175ms per word (~160 words per minute, natural speech rate)
-    let nextDelay = 175;
+    let nextDelay = 340;
 
     if (!isSpeaking) {
-      // Maya has finished speaking: smoothly glide through remaining words
-      nextDelay = 65;
-    } else if (wordsBehind > 4) {
-      // Catch up smoothly if stream buffered
-      nextDelay = 95;
-    } else if (wordsBehind > 2) {
-      nextDelay = 130;
-    }
+      // Maya has finished speaking her turn: smoothly complete remaining words
+      nextDelay = 110;
+    } else {
+      // Maya is actively speaking: match her natural speech cadence (~140-150 words per minute)
+      // Base word duration scales with character/syllable length (240ms - 480ms)
+      nextDelay = Math.max(240, Math.min(480, cleanWord.length * 48 + 190));
 
-    // Natural punctuation rhythm
-    const lastRevealedWord = allTargetWords[displayedCount - 1] || '';
-    if (isSpeaking && /[.?!]$/.test(lastRevealedWord)) {
-      nextDelay += 140; // Sentence boundary pause
-    } else if (isSpeaking && /[,;:\-]$/.test(lastRevealedWord)) {
-      nextDelay += 65; // Clause pause
+      // Natural conversational punctuation pauses
+      const lastRevealedWord = allTargetWords[displayedCount - 1] || '';
+      if (/[.?!]$/.test(lastRevealedWord)) {
+        nextDelay += 350; // Full stop / sentence boundary pause
+      } else if (/[,;:\-]$/.test(lastRevealedWord)) {
+        nextDelay += 180; // Clause breath pause
+      }
     }
 
     tickerTimerRef.current = setTimeout(() => {
