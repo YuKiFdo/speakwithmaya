@@ -9,27 +9,144 @@
  * - Direct client-side WebAssembly inference (Piper Amy 22kHz ONNX).
  * - Automatic IndexedDB caching for fast repeated playback without network downloads.
  * - In-memory Blob URL caching for instant 0ms audio replays on review screens.
- * - Graceful fallback to browser Web Speech API (SpeechSynthesis) if WASM is initializing or unavailable.
+ * - Seamless fallback to browser Web Speech API (SpeechSynthesis) if WASM is initializing or unavailable.
  */
 
 import { Platform } from 'react-native';
 
 let cachedVoices: SpeechSynthesisVoice[] = [];
-let piperInstance: any = null;
-let piperInitPromise: Promise<any> | null = null;
+let piperSession: any = null;
+let piperConfig: any = null;
+let piperG2P: any = null;
+let piperInitPromise: Promise<boolean> | null = null;
 let activeAudioElement: any = null;
 const audioBlobCache = new Map<string, string>();
+
+/**
+ * Load browser script asynchronously without bundling through Metro.
+ * This guarantees Metro never parses ONNX runtime bundles.
+ */
+function loadScript(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof document === 'undefined') return resolve();
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      if ((window as any).ort) return resolve();
+      existing.addEventListener('load', () => resolve());
+      existing.addEventListener('error', (e) => reject(e));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = (e) => reject(e);
+    document.head.appendChild(script);
+  });
+}
+
+/**
+ * Retrieve cached ONNX model buffer from IndexedDB to eliminate network requests.
+ */
+function getCachedModelBuffer(): Promise<ArrayBuffer | null> {
+  return new Promise((resolve) => {
+    try {
+      if (typeof indexedDB === 'undefined') return resolve(null);
+      const req = indexedDB.open('maya-piper-cache', 1);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore('models');
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction('models', 'readonly');
+        const getReq = tx.objectStore('models').get('amy');
+        getReq.onsuccess = () => resolve(getReq.result || null);
+        getReq.onerror = () => resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Cache ONNX model buffer in IndexedDB.
+ */
+function setCachedModelBuffer(buffer: ArrayBuffer): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      if (typeof indexedDB === 'undefined') return resolve();
+      const req = indexedDB.open('maya-piper-cache', 1);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore('models');
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction('models', 'readwrite');
+        tx.objectStore('models').put(buffer, 'amy');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      };
+      req.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+/**
+ * Encode Float32Array audio samples into standard PCM 16-bit mono WAV.
+ */
+function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample / 8;
+  const dataByteLength = samples.length * bytesPerSample;
+  const headerByteLength = 44;
+  const buffer = new ArrayBuffer(headerByteLength + dataByteLength);
+  const view = new DataView(buffer);
+
+  function writeString(offset: number, str: string) {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  }
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataByteLength, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataByteLength, true);
+
+  const offset = headerByteLength;
+  for (let i = 0; i < samples.length; i++) {
+    const clamped = Math.max(-1, Math.min(1, samples[i]));
+    const int16 = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+    view.setInt16(offset + i * bytesPerSample, int16, true);
+  }
+
+  return buffer;
+}
 
 /**
  * Initialize / Pre-warm Piper WASM in the browser.
  * Caches model and phonemizer into browser memory / IndexedDB.
  */
-export async function getPiperInstance(): Promise<any> {
+export async function initPiper(): Promise<boolean> {
   if (Platform.OS !== 'web' || typeof window === 'undefined') {
-    return null;
+    return false;
   }
-  if (piperInstance) {
-    return piperInstance;
+  if (piperSession && piperG2P && piperConfig) {
+    return true;
   }
   if (piperInitPromise) {
     return piperInitPromise;
@@ -37,33 +154,59 @@ export async function getPiperInstance(): Promise<any> {
 
   piperInitPromise = (async () => {
     try {
-      // Dynamic imports prevent Node.js / SSR / Native bundle breakages
-      const [ortModule, piperModule] = await Promise.all([
-        import('onnxruntime-web'),
-        import('piper-plus'),
-      ]);
+      // 1. Load ONNX Runtime Web via script tag
+      if (!(window as any).ort) {
+        await loadScript('/onnx/ort.all.min.js').catch(async () => {
+          await loadScript('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.all.min.js');
+        });
+      }
 
-      const ort = (ortModule as any).default || ortModule;
+      const ort = (window as any).ort;
+      if (!ort) {
+        throw new Error('onnxruntime-web could not be loaded');
+      }
+
       if (ort?.env?.wasm) {
         ort.env.wasm.wasmPaths = '/onnx/';
         ort.env.wasm.numThreads = 1;
       }
-      (globalThis as any).ort = ort;
 
-      const PiperPlus = piperModule.PiperPlus;
-      const modelUrl = `${window.location.origin}/piper/en_US-amy-medium.onnx`;
+      // 2. Load model config and G2P phonemizer
+      // @ts-ignore
+      const [{ G2P }, configRes] = await Promise.all([
+        // @ts-ignore
+        import('@piper-plus/g2p'),
+        fetch('/piper/en_US-amy-medium.onnx.json'),
+      ]);
 
-      const piper = await PiperPlus.initialize({
-        model: modelUrl,
-        ort,
+      if (!configRes.ok) {
+        throw new Error(`Failed to load model config: ${configRes.status}`);
+      }
+
+      piperConfig = await configRes.json();
+      piperG2P = await G2P.create({ languages: ['en'] });
+
+      // 3. Load ONNX model data (try IndexedDB first, fallback to fetch)
+      let modelBuffer = await getCachedModelBuffer();
+      if (!modelBuffer) {
+        const modelRes = await fetch('/piper/en_US-amy-medium.onnx');
+        if (!modelRes.ok) {
+          throw new Error(`Failed to fetch ONNX model: ${modelRes.status}`);
+        }
+        modelBuffer = await modelRes.arrayBuffer();
+        setCachedModelBuffer(modelBuffer);
+      }
+
+      // 4. Create ONNX inference session
+      piperSession = await ort.InferenceSession.create(modelBuffer, {
+        executionProviders: ['wasm'],
       });
 
-      piperInstance = piper;
-      console.log('[MayaVoiceFallback] Piper WASM (Amy voice) initialized successfully in browser.');
-      return piper;
+      console.log('[MayaVoiceFallback] Piper WASM Amy neural voice engine ready.');
+      return true;
     } catch (err) {
-      console.warn('[MayaVoiceFallback] Piper WASM initialization failed; will fall back to SpeechSynthesis:', err);
-      return null;
+      console.warn('[MayaVoiceFallback] Piper WASM init failed; using SpeechSynthesis:', err);
+      return false;
     } finally {
       piperInitPromise = null;
     }
@@ -85,9 +228,9 @@ export function warmUpSpeechVoices(): void {
     } catch {}
   }
 
-  // Pre-warm Piper WASM in background so review screens have 0ms latency
+  // Pre-warm Piper WASM in background
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    getPiperInstance().catch(() => {});
+    initPiper().catch(() => {});
   }
 }
 
@@ -256,12 +399,10 @@ function speakViaSpeechSynthesis(
     pitch?: number;
     onStart?: () => void;
     onEnd?: () => void;
-    onError?: (err: any) => void;
   },
   isRetry = false,
 ): boolean {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-    options?.onError?.(new Error('SpeechSynthesis not supported'));
     return false;
   }
 
@@ -327,7 +468,6 @@ function speakViaSpeechSynthesis(
         if (e.error !== 'interrupted' && e.error !== 'canceled') {
           console.warn('[MayaVoiceFallback] Synthesis error:', e.error);
         }
-        options?.onError?.(e);
       }
     };
 
@@ -337,10 +477,10 @@ function speakViaSpeechSynthesis(
           window.speechSynthesis.resume();
         }
         window.speechSynthesis.speak(utterance);
-      } catch (err) {
+      } catch {
         if (!hasEnded) {
           hasEnded = true;
-          options?.onError?.(err);
+          options?.onEnd?.();
         }
       }
     };
@@ -355,13 +495,12 @@ function speakViaSpeechSynthesis(
     return true;
   } catch (err) {
     console.warn('[MayaVoiceFallback] Failed to speak:', err);
-    options?.onError?.(err);
     return false;
   }
 }
 
 /**
- * Main entrance: Synthesizes and speaks text using Piper WASM neural voice (Amy),
+ * Synthesize and speak text using Piper WASM neural voice (Amy),
  * with instant Blob URL caching and SpeechSynthesis fallback.
  */
 export function speakAsCallirrhoe(
@@ -373,7 +512,6 @@ export function speakAsCallirrhoe(
     onEnd?: () => void;
     onError?: (err: any) => void;
   },
-  _isRetry = false,
 ): boolean {
   const cleanText = (text || '').trim();
   if (!cleanText) {
@@ -387,26 +525,33 @@ export function speakAsCallirrhoe(
     return playAudioBlob(cachedUrl, options);
   }
 
-  // 2. If Piper instance is available, synthesize directly via client-side WASM
+  // 2. Synthesize directly via client-side WASM if on Web
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    getPiperInstance()
-      .then(async (piper) => {
-        if (!piper) {
+    initPiper()
+      .then(async (ready) => {
+        if (!ready || !piperSession || !piperG2P || !piperConfig) {
           speakViaSpeechSynthesis(cleanText, options);
           return;
         }
 
         try {
-          const result = await piper.synthesize(cleanText, {
-            language: 'en',
-            noiseScale: 0.667,
-            lengthScale: 0.95,
-          });
+          const ort = (window as any).ort;
+          const encoded = piperG2P.encode(cleanText, piperConfig.phoneme_id_map, { language: 'en' });
+          const phonemeIds = encoded.phonemeIds;
 
-          const blob = result.toBlob();
+          const feeds = {
+            input: new ort.Tensor('int64', new BigInt64Array(phonemeIds.map((id: number) => BigInt(id))), [1, phonemeIds.length]),
+            input_lengths: new ort.Tensor('int64', new BigInt64Array([BigInt(phonemeIds.length)]), [1]),
+            scales: new ort.Tensor('float32', new Float32Array([0.667, 0.95, 0.8]), [3]),
+          };
+
+          const result = await piperSession.run(feeds);
+          const sampleRate = piperConfig.audio?.sample_rate || 22050;
+          const wavBuffer = encodeWav(result.output.data, sampleRate);
+          const blob = new Blob([wavBuffer], { type: 'audio/wav' });
           const blobUrl = URL.createObjectURL(blob);
-          audioBlobCache.set(cleanText, blobUrl);
 
+          audioBlobCache.set(cleanText, blobUrl);
           playAudioBlob(blobUrl, options);
         } catch (synthErr) {
           console.warn('[MayaVoiceFallback] Piper synthesis failed, falling back to Web Speech:', synthErr);
