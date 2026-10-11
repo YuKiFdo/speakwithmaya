@@ -53,6 +53,11 @@ interface SessionRecord {
   status: string;
   turnsCount: number;
   correctionsCount: number;
+  hintsUsedCount?: number;
+  hintTokens?: number;
+  hintCostLkr?: number;
+  hintCostUsd?: number;
+  totalWithHintsLkr?: number;
   scores: {
     overall: number;
     fluency: number;
@@ -92,6 +97,10 @@ interface UsageResponse {
     totalTokens: number;
     totalCostLkr: number;
     totalCostUsd: number;
+    totalHintsUsed?: number;
+    totalHintCostLkr?: number;
+    totalHintCostUsd?: number;
+    grandTotalCostLkr?: number;
     totalSessions: number;
     avgDurationMinutes: number;
     minutesToday?: number;
@@ -478,7 +487,7 @@ export default function AdminUsageScreen() {
               </Pressable>
             </View>
 
-            {/* 5 Summary Metric Cards */}
+            {/* 6 Summary Metric Cards */}
             <View style={styles.metricCardsRow}>
               {/* 1. AI Minutes Today */}
               <View style={styles.metricCard}>
@@ -510,17 +519,35 @@ export default function AdminUsageScreen() {
                 </Text>
               </View>
 
-              {/* 4. Estimated AI Cost */}
+              {/* 4. Hints Used */}
               <View style={styles.metricCard}>
-                <Text style={styles.metricLabel}>Estimated AI Cost</Text>
-                <Text style={[styles.metricValue, { color: '#ea580c' }]}>
-                  {data?.stats?.totalCostLkr !== undefined
-                    ? `LKR ${data.stats.totalCostLkr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : 'LKR 0.00'}
+                <Text style={styles.metricLabel}>Hints Used</Text>
+                <Text style={[styles.metricValue, { color: '#8b5cf6' }]}>
+                  {data?.stats?.totalHintsUsed !== undefined
+                    ? data.stats.totalHintsUsed.toLocaleString()
+                    : '0'}
+                </Text>
+                <Text style={styles.metricSubText}>
+                  Spend: LKR {(data?.stats?.totalHintCostLkr || 0).toFixed(2)}
                 </Text>
               </View>
 
-              {/* 5. Avg Cost Per Min */}
+              {/* 5. Total AI Cost (Voice + Hints) */}
+              <View style={styles.metricCard}>
+                <Text style={styles.metricLabel}>Total AI Cost</Text>
+                <Text style={[styles.metricValue, { color: '#ea580c' }]}>
+                  {data?.stats?.grandTotalCostLkr !== undefined
+                    ? `LKR ${data.stats.grandTotalCostLkr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : data?.stats?.totalCostLkr !== undefined
+                      ? `LKR ${data.stats.totalCostLkr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : 'LKR 0.00'}
+                </Text>
+                <Text style={styles.metricSubText}>
+                  Voice: LKR {(data?.stats?.totalCostLkr || 0).toFixed(2)} | Hints: LKR {(data?.stats?.totalHintCostLkr || 0).toFixed(2)}
+                </Text>
+              </View>
+
+              {/* 6. Avg Cost Per Min */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Avg Cost Per Min</Text>
                 <Text style={[styles.metricValue, { color: '#7c3aed' }]}>
@@ -833,7 +860,10 @@ export default function AdminUsageScreen() {
                     <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Input Tokens</Text>
                     <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Output Tokens</Text>
                     <Text style={[styles.th, { width: 95, textAlign: 'right' }]}>Total</Text>
-                    <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Est. Cost</Text>
+                    <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Voice Cost</Text>
+                    <Text style={[styles.th, { width: 95, textAlign: 'center' }]}>Hints Used</Text>
+                    <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Hint Cost</Text>
+                    <Text style={[styles.th, { width: 110, textAlign: 'right' }]}>Total Cost</Text>
                     <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Avg / Min</Text>
                     <Text style={[styles.th, { width: 90, textAlign: 'center' }]}>Status</Text>
                     <Text style={[styles.th, { width: 145, textAlign: 'center' }]}>Actions</Text>
@@ -949,7 +979,7 @@ export default function AdminUsageScreen() {
                           {row.totalTokens.toLocaleString()}
                         </Text>
 
-                        {/* Est Cost */}
+                        {/* Voice Cost */}
                         <Text
                           style={[
                             styles.td,
@@ -957,6 +987,37 @@ export default function AdminUsageScreen() {
                           ]}
                         >
                           {`LKR ${row.costLkr.toFixed(2)}`}
+                        </Text>
+
+                        {/* Hints Used */}
+                        <View style={[styles.td, { width: 95, alignItems: 'center', justifyContent: 'center' }]}>
+                          {row.hintsUsedCount && row.hintsUsedCount > 0 ? (
+                            <View style={styles.hintsBadge}>
+                              <Text style={styles.hintsBadgeText}>{row.hintsUsedCount} hints</Text>
+                            </View>
+                          ) : (
+                            <Text style={{ color: '#94a3b8', fontSize: 13 }}>—</Text>
+                          )}
+                        </View>
+
+                        {/* Hint Cost */}
+                        <Text
+                          style={[
+                            styles.td,
+                            { width: 105, textAlign: 'right', color: '#7c3aed', ...fontStyle('inter', 'medium') },
+                          ]}
+                        >
+                          {row.hintCostLkr && row.hintCostLkr > 0 ? `LKR ${row.hintCostLkr.toFixed(2)}` : '—'}
+                        </Text>
+
+                        {/* Total Cost */}
+                        <Text
+                          style={[
+                            styles.td,
+                            { width: 110, textAlign: 'right', color: '#ea580c', ...fontStyle('inter', 'bold') },
+                          ]}
+                        >
+                          {`LKR ${(row.totalWithHintsLkr !== undefined ? row.totalWithHintsLkr : row.costLkr + (row.hintCostLkr || 0)).toFixed(2)}`}
                         </Text>
 
                         {/* Avg Min Cost */}
@@ -1152,7 +1213,7 @@ export default function AdminUsageScreen() {
                   <Text style={styles.modalStatValue}>{activeSession?.durationFormatted}</Text>
                 </View>
                 <View style={styles.modalStatBox}>
-                  <Text style={styles.modalStatLabel}>Estimated Cost</Text>
+                  <Text style={styles.modalStatLabel}>Voice Cost</Text>
                   <Text style={[styles.modalStatValue, { color: '#0d9488' }]}>
                     {activeSession ? `LKR ${activeSession.costLkr.toFixed(2)}` : 'LKR 0.00'}
                   </Text>
@@ -1162,6 +1223,24 @@ export default function AdminUsageScreen() {
                         ? activeSession.costPerMinLkr
                         : (activeSession?.costLkr || 0) / Math.max(0.1, (activeSession?.durationSeconds || 60) / 60)
                     ).toFixed(2)}/min
+                  </Text>
+                </View>
+                <View style={styles.modalStatBox}>
+                  <Text style={styles.modalStatLabel}>Hints Used & Cost</Text>
+                  <Text style={[styles.modalStatValue, { color: '#8b5cf6' }]}>
+                    {activeSession?.hintsUsedCount || 0} hints
+                  </Text>
+                  <Text style={styles.modalStatSub}>
+                    LKR {(activeSession?.hintCostLkr || 0).toFixed(2)} (${(activeSession?.hintCostUsd || 0).toFixed(5)} USD)
+                  </Text>
+                </View>
+                <View style={styles.modalStatBox}>
+                  <Text style={styles.modalStatLabel}>Total Session Spend</Text>
+                  <Text style={[styles.modalStatValue, { color: '#ea580c' }]}>
+                    {`LKR ${(activeSession?.totalWithHintsLkr !== undefined ? activeSession.totalWithHintsLkr : (activeSession?.costLkr || 0) + (activeSession?.hintCostLkr || 0)).toFixed(2)}`}
+                  </Text>
+                  <Text style={styles.modalStatSub}>
+                    Voice: LKR {(activeSession?.costLkr || 0).toFixed(2)} + Hints: LKR {(activeSession?.hintCostLkr || 0).toFixed(2)}
                   </Text>
                 </View>
                 <View style={styles.modalStatBox}>
@@ -1898,6 +1977,12 @@ const styles = StyleSheet.create({
     ...fontStyle('outfit', 'bold'),
     fontSize: 21,
   },
+  metricSubText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 4,
+  },
 
   // Daily AI Usage Chart Card
   chartCard: {
@@ -2240,6 +2325,20 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'medium'),
     fontSize: 11,
     color: '#059669',
+  },
+  hintsBadge: {
+    backgroundColor: '#f5f3ff',
+    borderWidth: 1,
+    borderColor: '#ede9fe',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    alignSelf: 'center',
+  },
+  hintsBadgeText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#7c3aed',
   },
   detailBtn: {
     backgroundColor: '#f8fafc',

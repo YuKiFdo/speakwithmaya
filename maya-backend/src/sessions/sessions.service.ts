@@ -102,6 +102,11 @@ export interface UsageRecord {
   topic?: string;
   languageMode?: string;
   sinhalaStyle?: string;
+  hintsUsedCount?: number;
+  hintTokens?: number;
+  hintCostUsd?: number;
+  hintCostLkr?: number;
+  totalWithHintsLkr?: number;
 }
 
 export interface SessionDiagnosticsRecord {
@@ -1567,6 +1572,11 @@ STRICT RESTRICTIONS:
               costLkr: Number(Number(row.cost_lkr || 0).toFixed(2)),
               costPerMinLkr: durationSec > 0 ? Number(((row.cost_lkr || 0) / (durationSec / 60)).toFixed(2)) : 0,
               costPerMinUsd: durationSec > 0 ? Number(((row.cost_usd || 0) / (durationSec / 60)).toFixed(4)) : 0,
+              hintsUsedCount: (this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.count || 0,
+              hintTokens: (this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.totalTokens || 0,
+              hintCostUsd: Number(Number((this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.costUsd || 0).toFixed(6)),
+              hintCostLkr: Number(Number((this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.costLkr || 0).toFixed(2)),
+              totalWithHintsLkr: Number((Number(row.cost_lkr || 0) + Number((this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.costLkr || 0)).toFixed(2)),
               status: ((sess?.status === 'completed' ? 'Success' : 'In Progress') as 'Success' | 'In Progress'),
               turnsCount: turnsCountMap.get(row.session_id) || 0,
               correctionsCount: correctionsCountMap.get(row.session_id) || 0,
@@ -1725,6 +1735,10 @@ STRICT RESTRICTIONS:
     const totalTokens = filtered.reduce((sum, r) => sum + r.totalTokens, 0);
     const totalCostLkr = Number(filtered.reduce((sum, r) => sum + r.costLkr, 0).toFixed(2));
     const totalCostUsd = Number(filtered.reduce((sum, r) => sum + r.costUsd, 0).toFixed(4));
+    const totalHintsUsed = filtered.reduce((sum, r) => sum + (r.hintsUsedCount || 0), 0);
+    const totalHintCostLkr = Number(filtered.reduce((sum, r) => sum + (r.hintCostLkr || 0), 0).toFixed(2));
+    const totalHintCostUsd = Number(filtered.reduce((sum, r) => sum + (r.hintCostUsd || 0), 0).toFixed(4));
+    const grandTotalCostLkr = Number((totalCostLkr + totalHintCostLkr).toFixed(2));
     const totalSessions = filtered.length;
     const avgDurationSeconds =
       totalSessions > 0
@@ -1742,6 +1756,10 @@ STRICT RESTRICTIONS:
         totalTokens,
         totalCostLkr,
         totalCostUsd,
+        totalHintsUsed,
+        totalHintCostLkr,
+        totalHintCostUsd,
+        grandTotalCostLkr,
         totalSessions,
         avgDurationMinutes,
         minutesToday,
@@ -1869,6 +1887,11 @@ STRICT RESTRICTIONS:
       costLkr: Number(Number(ledger?.cost_lkr || 0).toFixed(2)),
       costPerMinLkr: durationSec > 0 ? Number(((ledger?.cost_lkr || 0) / (durationSec / 60)).toFixed(2)) : 0,
       costPerMinUsd: durationSec > 0 ? Number(((ledger?.cost_usd || 0) / (durationSec / 60)).toFixed(4)) : 0,
+      hintsUsedCount: (this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.count || 0,
+      hintTokens: (this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.totalTokens || 0,
+      hintCostUsd: Number(Number((this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.costUsd || 0).toFixed(6)),
+      hintCostLkr: Number(Number((this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.costLkr || 0).toFixed(2)),
+      totalWithHintsLkr: Number((Number(ledger?.cost_lkr || 0) + Number((this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.costLkr || 0)).toFixed(2)),
       status: sess.status === 'completed' ? 'Success' : 'In Progress',
       turnsCount: mappedTurns.length,
       correctionsCount: mappedCorrections.length,
@@ -2650,6 +2673,52 @@ CRITICAL SCRIPT RULES for hintSinhala:
     return { audioBase64: '', mimeType: 'audio/wav' };
   }
 
+  findHighlightDiff(
+    original?: string,
+    updated?: string,
+  ): { originalHighlight?: string; updatedHighlight?: string } {
+    if (!original || !updated) return {};
+    const clean = (w: string) => (w || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const origWords = original.trim().split(/\s+/).filter(Boolean);
+    const updWords = updated.trim().split(/\s+/).filter(Boolean);
+
+    let prefixLen = 0;
+    while (
+      prefixLen < origWords.length &&
+      prefixLen < updWords.length &&
+      clean(origWords[prefixLen]) === clean(updWords[prefixLen])
+    ) {
+      prefixLen++;
+    }
+
+    let origSuffix = origWords.length - 1;
+    let updSuffix = updWords.length - 1;
+    while (
+      origSuffix >= prefixLen &&
+      updSuffix >= prefixLen &&
+      clean(origWords[origSuffix]) === clean(updWords[updSuffix])
+    ) {
+      origSuffix--;
+      updSuffix--;
+    }
+
+    const origDiffWords = origWords.slice(prefixLen, origSuffix + 1);
+    const updDiffWords = updWords.slice(prefixLen, updSuffix + 1);
+
+    let origDiff = origDiffWords.join(' ');
+    let updDiff = updDiffWords.join(' ');
+
+    if (!origDiff && updDiff && prefixLen < origWords.length) {
+      origDiff = origWords[prefixLen];
+    } else if (!updDiff && origDiff && prefixLen < updWords.length) {
+      updDiff = updWords[prefixLen];
+    }
+
+    return {
+      originalHighlight: origDiff ? origDiff.trim() : undefined,
+      updatedHighlight: updDiff ? updDiff.trim() : undefined,
+    };
+  }
 
   async analyzeSession(dto: AnalyzeSessionDto): Promise<{
     sessionId?: string;
@@ -2750,7 +2819,9 @@ CRITICAL RULES:
      * subtitle: "You talked about [topic]. Let’s try a more natural way to say it."
      * badge: "More natural"
      * youSaid: the full sentence the student spoke
+     * youSaidHighlight: the specific awkward or stilted words in what the student spoke that needed improving (or the word right before/after where words were omitted, e.g. "Absolute favorite")
      * betterWay: the full natural conversational sentence
+     * betterWayHighlight: the exact words or phrase that were added, modified, or rephrased in the natural version (e.g. "My" or "My absolute favorite") so the learner immediately sees what was added or changed
      * whyExplanation: concise reason under "Why this sounds more fluent" (1-2 sentences)
      * spokenIntro: "Here's one way to sound more fluent."
 
@@ -2879,8 +2950,23 @@ CRITICAL RULES:
                   ? isolatedTurnAudio.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp')
                   : userAudioUrl || null;
 
+                let youSaidHighlight = it.youSaidHighlight?.trim();
+                let betterWayHighlight = it.betterWayHighlight?.trim();
+
+                if ((it.type === 'grammar' || it.type === 'more_natural') && (!youSaidHighlight || !betterWayHighlight)) {
+                  const fallback = this.findHighlightDiff(it.youSaid, it.betterWay);
+                  if (!youSaidHighlight && fallback.originalHighlight) {
+                    youSaidHighlight = fallback.originalHighlight;
+                  }
+                  if (!betterWayHighlight && fallback.updatedHighlight) {
+                    betterWayHighlight = fallback.updatedHighlight;
+                  }
+                }
+
                 return {
                   ...it,
+                  youSaidHighlight,
+                  betterWayHighlight,
                   userAudioUrl: sentenceAudioUrl,
                 };
               }),

@@ -518,25 +518,58 @@ export default function SessionFeedbackScreen() {
     });
   };
 
-  // Render highlighted sentence parts
-  const renderYouSaidText = () => {
-    if (currentItem.type === 'grammar' && currentItem.youSaidHighlight) {
-      const phrase = currentItem.youSaid;
-      const highlight = currentItem.youSaidHighlight;
-      const idx = phrase.indexOf(highlight);
-      if (idx !== -1) {
-        const before = phrase.slice(0, idx);
-        const after = phrase.slice(idx + highlight.length);
-        return (
-          <Text style={styles.cardSentenceText}>
-            {before}
-            <Text style={styles.pinkHighlightTag}> {highlight} </Text>
-            {after}
-          </Text>
-        );
-      }
+  function cleanWord(w: string): string {
+    return (w || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function findHighlightDiff(
+    original?: string,
+    updated?: string,
+  ): { originalHighlight?: string; updatedHighlight?: string } {
+    if (!original || !updated) return {};
+    const origWords = original.trim().split(/\s+/).filter(Boolean);
+    const updWords = updated.trim().split(/\s+/).filter(Boolean);
+
+    let prefixLen = 0;
+    while (
+      prefixLen < origWords.length &&
+      prefixLen < updWords.length &&
+      cleanWord(origWords[prefixLen]) === cleanWord(updWords[prefixLen])
+    ) {
+      prefixLen++;
     }
 
+    let origSuffix = origWords.length - 1;
+    let updSuffix = updWords.length - 1;
+    while (
+      origSuffix >= prefixLen &&
+      updSuffix >= prefixLen &&
+      cleanWord(origWords[origSuffix]) === cleanWord(updWords[updSuffix])
+    ) {
+      origSuffix--;
+      updSuffix--;
+    }
+
+    const origDiffWords = origWords.slice(prefixLen, origSuffix + 1);
+    const updDiffWords = updWords.slice(prefixLen, updSuffix + 1);
+
+    let origDiff = origDiffWords.join(' ');
+    let updDiff = updDiffWords.join(' ');
+
+    if (!origDiff && updDiff && prefixLen < origWords.length) {
+      origDiff = origWords[prefixLen];
+    } else if (!updDiff && origDiff && prefixLen < updWords.length) {
+      updDiff = updWords[prefixLen];
+    }
+
+    return {
+      originalHighlight: origDiff ? origDiff.trim() : undefined,
+      updatedHighlight: updDiff ? updDiff.trim() : undefined,
+    };
+  }
+
+  // Render highlighted sentence parts
+  const renderYouSaidText = () => {
     if (currentItem.type === 'pronunciation') {
       return (
         <View>
@@ -550,27 +583,38 @@ export default function SessionFeedbackScreen() {
       );
     }
 
-    return <Text style={styles.cardSentenceText}>{currentItem.youSaid}</Text>;
-  };
+    const phrase = currentItem.youSaid || '';
+    let highlight = currentItem.youSaidHighlight?.trim();
 
-  const renderBetterWayText = () => {
-    if (currentItem.type === 'grammar' && currentItem.betterWayHighlight) {
-      const phrase = currentItem.betterWay;
-      const highlight = currentItem.betterWayHighlight;
-      const idx = phrase.indexOf(highlight);
+    if (!highlight || !phrase.toLowerCase().includes(highlight.toLowerCase())) {
+      const fallback = findHighlightDiff(phrase, currentItem.betterWay);
+      if (fallback.originalHighlight && phrase.toLowerCase().includes(fallback.originalHighlight.toLowerCase())) {
+        highlight = fallback.originalHighlight;
+      }
+    }
+
+    if (highlight) {
+      const lowerPhrase = phrase.toLowerCase();
+      const lowerHighlight = highlight.toLowerCase();
+      const idx = lowerPhrase.indexOf(lowerHighlight);
       if (idx !== -1) {
         const before = phrase.slice(0, idx);
+        const match = phrase.slice(idx, idx + highlight.length);
         const after = phrase.slice(idx + highlight.length);
         return (
           <Text style={styles.cardSentenceText}>
             {before}
-            <Text style={styles.greenHighlightTag}> {highlight} </Text>
+            <Text style={styles.pinkHighlightTag}>{match}</Text>
             {after}
           </Text>
         );
       }
     }
 
+    return <Text style={styles.cardSentenceText}>{phrase}</Text>;
+  };
+
+  const renderBetterWayText = () => {
     if (currentItem.type === 'pronunciation') {
       return (
         <View>
@@ -584,7 +628,35 @@ export default function SessionFeedbackScreen() {
       );
     }
 
-    return <Text style={styles.cardSentenceText}>{currentItem.betterWay}</Text>;
+    const phrase = currentItem.betterWay || '';
+    let highlight = currentItem.betterWayHighlight?.trim();
+
+    if (!highlight || !phrase.toLowerCase().includes(highlight.toLowerCase())) {
+      const fallback = findHighlightDiff(currentItem.youSaid, phrase);
+      if (fallback.updatedHighlight && phrase.toLowerCase().includes(fallback.updatedHighlight.toLowerCase())) {
+        highlight = fallback.updatedHighlight;
+      }
+    }
+
+    if (highlight) {
+      const lowerPhrase = phrase.toLowerCase();
+      const lowerHighlight = highlight.toLowerCase();
+      const idx = lowerPhrase.indexOf(lowerHighlight);
+      if (idx !== -1) {
+        const before = phrase.slice(0, idx);
+        const match = phrase.slice(idx, idx + highlight.length);
+        const after = phrase.slice(idx + highlight.length);
+        return (
+          <Text style={styles.cardSentenceText}>
+            {before}
+            <Text style={styles.greenHighlightTag}>{match}</Text>
+            {after}
+          </Text>
+        );
+      }
+    }
+
+    return <Text style={styles.cardSentenceText}>{phrase}</Text>;
   };
 
   // Badge configurations based on card category
