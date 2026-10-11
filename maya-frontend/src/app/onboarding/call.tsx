@@ -250,7 +250,6 @@ export default function CallScreen() {
   }, [liveCall.status, liveCall.subtitles, liveCall.previousSubtitles]);
 
   const handleToggleHint = async () => {
-    playHintButtonSound();
     if (isHintVisible) {
       setIsHintVisible(false);
       return;
@@ -375,19 +374,30 @@ export default function CallScreen() {
   const hasTransitionedRef = useRef(false);
 
   useEffect(() => {
-    if (liveCall.status !== 'connecting' && liveCall.status !== 'idle' && !hasTransitionedRef.current) {
+    const isNowConnected = liveCall.isConnected || (liveCall.status !== 'connecting' && liveCall.status !== 'idle');
+
+    if (isNowConnected && !hasTransitionedRef.current) {
       hasTransitionedRef.current = true;
-      playCallConnectedSound();
-      Animated.timing(connectingFadeAnim, {
-        toValue: 0,
-        duration: 320,
-        easing: Easing.out(Easing.ease),
-        useNativeDriver: Platform.OS !== 'web',
-      }).start(() => {
-        setConnectingVisible(false);
+      console.log('[call.tsx] 📞 Call connected! Playing chime once before transitioning to call screen.');
+
+      // Play call connected chime ONCE
+      playCallConnectedSound(() => {
+        console.log('[call.tsx] 🔔 Chime finished -> moving to call screen and releasing model greeting audio');
+        // 1. Release Maya's greeting audio now that chime has finished playing
+        liveCall.releaseGreeting?.();
+
+        // 2. Smoothly crossfade from ConnectingView into active CallScreen
+        Animated.timing(connectingFadeAnim, {
+          toValue: 0,
+          duration: 380,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: Platform.OS !== 'web',
+        }).start(() => {
+          setConnectingVisible(false);
+        });
       });
     }
-  }, [liveCall.status]);
+  }, [liveCall.isConnected, liveCall.status]);
 
   // Animate glows reactively based on voice strength and call status
   useEffect(() => {
@@ -810,10 +820,7 @@ export default function CallScreen() {
           ]}
           pointerEvents={liveCall.status === 'connecting' ? 'auto' : 'none'}
         >
-          <ConnectingView
-            onCancel={handleHangup}
-            isConnected={liveCall.status !== 'connecting' && liveCall.status !== 'idle'}
-          />
+          <ConnectingView onCancel={handleHangup} />
         </Animated.View>
       )}
 

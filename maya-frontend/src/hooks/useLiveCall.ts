@@ -125,6 +125,13 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const [networkQuality, setNetworkQuality] = useState<'good' | 'fair' | 'poor'>('good');
   const [networkRttMs, setNetworkRttMs] = useState<number>(0);
 
+  // Connection gate and greeting audio hold
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const isInitialGreetingHeldRef = useRef<boolean>(true);
+  const initialGreetingBufferRef = useRef<
+    Array<{ type: 'samples'; data: Float32Array } | { type: 'chunk'; data: string }>
+  >([]);
+
   // Next-generation deliberate practice & testing states
   const [activePracticeTask, setActivePracticeTask] = useState<PracticeTaskPayload | null>(null);
   const [testScores, setTestScores] = useState<Map<number, TestScorePayload>>(new Map());
@@ -314,8 +321,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         testScoresRef.current.clear();
         evaluationResultRef.current = null;
 
-        // Fresh session: gate microphone until Maya finishes speaking her opening turn greeting
+        // Fresh session: gate microphone and initial greeting audio until Maya finishes speaking her opening turn greeting
         isFirstGreetingPendingRef.current = true;
+        isInitialGreetingHeldRef.current = true;
+        initialGreetingBufferRef.current = [];
+        setIsConnected(false);
         setTimeout(() => {
           if (isFirstGreetingPendingRef.current) {
             console.warn('[useLiveCall] Initial greeting safety timeout expired (12s) — unlocking mic');
@@ -540,6 +550,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         {
           onOpen: () => {
             console.log('[useLiveCall] Gemini Live transport connection established');
+            setIsConnected(true);
             reconnectAttemptsRef.current = 0;
             if (reconnectTimerRef.current) {
               clearTimeout(reconnectTimerRef.current);
@@ -568,6 +579,13 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onAudioSamples: (samples: Float32Array) => {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
+
+            // If greeting chime is still playing, buffer initial greeting audio
+            if (isInitialGreetingHeldRef.current) {
+              initialGreetingBufferRef.current.push({ type: 'samples', data: samples });
+              return;
+            }
+
             isModelSpeakingRef.current = true;
             userChunksSentRef.current = 0;
 
@@ -604,6 +622,13 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onAudioChunk: (base64) => {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
+
+            // If greeting chime is still playing, buffer initial greeting audio
+            if (isInitialGreetingHeldRef.current) {
+              initialGreetingBufferRef.current.push({ type: 'chunk', data: base64 });
+              return;
+            }
+
             isModelSpeakingRef.current = true;
             userChunksSentRef.current = 0;
 
@@ -1372,6 +1397,30 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     }, 12000);
   }, []);
 
+  // Release buffered greeting audio once connected chime finishes
+  const releaseGreeting = useCallback(() => {
+    if (!isInitialGreetingHeldRef.current) return;
+    console.log('[useLiveCall] 🚀 Releasing initial greeting audio now that chime finished');
+    isInitialGreetingHeldRef.current = false;
+
+    const buffered = [...initialGreetingBufferRef.current];
+    initialGreetingBufferRef.current = [];
+
+    if (buffered.length > 0) {
+      isModelSpeakingRef.current = true;
+      setStatus('speaking');
+      buffered.forEach((item) => {
+        if (item.type === 'samples') {
+          playerRef.current.playFloat32Chunk?.(item.data);
+        } else {
+          playerRef.current.playPcmChunk(item.data);
+        }
+      });
+    } else if (statusRef.current === 'connecting') {
+      setStatus('listening');
+    }
+  }, []);
+
   return {
     status,
     sessionId: sessionIdRef.current,
@@ -1409,6 +1458,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     testScores,
     evaluationResult,
     turns: turnsRef.current,
+    isConnected,
+    releaseGreeting,
   };
 }
 

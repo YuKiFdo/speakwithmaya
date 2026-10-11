@@ -1,12 +1,26 @@
+import * as Haptics from 'expo-haptics';
+
 /**
  * Universal Haptics and Micro-Sound Synthesizer
  * Provides subtle tactile and synthesized audio feedback across Web and Mobile.
  */
 
-export function triggerHaptic(style: 'light' | 'medium' = 'light') {
+export function triggerHaptic(style: 'light' | 'medium' | 'selection' | 'word' = 'light') {
+  try {
+    if (style === 'word' || style === 'selection') {
+      Haptics.selectionAsync().catch(() => {});
+    } else if (style === 'medium') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+  } catch {}
+
+  // Web fallback for mobile browsers
   if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && navigator.vibrate) {
     try {
-      navigator.vibrate(style === 'medium' ? 22 : 12);
+      const ms = style === 'word' ? 6 : style === 'selection' ? 8 : style === 'medium' ? 22 : 12;
+      navigator.vibrate(ms);
     } catch {}
   }
 }

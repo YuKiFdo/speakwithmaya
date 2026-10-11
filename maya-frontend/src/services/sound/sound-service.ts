@@ -118,7 +118,20 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
  * Universal sound player using HTMLAudioElement with instant overlapping cloning
  * and automatic fallback to Web Audio synthesis.
  */
-export function playSoundAsset(asset: any, volume: number = 0.75, fallbackFn?: () => void): void {
+export function playSoundAsset(
+  asset: any,
+  volume: number = 0.75,
+  fallbackFn?: () => void,
+  onEnded?: () => void,
+): void {
+  let hasTriggeredEnded = false;
+  const notifyEnded = () => {
+    if (!hasTriggeredEnded) {
+      hasTriggeredEnded = true;
+      if (onEnded) onEnded();
+    }
+  };
+
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {
       const uri = getAssetUri(asset);
@@ -126,15 +139,23 @@ export function playSoundAsset(asset: any, volume: number = 0.75, fallbackFn?: (
         const audio = getPreloadedAudio(uri);
         const player = (audio.cloneNode(true) as HTMLAudioElement) || audio;
         player.volume = Math.max(0, Math.min(1, volume));
+
+        player.onended = notifyEnded;
+        // Fallback timeout in case browser onended does not fire
+        setTimeout(notifyEnded, 2200);
+
         player.play().catch(() => {
           try {
             audio.currentTime = 0;
             audio.volume = Math.max(0, Math.min(1, volume));
+            audio.onended = notifyEnded;
             audio.play().catch(() => {
               if (fallbackFn) fallbackFn();
+              notifyEnded();
             });
           } catch {
             if (fallbackFn) fallbackFn();
+            notifyEnded();
           }
         });
         return;
@@ -147,17 +168,27 @@ export function playSoundAsset(asset: any, volume: number = 0.75, fallbackFn?: (
   if (fallbackFn) {
     fallbackFn();
   }
+  if (onEnded) {
+    setTimeout(notifyEnded, 1500);
+  }
 }
 
 /**
  * Call Connected Sound (call-connected.mp3)
  * Plays when connection establishes with Maya.
+ * Supports onEnded callback so screen transition and greeting audio
+ * begin cleanly right after the chime completes.
  */
-export function playCallConnectedSound(): void {
+export function playCallConnectedSound(onEnded?: () => void): void {
   console.log('[sound-service] 📞 playCallConnectedSound() called');
-  playSoundAsset(CALL_CONNECTED_ASSET, 0.85, () => {
-    playAnalysisCompleteSound();
-  });
+  playSoundAsset(
+    CALL_CONNECTED_ASSET,
+    0.85,
+    () => {
+      playAnalysisCompleteSound();
+    },
+    onEnded,
+  );
 }
 
 /**

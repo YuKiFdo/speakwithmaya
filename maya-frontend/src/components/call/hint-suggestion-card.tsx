@@ -8,6 +8,7 @@ import {
   Pressable,
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
+import { triggerHaptic } from '@/utils/haptics-audio';
 
 interface HintSuggestionCardProps {
   hintEnglish: string;
