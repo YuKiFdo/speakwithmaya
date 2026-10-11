@@ -128,6 +128,7 @@ function getPreloadedAudio(uri: string): HTMLAudioElement {
 if (Platform.OS === 'web' && typeof window !== 'undefined') {
   setTimeout(() => {
     try {
+      preloadAllOnboardingVoicesInOrder();
       [
         CALL_CONNECTED_ASSET,
         GOOD_JOB_ASSET,
@@ -139,7 +140,7 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
         if (uri) getPreloadedAudio(uri);
       });
     } catch {}
-  }, 1000);
+  }, 200);
 }
 
 type MicSuppressor = (durationMs: number) => void;
@@ -801,6 +802,59 @@ export function stopMayaPhonePromptVoice(): void {
     } catch {}
     phonePromptAudioPlayer = null;
   }
+}
+
+/**
+ * Sequentially preloads all onboarding voice assets in the exact chronological order
+ * of the user journey (Welcome -> Name -> Phone -> Goal -> Challenge), ensuring
+ * each upcoming screen's audio is fully loaded into memory before the user arrives.
+ */
+let hasInitiatedSequentialPreload = false;
+export function preloadAllOnboardingVoicesInOrder(): void {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  if (hasInitiatedSequentialPreload) return;
+  hasInitiatedSequentialPreload = true;
+
+  const orderedAssets = [
+    // Screen 1: Welcome Screen
+    MAYA_WELCOME_ASSET,
+    // Screen 2: Name Prompt Screen
+    MAYA_NAME_PROMPT_ASSET,
+    // Screen 3: Phone Prompt Screen
+    MAYA_PHONE_PROMPT_ASSET,
+    // Screen 4: Goal Question Prompt
+    MAYA_GOAL_PROMPT_ASSET,
+    // Screen 4: Goal Selection Feedback Voices
+    GOAL_AUDIO_ASSETS['better-job'],
+    GOAL_AUDIO_ASSETS['speak-confidently'],
+    GOAL_AUDIO_ASSETS['work-abroad'],
+    GOAL_AUDIO_ASSETS['travel'],
+    GOAL_AUDIO_ASSETS['exams'],
+    // Screen 5: Challenge Question Prompt
+    MAYA_CHALLENGE_PROMPT_ASSET,
+    // Screen 5: Challenge Selection Feedback Voices
+    CHALLENGE_AUDIO_ASSETS['speaking-confidently'],
+    CHALLENGE_AUDIO_ASSETS['getting-stuck'],
+    CHALLENGE_AUDIO_ASSETS['listening'],
+    CHALLENGE_AUDIO_ASSETS['grammar'],
+    CHALLENGE_AUDIO_ASSETS['vocabulary'],
+  ];
+
+  let delay = 100;
+  orderedAssets.forEach((asset) => {
+    setTimeout(() => {
+      try {
+        const uri = getAssetUri(asset);
+        if (uri) {
+          const audio = getPreloadedAudio(uri);
+          audio.load();
+        }
+      } catch (e) {
+        console.warn('[sound-service] sequential preload error for asset:', e);
+      }
+    }, delay);
+    delay += 180; // Smooth sequential stream without freezing browser thread
+  });
 }
 
 /**

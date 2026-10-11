@@ -19,6 +19,7 @@ import Svg, { Defs, LinearGradient, Stop, Rect, Path } from 'react-native-svg';
 import {
   playMayaWelcomeVoice,
   stopMayaWelcomeVoice,
+  preloadAllOnboardingVoicesInOrder,
 } from '@/services/sound/sound-service';
 import { MayaPrimaryButton } from '@/components/ui';
 
@@ -63,8 +64,11 @@ export default function WelcomeScreen() {
     return () => floatLoop.stop();
   }, []);
 
-  // Screen entrance choreography
+  // Screen entrance choreography + sequential audio preloading
   useEffect(() => {
+    // Sequentially pre-download all onboarding voice clips in order
+    preloadAllOnboardingVoicesInOrder();
+
     // 1. Hero Avatar fades in
     Animated.timing(heroFadeAnim, {
       toValue: 1,
