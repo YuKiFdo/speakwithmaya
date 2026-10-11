@@ -2402,7 +2402,7 @@ Provide one short, natural, practical model answer the student can say in respon
   }
 
   private async initPiper(): Promise<boolean> {
-    if (this.piperSession && this.piperG2p && this.piperConfig) {
+    if (this.piperSession && this.piperConfig) {
       return true;
     }
     if (this.piperInitPromise) {
@@ -2412,11 +2412,11 @@ Provide one short, natural, practical model answer the student can say in respon
     this.piperInitPromise = (async () => {
       try {
         const ortModule = await this.getOrtModule();
-        // @ts-ignore
-        const { G2P } = await import('@piper-plus/g2p');
         const path = await import('path');
         const fs = await import('fs');
 
+        // Prefer hfc_female, fall back to Amy if hfc_female not found
+        const modelNames = ['en_US-hfc_female-medium', 'en_US-amy-medium'];
         const candidateDirs = [
           path.resolve(process.cwd(), 'assets/piper'),
           path.resolve(process.cwd(), '../assets/piper'),
@@ -2425,26 +2425,50 @@ Provide one short, natural, practical model answer the student can say in respon
         ];
 
         let foundDir: string | null = null;
+        let foundModel: string | null = null;
         for (const dir of candidateDirs) {
-          if (fs.existsSync(path.join(dir, 'en_US-amy-medium.onnx')) && fs.existsSync(path.join(dir, 'en_US-amy-medium.onnx.json'))) {
-            foundDir = dir;
-            break;
+          for (const modelName of modelNames) {
+            if (fs.existsSync(path.join(dir, `${modelName}.onnx`)) && fs.existsSync(path.join(dir, `${modelName}.onnx.json`))) {
+              foundDir = dir;
+              foundModel = modelName;
+              break;
+            }
           }
+          if (foundDir) break;
         }
 
-        if (!foundDir) {
+        if (!foundDir || !foundModel) {
           this.logger.warn(`[PiperTTS] Model files not found in any candidate directory: ${candidateDirs.join(', ')}`);
           return false;
         }
 
-        const modelPath = path.join(foundDir, 'en_US-amy-medium.onnx');
-        const configPath = path.join(foundDir, 'en_US-amy-medium.onnx.json');
+        const modelPath = path.join(foundDir, `${foundModel}.onnx`);
+        const configPath = path.join(foundDir, `${foundModel}.onnx.json`);
 
         this.piperConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         this.piperSession = await ortModule.InferenceSession.create(modelPath);
-        this.piperG2p = await G2P.create({ languages: ['en'] });
 
-        this.logger.log(`[PiperTTS] Offline Piper Amy neural voice initialized from ${modelPath}`);
+        // Verify espeak-ng is available
+        try {
+          const { execSync } = await import('child_process');
+          execSync('espeak-ng --version', { stdio: 'pipe' });
+          this.piperG2p = 'espeak-ng'; // marker that espeak-ng is available
+          this.logger.log(`[PiperTTS] espeak-ng phonemizer verified`);
+        } catch {
+          this.logger.warn(`[PiperTTS] espeak-ng not installed, falling back to basic G2P`);
+          // Fall back to @piper-plus/g2p if espeak-ng not available (dev environment)
+          try {
+            // @ts-ignore
+            const { G2P } = await import('@piper-plus/g2p');
+            this.piperG2p = await G2P.create({ languages: ['en'] });
+            this.logger.log(`[PiperTTS] Using fallback @piper-plus/g2p (limited dictionary)`);
+          } catch {
+            this.piperG2p = null;
+            this.logger.warn(`[PiperTTS] No phonemizer available`);
+          }
+        }
+
+        this.logger.log(`[PiperTTS] Offline Piper ${foundModel} neural voice initialized from ${modelPath}`);
         return true;
       } catch (err: any) {
         this.logger.warn(`[PiperTTS] Failed initializing Piper: ${err?.message}`);
@@ -2457,12 +2481,81 @@ Provide one short, natural, practical model answer the student can say in respon
     return this.piperInitPromise;
   }
 
+  /**
+   * Convert text to IPA phonemes using espeak-ng.
+   * espeak-ng outputs IPA that exactly matches what Piper models were trained on.
+   */
+  private espeakTextToIpa(text: string, voice: string = 'en-us'): string {
+    const { execSync } = require('child_process');
+    // --ipa: output IPA, -q: quiet (no audio), -v: voice
+    // espeak-ng outputs IPA with stress marks, word boundaries, etc.
+    const cleanText = text.replace(/"/g, '\\"').replace(/\n/g, ' ').substring(0, 2000);
+    try {
+      const result = execSync(`espeak-ng --ipa -q -v ${voice} "${cleanText}"`, {
+        encoding: 'utf8',
+        timeout: 5000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return (result || '').trim();
+    } catch (err: any) {
+      this.logger.warn(`[PiperTTS] espeak-ng phonemization failed: ${err?.message}`);
+      return '';
+    }
+  }
+
+  /**
+   * Convert IPA string from espeak-ng into phoneme IDs using the model's phoneme_id_map.
+   * Piper's convention: each utterance is wrapped with ^ (BOS) and $ (EOS),
+   * and each phoneme token is padded with _ (pad) on both sides.
+   */
+  private ipaToPhonemeIds(ipa: string, phonemeIdMap: Record<string, number[]>): number[] {
+    const padId = phonemeIdMap['_']?.[0] ?? 0;
+    const bosId = phonemeIdMap['^']?.[0] ?? 1;
+    const eosId = phonemeIdMap['$']?.[0] ?? 2;
+
+    const ids: number[] = [padId, bosId, padId];
+
+    // Process each IPA character/symbol
+    for (let i = 0; i < ipa.length; i++) {
+      const char = ipa[i];
+
+      // Skip line-break markers from espeak-ng
+      if (char === '\n' || char === '\r') continue;
+
+      // Try 2-char sequence first (for combining diacritics, etc.)
+      if (i + 1 < ipa.length) {
+        const twoChar = ipa.substring(i, i + 2);
+        if (phonemeIdMap[twoChar]) {
+          for (const id of phonemeIdMap[twoChar]) {
+            ids.push(id);
+            ids.push(padId);
+          }
+          i++; // skip next char
+          continue;
+        }
+      }
+
+      // Single character lookup
+      if (phonemeIdMap[char]) {
+        for (const id of phonemeIdMap[char]) {
+          ids.push(id);
+          ids.push(padId);
+        }
+      }
+      // Characters not in the map are silently skipped
+    }
+
+    ids.push(eosId);
+    ids.push(padId);
+    return ids;
+  }
+
   async generateTtsAudio(dto: SessionTtsDto): Promise<{ audioBase64: string; mimeType: string }> {
     const text = (dto.text || '').trim();
     if (!text) {
       return { audioBase64: '', mimeType: 'audio/wav' };
     }
-    const voice = dto.voice || 'Amy';
+    const voice = dto.voice || 'Maya';
     const cacheKey = `${voice}:${text}`;
     if (this.ttsAudioCache.has(cacheKey)) {
       return this.ttsAudioCache.get(cacheKey)!;
@@ -2470,10 +2563,27 @@ Provide one short, natural, practical model answer the student can say in respon
 
     try {
       const ready = await this.initPiper();
-      if (ready && this.piperSession && this.piperG2p && this.piperConfig) {
+      if (ready && this.piperSession && this.piperConfig) {
         const ortModule = await this.getOrtModule();
-        const encoded = this.piperG2p.encode(text, this.piperConfig.phoneme_id_map, { language: 'en' });
-        const phonemeIds = encoded.phonemeIds;
+        let phonemeIds: number[];
+
+        if (this.piperG2p === 'espeak-ng') {
+          // Use espeak-ng for proper phonemization (production path)
+          const espeakVoice = this.piperConfig.espeak?.voice || 'en-us';
+          const ipa = this.espeakTextToIpa(text, espeakVoice);
+          if (!ipa) {
+            this.logger.warn(`[PiperTTS] espeak-ng returned empty IPA for "${text}"`);
+            return { audioBase64: '', mimeType: 'audio/wav' };
+          }
+          phonemeIds = this.ipaToPhonemeIds(ipa, this.piperConfig.phoneme_id_map);
+        } else if (this.piperG2p && typeof this.piperG2p === 'object') {
+          // Fallback: @piper-plus/g2p (dev environment without espeak-ng)
+          const encoded = this.piperG2p.encode(text, this.piperConfig.phoneme_id_map, { language: 'en' });
+          phonemeIds = encoded.phonemeIds;
+        } else {
+          this.logger.warn(`[PiperTTS] No phonemizer available`);
+          return { audioBase64: '', mimeType: 'audio/wav' };
+        }
 
         const feeds = {
           input: new ortModule.Tensor('int64', new BigInt64Array(phonemeIds.map((id: number) => BigInt(id))), [1, phonemeIds.length]),
@@ -2498,6 +2608,7 @@ Provide one short, natural, practical model answer the student can say in respon
 
     return { audioBase64: '', mimeType: 'audio/wav' };
   }
+
 
   async analyzeSession(dto: AnalyzeSessionDto): Promise<{
     sessionId?: string;

@@ -26,6 +26,10 @@ RUN npm prune --omit=dev --legacy-peer-deps
 # -------------------------------------------------------------
 FROM node:22-bookworm-slim AS runner
 
+# Install espeak-ng for proper Piper TTS phonemization (must run as root)
+RUN apt-get update && apt-get install -y --no-install-recommends espeak-ng \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 ENV NODE_ENV=production
