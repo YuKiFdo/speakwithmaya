@@ -15,11 +15,20 @@ const MAYA_WELCOME_ASSET = require('@/assets/sounds/maya-welcome.wav');
 const MAYA_NAME_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-name.wav');
 const MAYA_PHONE_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-phone.wav');
 
+const GOAL_AUDIO_ASSETS: Record<string, any> = {
+  'better-job': require('@/assets/sounds/maya-goal-job.wav'),
+  'work-abroad': require('@/assets/sounds/maya-goal-abroad.wav'),
+  'speak-confidently': require('@/assets/sounds/maya-goal-confident.wav'),
+  'travel': require('@/assets/sounds/maya-goal-travel.wav'),
+  'exams': require('@/assets/sounds/maya-goal-exams.wav'),
+};
+
 let audioCtx: AudioContext | null = null;
 let activeWhooshNodes: { noise: AudioBufferSourceNode; gain: GainNode } | null = null;
 let welcomeAudioPlayer: HTMLAudioElement | null = null;
 let namePromptAudioPlayer: HTMLAudioElement | null = null;
 let phonePromptAudioPlayer: HTMLAudioElement | null = null;
+let goalAudioPlayer: HTMLAudioElement | null = null;
 
 function getAudioContext(): AudioContext | null {
   if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -780,6 +789,83 @@ export function stopMayaPhonePromptVoice(): void {
     phonePromptAudioPlayer = null;
   }
 }
+
+/**
+ * 9. Maya's Personalized Goal Selection Feedback Voices
+ * Plays tailored encouragement when user selects their goal.
+ */
+export function playMayaGoalFeedbackVoice(
+  goalId: string,
+  callbacks?: {
+    onStart?: () => void;
+    onEnd?: () => void;
+    onError?: (err: any) => void;
+  },
+): void {
+  stopMayaGoalFeedbackVoice();
+
+  const asset = GOAL_AUDIO_ASSETS[goalId];
+  if (!asset) {
+    callbacks?.onEnd?.();
+    return;
+  }
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(asset);
+      if (uri) {
+        const audio = new Audio(uri);
+        goalAudioPlayer = audio;
+        audio.volume = 1.0;
+
+        audio.onplay = () => {
+          callbacks?.onStart?.();
+        };
+
+        audio.onended = () => {
+          if (goalAudioPlayer === audio) {
+            goalAudioPlayer = null;
+          }
+          callbacks?.onEnd?.();
+        };
+
+        audio.onerror = (e) => {
+          if (goalAudioPlayer === audio) {
+            goalAudioPlayer = null;
+          }
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (goalAudioPlayer === audio) {
+              goalAudioPlayer = null;
+            }
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaGoalFeedbackVoice(): void {
+  if (goalAudioPlayer) {
+    try {
+      goalAudioPlayer.pause();
+      goalAudioPlayer.currentTime = 0;
+    } catch {}
+    goalAudioPlayer = null;
+  }
+}
+
 
 
 

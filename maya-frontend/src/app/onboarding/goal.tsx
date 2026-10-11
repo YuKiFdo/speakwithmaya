@@ -1,19 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
   ScrollView,
+  Animated,
+  Platform,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
-import { StepTransition } from '@/components/onboarding/step-transition';
-import { OptionCard } from '@/components/onboarding/option-card';
-import { Colors, Radii } from '@/theme/tokens';
+import { fontStyle } from '@/theme/fonts';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  playMayaGoalFeedbackVoice,
+  stopMayaGoalFeedbackVoice,
+  playUnderstoodTapSound,
+} from '@/services/sound/sound-service';
 
-const GOAL_OPTIONS = [
+interface GoalOption {
+  id: string;
+  icon: string;
+  title: string;
+  subtitle: string;
+}
+
+const GOAL_OPTIONS: GoalOption[] = [
   {
     id: 'better-job',
     icon: '💼',
@@ -48,14 +62,114 @@ const GOAL_OPTIONS = [
 
 export default function GoalScreen() {
   const params = useLocalSearchParams<{ phone?: string; name?: string }>();
-  const [selectedGoal, setSelectedGoal] = useState<string>('work-abroad');
+  const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
 
-  const handleContinue = () => {
-    if (!selectedGoal) return;
-    router.replace({
-      pathname: '/onboarding/challenge',
-      params: { ...params, goal: selectedGoal },
+  // Staggered Entrance Animations
+  const headerOpacityAnim = useRef(new Animated.Value(0)).current;
+  const headerSlideAnim = useRef(new Animated.Value(14)).current;
+
+  const cardAnims = useRef(
+    GOAL_OPTIONS.map(() => ({
+      opacity: new Animated.Value(0),
+      slide: new Animated.Value(18),
+      scale: new Animated.Value(1),
+    })),
+  ).current;
+
+  // Staggered cascade entrance on mount
+  useEffect(() => {
+    // 1. Header fades & slides in
+    Animated.parallel([
+      Animated.timing(headerOpacityAnim, {
+        toValue: 1,
+        duration: 380,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.spring(headerSlideAnim, {
+        toValue: 0,
+        friction: 7,
+        tension: 45,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+
+    // 2. Cascade cards in sequence
+    GOAL_OPTIONS.forEach((_, idx) => {
+      const delay = 100 + idx * 70;
+      setTimeout(() => {
+        Animated.parallel([
+          Animated.timing(cardAnims[idx].opacity, {
+            toValue: 1,
+            duration: 380,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+          Animated.spring(cardAnims[idx].slide, {
+            toValue: 0,
+            friction: 7,
+            tension: 45,
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+        ]).start();
+      }, delay);
     });
+
+    return () => {
+      stopMayaGoalFeedbackVoice();
+    };
+  }, []);
+
+  const handleSelectGoal = (goal: GoalOption, index: number) => {
+    if (isTransitioning) return;
+
+    setSelectedGoal(goal.id);
+    setIsTransitioning(true);
+
+    // Tactile pop animation on tapped card
+    Animated.sequence([
+      Animated.timing(cardAnims[index].scale, {
+        toValue: 0.97,
+        duration: 100,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.spring(cardAnims[index].scale, {
+        toValue: 1,
+        friction: 4,
+        tension: 50,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+
+    // Play tactile select chime
+    playUnderstoodTapSound();
+
+    let hasNavigated = false;
+    const navigateNext = () => {
+      if (!hasNavigated) {
+        hasNavigated = true;
+        stopMayaGoalFeedbackVoice();
+        router.replace({
+          pathname: '/onboarding/challenge',
+          params: { ...params, goal: goal.id },
+        });
+      }
+    };
+
+    // Maya speaks personalized encouraging sentence, then transitions to next screen
+    playMayaGoalFeedbackVoice(goal.id, {
+      onEnd: () => {
+        // Short pause after she finishes speaking for natural flow
+        setTimeout(navigateNext, 300);
+      },
+      onError: () => {
+        setTimeout(navigateNext, 1200);
+      },
+    });
+
+    // Safety fallback: if audio fails or takes too long, navigate after 3.2s
+    setTimeout(navigateNext, 3200);
   };
 
   return (
@@ -66,52 +180,84 @@ export default function GoalScreen() {
           <ProgressBar progress={0.5} />
         </View>
 
-        {/* Scrollable Content */}
-        <StepTransition style={{ flex: 1, width: '100%' }}>
-          <ScrollView
-            style={styles.scrollArea}
+        <ScrollView
+          style={styles.scrollArea}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          bounces={false}
         >
           {/* Header */}
-          <View style={styles.header}>
+          <Animated.View
+            style={[
+              styles.header,
+              {
+                opacity: headerOpacityAnim,
+                transform: [{ translateY: headerSlideAnim }],
+              },
+            ]}
+          >
             <Text style={styles.title}>What's your biggest goal?</Text>
             <Text style={styles.subtitle}>We'll personalise Maya just for you.</Text>
-          </View>
+          </Animated.View>
 
-          {/* Goal Options List */}
+          {/* Goal Options List with Staggered Entrance */}
           <View style={styles.optionsList}>
-            {GOAL_OPTIONS.map((item) => (
-              <OptionCard
-                key={item.id}
-                id={item.id}
-                icon={item.icon}
-                title={item.title}
-                subtitle={item.subtitle}
-                selected={selectedGoal === item.id}
-                onPress={() => setSelectedGoal(item.id)}
-              />
-            ))}
+            {GOAL_OPTIONS.map((item, index) => {
+              const isSelected = selectedGoal === item.id;
+              const anim = cardAnims[index];
+
+              return (
+                <Animated.View
+                  key={item.id}
+                  style={{
+                    opacity: anim.opacity,
+                    transform: [
+                      { translateY: anim.slide },
+                      { scale: anim.scale },
+                    ],
+                  }}
+                >
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.card,
+                      isSelected && styles.cardSelected,
+                      pressed && !isSelected && styles.cardPressed,
+                    ]}
+                    onPress={() => handleSelectGoal(item, index)}
+                    accessibilityRole="button"
+                    accessibilityLabel={item.title}
+                  >
+                    <View style={styles.cardLeftCol}>
+                      <View style={styles.iconWrapper}>
+                        <Text style={styles.iconText}>{item.icon}</Text>
+                      </View>
+                      <View style={styles.textCol}>
+                        <Text
+                          style={[
+                            styles.cardTitle,
+                            isSelected && styles.cardTitleSelected,
+                          ]}
+                        >
+                          {item.title}
+                        </Text>
+                        <Text style={styles.cardSubtitle}>
+                          {item.subtitle}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Blue Checkmark Indicator when selected */}
+                    {isSelected && (
+                      <View style={styles.checkmarkWrapper}>
+                        <Ionicons name="checkmark-circle" size={24} color="#2563EB" />
+                      </View>
+                    )}
+                  </Pressable>
+                </Animated.View>
+              );
+            })}
           </View>
         </ScrollView>
-
-        {/* Bottom CTA Button */}
-        <View style={styles.footer}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.ctaButton,
-              !selectedGoal && styles.ctaButtonDisabled,
-              pressed && selectedGoal && styles.ctaButtonPressed,
-            ]}
-            onPress={handleContinue}
-            disabled={!selectedGoal}
-            accessibilityRole="button"
-            accessibilityLabel="Continue to challenges"
-          >
-            <Text style={styles.ctaButtonText}>Continue</Text>
-          </Pressable>
-        </View>
-        </StepTransition>
       </View>
     </SafeAreaView>
   );
@@ -120,76 +266,131 @@ export default function GoalScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
   },
   container: {
     flex: 1,
     width: '100%',
     maxWidth: 440,
     paddingHorizontal: 24,
-    paddingVertical: 16,
-    justifyContent: 'space-between',
+    paddingTop: Platform.OS === 'web' ? 20 : 12,
+    paddingBottom: 24,
     alignSelf: 'center',
   },
   progressContainer: {
+    width: '100%',
     paddingTop: 8,
-    paddingBottom: 16,
+    paddingBottom: 28,
   },
   scrollArea: {
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 24,
+    paddingBottom: 32,
   },
   header: {
     marginBottom: 24,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#0f172a',
+    ...fontStyle('outfit', 'extraBold'),
+    fontSize: 30,
+    lineHeight: 38,
+    color: '#0F172A',
     letterSpacing: -0.6,
   },
   subtitle: {
-    fontSize: 15,
-    color: '#64748b',
-    marginTop: 8,
+    ...fontStyle('inter', 'regular'),
+    fontSize: 15.5,
     lineHeight: 22,
+    color: '#64748B',
+    marginTop: 8,
   },
   optionsList: {
     gap: 12,
   },
-  footer: {
-    width: '100%',
-    paddingTop: 12,
-    paddingBottom: 8,
+
+  /* Option Card */
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 22,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 18px rgba(15, 23, 42, 0.04)',
+        cursor: 'pointer',
+        transition: 'all 0.15s ease',
+      } as any,
+      default: {
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.04,
+        shadowRadius: 12,
+        elevation: 2,
+      },
+    }),
   },
-  ctaButton: {
-    backgroundColor: '#0085db',
-    width: '100%',
-    height: 56,
-    borderRadius: Radii.pill,
+  cardPressed: {
+    transform: [{ scale: 0.985 }],
+    backgroundColor: '#F8FAFC',
+  },
+  cardSelected: {
+    borderColor: '#2563EB',
+    backgroundColor: '#EFF6FF',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 6px 20px rgba(37, 99, 235, 0.16)',
+      } as any,
+      default: {
+        shadowColor: '#2563EB',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.16,
+        shadowRadius: 14,
+        elevation: 3,
+      },
+    }),
+  },
+  cardLeftCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    flex: 1,
+  },
+  iconWrapper: {
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0085db',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.32,
-    shadowRadius: 12,
-    elevation: 6,
   },
-  ctaButtonDisabled: {
-    backgroundColor: '#93c5fd',
-    shadowOpacity: 0,
-    elevation: 0,
+  iconText: {
+    fontSize: 28,
   },
-  ctaButtonPressed: {
-    backgroundColor: '#0072bc',
-    transform: [{ scale: 0.99 }],
+  textCol: {
+    flex: 1,
+    gap: 2,
   },
-  ctaButtonText: {
-    color: '#ffffff',
-    fontSize: 17,
-    fontWeight: '700',
+  cardTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 17.5,
+    lineHeight: 23,
+    color: '#0F172A',
+    letterSpacing: -0.2,
+  },
+  cardTitleSelected: {
+    color: '#1D4ED8',
+  },
+  cardSubtitle: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13.5,
+    lineHeight: 18,
+    color: '#64748B',
+  },
+  checkmarkWrapper: {
+    marginLeft: 12,
   },
 });
