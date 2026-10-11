@@ -204,7 +204,7 @@ export class SessionsService {
   private readonly recentDiagnostics = new Map<string, SessionDiagnosticsRecord>();
   private readonly translationCache = new Map<string, string>();
   private readonly hintCache = new Map<string, { hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number }>();
-  private readonly sessionHintUsage = new Map<string, { count: number; totalTokens: number; costUsd: number; costLkr: number }>();
+  private readonly sessionHintUsage = new Map<string, { count: number; totalTokens: number; costUsd: number; costLkr: number; generatedKeys?: Set<string> }>();
 
   private readonly sessionRecordingsMap = new Map<string, { userAudioUrl?: string; modelAudioUrl?: string }>();
   private readonly sessionTurnAudioMap = new Map<string, Map<number, string>>();
@@ -2302,13 +2302,19 @@ STRICT SCRIPT RULES:
     if (this.hintCache.has(cacheKey)) {
       const cached = this.hintCache.get(cacheKey)!;
       if (dto.sessionId && !dto.isPrefetch) {
-        const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
-        this.sessionHintUsage.set(dto.sessionId, {
-          count: existing.count + 1,
-          totalTokens: existing.totalTokens + ((cached as any).tokens?.totalTokens || 120),
-          costUsd: Number((existing.costUsd + (cached.costUsd || 0.00004)).toFixed(6)),
-          costLkr: Number((existing.costLkr + (cached.costLkr || 0.012)).toFixed(4)),
-        });
+        const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0, generatedKeys: new Set<string>() };
+        const keys = existing.generatedKeys || new Set<string>();
+        // Only count/charge if this question key was NOT already generated or counted for this session!
+        if (!keys.has(cacheKey)) {
+          keys.add(cacheKey);
+          this.sessionHintUsage.set(dto.sessionId, {
+            count: existing.count + 1,
+            totalTokens: existing.totalTokens + ((cached as any).tokens?.totalTokens || 120),
+            costUsd: Number((existing.costUsd + (cached.costUsd || 0.00004)).toFixed(6)),
+            costLkr: Number((existing.costLkr + (cached.costLkr || 0.012)).toFixed(4)),
+            generatedKeys: keys,
+          });
+        }
       }
       return cached;
     }
@@ -2414,14 +2420,19 @@ CRITICAL SCRIPT RULES for hintSinhala:
                 this.hintCache.set(cacheKey, result);
 
                 if (dto.sessionId && !dto.isPrefetch) {
-                  const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
-                  this.sessionHintUsage.set(dto.sessionId, {
-                    count: existing.count + 1,
-                    totalTokens: existing.totalTokens + totalTokens,
-                    costUsd: Number((existing.costUsd + costUsd).toFixed(6)),
-                    costLkr: Number((existing.costLkr + costLkr).toFixed(4)),
-                  });
-                  this.logger.log(`[SessionsService] 💡 User pressed hint for session ${dto.sessionId}: tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`);
+                  const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0, generatedKeys: new Set<string>() };
+                  const keys = existing.generatedKeys || new Set<string>();
+                  if (!keys.has(cacheKey)) {
+                    keys.add(cacheKey);
+                    this.sessionHintUsage.set(dto.sessionId, {
+                      count: existing.count + 1,
+                      totalTokens: existing.totalTokens + totalTokens,
+                      costUsd: Number((existing.costUsd + costUsd).toFixed(6)),
+                      costLkr: Number((existing.costLkr + costLkr).toFixed(4)),
+                      generatedKeys: keys,
+                    });
+                    this.logger.log(`[SessionsService] 💡 User pressed hint for session ${dto.sessionId} (${cacheKey}): tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`);
+                  }
                 }
 
                 return result;

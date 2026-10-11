@@ -216,8 +216,37 @@ export default function CallScreen() {
     setIsTranslating(false);
   };
 
-  // Conversational Hint: Only fetched when the student explicitly presses the Hint button
+  // Timer: user gets the FULL targetDuration for uninterrupted conversation.
+  // Farewell only fires AFTER time is up. Display freezes at the target so extra farewell time is invisible.
+  const hasTriggeredFarewellRef = useRef(false);
+  const farewellGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTimeUp = liveCall.secondsElapsed >= targetDuration && liveCall.secondsElapsed > 0;
+
+  // Freeze displayed time at targetDuration — farewell grace period is invisible to the user
+  const displayedElapsed = Math.min(liveCall.secondsElapsed, targetDuration);
+  const remainingSeconds = Math.max(0, targetDuration - displayedElapsed);
+  const isFarewellPhase = isTimeUp && hasTriggeredFarewellRef.current;
+  const [isConcludingCall, setIsConcludingCall] = useState(false);
+
+  // Concluding or wrapping up state — hints must never be generated or shown here
+  const isWrappingUp = isConcludingCall || isFarewellPhase || isTimeUp || liveCall.status === 'ended';
+
+  // Automatically dismiss and reset hint card if call enters concluding/wrapping up
+  useEffect(() => {
+    if (isWrappingUp) {
+      setIsHintVisible(false);
+      setHintData(null);
+    }
+  }, [isWrappingUp]);
+
+  // Conversational Hint: Only fetched when the student explicitly presses the Hint button (blocked when wrapping up)
   const handleToggleHint = async () => {
+    // 1. Never generate or display hints when call is concluding / wrapping up
+    if (isWrappingUp) {
+      setIsHintVisible(false);
+      return;
+    }
+
     // Suppress mic capture & VAD for 1.4s so Hint button chime never leaks into Gemini Live
     liveCall.suppressMicFor?.(1400);
 
@@ -236,7 +265,7 @@ export default function CallScreen() {
 
     // User explicitly pressed Hint button: fetch hint on demand
     const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
-    if (!question) return;
+    if (!question || question.length < 3) return;
 
     isFetchingHintRef.current = true;
     try {
@@ -248,7 +277,7 @@ export default function CallScreen() {
         sessionId: liveCall.sessionId,
       });
 
-      if (res && res.hintEnglish) {
+      if (res && res.hintEnglish && !isWrappingUp) {
         setHintData(res);
         setIsHintVisible(true);
         if (!hintsHistoryRef.current.includes(res.hintEnglish)) {
@@ -259,17 +288,6 @@ export default function CallScreen() {
       isFetchingHintRef.current = false;
     }
   };
-
-  // Timer: user gets the FULL targetDuration for uninterrupted conversation.
-  // Farewell only fires AFTER time is up. Display freezes at the target so extra farewell time is invisible.
-  const hasTriggeredFarewellRef = useRef(false);
-  const farewellGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isTimeUp = liveCall.secondsElapsed >= targetDuration && liveCall.secondsElapsed > 0;
-
-  // Freeze displayed time at targetDuration — farewell grace period is invisible to the user
-  const displayedElapsed = Math.min(liveCall.secondsElapsed, targetDuration);
-  const remainingSeconds = Math.max(0, targetDuration - displayedElapsed);
-  const isFarewellPhase = isTimeUp && hasTriggeredFarewellRef.current;
 
   // When time is up, send the farewell cue to Maya (she speaks goodbye AFTER the full session)
   useEffect(() => {
@@ -296,8 +314,6 @@ export default function CallScreen() {
       if (farewellGraceTimerRef.current) clearTimeout(farewellGraceTimerRef.current);
     };
   }, []);
-
-  const [isConcludingCall, setIsConcludingCall] = useState(false);
 
   const isCallActive = liveCall.status === 'speaking' || liveCall.status === 'listening';
   const isCallReconnecting = liveCall.status === 'reconnecting' || connection.isReconnecting;
@@ -773,8 +789,8 @@ export default function CallScreen() {
             )}
           </View>
 
-          {/* Floating Hint Button in Bottom Right Corner (Image 1 Design - hidden when hint is showing) */}
-          {!isHintVisible && (
+          {/* Floating Hint Button in Bottom Right Corner (hidden when hint is showing OR when wrapping up/concluding) */}
+          {!isHintVisible && !isWrappingUp && (
             <View style={styles.floatingHintContainer} pointerEvents="box-none">
               <HintFloatingButton
                 onPress={handleToggleHint}
