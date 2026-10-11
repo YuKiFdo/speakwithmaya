@@ -11,9 +11,11 @@ const GOOD_JOB_ASSET = require('@/assets/sounds/good job.mp3');
 const HINT_BUTTON_ASSET = require('@/assets/sounds/hint button press.mp3');
 const OTHER_BUTTON_ASSET = require('@/assets/sounds/other button press.mp3');
 const UNDERSTOOD_BUTTON_ASSET = require('@/assets/sounds/understood button press.mp3');
+const MAYA_WELCOME_ASSET = require('@/assets/sounds/maya-welcome.wav');
 
 let audioCtx: AudioContext | null = null;
 let activeWhooshNodes: { noise: AudioBufferSourceNode; gain: GainNode } | null = null;
+let welcomeAudioPlayer: HTMLAudioElement | null = null;
 
 function getAudioContext(): AudioContext | null {
   if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -570,3 +572,72 @@ export function playFinishReviewFanfare(): void {
     console.warn('[sound-service] Finish review fanfare error:', err);
   }
 }
+
+/**
+ * 6. Maya's High-Fidelity Welcome Voice Introduction
+ * Plays Kokoro-82M cheerful neural voice (Heart + Sky blend)
+ */
+export function playMayaWelcomeVoice(callbacks?: {
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (err: any) => void;
+}): void {
+  stopMayaWelcomeVoice();
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(MAYA_WELCOME_ASSET);
+      if (uri) {
+        const audio = new Audio(uri);
+        welcomeAudioPlayer = audio;
+        audio.volume = 1.0;
+
+        audio.onplay = () => {
+          callbacks?.onStart?.();
+        };
+
+        audio.onended = () => {
+          if (welcomeAudioPlayer === audio) {
+            welcomeAudioPlayer = null;
+          }
+          callbacks?.onEnd?.();
+        };
+
+        audio.onerror = (e) => {
+          if (welcomeAudioPlayer === audio) {
+            welcomeAudioPlayer = null;
+          }
+          callbacks?.onError?.(e);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (welcomeAudioPlayer === audio) {
+              welcomeAudioPlayer = null;
+            }
+            callbacks?.onError?.(err);
+          });
+        }
+        return;
+      }
+    } catch (err) {
+      callbacks?.onError?.(err);
+      return;
+    }
+  }
+
+  // Fallback for native or unsupported environments
+  callbacks?.onError?.(new Error('Audio playback not supported on this platform'));
+}
+
+export function stopMayaWelcomeVoice(): void {
+  if (welcomeAudioPlayer) {
+    try {
+      welcomeAudioPlayer.pause();
+      welcomeAudioPlayer.currentTime = 0;
+    } catch {}
+    welcomeAudioPlayer = null;
+  }
+}
+

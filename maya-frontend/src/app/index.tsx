@@ -16,9 +16,7 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { fontStyle } from '@/theme/fonts';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Defs, LinearGradient, Stop, Rect, Path } from 'react-native-svg';
-import { speakAsCallirrhoe, stopMayaVoiceFallback } from '@/utils/maya-voice-fallback';
-
-const MAYA_INTRO_TEXT = "Hi! I'm Maya, your AI English speaking coach. Maya helps you practice real conversations, correct your mistakes, and speak with confidence!";
+import { playMayaWelcomeVoice, stopMayaWelcomeVoice } from '@/services/sound/sound-service';
 
 export default function WelcomeScreen() {
   const { isDesktop, isTablet } = useBreakpoint();
@@ -102,17 +100,16 @@ export default function WelcomeScreen() {
     return () => waveLoop?.stop();
   }, [isSpeaking]);
 
-  // Maya friendly voice introduction
+  // Maya cheerful neural voice introduction
   const handlePlayVoiceIntro = () => {
     if (isSpeaking) {
-      stopMayaVoiceFallback();
+      stopMayaWelcomeVoice();
       setIsSpeaking(false);
       return;
     }
 
     setIsSpeaking(true);
-    speakAsCallirrhoe(MAYA_INTRO_TEXT, {
-      rate: 1.05,
+    playMayaWelcomeVoice({
       onStart: () => setIsSpeaking(true),
       onEnd: () => setIsSpeaking(false),
       onError: () => setIsSpeaking(false),
@@ -123,23 +120,22 @@ export default function WelcomeScreen() {
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
-        speakAsCallirrhoe(MAYA_INTRO_TEXT, {
-          rate: 1.05,
+        playMayaWelcomeVoice({
           onStart: () => setIsSpeaking(true),
           onEnd: () => setIsSpeaking(false),
           onError: () => setIsSpeaking(false),
         });
       } catch {}
-    }, 700);
+    }, 600);
 
     return () => {
       clearTimeout(timer);
-      stopMayaVoiceFallback();
+      stopMayaWelcomeVoice();
     };
   }, []);
 
   const handleGetStarted = () => {
-    stopMayaVoiceFallback();
+    stopMayaWelcomeVoice();
     setIsSpeaking(false);
     router.push('/onboarding/name');
   };
