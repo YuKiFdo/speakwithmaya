@@ -28,15 +28,17 @@ export function HintSuggestionCard({
   const slideAnim = useRef(new Animated.Value(14)).current;
 
   useEffect(() => {
+    fadeAnim.setValue(0);
+    slideAnim.setValue(14);
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 320,
+        duration: 280,
         useNativeDriver: Platform.OS !== 'web',
       }),
       Animated.timing(slideAnim, {
         toValue: 0,
-        duration: 320,
+        duration: 280,
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();

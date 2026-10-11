@@ -205,6 +205,10 @@ export class FinishSessionDto {
   @IsOptional()
   @IsString()
   sinhalaStyle?: string;
+
+  @IsOptional()
+  @IsNumber()
+  hintsUsedCount?: number;
 }
 
 export class QueryUsageDto {
@@ -261,6 +265,9 @@ export class GenerateHintDto {
   @IsOptional()
   @IsString()
   userName?: string;
+
+  @IsOptional()
+  isPrefetch?: boolean;
 }
 
 export class SessionAnalysisTurnDto {

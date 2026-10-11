@@ -104,6 +104,7 @@ interface UseLiveCallOptions {
       targetTurns?: number;
     }>;
   };
+  hintsUsedCount?: number | (() => number);
 }
 
 export function useLiveCall(options: UseLiveCallOptions = {}) {
@@ -1356,6 +1357,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             topic: options.topic || 'English Speaking Practice',
             languageMode: options.languageMode || 'sinhala',
             sinhalaStyle: options.sinhalaStyle || 'balanced',
+            hintsUsedCount: typeof options.hintsUsedCount === 'function' ? options.hintsUsedCount() : (options.hintsUsedCount ?? 0),
           }),
         });
       } catch (err) {

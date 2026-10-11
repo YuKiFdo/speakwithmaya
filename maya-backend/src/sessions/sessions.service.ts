@@ -1427,7 +1427,27 @@ STRICT RESTRICTIONS:
       });
     }
 
-    const hintUsage = this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
+    const recordedHintUsage = this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
+    // Synchronize count with actual hints pressed reported by client
+    const hintCount = dto.hintsUsedCount !== undefined ? dto.hintsUsedCount : recordedHintUsage.count;
+    let hintCostLkr = recordedHintUsage.costLkr;
+    let hintCostUsd = recordedHintUsage.costUsd;
+
+    // If client reported exact user-pressed hints count, adjust cost to reflect only user-pressed hints
+    if (recordedHintUsage.count > 0 && hintCount !== recordedHintUsage.count) {
+      hintCostLkr = Number(((recordedHintUsage.costLkr / recordedHintUsage.count) * hintCount).toFixed(4));
+      hintCostUsd = Number(((recordedHintUsage.costUsd / recordedHintUsage.count) * hintCount).toFixed(6));
+    }
+
+    const hintUsage = {
+      count: hintCount,
+      totalTokens: recordedHintUsage.totalTokens,
+      costUsd: hintCostUsd,
+      costLkr: hintCostLkr,
+    };
+    this.sessionHintUsage.set(sessionId, hintUsage);
+    this.sessionHintUsage.set(validSessionId, hintUsage);
+
     const sessionCode = `SM-${validSessionId.slice(0, 5).toUpperCase()}`;
 
     return {
@@ -2281,11 +2301,13 @@ STRICT SCRIPT RULES:
 
     if (this.hintCache.has(cacheKey)) {
       const cached = this.hintCache.get(cacheKey)!;
-      if (dto.sessionId) {
+      if (dto.sessionId && !dto.isPrefetch) {
         const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
         this.sessionHintUsage.set(dto.sessionId, {
-          ...existing,
           count: existing.count + 1,
+          totalTokens: existing.totalTokens + ((cached as any).tokens?.totalTokens || 120),
+          costUsd: Number((existing.costUsd + (cached.costUsd || 0.00004)).toFixed(6)),
+          costLkr: Number((existing.costLkr + (cached.costLkr || 0.012)).toFixed(4)),
         });
       }
       return cached;
@@ -2391,7 +2413,7 @@ CRITICAL SCRIPT RULES for hintSinhala:
 
                 this.hintCache.set(cacheKey, result);
 
-                if (dto.sessionId) {
+                if (dto.sessionId && !dto.isPrefetch) {
                   const existing = this.sessionHintUsage.get(dto.sessionId) || { count: 0, totalTokens: 0, costUsd: 0, costLkr: 0 };
                   this.sessionHintUsage.set(dto.sessionId, {
                     count: existing.count + 1,
@@ -2399,7 +2421,7 @@ CRITICAL SCRIPT RULES for hintSinhala:
                     costUsd: Number((existing.costUsd + costUsd).toFixed(6)),
                     costLkr: Number((existing.costLkr + costLkr).toFixed(4)),
                   });
-                  this.logger.log(`[SessionsService] 💡 Hint generated for session ${dto.sessionId}: tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`);
+                  this.logger.log(`[SessionsService] 💡 User pressed hint for session ${dto.sessionId}: tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`);
                 }
 
                 return result;

@@ -109,6 +109,7 @@ export default function CallScreen() {
     canonicalContent: params.canonicalContent,
     passingScorePercent: params.passingScorePercent ? parseInt(params.passingScorePercent, 10) : 75,
     targetSpeakingShare: params.targetSpeakingShare ? parseInt(params.targetSpeakingShare, 10) : 40,
+    hintsUsedCount: () => hintsHistoryRef.current.length,
   });
 
 
@@ -215,40 +216,7 @@ export default function CallScreen() {
     setIsTranslating(false);
   };
 
-  // Background prefetch: when Maya finishes speaking a prompt, silently fetch hint once per turn
-  useEffect(() => {
-    if (liveCall.status !== 'listening') return;
-
-    const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
-    if (!question) return;
-
-    const norm = question.toLowerCase().trim().replace(/[?!.,]/g, '');
-    if (lastPrefetchedHintPromptRef.current === norm || isFetchingHintRef.current) {
-      return;
-    }
-
-    lastPrefetchedHintPromptRef.current = norm;
-    isFetchingHintRef.current = true;
-
-    fetchHint(question, {
-      topic: effectiveTopic,
-      level: params.level,
-      scenarioId: params.scenarioId,
-      userName: effectiveUserName,
-      sessionId: liveCall.sessionId,
-    }).then((res) => {
-      isFetchingHintRef.current = false;
-      if (res) {
-        setHintData(res);
-        if (res.hintEnglish && !hintsHistoryRef.current.includes(res.hintEnglish)) {
-          hintsHistoryRef.current.push(res.hintEnglish);
-        }
-      }
-    }).catch(() => {
-      isFetchingHintRef.current = false;
-    });
-  }, [liveCall.status, liveCall.subtitles, liveCall.previousSubtitles]);
-
+  // Conversational Hint: Only fetched when the student explicitly presses the Hint button
   const handleToggleHint = async () => {
     // Suppress mic capture & VAD for 1.4s so Hint button chime never leaks into Gemini Live
     liveCall.suppressMicFor?.(1400);
@@ -258,29 +226,37 @@ export default function CallScreen() {
       return;
     }
 
+    // If hint was already fetched for this prompt, show it immediately without re-fetching
     if (hintData) {
       setIsHintVisible(true);
       return;
     }
 
-    // User tapped to view hint: show panel immediately and retrieve cached or in-flight hint
-    setIsHintVisible(true);
+    if (isFetchingHintRef.current) return;
+
+    // User explicitly pressed Hint button: fetch hint on demand
     const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
     if (!question) return;
 
-    const res = await fetchHint(question, {
-      topic: effectiveTopic,
-      level: params.level,
-      scenarioId: params.scenarioId,
-      userName: effectiveUserName,
-      sessionId: liveCall.sessionId,
-    });
+    isFetchingHintRef.current = true;
+    try {
+      const res = await fetchHint(question, {
+        topic: effectiveTopic,
+        level: params.level,
+        scenarioId: params.scenarioId,
+        userName: effectiveUserName,
+        sessionId: liveCall.sessionId,
+      });
 
-    if (res) {
-      setHintData(res);
-      if (res.hintEnglish && !hintsHistoryRef.current.includes(res.hintEnglish)) {
-        hintsHistoryRef.current.push(res.hintEnglish);
+      if (res && res.hintEnglish) {
+        setHintData(res);
+        setIsHintVisible(true);
+        if (!hintsHistoryRef.current.includes(res.hintEnglish)) {
+          hintsHistoryRef.current.push(res.hintEnglish);
+        }
       }
+    } finally {
+      isFetchingHintRef.current = false;
     }
   };
 
@@ -511,12 +487,12 @@ export default function CallScreen() {
     liveCall.endCall(true);
   };
 
-  const handleScreenTouch = () => {
-    liveCall.resumeAudio();
-    if (liveCall.status === 'speaking' && liveCall.modelVolume > 0.08) {
-      liveCall.interrupt();
-    }
-  };
+  // const handleScreenTouch = () => {
+  //   liveCall.resumeAudio();
+  //   if (liveCall.status === 'speaking' && liveCall.modelVolume > 0.08) {
+  //     liveCall.interrupt();
+  //   }
+  // };
 
   // When session completes, navigate directly to analyzing screen before showing completion scorecard
   useEffect(() => {
