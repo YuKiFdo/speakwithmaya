@@ -1,12 +1,76 @@
 /**
- * Maya Voice Fallback (Web Speech API)
+ * Maya Voice Fallback & Neural Client TTS (Piper WASM + Web Speech API)
  *
- * Emulates the warm, articulate, gentle tone of Gemini's "Callirrhoe" voice
- * using the best available browser SpeechSynthesis voices across
- * Chrome, Safari, Edge, Firefox, iOS, and Android when offline or in simulated mode.
+ * Provides high-quality neural voice synthesis directly in the browser via Piper WASM (Amy voice),
+ * matching Gemini's "Callirrhoe" conversational tone across all platforms (Android, Windows, macOS, iOS)
+ * with zero backend Gemini TTS API quota consumption.
+ *
+ * Features:
+ * - Direct client-side WebAssembly inference (Piper Amy 22kHz ONNX).
+ * - Automatic IndexedDB caching for fast repeated playback without network downloads.
+ * - In-memory Blob URL caching for instant 0ms audio replays on review screens.
+ * - Graceful fallback to browser Web Speech API (SpeechSynthesis) if WASM is initializing or unavailable.
  */
 
+import { Platform } from 'react-native';
+
 let cachedVoices: SpeechSynthesisVoice[] = [];
+let piperInstance: any = null;
+let piperInitPromise: Promise<any> | null = null;
+let activeAudioElement: any = null;
+const audioBlobCache = new Map<string, string>();
+
+/**
+ * Initialize / Pre-warm Piper WASM in the browser.
+ * Caches model and phonemizer into browser memory / IndexedDB.
+ */
+export async function getPiperInstance(): Promise<any> {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return null;
+  }
+  if (piperInstance) {
+    return piperInstance;
+  }
+  if (piperInitPromise) {
+    return piperInitPromise;
+  }
+
+  piperInitPromise = (async () => {
+    try {
+      // Dynamic imports prevent Node.js / SSR / Native bundle breakages
+      const [ortModule, piperModule] = await Promise.all([
+        import('onnxruntime-web'),
+        import('piper-plus'),
+      ]);
+
+      const ort = (ortModule as any).default || ortModule;
+      if (ort?.env?.wasm) {
+        ort.env.wasm.wasmPaths = '/onnx/';
+        ort.env.wasm.numThreads = 1;
+      }
+      (globalThis as any).ort = ort;
+
+      const PiperPlus = piperModule.PiperPlus;
+      const modelUrl = `${window.location.origin}/piper/en_US-amy-medium.onnx`;
+
+      const piper = await PiperPlus.initialize({
+        model: modelUrl,
+        ort,
+      });
+
+      piperInstance = piper;
+      console.log('[MayaVoiceFallback] Piper WASM (Amy voice) initialized successfully in browser.');
+      return piper;
+    } catch (err) {
+      console.warn('[MayaVoiceFallback] Piper WASM initialization failed; will fall back to SpeechSynthesis:', err);
+      return null;
+    } finally {
+      piperInitPromise = null;
+    }
+  })();
+
+  return piperInitPromise;
+}
 
 export function warmUpSpeechVoices(): void {
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -20,6 +84,11 @@ export function warmUpSpeechVoices(): void {
       }
     } catch {}
   }
+
+  // Pre-warm Piper WASM in background so review screens have 0ms latency
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    getPiperInstance().catch(() => {});
+  }
 }
 
 if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -29,22 +98,17 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   };
 }
 
-// Preferred browser voices that closely match Callirrhoe's warm, conversational female tone
+// Preferred browser voices for Web Speech API fallback
 const PREFERRED_CALLIRRHOE_VOICE_NAMES = [
-  // Edge / Windows Natural Neural voices (closest to Callirrhoe)
   'Microsoft Jenny Online (Natural) - English (United States)',
   'Microsoft Aria Online (Natural) - English (United States)',
   'Microsoft Michelle Online (Natural) - English (United States)',
   'Microsoft Jenny - English (United States)',
   'Microsoft Aria - English (United States)',
   'Microsoft Zira - English (United States)',
-
-  // Google / Android voices
   'Google US English',
   'Google UK English Female',
   'Google English (United States)',
-
-  // Apple / Safari (iOS & macOS)
   'Samantha (Enhanced)',
   'Samantha',
   'Ava (Premium)',
@@ -65,7 +129,6 @@ export function getBestCallirrhoeVoice(preferLocal = false): SpeechSynthesisVoic
   const voices = cachedVoices.length > 0 ? cachedVoices : window.speechSynthesis.getVoices();
   if (!voices || voices.length === 0) return null;
 
-  // If local offline voice preferred (to prevent synthesis-failed on network/cloud voices)
   if (preferLocal) {
     const localPreferred = voices.find(
       (v) =>
@@ -84,7 +147,6 @@ export function getBestCallirrhoeVoice(preferLocal = false): SpeechSynthesisVoic
     if (zira) return zira;
   }
 
-  // 1. Try exact or partial match with preferred Callirrhoe-like voices
   for (const preferred of PREFERRED_CALLIRRHOE_VOICE_NAMES) {
     const match = voices.find(
       (v) =>
@@ -94,7 +156,6 @@ export function getBestCallirrhoeVoice(preferLocal = false): SpeechSynthesisVoic
     if (match) return match;
   }
 
-  // 2. Search for any English US female voice
   const usFemale = voices.find((v) => {
     const langMatch = v.lang.startsWith('en-US') || v.lang.startsWith('en_US');
     const nameLower = v.name.toLowerCase();
@@ -110,7 +171,6 @@ export function getBestCallirrhoeVoice(preferLocal = false): SpeechSynthesisVoic
   });
   if (usFemale) return usFemale;
 
-  // 3. Any English US voice (prefer non-male)
   const usGeneral =
     voices.find((v) => {
       const langMatch = v.lang.startsWith('en-US') || v.lang.startsWith('en_US');
@@ -123,13 +183,74 @@ export function getBestCallirrhoeVoice(preferLocal = false): SpeechSynthesisVoic
     }) || voices.find((v) => v.lang.startsWith('en-US') || v.lang.startsWith('en_US'));
 
   if (usGeneral) return usGeneral;
-
-  // 4. Any English voice
   return voices.find((v) => v.lang.startsWith('en')) || voices[0] || null;
 }
 
-export function speakAsCallirrhoe(
-  text: string,
+/**
+ * Play an existing audio blob URL via HTMLAudioElement.
+ */
+function playAudioBlob(
+  blobUrl: string,
+  options?: {
+    rate?: number;
+    onStart?: () => void;
+    onEnd?: () => void;
+    onError?: (err: any) => void;
+  },
+): boolean {
+  try {
+    stopMayaVoiceFallback();
+
+    const audio = new Audio(blobUrl);
+    activeAudioElement = audio;
+
+    if (options?.rate && options.rate > 0) {
+      audio.playbackRate = options.rate;
+    }
+
+    audio.onplay = () => {
+      options?.onStart?.();
+    };
+
+    audio.onended = () => {
+      if (activeAudioElement === audio) {
+        activeAudioElement = null;
+      }
+      options?.onEnd?.();
+    };
+
+    audio.onerror = (e) => {
+      if (activeAudioElement === audio) {
+        activeAudioElement = null;
+      }
+      console.warn('[MayaVoiceFallback] HTMLAudioElement playback error:', e);
+      options?.onError?.(e);
+    };
+
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch((err) => {
+        if (activeAudioElement === audio) {
+          activeAudioElement = null;
+        }
+        console.warn('[MayaVoiceFallback] audio.play() promise rejected:', err);
+        options?.onError?.(err);
+      });
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('[MayaVoiceFallback] playAudioBlob exception:', err);
+    options?.onError?.(err);
+    return false;
+  }
+}
+
+/**
+ * Fallback Web Speech API speech synthesis
+ */
+function speakViaSpeechSynthesis(
+  cleanText: string,
   options?: {
     rate?: number;
     pitch?: number;
@@ -144,12 +265,6 @@ export function speakAsCallirrhoe(
     return false;
   }
 
-  const cleanText = (text || '').trim();
-  if (!cleanText) {
-    options?.onEnd?.();
-    return true;
-  }
-
   try {
     const utterance = new SpeechSynthesisUtterance(cleanText);
     const voice = getBestCallirrhoeVoice(isRetry);
@@ -160,7 +275,6 @@ export function speakAsCallirrhoe(
       utterance.lang = 'en-US';
     }
 
-    // Callirrhoe prosody: articulate, natural speaking tempo and warm tone
     utterance.rate = options?.rate ?? 1.10;
     utterance.pitch = options?.pitch ?? 1.04;
     utterance.volume = 1.0;
@@ -170,7 +284,6 @@ export function speakAsCallirrhoe(
 
     utterance.onstart = () => {
       options?.onStart?.();
-      // Chromium bugfix: prevent engine pause after 15s on longer sentences
       keepAliveTimer = setInterval(() => {
         if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
           if (!window.speechSynthesis.speaking) {
@@ -195,16 +308,10 @@ export function speakAsCallirrhoe(
       if (keepAliveTimer) clearInterval(keepAliveTimer);
       if (!hasEnded) {
         hasEnded = true;
-
-        // Auto-recovery for Edge/Chrome "synthesis-failed" or network drop:
-        // Automatically unfreeze and retry once with a guaranteed local offline voice
         if (
           !isRetry &&
           (e.error === 'synthesis-failed' || e.error === 'network' || e.error === 'audio-busy')
         ) {
-          console.warn(
-            `[MayaVoiceFallback] Synthesis error (${e.error}), recovering with local offline voice...`,
-          );
           try {
             window.speechSynthesis.cancel();
             if (window.speechSynthesis.paused) {
@@ -212,12 +319,11 @@ export function speakAsCallirrhoe(
             }
           } catch {}
           setTimeout(() => {
-            speakAsCallirrhoe(cleanText, options, true);
+            speakViaSpeechSynthesis(cleanText, options, true);
           }, 120);
           return;
         }
 
-        // 'interrupted' and 'canceled' are standard browser lifecycle events when audio is stopped or replaced
         if (e.error !== 'interrupted' && e.error !== 'canceled') {
           console.warn('[MayaVoiceFallback] Synthesis error:', e.error);
         }
@@ -239,8 +345,6 @@ export function speakAsCallirrhoe(
       }
     };
 
-    // Chromium audio endpoint release fix:
-    // If currently speaking or pending, cancel and wait 120ms before triggering speak
     if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
       window.speechSynthesis.cancel();
       setTimeout(triggerSpeak, 120);
@@ -256,7 +360,82 @@ export function speakAsCallirrhoe(
   }
 }
 
+/**
+ * Main entrance: Synthesizes and speaks text using Piper WASM neural voice (Amy),
+ * with instant Blob URL caching and SpeechSynthesis fallback.
+ */
+export function speakAsCallirrhoe(
+  text: string,
+  options?: {
+    rate?: number;
+    pitch?: number;
+    onStart?: () => void;
+    onEnd?: () => void;
+    onError?: (err: any) => void;
+  },
+  _isRetry = false,
+): boolean {
+  const cleanText = (text || '').trim();
+  if (!cleanText) {
+    options?.onEnd?.();
+    return true;
+  }
+
+  // 1. Check in-memory audio blob cache for instant 0ms playback
+  const cachedUrl = audioBlobCache.get(cleanText);
+  if (cachedUrl) {
+    return playAudioBlob(cachedUrl, options);
+  }
+
+  // 2. If Piper instance is available, synthesize directly via client-side WASM
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    getPiperInstance()
+      .then(async (piper) => {
+        if (!piper) {
+          speakViaSpeechSynthesis(cleanText, options);
+          return;
+        }
+
+        try {
+          const result = await piper.synthesize(cleanText, {
+            language: 'en',
+            noiseScale: 0.667,
+            lengthScale: 0.95,
+          });
+
+          const blob = result.toBlob();
+          const blobUrl = URL.createObjectURL(blob);
+          audioBlobCache.set(cleanText, blobUrl);
+
+          playAudioBlob(blobUrl, options);
+        } catch (synthErr) {
+          console.warn('[MayaVoiceFallback] Piper synthesis failed, falling back to Web Speech:', synthErr);
+          speakViaSpeechSynthesis(cleanText, options);
+        }
+      })
+      .catch((err) => {
+        console.warn('[MayaVoiceFallback] Piper async call failed, falling back to Web Speech:', err);
+        speakViaSpeechSynthesis(cleanText, options);
+      });
+
+    return true;
+  }
+
+  // 3. Fallback to SpeechSynthesis
+  return speakViaSpeechSynthesis(cleanText, options);
+}
+
 export function stopMayaVoiceFallback(): void {
+  // Stop active HTMLAudioElement if Piper audio is playing
+  if (activeAudioElement) {
+    try {
+      activeAudioElement.pause();
+      activeAudioElement.currentTime = 0;
+    } catch {}
+    activeAudioElement = null;
+  }
+
+  // Stop browser SpeechSynthesis
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     try {
       window.speechSynthesis.cancel();

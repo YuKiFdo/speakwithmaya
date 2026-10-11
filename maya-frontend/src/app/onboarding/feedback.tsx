@@ -10,7 +10,7 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons, Feather, MaterialIcons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
@@ -173,6 +173,7 @@ const PARTICLE_ANIMATION_CSS = `
 
 export default function SessionFeedbackScreen() {
   const params = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
   const { isPhone } = useBreakpoint();
   const isWebOrDesktop = !isPhone;
 
@@ -620,10 +621,10 @@ export default function SessionFeedbackScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
+      <View style={[styles.container, isPhone && styles.containerPhone, isWebOrDesktop && styles.containerDesktop]}>
         
         {/* Top Header: Back Button + 5-Segment Progress Bar */}
-        <View style={styles.headerRow}>
+        <View style={[styles.headerRow, isPhone && styles.headerRowPhone]}>
           <Pressable
             onPress={handleBack}
             style={({ pressed }) => [styles.backButton, pressed && styles.buttonPressed]}
@@ -656,22 +657,18 @@ export default function SessionFeedbackScreen() {
 
         <ScrollView
           style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, isPhone && styles.scrollContentPhone]}
           showsVerticalScrollIndicator={false}
         >
           {/* Category Badge Pill & Speaking Indicator */}
-          <View style={styles.badgeRow}>
-            <View style={[styles.categoryBadge, { backgroundColor: badgeConfig.bg }]}>
-              <Ionicons name={badgeConfig.iconName as any} size={16} color={badgeConfig.text} />
-              <Text style={[styles.categoryBadgeText, { color: badgeConfig.text }]}>
+          <View style={[styles.badgeRow, isPhone && styles.badgeRowPhone]}>
+            <View style={[styles.categoryBadge, isPhone && styles.categoryBadgePhone, { backgroundColor: badgeConfig.bg }]}>
+              <Ionicons name={badgeConfig.iconName as any} size={isPhone ? 14 : 16} color={badgeConfig.text} />
+              <Text style={[styles.categoryBadgeText, isPhone && styles.categoryBadgeTextPhone, { color: badgeConfig.text }]}>
                 {currentItem.badge}
               </Text>
             </View>
             {currentSpeakingCard === 'intro' ? (
-              // <View style={styles.speakingIndicatorBadge}>
-              //   {/* <Ionicons name="volume-high" size={14} color="#0284C7" />
-              //   <Text style={styles.speakingIndicatorText}>Maya is speaking...</Text> */}
-              // </View>
               <View/>
             ) : (
               <Pressable
@@ -686,24 +683,24 @@ export default function SessionFeedbackScreen() {
 
           {/* Title Headline */}
           <Pressable onPress={handleToggleIntroAudio}>
-            <Text style={[styles.mainTitle, isWebOrDesktop && styles.mainTitleDesktop]}>
+            <Text style={[styles.mainTitle, isPhone ? styles.mainTitlePhone : (isWebOrDesktop && styles.mainTitleDesktop)]}>
               {currentItem.title}
             </Text>
           </Pressable>
 
           {/* Context Subtitle */}
           <Pressable onPress={handleToggleIntroAudio}>
-            <Text style={[styles.subTitle, isWebOrDesktop && styles.subTitleDesktop]}>
+            <Text style={[styles.subTitle, isPhone ? styles.subTitlePhone : (isWebOrDesktop && styles.subTitleDesktop)]}>
               {currentItem.subtitle}
             </Text>
           </Pressable>
 
           {/* Card 1: You Said (Warm Peach / Pink Card) */}
-          <View style={styles.cardPeach}>
+          <View style={[styles.cardPeach, isPhone && styles.cardCompact]}>
             <View style={styles.cardHeaderRow}>
               <View style={styles.cardLabelRow}>
-                <Ionicons name="person" size={17} color="#0284C7" />
-                <Text style={styles.cardLabelPeach}>You said</Text>
+                <Ionicons name="person" size={isPhone ? 15 : 17} color="#0284C7" />
+                <Text style={[styles.cardLabelPeach, isPhone && styles.cardLabelPhone]}>You said</Text>
               </View>
 
               {/* Speaker Playback Button */}
@@ -711,6 +708,7 @@ export default function SessionFeedbackScreen() {
                 onPress={handleToggleUserAudio}
                 style={({ pressed }) => [
                   styles.speakerButton,
+                  isPhone && styles.speakerButtonPhone,
                   currentSpeakingCard === 'youSaid' && styles.speakerButtonActive,
                   pressed && styles.buttonPressed,
                 ]}
@@ -718,7 +716,7 @@ export default function SessionFeedbackScreen() {
               >
                 <Ionicons
                   name="volume-high"
-                  size={20}
+                  size={isPhone ? 17 : 20}
                   color={currentSpeakingCard === 'youSaid' ? '#ffffff' : '#0284C7'}
                 />
               </Pressable>
@@ -730,18 +728,18 @@ export default function SessionFeedbackScreen() {
           </View>
 
           {/* Connector Down Arrow */}
-          <View style={styles.connectorRow}>
-            <View style={styles.connectorCircle}>
-              <Feather name="arrow-down" size={19} color="#0284C7" />
+          <View style={[styles.connectorRow, isPhone && styles.connectorRowPhone]}>
+            <View style={[styles.connectorCircle, isPhone && styles.connectorCirclePhone]}>
+              <Feather name="arrow-down" size={isPhone ? 15 : 19} color="#0284C7" />
             </View>
           </View>
 
           {/* Card 2: A Better / More Natural Way (Mint Green Card) */}
-          <View style={styles.cardGreen}>
+          <View style={[styles.cardGreen, isPhone && styles.cardCompact]}>
             <View style={styles.cardHeaderRow}>
               <View style={styles.cardLabelRow}>
-                <CorrectCardStarIcon size={19} color="#00BCA5" />
-                <Text style={styles.cardLabelGreen}>{badgeConfig.betterTitle}</Text>
+                <CorrectCardStarIcon size={isPhone ? 16 : 19} color="#00BCA5" />
+                <Text style={[styles.cardLabelGreen, isPhone && styles.cardLabelPhone]}>{badgeConfig.betterTitle}</Text>
               </View>
 
               {/* Speaker Playback Button for Maya's Voice */}
@@ -749,6 +747,7 @@ export default function SessionFeedbackScreen() {
                 onPress={handleToggleBetterWayAudio}
                 style={({ pressed }) => [
                   styles.speakerButton,
+                  isPhone && styles.speakerButtonPhone,
                   currentSpeakingCard === 'betterWay' && styles.speakerButtonActiveGreen,
                   pressed && styles.buttonPressed,
                 ]}
@@ -756,7 +755,7 @@ export default function SessionFeedbackScreen() {
               >
                 <Ionicons
                   name="volume-high"
-                  size={20}
+                  size={isPhone ? 17 : 20}
                   color={currentSpeakingCard === 'betterWay' ? '#ffffff' : '#059669'}
                 />
               </Pressable>
@@ -768,11 +767,11 @@ export default function SessionFeedbackScreen() {
           </View>
 
           {/* Card 3: Why Explanation (Ice Blue Card) */}
-          <View style={styles.cardBlue}>
+          <View style={[styles.cardBlue, isPhone && styles.cardCompact, isPhone && { marginTop: 8 }]}>
             <View style={styles.cardHeaderRow}>
               <View style={styles.cardLabelRow}>
-                <Ionicons name="bulb-outline" size={19} color="#0284C7" />
-                <Text style={styles.cardLabelBlue}>{badgeConfig.whyTitle}</Text>
+                <Ionicons name="bulb-outline" size={isPhone ? 16 : 19} color="#0284C7" />
+                <Text style={[styles.cardLabelBlue, isPhone && styles.cardLabelPhone]}>{badgeConfig.whyTitle}</Text>
               </View>
 
               {/* Speaker Playback Button for Explanation */}
@@ -780,6 +779,7 @@ export default function SessionFeedbackScreen() {
                 onPress={handleToggleExplanationAudio}
                 style={({ pressed }) => [
                   styles.speakerButton,
+                  isPhone && styles.speakerButtonPhone,
                   currentSpeakingCard === 'explanation' && styles.speakerButtonActive,
                   pressed && styles.buttonPressed,
                 ]}
@@ -787,14 +787,14 @@ export default function SessionFeedbackScreen() {
               >
                 <Ionicons
                   name="volume-high"
-                  size={20}
+                  size={isPhone ? 17 : 20}
                   color={currentSpeakingCard === 'explanation' ? '#ffffff' : '#0284C7'}
                 />
               </Pressable>
             </View>
 
             <View style={styles.cardBodyTextWrapper}>
-              <Text style={styles.whyExplanationText}>
+              <Text style={[styles.whyExplanationText, isPhone && styles.whyExplanationTextPhone]}>
                 {currentItem.whyExplanation}
               </Text>
             </View>
@@ -802,7 +802,13 @@ export default function SessionFeedbackScreen() {
         </ScrollView>
 
         {/* Bottom Actions */}
-        <View style={styles.bottomSection}>
+        <View
+          style={[
+            styles.bottomSection,
+            isPhone && styles.bottomSectionPhone,
+            { paddingBottom: Math.max(insets.bottom + 8, Platform.select({ web: 28, default: 16 })) },
+          ]}
+        >
           {Platform.OS === 'web' && (
             <style dangerouslySetInnerHTML={{ __html: PARTICLE_ANIMATION_CSS }} />
           )}
@@ -811,6 +817,7 @@ export default function SessionFeedbackScreen() {
             onPress={handleNext}
             style={({ pressed }) => [
               styles.primaryButton,
+              isPhone && styles.primaryButtonPhone,
               pressed && styles.primaryButtonPressed,
             ]}
           >
@@ -826,10 +833,10 @@ export default function SessionFeedbackScreen() {
 
             {/* Button label & arrow */}
             <View style={styles.buttonContentRow} pointerEvents="none">
-              <Text style={styles.primaryButtonText}>
+              <Text style={[styles.primaryButtonText, isPhone && styles.primaryButtonTextPhone]}>
                 {isLastCard ? 'Finish Review' : 'Understood'}
               </Text>
-              <Feather name="arrow-right" size={20} color="#ffffff" style={styles.buttonArrow} />
+              <Feather name="arrow-right" size={isPhone ? 18 : 20} color="#ffffff" style={styles.buttonArrow} />
             </View>
           </Pressable>
 
@@ -837,10 +844,11 @@ export default function SessionFeedbackScreen() {
             onPress={handleSkipAll}
             style={({ pressed }) => [
               styles.skipButton,
+              isPhone && styles.skipButtonPhone,
               pressed && styles.buttonPressed,
             ]}
           >
-            <Text style={styles.skipButtonText}>Skip all</Text>
+            <Text style={[styles.skipButtonText, isPhone && styles.skipButtonTextPhone]}>Skip all</Text>
           </Pressable>
         </View>
 
@@ -1206,6 +1214,83 @@ const styles = StyleSheet.create({
     ...fontStyle('outfit', 'semiBold'),
     fontSize: 16,
     color: '#2563EB',
+  },
+  /* Mobile Phone specific scalings */
+  containerPhone: {
+    paddingHorizontal: 16,
+  },
+  headerRowPhone: {
+    paddingVertical: 10,
+  },
+  scrollContentPhone: {
+    paddingTop: 8,
+    paddingBottom: 10,
+  },
+  badgeRowPhone: {
+    marginBottom: 10,
+  },
+  categoryBadgePhone: {
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+  },
+  categoryBadgeTextPhone: {
+    fontSize: 12.5,
+  },
+  mainTitlePhone: {
+    fontSize: 21,
+    lineHeight: 26,
+    marginBottom: 4,
+  },
+  subTitlePhone: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  cardCompact: {
+    padding: 12,
+    borderRadius: 16,
+  },
+  cardLabelPhone: {
+    fontSize: 13.5,
+  },
+  speakerButtonPhone: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  cardSentenceTextPhone: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  whyExplanationTextPhone: {
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  connectorRowPhone: {
+    marginVertical: 4,
+  },
+  connectorCirclePhone: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+  },
+  bottomSectionPhone: {
+    paddingTop: 8,
+    gap: 8,
+  },
+  primaryButtonPhone: {
+    height: 48,
+    borderRadius: 18,
+  },
+  primaryButtonTextPhone: {
+    fontSize: 15.5,
+  },
+  skipButtonPhone: {
+    height: 42,
+    borderRadius: 18,
+  },
+  skipButtonTextPhone: {
+    fontSize: 14.5,
   },
   buttonPressed: {
     opacity: 0.85,

@@ -31,6 +31,10 @@ export function HintFloatingButton({
   const handlePress = () => {
     if (disabled || isRippling) return;
 
+    // Immediately trigger onPress so mic suppression (suppressMicFor) gates the audio
+    // BEFORE any audio chime sound leaves the speaker!
+    onPress();
+
     triggerHaptic('light');
     playHintButtonSound();
 
@@ -54,7 +58,6 @@ export function HintFloatingButton({
       }),
     ]).start(() => {
       setIsRippling(false);
-      onPress();
     });
   };
 
