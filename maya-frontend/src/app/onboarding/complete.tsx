@@ -18,7 +18,7 @@ import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getLatestSessionReport, ExtendedSessionReport } from '@/utils/session-report-store';
-import { playUnderstoodTapSound, playFinishReviewFanfare } from '@/services/sound/sound-service';
+import { playUnderstoodTapSound, playFinishReviewFanfare, playGoodJobSound } from '@/services/sound/sound-service';
 
 const GLOW_PARTICLES = [
   { id: 1, left: '12%', top: '65%', size: 4, delay: '0s', duration: '2.5s' },
@@ -318,6 +318,9 @@ export default function SessionCompleteScreen() {
   const buttonAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // Play celebratory good job sound
+    playGoodJobSound();
+
     Animated.stagger(90, [
       Animated.spring(avatarAnim, {
         toValue: 1,
@@ -395,7 +398,7 @@ export default function SessionCompleteScreen() {
     : (isPassed ? 'Back to home' : 'Back to Roadmap');
 
   const totalObjectives = report?.objectives?.length || 0;
-  const passedObjectives = report?.objectives?.filter((o) => o.status === 'mastered').length || 0;
+  const passedObjectives = report?.objectives?.filter((o: any) => o.status === 'mastered').length || 0;
   const hasReviewItems = (report?.objectives && report.objectives.length > 0) || (report?.corrections && report.corrections.length > 0);
 
   return (

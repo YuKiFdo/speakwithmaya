@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { triggerHaptic, playMicroChime } from '@/utils/haptics-audio';
+import { playHintButtonSound } from '@/services/sound/sound-service';
 
 interface HintFloatingButtonProps {
   onPress: () => void;
@@ -31,7 +32,7 @@ export function HintFloatingButton({
     if (disabled || isRippling) return;
 
     triggerHaptic('light');
-    playMicroChime('hint');
+    playHintButtonSound();
 
     setIsRippling(true);
     ringScale.setValue(1);

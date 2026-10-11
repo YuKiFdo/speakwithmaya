@@ -14,18 +14,28 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
+import { playCallConnectedSound } from '@/services/sound/sound-service';
 
 interface ConnectingViewProps {
   onCancel?: () => void;
   style?: any;
+  isConnected?: boolean;
 }
 
-export function ConnectingView({ onCancel, style }: ConnectingViewProps) {
+export function ConnectingView({ onCancel, style, isConnected }: ConnectingViewProps) {
   const [isCancelHovered, setIsCancelHovered] = useState(false);
   const [hoveredTip, setHoveredTip] = useState<number | null>(null);
   const [dotCount, setDotCount] = useState(2);
+  const hasPlayedConnectedRef = useRef(false);
   const { isPhone, width: windowWidth, height: windowHeight } = useBreakpoint();
   const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    if (isConnected && !hasPlayedConnectedRef.current) {
+      hasPlayedConnectedRef.current = true;
+      playCallConnectedSound();
+    }
+  }, [isConnected]);
 
   // Dynamic bottom padding to ensure Quick Tips card comes up above gesture bars and mobile browser chrome
   const bottomPadding = Math.max(

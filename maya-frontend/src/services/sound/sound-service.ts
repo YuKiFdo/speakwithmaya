@@ -2,15 +2,21 @@ import { Platform } from 'react-native';
 
 /**
  * Maya Gamified Sound Engine
- * Uses the Web Audio API for guaranteed, zero-latency, 100% offline playback.
+ * Uses pre-loaded high fidelity audio assets (MP3) with Web Audio API synthesis as 100% offline fallback.
  */
+
+// Audio Assets
+const CALL_CONNECTED_ASSET = require('@/assets/sounds/call-connected.mp3');
+const GOOD_JOB_ASSET = require('@/assets/sounds/good job.mp3');
+const HINT_BUTTON_ASSET = require('@/assets/sounds/hint button press.mp3');
+const OTHER_BUTTON_ASSET = require('@/assets/sounds/other button press.mp3');
+const UNDERSTOOD_BUTTON_ASSET = require('@/assets/sounds/understood button press.mp3');
 
 let audioCtx: AudioContext | null = null;
 let activeWhooshNodes: { noise: AudioBufferSourceNode; gain: GainNode } | null = null;
 
 function getAudioContext(): AudioContext | null {
   if (Platform.OS !== 'web' || typeof window === 'undefined') {
-    console.log('[sound-service] Non-web platform or SSR environment, skipping Web Audio');
     return null;
   }
   try {
@@ -25,7 +31,6 @@ function getAudioContext(): AudioContext | null {
       console.log(`[sound-service] 🔊 AudioContext created. Initial state: "${audioCtx.state}"`);
     }
     if (audioCtx.state === 'suspended') {
-      console.log('[sound-service] ⚠️ AudioContext is suspended. Requesting resume()...');
       audioCtx.resume().then(() => {
         console.log(`[sound-service] ✅ AudioContext resumed successfully! State: "${audioCtx?.state}"`);
       }).catch((err) => {
@@ -56,15 +61,157 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
 }
 
 /**
+ * Resolve an asset import into a playable URI string across Web and Native.
+ */
+function getAssetUri(asset: any): string | null {
+  if (!asset) return null;
+  if (typeof asset === 'string') return asset;
+  if (typeof asset === 'object') {
+    if (typeof asset.default === 'string') return asset.default;
+    if (asset.uri && typeof asset.uri === 'string') return asset.uri;
+    if (asset.default?.uri && typeof asset.default.uri === 'string') return asset.default.uri;
+  }
+  try {
+    const { Asset } = require('expo-asset');
+    const resolved = Asset.fromModule(asset);
+    if (resolved?.uri) return resolved.uri;
+  } catch {}
+  try {
+    const { Image } = require('react-native');
+    const resolved = Image.resolveAssetSource(asset);
+    if (resolved?.uri) return resolved.uri;
+  } catch {}
+  return null;
+}
+
+const audioCache = new Map<string, HTMLAudioElement>();
+
+function getPreloadedAudio(uri: string): HTMLAudioElement {
+  let audio = audioCache.get(uri);
+  if (!audio) {
+    audio = new Audio(uri);
+    audio.preload = 'auto';
+    audioCache.set(uri, audio);
+  }
+  return audio;
+}
+
+// Preload audio assets in web browser
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  setTimeout(() => {
+    try {
+      [
+        CALL_CONNECTED_ASSET,
+        GOOD_JOB_ASSET,
+        HINT_BUTTON_ASSET,
+        OTHER_BUTTON_ASSET,
+        UNDERSTOOD_BUTTON_ASSET,
+      ].forEach((asset) => {
+        const uri = getAssetUri(asset);
+        if (uri) getPreloadedAudio(uri);
+      });
+    } catch {}
+  }, 1000);
+}
+
+/**
+ * Universal sound player using HTMLAudioElement with instant overlapping cloning
+ * and automatic fallback to Web Audio synthesis.
+ */
+export function playSoundAsset(asset: any, volume: number = 0.75, fallbackFn?: () => void): void {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      const uri = getAssetUri(asset);
+      if (uri) {
+        const audio = getPreloadedAudio(uri);
+        const player = (audio.cloneNode(true) as HTMLAudioElement) || audio;
+        player.volume = Math.max(0, Math.min(1, volume));
+        player.play().catch(() => {
+          try {
+            audio.currentTime = 0;
+            audio.volume = Math.max(0, Math.min(1, volume));
+            audio.play().catch(() => {
+              if (fallbackFn) fallbackFn();
+            });
+          } catch {
+            if (fallbackFn) fallbackFn();
+          }
+        });
+        return;
+      }
+    } catch (err) {
+      console.warn('[sound-service] playSoundAsset error:', err);
+    }
+  }
+
+  if (fallbackFn) {
+    fallbackFn();
+  }
+}
+
+/**
+ * Call Connected Sound (call-connected.mp3)
+ * Plays when connection establishes with Maya.
+ */
+export function playCallConnectedSound(): void {
+  console.log('[sound-service] 📞 playCallConnectedSound() called');
+  playSoundAsset(CALL_CONNECTED_ASSET, 0.85, () => {
+    playAnalysisCompleteSound();
+  });
+}
+
+/**
+ * Good Job Sound (good job.mp3)
+ * Plays on the session completion screen.
+ */
+export function playGoodJobSound(): void {
+  console.log('[sound-service] 🌟 playGoodJobSound() called');
+  playSoundAsset(GOOD_JOB_ASSET, 0.85, () => {
+    playFinishReviewFanfare();
+  });
+}
+
+/**
+ * Hint Button Press Sound (hint button press.mp3)
+ * Plays when the user taps the Hint lightbulb button during a call.
+ */
+export function playHintButtonSound(): void {
+  console.log('[sound-service] 💡 playHintButtonSound() called');
+  playSoundAsset(HINT_BUTTON_ASSET, 0.8, () => {
+    playStepPop(2);
+  });
+}
+
+/**
+ * Other Button Press Sound (other button press.mp3)
+ * Plays for interactive toggles, controls, and secondary buttons.
+ */
+export function playOtherButtonSound(): void {
+  console.log('[sound-service] 🔘 playOtherButtonSound() called');
+  playSoundAsset(OTHER_BUTTON_ASSET, 0.75, () => {
+    playStepPop(0);
+  });
+}
+
+/**
+ * Understood Button Press Sound (understood button press.mp3)
+ * Plays when tapping "Understood" cards, feedback ratings, and session-review actions.
+ */
+export function playUnderstoodTapSound(): void {
+  console.log('[sound-service] 👍 playUnderstoodTapSound() called');
+  playSoundAsset(UNDERSTOOD_BUTTON_ASSET, 0.8, () => {
+    playSynthesizedUnderstoodTap();
+  });
+}
+
+export const playUnderstoodButtonSound = playUnderstoodTapSound;
+
+/**
  * 1. Gentle Soft Whoosh / Wind Shimmer Sweep
  */
 export function playScanningSound(): void {
-  console.log('[sound-service] ▶️ playScanningSound() called');
   const ctx = getAudioContext();
-  if (!ctx) {
-    console.warn('[sound-service] Cannot play scanning sound: AudioContext unavailable');
-    return;
-  }
+  if (!ctx) return;
 
   stopScanningSound();
 
@@ -98,7 +245,7 @@ export function playScanningSound(): void {
     filter.frequency.exponentialRampToValueAtTime(850, now + 1.7);
     filter.frequency.exponentialRampToValueAtTime(320, now + duration);
 
-    // Audible gain envelope (boosted to 0.45 for clear audibility)
+    // Audible gain envelope
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.001, now);
     gain.gain.exponentialRampToValueAtTime(0.42, now + 0.6);
@@ -130,7 +277,6 @@ export function playScanningSound(): void {
     shimmerOsc.stop(now + duration);
 
     activeWhooshNodes = { noise, gain };
-    console.log(`[sound-service] 🌬️ Scanning whoosh playing (duration: ${duration}s, ctx.state: "${ctx.state}")`);
   } catch (err) {
     console.error('[sound-service] Whoosh play error:', err);
   }
@@ -142,7 +288,6 @@ export function playScanningSound(): void {
 export function stopScanningSound(): void {
   if (activeWhooshNodes && audioCtx) {
     try {
-      console.log('[sound-service] ⏹️ stopScanningSound() called');
       activeWhooshNodes.gain.gain.setValueAtTime(
         activeWhooshNodes.gain.gain.value,
         audioCtx.currentTime,
@@ -162,12 +307,8 @@ export function stopScanningSound(): void {
  * 2. Juicy Gamified Checkmark Pop
  */
 export function playStepPop(stepIndex: number = 0): void {
-  console.log(`[sound-service] ▶️ playStepPop(${stepIndex}) called`);
   const ctx = getAudioContext();
-  if (!ctx) {
-    console.warn('[sound-service] Cannot play step pop: AudioContext unavailable');
-    return;
-  }
+  if (!ctx) return;
 
   try {
     const freqs = [523.25, 659.25, 783.99, 1046.50];
@@ -178,12 +319,10 @@ export function playStepPop(stepIndex: number = 0): void {
     const gain = ctx.createGain();
 
     osc.type = 'sine';
-    // Downward pitch envelope for punchy juicy pop
     osc.frequency.setValueAtTime(targetFreq * 1.3, now);
     osc.frequency.exponentialRampToValueAtTime(targetFreq, now + 0.03);
     osc.frequency.exponentialRampToValueAtTime(targetFreq * 0.85, now + 0.18);
 
-    // Master volume for pop
     gain.gain.setValueAtTime(0.55, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
 
@@ -192,7 +331,6 @@ export function playStepPop(stepIndex: number = 0): void {
 
     osc.start(now);
     osc.stop(now + 0.18);
-    console.log(`[sound-service] 🫧 Step pop played (step: ${stepIndex}, freq: ${targetFreq.toFixed(0)}Hz, ctx.state: "${ctx.state}")`);
   } catch (err) {
     console.error('[sound-service] Step pop error:', err);
   }
@@ -202,14 +340,10 @@ export function playStepPop(stepIndex: number = 0): void {
  * 3. Celebratory Analysis Complete Chime
  */
 export function playAnalysisCompleteSound(): void {
-  console.log('[sound-service] ▶️ playAnalysisCompleteSound() called');
   stopScanningSound();
 
   const ctx = getAudioContext();
-  if (!ctx) {
-    console.warn('[sound-service] Cannot play complete sound: AudioContext unavailable');
-    return;
-  }
+  if (!ctx) return;
 
   try {
     const notes = [523.25, 659.25, 783.99, 1046.50];
@@ -243,24 +377,21 @@ export function playAnalysisCompleteSound(): void {
       osc.stop(startTime + noteDuration);
       harmonic.stop(startTime + noteDuration);
     });
-    console.log(`[sound-service] 🔔 Analysis complete chime played! (ctx.state: "${ctx.state}")`);
   } catch (err) {
     console.error('[sound-service] Complete sound error:', err);
   }
 }
 
 /**
- * 4. Juicy Gamified "Understood" Button Click Pop
- * Crisp, modern affirmative tap with a bright rising resonant chime
+ * 4. Synthesized fallback for Understood tap
  */
-export function playUnderstoodTapSound(): void {
+function playSynthesizedUnderstoodTap(): void {
   const ctx = getAudioContext();
   if (!ctx) return;
 
   try {
     const now = ctx.currentTime;
 
-    // 1. Subtle acoustic tactile click
     const clickOsc = ctx.createOscillator();
     const clickGain = ctx.createGain();
     clickOsc.type = 'triangle';
@@ -276,7 +407,6 @@ export function playUnderstoodTapSound(): void {
     clickOsc.start(now);
     clickOsc.stop(now + 0.025);
 
-    // 2. Bright, rewarding melodic chime (D5 -> A5 rising tone)
     const tones = [587.33, 880.00];
     tones.forEach((freq, idx) => {
       const startTime = now + idx * 0.035;
@@ -303,7 +433,6 @@ export function playUnderstoodTapSound(): void {
 
 /**
  * 5. Celebratory "Finish Review" Victory Fanfare
- * Joyful ascending triad chime (C5 -> E5 -> G5 -> C6) with warm shimmer
  */
 export function playFinishReviewFanfare(): void {
   const ctx = getAudioContext();

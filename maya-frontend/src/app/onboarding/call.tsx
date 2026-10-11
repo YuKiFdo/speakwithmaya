@@ -33,7 +33,12 @@ import { HintFloatingButton } from '@/components/call/hint-floating-button';
 import { HintSuggestionCard } from '@/components/call/hint-suggestion-card';
 import { fetchTranslation, fetchHint, HintResponse } from '@/services/assistance/assistance-service';
 import { CommonPopup } from '@/components/ui/common-popup';
-import { triggerHaptic, playMicroChime } from '@/utils/haptics-audio';
+import { triggerHaptic } from '@/utils/haptics-audio';
+import {
+  playCallConnectedSound,
+  playHintButtonSound,
+  playOtherButtonSound,
+} from '@/services/sound/sound-service';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -175,6 +180,7 @@ export default function CallScreen() {
 
   // 3. User explicitly presses "[ Show Translation ]" / "[ Hide Translation ]"
   const handleToggleTranslation = async () => {
+    playOtherButtonSound();
     if (isTranslationVisible) {
       // User tapped to hide
       setIsTranslationVisible(false);
@@ -244,6 +250,7 @@ export default function CallScreen() {
   }, [liveCall.status, liveCall.subtitles, liveCall.previousSubtitles]);
 
   const handleToggleHint = async () => {
+    playHintButtonSound();
     if (isHintVisible) {
       setIsHintVisible(false);
       return;
@@ -370,6 +377,7 @@ export default function CallScreen() {
   useEffect(() => {
     if (liveCall.status !== 'connecting' && liveCall.status !== 'idle' && !hasTransitionedRef.current) {
       hasTransitionedRef.current = true;
+      playCallConnectedSound();
       Animated.timing(connectingFadeAnim, {
         toValue: 0,
         duration: 320,
@@ -802,7 +810,10 @@ export default function CallScreen() {
           ]}
           pointerEvents={liveCall.status === 'connecting' ? 'auto' : 'none'}
         >
-          <ConnectingView onCancel={handleHangup} />
+          <ConnectingView
+            onCancel={handleHangup}
+            isConnected={liveCall.status !== 'connecting' && liveCall.status !== 'idle'}
+          />
         </Animated.View>
       )}
 
