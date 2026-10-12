@@ -88,8 +88,8 @@ export class WebAudioCapture implements IAudioCapture {
           this.callbacks?.onVolumeChange?.(volume);
 
           // Client-Side VAD & Silence Gate: adapts dynamically to network quality to avoid spurious 3G uploads
-          const multiplier = this.networkQuality === 'poor' ? 3.0 : 2.5;
-          const minThreshold = this.networkQuality === 'poor' ? 0.052 : 0.040;
+          const multiplier = this.networkQuality === 'poor' ? 2.6 : 2.2;
+          const minThreshold = this.networkQuality === 'poor' ? 0.032 : 0.024;
           const speechThreshold = Math.max(minThreshold, noiseFloor * multiplier);
 
           if (rms >= speechThreshold) {
@@ -97,8 +97,8 @@ export class WebAudioCapture implements IAudioCapture {
               candidateChunks.push(chunk);
               if (rms > candidateMaxRms) candidateMaxRms = rms;
 
-              // Commit to speaking if sustained for >= 2 chunks (~160ms) or single high-energy spoken chunk (RMS >= 0.065)
-              if (candidateChunks.length >= 2 || candidateMaxRms >= 0.065) {
+              // Commit to speaking if sustained for >= 2 chunks (~160ms) or single high-energy spoken chunk (RMS >= 0.050)
+              if (candidateChunks.length >= 2 || candidateMaxRms >= 0.050) {
                 isSpeaking = true;
                 console.log(`[${getLogTimestamp()}] 🎤 [User Speaking] Started (RMS=${candidateMaxRms.toFixed(3)})`);
                 this.callbacks?.onVoiceStart?.();

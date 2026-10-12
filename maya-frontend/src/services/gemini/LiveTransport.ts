@@ -219,9 +219,9 @@ export class LiveTransport implements ILiveTransport {
           automaticActivityDetection: {
             disabled: false,
             startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
-            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
             prefixPaddingMs: 200,
-            silenceDurationMs: 700,
+            silenceDurationMs: 1200,
           },
         },
         inputAudioTranscription: {
