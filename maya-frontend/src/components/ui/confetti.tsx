@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -31,16 +31,11 @@ interface ParticleData {
   color: string;
   shape: ParticleShape;
   size: { width: number; height: number; borderRadius: number };
-  startX: number;
-  startY: number;
-  peakY: number;
-  endY: number;
-  midX1: number;
-  midX2: number;
-  midX3: number;
-  endX: number;
-  spinZ: number;
+  yKeyframes: number[];
+  xKeyframes: number[];
+  spinX: number;
   spinY: number;
+  spinZ: number;
   delay: number;
   duration: number;
 }
@@ -52,62 +47,54 @@ interface ConfettiProps {
   onComplete?: () => void;
 }
 
-function ConfettiPiece({
+// Normalized time steps for 9-point smooth parabolic physics & S-curve flutter
+const TIME_STEPS = [0, 0.08, 0.17, 0.27, 0.36, 0.5, 0.66, 0.83, 1];
+
+const ConfettiPiece = React.memo(function ConfettiPiece({
   particle,
-  onComplete,
+  onPieceComplete,
 }: {
   particle: ParticleData;
-  onComplete?: () => void;
+  onPieceComplete: () => void;
 }) {
   const anim = useRef(new Animated.Value(0)).current;
+  const useNative = Platform.OS !== 'web';
 
   useEffect(() => {
-    let isMounted = true;
-    const timer = setTimeout(() => {
-      if (!isMounted) return;
+    const animation = Animated.sequence([
+      Animated.delay(particle.delay),
       Animated.timing(anim, {
         toValue: 1,
         duration: particle.duration,
         easing: Easing.linear,
-        useNativeDriver: Platform.OS !== 'web',
-      }).start(({ finished }) => {
-        if (finished && onComplete) {
-          onComplete();
-        }
-      });
-    }, particle.delay);
+        useNativeDriver: useNative,
+      }),
+    ]);
+
+    animation.start(({ finished }) => {
+      if (finished) {
+        onPieceComplete();
+      }
+    });
 
     return () => {
-      isMounted = false;
-      clearTimeout(timer);
+      animation.stop();
     };
-  }, [anim, particle, onComplete]);
+  }, [anim, particle.delay, particle.duration, onPieceComplete, useNative]);
 
   const translateY = anim.interpolate({
-    inputRange: [0, 0.28, 0.58, 0.82, 1],
-    outputRange: [
-      particle.startY,
-      particle.peakY,
-      (particle.peakY + particle.endY) * 0.42,
-      (particle.peakY + particle.endY) * 0.72,
-      particle.endY,
-    ],
+    inputRange: TIME_STEPS,
+    outputRange: particle.yKeyframes,
   });
 
   const translateX = anim.interpolate({
-    inputRange: [0, 0.25, 0.5, 0.75, 1],
-    outputRange: [
-      particle.startX,
-      particle.midX1,
-      particle.midX2,
-      particle.midX3,
-      particle.endX,
-    ],
+    inputRange: TIME_STEPS,
+    outputRange: particle.xKeyframes,
   });
 
-  const rotateZ = anim.interpolate({
+  const rotateX = anim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', `${particle.spinZ}deg`],
+    outputRange: ['0deg', `${particle.spinX}deg`],
   });
 
   const rotateY = anim.interpolate({
@@ -115,19 +102,26 @@ function ConfettiPiece({
     outputRange: ['0deg', `${particle.spinY}deg`],
   });
 
+  const rotateZ = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', `${particle.spinZ}deg`],
+  });
+
   const opacity = anim.interpolate({
-    inputRange: [0, 0.05, 0.75, 1],
+    inputRange: [0, 0.04, 0.78, 1],
     outputRange: [0, 1, 1, 0],
   });
 
   const scale = anim.interpolate({
-    inputRange: [0, 0.15, 0.85, 1],
-    outputRange: [0.3, 1, 1, 0.7],
+    inputRange: [0, 0.1, 0.35, 0.85, 1],
+    outputRange: [0.25, 1.08, 1, 0.95, 0.65],
   });
 
   return (
     <Animated.View
       pointerEvents="none"
+      renderToHardwareTextureAndroid={true}
+      shouldRasterizeIOS={true}
       style={[
         styles.particle,
         {
@@ -137,17 +131,19 @@ function ConfettiPiece({
           backgroundColor: particle.color,
           opacity,
           transform: [
+            { perspective: 600 },
             { translateX },
             { translateY },
-            { rotateZ },
+            { rotateX },
             { rotateY },
+            { rotateZ },
             { scale },
           ],
         },
       ]}
     />
   );
-}
+});
 
 export function ConfettiOverlay({
   count = 65,
@@ -156,10 +152,18 @@ export function ConfettiOverlay({
   onComplete,
 }: ConfettiProps) {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const screenWidth = windowWidth || 380;
-  const screenHeight = windowHeight || 800;
+  // Lock initial dimensions so mid-animation layout shifts never restart particles
+  const dimensionsRef = useRef({
+    width: windowWidth || 380,
+    height: windowHeight || 800,
+  });
+
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   const particles: ParticleData[] = useMemo(() => {
+    const screenWidth = dimensionsRef.current.width;
+    const screenHeight = dimensionsRef.current.height;
     const list: ParticleData[] = [];
     const shapes: ParticleShape[] = ['ribbon', 'square', 'circle', 'pill'];
 
@@ -177,7 +181,6 @@ export function ConfettiOverlay({
       } else if (shape === 'pill') {
         size = { width: 7, height: 14, borderRadius: 4 };
       } else {
-        // ribbon
         size = {
           width: 8 + Math.floor(Math.random() * 3),
           height: 16 + Math.floor(Math.random() * 8),
@@ -185,90 +188,105 @@ export function ConfettiOverlay({
         };
       }
 
-      // 3 origin channels: Left cannon (42%), Right cannon (42%), Center fountain (16%)
+      // 3 origin channels: Left cannon (40%), Right cannon (40%), Center fountain (20%)
       const channel = i % 10;
       let startX = 0;
-      let startY = screenHeight * (0.65 + Math.random() * 0.25);
-      let targetSpreadX = 0;
+      const startY = screenHeight * (0.64 + Math.random() * 0.24);
+      let apexX = 0;
 
       if (channel < 4) {
         // Left cannon shooting up and right
         startX = screenWidth * (0.02 + Math.random() * 0.12);
-        targetSpreadX = screenWidth * (0.2 + Math.random() * 0.55);
+        apexX = screenWidth * (0.2 + Math.random() * 0.55);
       } else if (channel < 8) {
         // Right cannon shooting up and left
         startX = screenWidth * (0.86 + Math.random() * 0.12);
-        targetSpreadX = screenWidth * (0.25 + Math.random() * 0.55);
+        apexX = screenWidth * (0.25 + Math.random() * 0.55);
       } else {
         // Center fountain
         startX = screenWidth * (0.42 + Math.random() * 0.16);
-        targetSpreadX = screenWidth * (0.1 + Math.random() * 0.8);
+        apexX = screenWidth * (0.12 + Math.random() * 0.76);
       }
 
-      const peakY = screenHeight * (0.04 + Math.random() * 0.32);
-      const endY = screenHeight + 50;
+      const peakY = screenHeight * (0.04 + Math.random() * 0.3);
+      const endY = screenHeight + 60;
+      const upDist = startY - peakY;
+      const downDist = endY - peakY;
 
-      // Realistic fluttering drift on X axis
-      const drift1 = (Math.random() - 0.5) * 40;
-      const drift2 = (Math.random() - 0.5) * 50;
-      const drift3 = (Math.random() - 0.5) * 40;
+      // Smooth 9-point parabolic trajectory:
+      // Fast cannon burst up -> weightless hang at apex (t=0.27..0.36) -> accelerating gravity fall
+      const yKeyframes = [
+        startY,
+        startY - upDist * 0.58,
+        startY - upDist * 0.89,
+        peakY,
+        peakY + downDist * 0.04,
+        peakY + downDist * 0.19,
+        peakY + downDist * 0.44,
+        peakY + downDist * 0.73,
+        endY,
+      ];
 
-      const midX1 = (startX * 0.6 + targetSpreadX * 0.4) + drift1;
-      const midX2 = targetSpreadX + drift2;
-      const midX3 = targetSpreadX + drift3;
-      const endX = targetSpreadX + (Math.random() - 0.5) * 60;
+      // Smooth horizontal launch momentum + sinusoidal fluttering sway during descent
+      const swayAmp = (18 + Math.random() * 24) * (Math.random() > 0.5 ? 1 : -1);
+      const windDrift = (Math.random() - 0.5) * 45;
 
-      const spinDirection = Math.random() > 0.5 ? 1 : -1;
-      const spinZ = spinDirection * (360 + Math.floor(Math.random() * 720));
-      const spinY = 360 + Math.floor(Math.random() * 1080);
+      const xKeyframes = [
+        startX,
+        startX + (apexX - startX) * 0.52,
+        startX + (apexX - startX) * 0.84,
+        apexX,
+        apexX + swayAmp * 0.45,
+        apexX + swayAmp,
+        apexX - swayAmp * 0.65 + windDrift * 0.4,
+        apexX + swayAmp * 0.5 + windDrift * 0.75,
+        apexX + windDrift,
+      ];
 
-      const delay = Math.floor(Math.random() * 380);
-      const particleDuration = duration - 300 + Math.floor(Math.random() * 600);
+      const dirX = Math.random() > 0.5 ? 1 : -1;
+      const dirY = Math.random() > 0.5 ? 1 : -1;
+      const dirZ = Math.random() > 0.5 ? 1 : -1;
+
+      const spinX = dirX * (360 + Math.floor(Math.random() * 720));
+      const spinY = dirY * (540 + Math.floor(Math.random() * 900));
+      const spinZ = dirZ * (360 + Math.floor(Math.random() * 540));
+
+      const delay = Math.floor(Math.random() * 340);
+      const particleDuration = duration - 300 + Math.floor(Math.random() * 650);
 
       list.push({
         id: i,
         color,
         shape,
         size,
-        startX,
-        startY,
-        peakY,
-        endY,
-        midX1,
-        midX2,
-        midX3,
-        endX,
-        spinZ,
+        yKeyframes,
+        xKeyframes,
+        spinX,
         spinY,
+        spinZ,
         delay,
         duration: particleDuration,
       });
     }
 
     return list;
-  }, [count, duration, screenWidth, screenHeight]);
+  }, [count, duration]);
 
   const completedCount = useRef(0);
-  const handlePieceComplete = () => {
+  const handlePieceComplete = useCallback(() => {
     completedCount.current += 1;
-    if (completedCount.current >= particles.length && onComplete) {
-      onComplete();
+    if (completedCount.current >= particles.length && onCompleteRef.current) {
+      onCompleteRef.current();
     }
-  };
+  }, [particles.length]);
 
   return (
-    <View
-      pointerEvents="none"
-      style={[
-        styles.overlay,
-        style,
-      ]}
-    >
+    <View pointerEvents="none" style={[styles.overlay, style]}>
       {particles.map((p) => (
         <ConfettiPiece
           key={p.id}
           particle={p}
-          onComplete={handlePieceComplete}
+          onPieceComplete={handlePieceComplete}
         />
       ))}
     </View>
@@ -289,5 +307,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     top: 0,
+    ...Platform.select({
+      web: {
+        willChange: 'transform, opacity',
+        backfaceVisibility: 'visible',
+      } as any,
+      default: {},
+    }),
   },
 });

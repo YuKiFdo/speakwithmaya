@@ -477,59 +477,66 @@ export default function CallScreen() {
 
   // Animate glows reactively based on voice strength and call status
   useEffect(() => {
+    const useNative = Platform.OS !== 'web';
+
     if (liveCall.status === 'speaking') {
-      // Maya speaking: fade out purple bottom glow
+      const isMayaProjecting = liveCall.modelVolume > 0.04;
+      const targetBlueOpacity = 0.42 + Math.min(1, liveCall.modelVolume * 1.15) * 0.58;
+      const targetBlueScale = 1.0 + Math.min(1, liveCall.modelVolume * 1.2) * 0.11;
+
+      // Maya speaking: fade out purple bottom glow, spring-pulse blue edge aura
       Animated.parallel([
         Animated.timing(purpleGlowAnim, {
           toValue: 0,
-          duration: 300,
-          useNativeDriver: Platform.OS !== 'web',
+          duration: 280,
+          useNativeDriver: useNative,
         }),
         Animated.timing(purpleScaleAnim, {
-          toValue: 0.95,
-          duration: 300,
-          useNativeDriver: Platform.OS !== 'web',
+          toValue: 0.94,
+          duration: 280,
+          useNativeDriver: useNative,
         }),
-        // Blue edge aura pulses with Maya's voice intensity
         Animated.timing(blueAuraAnim, {
-          toValue: 0.38 + liveCall.modelVolume * 0.62,
-          duration: liveCall.modelVolume > 0.05 ? 80 : 200,
-          useNativeDriver: Platform.OS !== 'web',
+          toValue: targetBlueOpacity,
+          duration: isMayaProjecting ? 55 : 180,
+          useNativeDriver: useNative,
         }),
-        Animated.timing(blueScaleAnim, {
-          toValue: 1.0 + liveCall.modelVolume * 0.08,
-          duration: liveCall.modelVolume > 0.05 ? 80 : 200,
-          useNativeDriver: Platform.OS !== 'web',
+        Animated.spring(blueScaleAnim, {
+          toValue: targetBlueScale,
+          friction: 5,
+          tension: 120,
+          useNativeDriver: useNative,
         }),
       ]).start();
     } else {
       // Maya listening / idle: fade out blue aura
-      // Resting purple bottom glow stays low (~0.38 opacity, scale 1.0) when silent.
-      // When user speaks into the mic, it swells up and intensifies in real time!
+      // Resting purple bottom glow breathes gently when silent and surges with spring physics on user voice
       const isUserSpeaking = liveCall.userVolume > 0.02;
-      const targetPurpleOpacity = 0.38 + liveCall.userVolume * 0.62;
-      const targetPurpleScale = 1.0 + liveCall.userVolume * 0.28;
+      const boostedUserVol = Math.min(1, liveCall.userVolume * 1.3);
+      const targetPurpleOpacity = 0.38 + boostedUserVol * 0.62;
+      const targetPurpleScale = 1.0 + boostedUserVol * 0.34;
 
       Animated.parallel([
         Animated.timing(blueAuraAnim, {
           toValue: 0,
-          duration: 350,
-          useNativeDriver: Platform.OS !== 'web',
+          duration: 320,
+          useNativeDriver: useNative,
         }),
         Animated.timing(blueScaleAnim, {
           toValue: 1.0,
-          duration: 350,
-          useNativeDriver: Platform.OS !== 'web',
+          duration: 320,
+          useNativeDriver: useNative,
         }),
         Animated.timing(purpleGlowAnim, {
           toValue: targetPurpleOpacity,
-          duration: isUserSpeaking ? 60 : 180,
-          useNativeDriver: Platform.OS !== 'web',
+          duration: isUserSpeaking ? 45 : 180,
+          useNativeDriver: useNative,
         }),
-        Animated.timing(purpleScaleAnim, {
+        Animated.spring(purpleScaleAnim, {
           toValue: targetPurpleScale,
-          duration: isUserSpeaking ? 60 : 180,
-          useNativeDriver: Platform.OS !== 'web',
+          friction: isUserSpeaking ? 4 : 7,
+          tension: isUserSpeaking ? 140 : 80,
+          useNativeDriver: useNative,
         }),
       ]).start();
     }
@@ -665,7 +672,13 @@ export default function CallScreen() {
           <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
 
           {/* Ambient Edge Aura for Speaking State */}
-          <AmbientGlow type="blue-aura" opacity={blueAuraAnim} scale={blueScaleAnim} />
+          <AmbientGlow
+            type="blue-aura"
+            opacity={blueAuraAnim}
+            scale={blueScaleAnim}
+            volume={guideStepIndex === 0 ? 0.65 : liveCall.modelVolume}
+            isActive={guideStepIndex === 0 || (liveCall.status === 'speaking' && liveCall.modelVolume > 0.04)}
+          />
 
           {/* Top Bar Header */}
           {isWebOrDesktop ? (
@@ -952,7 +965,13 @@ export default function CallScreen() {
           )}
 
           {/* Bottom Purple Ambient Glow for Listening State (Speech-Reactive) */}
-          <AmbientGlow type="purple-bottom" opacity={purpleGlowAnim} scale={purpleScaleAnim} />
+          <AmbientGlow
+            type="purple-bottom"
+            opacity={purpleGlowAnim}
+            scale={purpleScaleAnim}
+            volume={guideStepIndex === 1 ? 0.75 : liveCall.userVolume}
+            isActive={guideStepIndex === 1 || (liveCall.status === 'listening' && liveCall.userVolume > 0.02)}
+          />
         </View>
       </Pressable>
     </View>

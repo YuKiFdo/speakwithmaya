@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Pressable,
+  Animated,
+  Easing,
   Platform,
   ScrollView,
 } from 'react-native';
@@ -21,13 +22,161 @@ import {
 export default function ClaimDiscountScreen() {
   const params = useLocalSearchParams();
   const { isPhone } = useBreakpoint();
+  const useNative = Platform.OS !== 'web';
+
+  // --- Entrance Animation Values ---
+  const badgeAnim = useRef(new Animated.Value(0)).current;
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const ticketAnim = useRef(new Animated.Value(0)).current;
+  const discountPopAnim = useRef(new Animated.Value(0)).current;
+  const urgencyAnim = useRef(new Animated.Value(0)).current;
+  const ctaAnim = useRef(new Animated.Value(0)).current;
+
+  // --- Continuous Idle Micro-Animation Values ---
+  const ticketFloatAnim = useRef(new Animated.Value(0)).current;
+  const clockWiggleAnim = useRef(new Animated.Value(0)).current;
+  const buttonPulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     // Play celebratory chime upon opening the claim discount screen
     try {
       playAnalysisCompleteSound();
     } catch {}
-  }, []);
+
+    // 1. Staggered Entrance Sequence
+    Animated.stagger(90, [
+      // Top Pill Pop
+      Animated.spring(badgeAnim, {
+        toValue: 1,
+        tension: 70,
+        friction: 7,
+        useNativeDriver: useNative,
+      }),
+      // Title & Subtitle Slide Up
+      Animated.timing(headerAnim, {
+        toValue: 1,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: useNative,
+      }),
+      // Ticket Card Spring Reveal + Inner 20% Pop
+      Animated.parallel([
+        Animated.spring(ticketAnim, {
+          toValue: 1,
+          tension: 55,
+          friction: 7,
+          useNativeDriver: useNative,
+        }),
+        Animated.sequence([
+          Animated.delay(140),
+          Animated.spring(discountPopAnim, {
+            toValue: 1,
+            tension: 90,
+            friction: 5,
+            useNativeDriver: useNative,
+          }),
+        ]),
+      ]),
+      // Urgency Card Slide Up
+      Animated.spring(urgencyAnim, {
+        toValue: 1,
+        tension: 65,
+        friction: 8,
+        useNativeDriver: useNative,
+      }),
+      // CTA & Disclaimer Slide Up
+      Animated.spring(ctaAnim, {
+        toValue: 1,
+        tension: 65,
+        friction: 8,
+        useNativeDriver: useNative,
+      }),
+    ]).start();
+
+    // 2. Gentle Continuous Floating on Ticket Card
+    const floatLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(ticketFloatAnim, {
+          toValue: 1,
+          duration: 2000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(ticketFloatAnim, {
+          toValue: 0,
+          duration: 2000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: useNative,
+        }),
+      ])
+    );
+
+    // 3. Subtle Urgency Clock Wiggle Loop
+    const clockLoop = Animated.loop(
+      Animated.sequence([
+        Animated.delay(1800),
+        Animated.timing(clockWiggleAnim, {
+          toValue: 1,
+          duration: 90,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(clockWiggleAnim, {
+          toValue: -1,
+          duration: 90,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(clockWiggleAnim, {
+          toValue: 1,
+          duration: 90,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(clockWiggleAnim, {
+          toValue: 0,
+          duration: 90,
+          useNativeDriver: useNative,
+        }),
+      ])
+    );
+
+    // 4. Subtle Breathing Pulse on Primary CTA Button
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(buttonPulseAnim, {
+          toValue: 1.025,
+          duration: 1100,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(buttonPulseAnim, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: useNative,
+        }),
+      ])
+    );
+
+    floatLoop.start();
+    clockLoop.start();
+    pulseLoop.start();
+
+    return () => {
+      floatLoop.stop();
+      clockLoop.stop();
+      pulseLoop.stop();
+    };
+  }, [
+    badgeAnim,
+    headerAnim,
+    ticketAnim,
+    discountPopAnim,
+    urgencyAnim,
+    ctaAnim,
+    ticketFloatAnim,
+    clockWiggleAnim,
+    buttonPulseAnim,
+    useNative,
+  ]);
 
   const handleClaim = () => {
     try {
@@ -40,6 +189,108 @@ export default function ClaimDiscountScreen() {
         discountWon: '20-off',
       },
     });
+  };
+
+  // --- Interpolations ---
+  const badgeStyle = {
+    opacity: badgeAnim,
+    transform: [
+      {
+        scale: badgeAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.7, 1],
+        }),
+      },
+      {
+        translateY: badgeAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [-12, 0],
+        }),
+      },
+    ],
+  };
+
+  const headerStyle = {
+    opacity: headerAnim,
+    transform: [
+      {
+        translateY: headerAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [18, 0],
+        }),
+      },
+    ],
+  };
+
+  const ticketStyle = {
+    opacity: ticketAnim,
+    transform: [
+      {
+        scale: ticketAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.82, 1],
+        }),
+      },
+      {
+        rotate: ticketAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: ['-3deg', '0deg'],
+        }),
+      },
+      {
+        translateY: Animated.add(
+          ticketAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [24, 0],
+          }),
+          ticketFloatAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, -5],
+          })
+        ),
+      },
+    ],
+  };
+
+  const discountNumberStyle = {
+    opacity: discountPopAnim,
+    transform: [
+      {
+        scale: discountPopAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.5, 1],
+        }),
+      },
+    ],
+  };
+
+  const urgencyStyle = {
+    opacity: urgencyAnim,
+    transform: [
+      {
+        translateY: urgencyAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [20, 0],
+        }),
+      },
+    ],
+  };
+
+  const clockRotate = clockWiggleAnim.interpolate({
+    inputRange: [-1, 0, 1],
+    outputRange: ['-14deg', '0deg', '14deg'],
+  });
+
+  const ctaStyle = {
+    opacity: ctaAnim,
+    transform: [
+      {
+        translateY: ctaAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [22, 0],
+        }),
+      },
+    ],
   };
 
   return (
@@ -57,21 +308,25 @@ export default function ClaimDiscountScreen() {
       >
         <View style={styles.container}>
           {/* Top Pill Badge */}
-          <View style={styles.pillBadge}>
+          <Animated.View style={[styles.pillBadge, badgeStyle]}>
             <Text style={styles.giftEmoji}>🎁</Text>
             <Text style={styles.pillText}>Special One-Time Offer</Text>
-          </View>
+          </Animated.View>
 
-          {/* Heading */}
-          <Text style={styles.title}>Congratulations!</Text>
-
-          {/* Subtitle */}
-          <Text style={styles.subtitle}>
-            You won a special discount for the 3{'\n'}Months Premium plan!
-          </Text>
+          {/* Heading & Subtitle */}
+          <Animated.View style={[styles.headerWrapper, headerStyle]}>
+            <Text style={styles.title}>Congratulations!</Text>
+            <Text style={styles.subtitle}>
+              You won a special discount for the 3{'\n'}Months Premium plan!
+            </Text>
+          </Animated.View>
 
           {/* Ticket Voucher Coupon Card */}
-          <View style={styles.ticketCard}>
+          <Animated.View
+            renderToHardwareTextureAndroid={true}
+            shouldRasterizeIOS={true}
+            style={[styles.ticketCard, ticketStyle]}
+          >
             {/* Left Circular Notch Cutout */}
             <View style={styles.leftNotch} />
 
@@ -88,28 +343,43 @@ export default function ClaimDiscountScreen() {
             <View style={styles.ticketInner}>
               <Text style={styles.ticketCategory}>SPECIAL DISCOUNT</Text>
 
-              <View style={styles.discountRow}>
+              <Animated.View style={[styles.discountRow, discountNumberStyle]}>
                 <Text style={styles.discountNumber}>20%</Text>
                 <Text style={styles.discountUnit}>OFF</Text>
-              </View>
+              </Animated.View>
 
               <Text style={styles.ticketSubtext}>
                 Applied to 3 Months Premium Plan
               </Text>
             </View>
-          </View>
+          </Animated.View>
 
           {/* Limited Time Urgency Card */}
-          <View style={styles.urgencyCard}>
-            <Ionicons name="time-outline" size={28} color="#2563EB" style={styles.urgencyIcon} />
+          <Animated.View style={[styles.urgencyCard, urgencyStyle]}>
+            <Animated.View
+              style={[
+                styles.urgencyIcon,
+                { transform: [{ rotate: clockRotate }] },
+              ]}
+            >
+              <Ionicons name="time-outline" size={28} color="#2563EB" />
+            </Animated.View>
             <View style={styles.urgencyTextCol}>
               <Text style={styles.urgencyTitle}>Limited time offer</Text>
-              <Text style={styles.urgencySubtitle}>Valid for this session only.</Text>
+              <Text style={styles.urgencySubtitle}>
+                Valid for this session only.
+              </Text>
             </View>
-          </View>
+          </Animated.View>
 
           {/* Primary CTA Claim Button */}
-          <View style={styles.buttonWrapper}>
+          <Animated.View
+            style={[
+              styles.buttonWrapper,
+              ctaStyle,
+              { transform: [...ctaStyle.transform, { scale: buttonPulseAnim }] },
+            ]}
+          >
             <MayaPrimaryButton
               label="Claim 20% OFF"
               onPress={handleClaim}
@@ -117,15 +387,21 @@ export default function ClaimDiscountScreen() {
               height={56}
               borderRadius={28}
             />
-          </View>
+          </Animated.View>
 
           {/* Bottom Security Disclaimer */}
-          <View style={styles.disclaimerRow}>
-            <Feather name="lock" size={13} color="#64748B" style={styles.lockIcon} />
+          <Animated.View style={[styles.disclaimerRow, ctaStyle]}>
+            <Feather
+              name="lock"
+              size={13}
+              color="#64748B"
+              style={styles.lockIcon}
+            />
             <Text style={styles.disclaimerText}>
-              Only one spin per user. Discount will be applied{'\n'}to the 3 Months Premium plan.
+              Only one spin per user. Discount will be applied{'\n'}to the 3
+              Months Premium plan.
             </Text>
-          </View>
+          </Animated.View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -171,6 +447,10 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     ...fontStyle('inter', 'bold'),
   },
+  headerWrapper: {
+    alignItems: 'center',
+    width: '100%',
+  },
   title: {
     fontSize: 32,
     color: '#10213D',
@@ -201,6 +481,7 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         boxShadow: '0 10px 36px rgba(37, 99, 235, 0.08)',
+        willChange: 'transform, opacity',
       } as any,
       default: {
         elevation: 3,

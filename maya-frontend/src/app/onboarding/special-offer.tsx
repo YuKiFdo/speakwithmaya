@@ -1,14 +1,12 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Pressable,
   Animated,
   Easing,
   Platform,
   ScrollView,
-  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -19,13 +17,12 @@ import Svg, {
   Polygon,
   Text as SvgText,
 } from 'react-native-svg';
-import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, Feather } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { MayaPrimaryButton } from '@/components/ui';
 import {
   playStepPop,
-  playAnalysisCompleteSound,
   playGoodJobSound,
   playOtherButtonSound,
 } from '@/services/sound/sound-service';
@@ -82,9 +79,16 @@ const WHEEL_SIZE = 300;
 const RADIUS = WHEEL_SIZE / 2;
 const CX = RADIUS;
 const CY = RADIUS;
+const SLICE_ANGLE = 360 / SLICES.length; // 60 deg
+const TARGET_DEG = 2400; // Lands cleanly on Slice 2 (20% OFF)
 
 // Helper to convert polar to cartesian coordinates
-function polarToCartesian(centerX: number, centerY: number, radius: number, angleInDegrees: number) {
+function polarToCartesian(
+  centerX: number,
+  centerY: number,
+  radius: number,
+  angleInDegrees: number
+) {
   const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180.0;
   return {
     x: centerX + radius * Math.cos(angleInRadians),
@@ -93,18 +97,132 @@ function polarToCartesian(centerX: number, centerY: number, radius: number, angl
 }
 
 // Generate SVG arc path for a pie slice
-function describeArc(x: number, y: number, radius: number, startAngle: number, endAngle: number) {
+function describeArc(
+  x: number,
+  y: number,
+  radius: number,
+  startAngle: number,
+  endAngle: number
+) {
   const start = polarToCartesian(x, y, radius, endAngle);
   const end = polarToCartesian(x, y, radius, startAngle);
   const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
 
   return [
-    'M', x, y,
-    'L', start.x, start.y,
-    'A', radius, radius, 0, largeArcFlag, 0, end.x, end.y,
+    'M',
+    x,
+    y,
+    'L',
+    start.x,
+    start.y,
+    'A',
+    radius,
+    radius,
+    0,
+    largeArcFlag,
+    0,
+    end.x,
+    end.y,
     'Z',
   ].join(' ');
 }
+
+// Precompute slice paths and text positions once at module load
+// so zero math happens during React renders or animation frames
+const PRECOMPUTED_SLICES = SLICES.map((slice, i) => {
+  const startAngle = i * SLICE_ANGLE - SLICE_ANGLE / 2;
+  const endAngle = startAngle + SLICE_ANGLE;
+  const path = describeArc(CX, CY, RADIUS - 4, startAngle, endAngle);
+  const midAngle = i * SLICE_ANGLE;
+  const textPos = polarToCartesian(CX, CY, RADIUS * 0.65, midAngle);
+
+  return {
+    ...slice,
+    path,
+    midAngle,
+    textPos,
+  };
+});
+
+// Memoized Static Wheel Graphic so state updates never re-render the SVG
+const WheelGraphic = React.memo(() => {
+  const svgFontFamily =
+    Platform.OS === 'web' ? 'Inter, sans-serif' : 'System';
+
+  return (
+    <>
+      <Svg
+        width={WHEEL_SIZE}
+        height={WHEEL_SIZE}
+        viewBox={`0 0 ${WHEEL_SIZE} ${WHEEL_SIZE}`}
+      >
+        {/* Outer Ring Circle */}
+        <Circle
+          cx={CX}
+          cy={CY}
+          r={RADIUS - 2}
+          fill="#FFFFFF"
+          stroke="#E2E8F0"
+          strokeWidth={4}
+        />
+
+        {/* Slices */}
+        {PRECOMPUTED_SLICES.map((slice) => (
+          <G key={slice.id}>
+            <Path
+              d={slice.path}
+              fill={slice.bgColor}
+              stroke="#E2E8F0"
+              strokeWidth={1}
+            />
+            <SvgText
+              x={slice.textPos.x}
+              y={slice.textPos.y - 6}
+              fill={slice.textColor}
+              fontSize={16}
+              fontWeight="800"
+              fontFamily={svgFontFamily}
+              textAnchor="middle"
+              alignmentBaseline="central"
+              transform={`rotate(${slice.midAngle}, ${slice.textPos.x}, ${slice.textPos.y})`}
+            >
+              {slice.label}
+            </SvgText>
+            <SvgText
+              x={slice.textPos.x}
+              y={slice.textPos.y + 12}
+              fill={slice.textColor}
+              fontSize={12}
+              fontWeight="700"
+              fontFamily={svgFontFamily}
+              textAnchor="middle"
+              alignmentBaseline="central"
+              transform={`rotate(${slice.midAngle}, ${slice.textPos.x}, ${slice.textPos.y})`}
+            >
+              {slice.subLabel}
+            </SvgText>
+          </G>
+        ))}
+
+        {/* Center Hub */}
+        <Circle cx={CX} cy={CY} r={36} fill="#E0F2FE" />
+        <Circle
+          cx={CX}
+          cy={CY}
+          r={30}
+          fill="#2563EB"
+          stroke="#FFFFFF"
+          strokeWidth={3}
+        />
+      </Svg>
+
+      {/* Center Gift Icon */}
+      <View style={styles.centerGiftOverlay} pointerEvents="none">
+        <Ionicons name="gift" size={24} color="#FFFFFF" />
+      </View>
+    </>
+  );
+});
 
 export default function SpecialOfferScreen() {
   const params = useLocalSearchParams();
@@ -112,15 +230,64 @@ export default function SpecialOfferScreen() {
 
   const [hasSpun, setHasSpun] = useState(false);
   const [isSpinning, setIsSpinning] = useState(false);
-  const [showWinModal, setShowWinModal] = useState(false);
 
   const spinAnim = useRef(new Animated.Value(0)).current;
+  const pointerBounceAnim = useRef(new Animated.Value(0)).current;
+  const lastSliceIndexRef = useRef(0);
+  const tickCounterRef = useRef(0);
+  const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const useNative = Platform.OS !== 'web';
 
   // Spin rotation interpolation: 2400deg lands directly on Slice 2 (20% OFF)
   const spinInterpolate = spinAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '2400deg'], // Always lands cleanly on 20% OFF!
+    outputRange: ['0deg', `${TARGET_DEG}deg`],
   });
+
+  // Subtle physical pointer flick when slice boundaries pass 12 o'clock
+  const pointerRotateInterpolate = pointerBounceAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '-18deg'],
+  });
+
+  const triggerPointerFlick = useCallback(() => {
+    pointerBounceAnim.stopAnimation();
+    pointerBounceAnim.setValue(1);
+    Animated.spring(pointerBounceAnim, {
+      toValue: 0,
+      speed: 28,
+      bounciness: 10,
+      useNativeDriver: useNative,
+    }).start();
+  }, [pointerBounceAnim, useNative]);
+
+  // Sync tick sounds & pointer flick to the actual angular velocity of the wheel
+  useEffect(() => {
+    const listenerId = spinAnim.addListener(({ value }) => {
+      const currentDeg = value * TARGET_DEG;
+      // Slice boundaries are offset by 30 deg (half a 60 deg slice)
+      const boundaryCount = Math.floor((currentDeg + SLICE_ANGLE / 2) / SLICE_ANGLE);
+
+      if (boundaryCount > lastSliceIndexRef.current) {
+        lastSliceIndexRef.current = boundaryCount;
+        tickCounterRef.current += 1;
+
+        try {
+          playStepPop(tickCounterRef.current % 4);
+        } catch {}
+
+        triggerPointerFlick();
+      }
+    });
+
+    return () => {
+      spinAnim.removeListener(listenerId);
+      if (redirectTimeoutRef.current) {
+        clearTimeout(redirectTimeoutRef.current);
+      }
+    };
+  }, [spinAnim, triggerPointerFlick]);
 
   const handleSpin = () => {
     if (isSpinning || hasSpun) return;
@@ -130,25 +297,19 @@ export default function SpecialOfferScreen() {
     } catch {}
 
     setIsSpinning(true);
+    lastSliceIndexRef.current = 0;
+    tickCounterRef.current = 0;
+    spinAnim.setValue(0);
 
-    // Tick sounds during spin
-    let tickCount = 0;
-    const tickInterval = setInterval(() => {
-      tickCount++;
-      try {
-        playStepPop(tickCount % 4);
-      } catch {}
-      if (tickCount > 18) clearInterval(tickInterval);
-    }, 180);
-
-    // Realistic physics deceleration spin
+    // Ultra-smooth quintic-style deceleration curve
     Animated.timing(spinAnim, {
       toValue: 1,
-      duration: 4000,
-      easing: Easing.bezier(0.15, 0.85, 0.25, 1.0),
-      useNativeDriver: Platform.OS !== 'web',
-    }).start(() => {
-      clearInterval(tickInterval);
+      duration: 6000,
+      easing: Easing.bezier(0.12, 0.8, 0.2, 1.0),
+      useNativeDriver: useNative,
+    }).start(({ finished }) => {
+      if (!finished) return;
+
       setIsSpinning(false);
       setHasSpun(true);
 
@@ -158,7 +319,7 @@ export default function SpecialOfferScreen() {
       } catch {}
 
       // Automatically transition to the congratulations claim discount screen
-      setTimeout(() => {
+      redirectTimeoutRef.current = setTimeout(() => {
         router.replace({
           pathname: '/onboarding/claim-discount' as any,
           params: {
@@ -193,7 +354,8 @@ export default function SpecialOfferScreen() {
 
           {/* Subtitle */}
           <Text style={styles.subtitle}>
-            Try your luck and claim your exclusive discount{'\n'}for the 3 Months Premium plan.{'\n'}only one spin per user.
+            Try your luck and claim your exclusive discount{'\n'}for the 3 Months
+            Premium plan.{'\n'}only one spin per user.
           </Text>
 
           {/* Wheel Container */}
@@ -202,95 +364,46 @@ export default function SpecialOfferScreen() {
             <View style={styles.wheelShadowBase} />
 
             {/* Top Indicator Triangle Arrow */}
-            <View style={styles.pointerContainer}>
+            <Animated.View
+              style={[
+                styles.pointerContainer,
+                {
+                  transform: [
+                    { translateY: -6 },
+                    { rotate: pointerRotateInterpolate },
+                    { translateY: 6 },
+                  ],
+                },
+              ]}
+            >
               <Svg width={28} height={28} viewBox="0 0 28 28">
                 <Polygon points="0,0 28,0 14,26" fill="#2563EB" />
               </Svg>
-            </View>
+            </Animated.View>
 
-            {/* Rotating Wheel Disk */}
+            {/* Rotating Wheel Disk (Hardware Texture Cached for 60/120fps) */}
             <Animated.View
+              renderToHardwareTextureAndroid={true}
+              shouldRasterizeIOS={true}
               style={[
                 styles.wheelDisk,
                 { transform: [{ rotate: spinInterpolate }] },
               ]}
             >
-              <Svg width={WHEEL_SIZE} height={WHEEL_SIZE} viewBox={`0 0 ${WHEEL_SIZE} ${WHEEL_SIZE}`}>
-                {/* Outer Ring Circle */}
-                <Circle
-                  cx={CX}
-                  cy={CY}
-                  r={RADIUS - 2}
-                  fill="#FFFFFF"
-                  stroke="#E2E8F0"
-                  strokeWidth={4}
-                />
-
-                {/* Slices */}
-                {SLICES.map((slice, i) => {
-                  const anglePerSlice = 360 / SLICES.length;
-                  const startAngle = i * anglePerSlice - anglePerSlice / 2;
-                  const endAngle = startAngle + anglePerSlice;
-                  const path = describeArc(CX, CY, RADIUS - 4, startAngle, endAngle);
-
-                  // Position for slice text
-                  const midAngle = i * anglePerSlice;
-                  const textPos = polarToCartesian(CX, CY, RADIUS * 0.65, midAngle);
-
-                  return (
-                    <G key={slice.id}>
-                      <Path
-                        d={path}
-                        fill={slice.bgColor}
-                        stroke="#E2E8F0"
-                        strokeWidth={1}
-                      />
-                      <SvgText
-                        x={textPos.x}
-                        y={textPos.y - 6}
-                        fill={slice.textColor}
-                        fontSize={16}
-                        fontWeight="800"
-                        fontFamily={Platform.OS === 'web' ? 'Inter, sans-serif' : 'System'}
-                        textAnchor="middle"
-                        alignmentBaseline="central"
-                        transform={`rotate(${midAngle}, ${textPos.x}, ${textPos.y})`}
-                      >
-                        {slice.label}
-                      </SvgText>
-                      <SvgText
-                        x={textPos.x}
-                        y={textPos.y + 12}
-                        fill={slice.textColor}
-                        fontSize={12}
-                        fontWeight="700"
-                        fontFamily={Platform.OS === 'web' ? 'Inter, sans-serif' : 'System'}
-                        textAnchor="middle"
-                        alignmentBaseline="central"
-                        transform={`rotate(${midAngle}, ${textPos.x}, ${textPos.y})`}
-                      >
-                        {slice.subLabel}
-                      </SvgText>
-                    </G>
-                  );
-                })}
-
-                {/* Center Hub */}
-                <Circle cx={CX} cy={CY} r={36} fill="#E0F2FE" />
-                <Circle cx={CX} cy={CY} r={30} fill="#2563EB" stroke="#FFFFFF" strokeWidth={3} />
-              </Svg>
-
-              {/* Center Gift Icon */}
-              <View style={styles.centerGiftOverlay}>
-                <Ionicons name="gift" size={24} color="#FFFFFF" />
-              </View>
+              <WheelGraphic />
             </Animated.View>
           </View>
 
           {/* Tap to Spin CTA Button */}
           <View style={styles.buttonWrapper}>
             <MayaPrimaryButton
-              label={isSpinning ? 'Spinning...' : hasSpun ? 'Discount Claimed!' : 'Tap to Spin'}
+              label={
+                isSpinning
+                  ? 'Spinning...'
+                  : hasSpun
+                  ? 'Discount Claimed!'
+                  : 'Tap to Spin'
+              }
               onPress={handleSpin}
               disabled={isSpinning || hasSpun}
               loading={isSpinning}
@@ -302,9 +415,15 @@ export default function SpecialOfferScreen() {
 
           {/* Disclaimer with Lock Icon */}
           <View style={styles.disclaimerRow}>
-            <Feather name="lock" size={13} color="#64748B" style={styles.lockIcon} />
+            <Feather
+              name="lock"
+              size={13}
+              color="#64748B"
+              style={styles.lockIcon}
+            />
             <Text style={styles.disclaimerText}>
-              Only one spin per user. Discount will be applied{'\n'}to the 3 Months Premium plan.
+              Only one spin per user. Discount will be applied{'\n'}to the 3
+              Months Premium plan.
             </Text>
           </View>
         </View>
@@ -416,6 +535,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
+    ...Platform.select({
+      web: {
+        willChange: 'transform',
+        backfaceVisibility: 'hidden',
+      } as any,
+      default: {},
+    }),
   },
   centerGiftOverlay: {
     position: 'absolute',
