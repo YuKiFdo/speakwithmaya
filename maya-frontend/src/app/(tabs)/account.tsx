@@ -2,54 +2,33 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   Pressable,
   ScrollView,
   Platform,
   Linking,
-  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { Feather, FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
-import { Radii } from '@/theme/tokens';
-import { Fonts, fontStyle } from '@/theme/fonts';
-import {
-  CrownSolidIcon,
-} from '@/components/icons/nav-icons';
-import {
-  EditPencilIcon,
-  PersonalInfoIcon,
-  LearningGoalsIcon,
-  MayaVoiceIcon,
-  ExplanationLangIcon,
-  SpeakingPrefIcon,
-  NotificationsIcon,
-  PrivacyDataIcon,
-  ClockPracticeIcon,
-  CalendarRenewIcon,
-  UnlimitedChatIcon,
-  AdvancedMemoryIcon,
-  DetailedFeedbackIcon,
-  PriorityVoiceIcon,
-  CustomGoalsIcon,
-  CustomerSupportIcon,
-  AboutAppIcon,
-  ChevronRightIcon,
-} from '@/components/icons/account-icons';
+import { fontStyle } from '@/theme/fonts';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
+import { CrownNavIcon } from '@/components/icons/nav-icons';
+
+const PLAN_CROWN_IMAGE = require('@/assets/images/plan-crown.png');
 
 export default function AccountScreen() {
-  const params = useLocalSearchParams<{ name?: string }>();
+  const params = useLocalSearchParams<{ name?: string; plan?: string; isPro?: string }>();
   const displayName = params.name || 'Tharindu Fernando';
   const { isPhone } = useBreakpoint();
   const isDesktop = !isPhone;
-  const { width: windowWidth } = useWindowDimensions();
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('account');
-  const [isPro, setIsPro] = useState(true);
+  const [isPro, setIsPro] = useState(params.plan === 'pro' || params.isPro === 'true');
   const [activePopup, setActivePopup] = useState<PopupPreset | null>(null);
 
   const handleSelectTab = (tab: DashboardTab) => {
@@ -71,9 +50,7 @@ export default function AccountScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.layoutRoot}>
-        {/* ==================================================================== */}
         {/* DESKTOP SIDEBAR NAVIGATION */}
-        {/* ==================================================================== */}
         {isDesktop && (
           <DesktopSidebar
             activeTab="account"
@@ -84,11 +61,9 @@ export default function AccountScreen() {
           />
         )}
 
-        {/* ==================================================================== */}
         {/* MAIN CONTAINER */}
-        {/* ==================================================================== */}
         <View style={styles.mainContainer}>
-          {/* MOBILE FIXED TOP BAR (PINNED) */}
+          {/* MOBILE FIXED TOP BAR */}
           {!isDesktop && (
             <View style={styles.mobileFixedTopBar}>
               <View>
@@ -145,91 +120,70 @@ export default function AccountScreen() {
               </View>
             )}
 
-            {/* ================================================================ */}
-            {/* DESKTOP 2-COLUMN LAYOUT vs MOBILE 1-COLUMN STACK                */}
-            {/* ================================================================ */}
+            {/* 2-COLUMN DESKTOP vs 1-COLUMN MOBILE LAYOUT */}
             {isDesktop ? (
               <View style={styles.desktopColumnsContainer}>
-                {/* ---------------- LEFT COLUMN ---------------- */}
+                {/* LEFT COLUMN */}
                 <View style={styles.desktopLeftCol}>
                   <ProfileCard
-                    isPro={isPro}
                     name={displayName}
-                    isDesktop={true}
+                    isPro={isPro}
                     onEdit={() => setActivePopup('practice-complete')}
+                    onTogglePlan={() => setIsPro((prev) => !prev)}
+                    onCancelSubscription={() => setActivePopup('level-locked')}
                   />
 
+                  <StatsCard />
+
                   <PreferencesCard onRowPress={(id) => {}} />
+                </View>
+
+                {/* RIGHT COLUMN */}
+                <View style={styles.desktopRightCol}>
+                  <CurrentPlanCard
+                    isPro={isPro}
+                    onTogglePlan={() => setIsPro((prev) => !prev)}
+                    onUpgrade={() => router.push('/upgrade')}
+                    onChangePayment={() => {}}
+                  />
+
+                  <CustomerSupportCard onEmailPress={handleSupportEmail} />
 
                   <AboutCard />
                 </View>
-
-                {/* ---------------- RIGHT COLUMN ---------------- */}
-                <View style={styles.desktopRightCol}>
-                  <PracticeMonthlyCard onManagePlan={() => router.push('/upgrade')} />
-
-                  <ProPlanPerksCard onManagePlan={() => router.push('/upgrade')} />
-
-                  <CustomerSupportCard onEmailPress={handleSupportEmail} />
-                </View>
               </View>
             ) : (
-              /* MOBILE 1-COLUMN STACK (MATCHES SCREENSHOT) */
               <View style={styles.mobileStackContainer}>
                 <ProfileCard
-                  isPro={isPro}
                   name={displayName}
-                  isDesktop={false}
+                  isPro={isPro}
                   onEdit={() => setActivePopup('practice-complete')}
+                  onTogglePlan={() => setIsPro((prev) => !prev)}
+                  onCancelSubscription={() => setActivePopup('level-locked')}
                 />
 
-                <PracticeMonthlyCard onManagePlan={() => router.push('/upgrade')} />
+                <StatsCard />
+
+                <CurrentPlanCard
+                  isPro={isPro}
+                  onTogglePlan={() => setIsPro((prev) => !prev)}
+                  onUpgrade={() => router.push('/upgrade')}
+                  onChangePayment={() => {}}
+                />
 
                 <PreferencesCard onRowPress={(id) => {}} />
 
-                <ProPlanPerksCard onManagePlan={() => router.push('/upgrade')} />
-
-                <AboutCard />
-
                 <CustomerSupportCard onEmailPress={handleSupportEmail} />
 
-                {/* MOBILE UPGRADE TO PRO BANNER */}
-                <View style={styles.mobileUpgradeCard}>
-                  <View style={styles.mobileUpgradeHeaderRow}>
-                    <CrownSolidIcon size={18} color="#D97706" />
-                    <Text style={styles.mobileUpgradeTitle}>Upgrade to Pro</Text>
-                    <View style={styles.hotBadge}>
-                      <Text style={styles.hotBadgeText}>Hot</Text>
-                    </View>
-                  </View>
-
-                  <Text style={styles.mobileUpgradeSubtitle}>
-                    Unlock unlimited conversations, advanced AI feedback and premium features.
-                  </Text>
-
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.mobileUpgradeBtn,
-                      pressed && styles.cardPressed,
-                    ]}
-                    onPress={() => router.push('/upgrade')}
-                  >
-                    <Text style={styles.mobileUpgradeBtnText}>Upgrade Now →</Text>
-                  </Pressable>
-                </View>
+                <AboutCard />
               </View>
             )}
 
-            {/* Bottom scroll clearance */}
             <View style={{ height: isDesktop ? 40 : 80 }} />
           </ScrollView>
         </View>
 
-
-
-        {/* ==================================================================== */}
         {/* POPUP MODAL */}
-        {/* ==================================================================== */}
         <CommonPopup
           visible={activePopup !== null}
           preset={activePopup || 'unlock-premium'}
@@ -256,13 +210,15 @@ export default function AccountScreen() {
 function ProfileCard({
   name,
   isPro,
-  isDesktop,
   onEdit,
+  onTogglePlan,
+  onCancelSubscription,
 }: {
   name: string;
   isPro: boolean;
-  isDesktop: boolean;
   onEdit: () => void;
+  onTogglePlan?: () => void;
+  onCancelSubscription: () => void;
 }) {
   return (
     <View style={styles.cardContainer}>
@@ -281,94 +237,104 @@ function ProfileCard({
               onPress={onEdit}
               hitSlop={8}
             >
-              <EditPencilIcon size={13} color="#0057FF" />
+              <Feather name="edit-2" size={13} color="#2563EB" />
               <Text style={styles.editBtnText}>Edit</Text>
             </Pressable>
           </View>
 
           <Text style={styles.memberSinceText}>Member since May 20, 2026</Text>
 
-          {isPro && (
-            <View style={styles.proPlanPill}>
-              <Text style={styles.proPlanPillText}>Pro Plan</Text>
-            </View>
-          )}
-        </View>
+          <View style={styles.profileBadgesRow}>
+            <Pressable
+              onPress={onTogglePlan}
+              hitSlop={8}
+              style={({ pressed }) => [styles.proPlanPill, pressed && styles.cardPressed]}
+            >
+              <Text style={styles.proPlanPillText}>
+                {isPro ? 'Pro Plan' : 'Starter Plan'}
+              </Text>
+            </Pressable>
 
-        {/* Mobile Right Chevron */}
-        {!isDesktop && (
-          <View style={styles.profileChevron}>
-            <ChevronRightIcon size={18} color="#94A3B8" />
+            <Pressable
+              onPress={onCancelSubscription}
+              hitSlop={8}
+              style={({ pressed }) => [pressed && styles.cardPressed]}
+            >
+              <Text style={styles.cancelSubText}>Cancel Subscription</Text>
+            </Pressable>
           </View>
-        )}
+        </View>
       </View>
     </View>
   );
 }
 
 /**
- * 2. Settings & Preferences Card (7 Items)
+ * 2. Stats Row Card (3 Columns: XP, Level, Lessons Completed)
  */
-interface PreferenceItem {
-  id: string;
-  iconBg: string;
-  icon: React.ReactNode;
-  title: string;
-  subtitle: string;
-  value?: string;
+function StatsCard() {
+  return (
+    <View style={[styles.cardContainer, styles.statsCardPadding]}>
+      <View style={styles.statsRow}>
+        <View style={styles.statCol}>
+          <Feather name="zap" size={22} color="#2563EB" />
+          <Text style={styles.statNumberText}>1,250 XP</Text>
+          <Text style={styles.statLabelText}>Keep practicing!</Text>
+        </View>
+
+        <View style={styles.statDivider} />
+
+        <View style={styles.statCol}>
+          <Feather name="bar-chart-2" size={22} color="#2563EB" />
+          <Text style={styles.statNumberText}>Level 7</Text>
+          <Text style={styles.statLabelText}>You're doing great</Text>
+        </View>
+
+        <View style={styles.statDivider} />
+
+        <View style={styles.statCol}>
+          <Feather name="book-open" size={22} color="#2563EB" />
+          <Text style={styles.statNumberText}>24</Text>
+          <Text style={styles.statLabelText}>Lessons Completed</Text>
+        </View>
+      </View>
+    </View>
+  );
 }
 
+/**
+ * 3. Settings & Preferences Card (4 Items)
+ */
 function PreferencesCard({ onRowPress }: { onRowPress: (id: string) => void }) {
-  const PREFERENCES: PreferenceItem[] = [
-    {
-      id: 'personal-info',
-      iconBg: '#F3E8FF',
-      icon: <PersonalInfoIcon size={18} color="#9333EA" />,
-      title: 'Personal Information',
-      subtitle: 'Update your name, email and basic details.',
-    },
-    {
-      id: 'learning-goals',
-      iconBg: '#FFEDD5',
-      icon: <LearningGoalsIcon size={18} color="#EA580C" />,
-      title: 'Learning Goals',
-      subtitle: 'Update your English goals and learning focus.',
-    },
-    {
-      id: 'maya-voice',
-      iconBg: '#FCE7F3',
-      icon: <MayaVoiceIcon size={18} color="#DB2777" />,
-      title: "Maya's Voice & Personality",
-      subtitle: 'Choose voice, speaking style and personality.',
-    },
+  const PREFERENCES = [
     {
       id: 'explanation-lang',
       iconBg: '#DCFCE7',
-      icon: <ExplanationLangIcon size={18} color="#16A34A" />,
+      icon: <Ionicons name="globe-outline" size={19} color="#16A34A" />,
       title: 'Explanation Language',
       subtitle: 'Choose the language Maya uses for explanations.',
       value: 'Sinhala',
     },
     {
       id: 'speaking-pref',
-      iconBg: '#FEF3C7',
-      icon: <SpeakingPrefIcon size={18} color="#D97706" />,
+      iconBg: '#FFEDD5',
+      icon: <Feather name="activity" size={18} color="#EA580C" />,
       title: 'Speaking Preferences',
-      subtitle: 'Set speaking speed, feedback style and more.',
-      value: 'Normal Speed • ...',
+      subtitle: 'Set speaking speed, feedback style and mo...',
+      value: 'Normal Speed',
     },
     {
       id: 'notifications',
-      iconBg: '#E0F2FE',
-      icon: <NotificationsIcon size={18} color="#0284C7" />,
+      iconBg: '#F3E8FF',
+      icon: <Feather name="bell" size={18} color="#9333EA" />,
       title: 'Notifications & Reminders',
       subtitle: 'Manage daily reminders and important alerts.',
       value: '7:00 PM Daily',
     },
     {
       id: 'privacy-data',
-      iconBg: '#EEF2FF',
-      icon: <PrivacyDataIcon size={18} color="#4F46E5" />,
+      iconBg: '#E0F2FE',
+      icon: <Feather name="shield" size={18} color="#0284C7" />,
       title: 'Privacy & Data',
       subtitle: 'Manage your data and privacy settings.',
     },
@@ -387,12 +353,10 @@ function PreferencesCard({ onRowPress }: { onRowPress: (id: string) => void }) {
               ]}
               onPress={() => onRowPress(item.id)}
             >
-              {/* Colored Circular Icon */}
               <View style={[styles.prefIconCircle, { backgroundColor: item.iconBg }]}>
                 {item.icon}
               </View>
 
-              {/* Text Info */}
               <View style={styles.prefTextCol}>
                 <Text style={styles.prefTitleText}>{item.title}</Text>
                 <Text style={styles.prefSubtitleText} numberOfLines={1}>
@@ -400,12 +364,11 @@ function PreferencesCard({ onRowPress }: { onRowPress: (id: string) => void }) {
                 </Text>
               </View>
 
-              {/* Right Value & Chevron */}
               <View style={styles.prefRightCol}>
                 {item.value && (
                   <Text style={styles.prefValueText}>{item.value}</Text>
                 )}
-                <ChevronRightIcon size={16} color="#94A3B8" />
+                <Feather name="chevron-right" size={18} color="#94A3B8" />
               </View>
             </Pressable>
 
@@ -418,185 +381,188 @@ function PreferencesCard({ onRowPress }: { onRowPress: (id: string) => void }) {
 }
 
 /**
- * 3. This Month's Practice Card
+ * 4. Your Current Plan Card
+ * Matches Image 1 for Pro Plan (Monthly) and Image 2 for Starter Plan (Daily)
  */
-function PracticeMonthlyCard({ onManagePlan }: { onManagePlan: () => void }) {
-  const percentUsed = 26; // 1h 18m of 5h 00m = ~26%
-
+function CurrentPlanCard({
+  isPro,
+  onTogglePlan,
+  onUpgrade,
+  onChangePayment,
+}: {
+  isPro: boolean;
+  onTogglePlan?: () => void;
+  onUpgrade: () => void;
+  onChangePayment: () => void;
+}) {
   return (
-    <View style={styles.cardContainer}>
-      <Text style={styles.sectionSmallHeading}>This month's practice</Text>
-
-      <View style={styles.practiceHeroRow}>
-        <View style={styles.practiceTimeDisplayRow}>
-          <Text style={styles.practiceTimeBig}>3h 42m</Text>
-          <Text style={styles.practiceTimeLeftText}> left</Text>
+    <View style={styles.currentPlanCardContainer}>
+      {/* Top Header Tag Row */}
+      <View style={styles.planHeaderRow}>
+        <View style={styles.planHeaderLeft}>
+          <Image
+            source={PLAN_CROWN_IMAGE}
+            style={styles.planCrownImg}
+            resizeMode="contain"
+          />
+          <Text style={styles.planHeaderLeftText}>Your Current Plan</Text>
         </View>
 
-        <View style={styles.greenPlanPill}>
-          <Text style={styles.greenPlanPillText}>Pro Plan</Text>
-        </View>
-      </View>
-
-      {/* Progress Bar */}
-      <View style={styles.progressBarTrack}>
-        <View style={[styles.progressBarFill, { width: `${percentUsed}%` }]} />
-      </View>
-
-      <View style={styles.progressLabelsRow}>
-        <Text style={styles.progressSubLabel}>
-          Used: <Text style={styles.progressBoldText}>1h 18m</Text>
-        </Text>
-        <Text style={styles.progressSubLabel}>
-          Total: <Text style={styles.progressBoldText}>5h 00m</Text>
-        </Text>
-      </View>
-
-      {/* Two Sub-Boxes */}
-      <View style={styles.subBoxesRow}>
-        {/* Total practice time */}
-        <View style={styles.subBoxCard}>
-          <View style={styles.subBoxIconCircle}>
-            <ClockPracticeIcon size={18} color="#0057FF" />
-          </View>
-          <Text style={styles.subBoxLabel}>Total practice time</Text>
-          <Text style={styles.subBoxValue}>5 Hours</Text>
-          <Text style={styles.subBoxSubtext}>300 minutes this month</Text>
-        </View>
-
-        {/* Plan renews on */}
-        <View style={styles.subBoxCard}>
-          <View style={styles.subBoxIconCircle}>
-            <CalendarRenewIcon size={18} color="#0057FF" />
-          </View>
-          <Text style={styles.subBoxLabel}>Plan renews on</Text>
-          <Text style={styles.subBoxValue}>25 Jun 2026</Text>
-          <Text style={styles.subBoxSubtext}>12 days remaining</Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-/**
- * 4. Your Pro Plan Card (Perks & Features)
- */
-function ProPlanPerksCard({ onManagePlan }: { onManagePlan: () => void }) {
-  const PERKS = [
-    {
-      id: 'perk-1',
-      icon: <UnlimitedChatIcon size={18} color="#0057FF" />,
-      label: 'Unlimited\nconversations',
-    },
-    {
-      id: 'perk-2',
-      icon: <AdvancedMemoryIcon size={18} color="#0057FF" />,
-      label: 'Advanced\nAI memory',
-    },
-    {
-      id: 'perk-3',
-      icon: <DetailedFeedbackIcon size={18} color="#0057FF" />,
-      label: 'Detailed feedback\n& corrections',
-    },
-    {
-      id: 'perk-4',
-      icon: <PriorityVoiceIcon size={18} color="#0057FF" />,
-      label: 'Priority voice\naccess',
-    },
-    {
-      id: 'perk-5',
-      icon: <CustomGoalsIcon size={18} color="#0057FF" />,
-      label: 'Custom learning\ngoals',
-    },
-  ];
-
-  return (
-    <View style={styles.cardContainer}>
-      <View style={styles.perksHeaderRow}>
-        <Text style={styles.cardHeaderTitle}>Your Pro Plan</Text>
+        {/* Top-Right Badge: Tapping toggles between Starter & Pro preview */}
         <Pressable
-          style={({ pressed }) => [pressed && styles.cardPressed]}
-          onPress={onManagePlan}
+          onPress={onTogglePlan}
           hitSlop={8}
+          style={({ pressed }) => [
+            styles.starterBadgePill,
+            pressed && styles.cardPressed,
+          ]}
         >
-          <Text style={styles.managePlanText}>☆ Manage Plan</Text>
+          <Text style={styles.starterBadgeText}>
+            {isPro ? 'Pro Plan' : 'Starter Plan'}
+          </Text>
         </Pressable>
       </View>
 
-      {/* 5 Icons Row */}
-      <View style={styles.perksIconsRow}>
-        {PERKS.map((perk) => (
-          <View key={perk.id} style={styles.perkItemCol}>
-            <View style={styles.perkIconCircle}>
-              {perk.icon}
-            </View>
-            <Text style={styles.perkItemLabel} numberOfLines={2}>
-              {perk.label}
-            </Text>
-          </View>
-        ))}
-      </View>
-
-      {/* Blue Banner Pill */}
-      <View style={styles.perkBannerPill}>
-        <Text style={styles.perkBannerPillText}>
-          ★ You are enjoying all Pro Plan benefits.
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-/**
- * 5. About TalkWithMaya Card
- */
-function AboutCard() {
-  return (
-    <View style={styles.cardContainer}>
-      <View style={styles.aboutHeaderRow}>
-        <View style={styles.aboutTitleRow}>
-          <AboutAppIcon size={24} />
-          <Text style={styles.aboutAppTitle}>About TalkWithMaya</Text>
-        </View>
-
-        <View style={styles.mayaLogoRow}>
-          <Text style={styles.mayaLogoText}>Maya</Text>
-          <Text style={styles.mayaTaglineText}>● Your English Partner</Text>
-        </View>
-      </View>
-
-      <Text style={styles.aboutDescriptionText}>
-        TalkWithMaya is your AI English partner that helps you speak with confidence in real-life situations.
+      {/* Main Title & Subtitle */}
+      <Text style={styles.planMainTitle}>
+        {isPro ? 'Pro Plan (Monthly)' : 'Starter Plan (Daily)'}
+      </Text>
+      <Text style={styles.planMainSubtitle}>
+        Perfect for getting started with Maya.
       </Text>
 
-      <Text style={styles.versionText}>Version 1.0.0</Text>
+      {/* Table Information Rows */}
+      <View style={styles.planInfoTable}>
+        {/* Row 1: Current Plan */}
+        <View style={styles.planInfoRow}>
+          <Text style={styles.planInfoLabel}>Current Plan</Text>
+          <View style={styles.planInfoValueCol}>
+            <Text style={styles.planInfoValue}>
+              {isPro ? 'Pro Plan' : 'Starter Plan'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Row 2: Billing Date / Registered Date */}
+        <View style={styles.planInfoRow}>
+          <Text style={styles.planInfoLabel}>
+            {isPro ? 'Next Billing Date' : 'Registered Date'}
+          </Text>
+          <View style={styles.planInfoValueCol}>
+            <Text style={styles.planInfoValue}>25 Jun 2026</Text>
+          </View>
+        </View>
+
+        {/* Row 3: Payment Method (Image 1) OR Mobile Number (Image 2) */}
+        {isPro ? (
+          <View style={styles.planInfoRow}>
+            <Text style={styles.planInfoLabel}>Payment Method</Text>
+            <View style={styles.paymentMethodRow}>
+              <View style={styles.paymentCardInfo}>
+                <Ionicons
+                  name="card-outline"
+                  size={16}
+                  color="#2563EB"
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={styles.planInfoValue}>•••• 4582</Text>
+              </View>
+              <Pressable
+                onPress={onChangePayment}
+                hitSlop={8}
+                style={({ pressed }) => [pressed && styles.cardPressed]}
+              >
+                <Text style={styles.changePaymentText}>Change</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.planInfoRow}>
+            <Text style={styles.planInfoLabel}>Mobile Number</Text>
+            <View style={styles.planInfoValueCol}>
+              <Text style={styles.planInfoValue}>077 1234567</Text>
+            </View>
+          </View>
+        )}
+      </View>
+
+      {/* Thin Horizontal Divider Line above button */}
+      <View style={styles.planCardDivider} />
+
+      {/* Upgrade to Pro Button */}
+      <Pressable
+        onPress={onUpgrade}
+        style={({ pressed }) => [
+          styles.planUpgradeBtn,
+          
+          pressed && styles.buttonPressed,
+        ]}
+      >
+        <CrownNavIcon
+          color="#FFFFFF"
+          size={19}
+        />
+        <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>Upgrade to Pro</Text>
+        <Feather
+          name="chevron-right"
+          size={18}
+          color="#FFFFFF"
+          style={{ marginLeft: 6 }}
+        />
+      </Pressable>
     </View>
   );
 }
 
 /**
- * 6. Customer Support Card
+ * 5. Customer Support Card
  */
 function CustomerSupportCard({ onEmailPress }: { onEmailPress: () => void }) {
   return (
     <View style={styles.cardContainer}>
-      <View style={styles.supportRow}>
+      <Pressable
+        style={({ pressed }) => [styles.supportRow, pressed && styles.cardPressed]}
+        onPress={onEmailPress}
+      >
         <View style={styles.supportIconCircle}>
-          <CustomerSupportIcon size={20} color="#0057FF" />
+          <Feather name="headphones" size={20} color="#2563EB" />
         </View>
 
         <View style={styles.supportTextCol}>
           <Text style={styles.supportTitle}>Customer Support</Text>
           <Text style={styles.supportSubtitle}>
-            We're here to help you with any questions or issues you may have.
+            We're here to help you with any questions or issues.
           </Text>
-          <Pressable
-            style={({ pressed }) => [pressed && styles.cardPressed]}
-            onPress={onEmailPress}
-            hitSlop={6}
-          >
-            <Text style={styles.supportEmailLink}>support@talkwithmaya.com</Text>
-          </Pressable>
+          <Text style={styles.supportEmailLink}>support@talkwithmaya.com</Text>
+        </View>
+
+        <Feather name="chevron-right" size={18} color="#94A3B8" />
+      </Pressable>
+    </View>
+  );
+}
+
+/**
+ * 6. About TalkWithMaya Card
+ */
+function AboutCard() {
+  return (
+    <View style={styles.cardContainer}>
+      <View style={styles.aboutRow}>
+        <View style={styles.aboutLeftCol}>
+          <Text style={styles.aboutAppTitle}>About TalkWithMaya</Text>
+          <Text style={styles.aboutDescriptionText}>
+            SpeakWithMaya is your AI English partner that helps you speak with confidence in real-life situations.
+          </Text>
+          <Text style={styles.versionText}>Version 1.0.0</Text>
+        </View>
+
+        <View style={styles.aboutRightCol}>
+          <Text style={styles.mayaBrandText}>Maya</Text>
+          <View style={styles.partnerDotRow}>
+            <View style={styles.partnerBlueDot} />
+            <Text style={styles.partnerText}>Your English Partner</Text>
+          </View>
         </View>
       </View>
     </View>
@@ -606,7 +572,7 @@ function CustomerSupportCard({ onEmailPress }: { onEmailPress: () => void }) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FFFFFF',
   },
   layoutRoot: {
     flex: 1,
@@ -631,9 +597,9 @@ const styles = StyleSheet.create({
   },
   mainScrollContentDesktop: {
     paddingHorizontal: 38,
-    paddingTop: 24,
+    paddingTop: 28,
     paddingBottom: 40,
-    maxWidth: 1400,
+    maxWidth: 1300,
     alignSelf: 'center',
     width: '100%',
     flexGrow: 1,
@@ -644,19 +610,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 26,
   },
   headingTitle: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 32,
-    color: '#0F172A',
-    letterSpacing: -0.4,
+    fontSize: 28,
+    color: '#10213D',
+    letterSpacing: -0.5,
+    ...fontStyle('inter', 'bold'),
   },
   headingSubtitle: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 14.5,
+    fontSize: 14,
     color: '#64748B',
     marginTop: 4,
+    ...fontStyle('inter', 'regular'),
   },
 
   /* Mobile Fixed Top Bar */
@@ -666,81 +632,88 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 2,
+    paddingBottom: 4,
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FFFFFF',
     zIndex: 10,
   },
   brandTitleMobile: {
-    ...fontStyle('outfit', 'extraBold'),
     fontSize: 18,
-    color: '#0F172A',
+    color: '#10213D',
+    ...fontStyle('inter', 'extraBold'),
   },
   brandAccent: {
-    color: '#0057FF',
+    color: '#2563EB',
   },
   brandTaglineMobile: {
-    fontFamily: Fonts.outfit.regular,
     fontSize: 10.5,
-    color: '#94a3b8',
+    color: '#94A3B8',
+    ...fontStyle('inter', 'regular'),
   },
   mobileHeadingSection: {
     marginTop: 8,
     marginBottom: 16,
   },
   headingTitleMobile: {
-    ...fontStyle('outfit', 'bold'),
     fontSize: 26,
-    color: '#0F172A',
+    color: '#10213D',
     letterSpacing: -0.3,
+    ...fontStyle('inter', 'bold'),
   },
   headingSubtitleMobile: {
-    fontFamily: Fonts.outfit.regular,
     fontSize: 13,
     color: '#64748B',
     marginTop: 3,
+    ...fontStyle('inter', 'regular'),
   },
 
   /* Desktop 2 Columns */
   desktopColumnsContainer: {
     flexDirection: 'row',
-    gap: 22,
+    gap: 20,
     alignItems: 'flex-start',
   },
   desktopLeftCol: {
     flex: 1.05,
-    gap: 18,
+    gap: 16,
   },
   desktopRightCol: {
     flex: 0.95,
-    gap: 18,
+    gap: 16,
   },
 
   /* Mobile 1 Column Stack */
   mobileStackContainer: {
-    gap: 16,
+    gap: 14,
   },
 
   /* Common Card Container */
   cardContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#F1F5F9',
+    borderColor: '#E2E8F0',
     padding: 20,
-    ...(Platform.OS === 'web'
-      ? ({ boxShadow: '0px 2px 10px rgba(0, 0, 0, 0.02)' } as any)
-      : {
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.03,
-          shadowRadius: 6,
-          elevation: 1,
-        }),
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.02)',
+      } as any,
+      default: {
+        elevation: 1,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.03,
+        shadowRadius: 6,
+      },
+    }),
   },
   cardPressed: {
     opacity: 0.8,
+  },
+  buttonPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.99 }],
   },
 
   /* Profile Card */
@@ -750,17 +723,17 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   avatarInitialsCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: '#0057FF',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitialsText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 19,
+    fontSize: 20,
     color: '#FFFFFF',
+    ...fontStyle('inter', 'extraBold'),
   },
   profileInfoCol: {
     flex: 1,
@@ -771,9 +744,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   profileNameText: {
-    ...fontStyle('outfit', 'bold'),
     fontSize: 17,
-    color: '#0F172A',
+    color: '#10213D',
+    ...fontStyle('inter', 'bold'),
   },
   editBtn: {
     flexDirection: 'row',
@@ -783,45 +756,82 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   editBtnText: {
-    ...fontStyle('outfit', 'semiBold'),
-    fontSize: 12.5,
-    color: '#0057FF',
+    fontSize: 13,
+    color: '#2563EB',
+    ...fontStyle('inter', 'semiBold'),
   },
   memberSinceText: {
-    fontFamily: Fonts.outfit.regular,
     fontSize: 12.5,
     color: '#64748B',
     marginTop: 2,
-    marginBottom: 6,
+    marginBottom: 8,
+    ...fontStyle('inter', 'regular'),
+  },
+  profileBadgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   proPlanPill: {
-    alignSelf: 'flex-start',
     backgroundColor: '#EFF6FF',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
   proPlanPillText: {
-    ...fontStyle('outfit', 'semiBold'),
-    fontSize: 11,
-    color: '#0057FF',
+    fontSize: 11.5,
+    color: '#2563EB',
+    ...fontStyle('inter', 'bold'),
   },
-  profileChevron: {
-    paddingLeft: 4,
+  cancelSubText: {
+    fontSize: 11.5,
+    color: '#EF4444',
+    marginLeft: 14,
+    ...fontStyle('inter', 'semiBold'),
+  },
+
+  /* Stats Card */
+  statsCardPadding: {
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  statCol: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statNumberText: {
+    fontSize: 17,
+    color: '#10213D',
+    marginTop: 6,
+    marginBottom: 2,
+    ...fontStyle('inter', 'bold'),
+  },
+  statLabelText: {
+    fontSize: 11,
+    color: '#64748B',
+    ...fontStyle('inter', 'regular'),
+  },
+  statDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: '#E2E8F0',
   },
 
   /* Preferences List Card */
   preferenceRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   prefIconCircle: {
     width: 38,
     height: 38,
-    borderRadius: 19,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
@@ -831,15 +841,15 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   prefTitleText: {
-    ...fontStyle('outfit', 'bold'),
     fontSize: 14,
-    color: '#0F172A',
+    color: '#10213D',
+    ...fontStyle('inter', 'bold'),
   },
   prefSubtitleText: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 12,
+    fontSize: 11.5,
     color: '#64748B',
     marginTop: 2,
+    ...fontStyle('inter', 'regular'),
   },
   prefRightCol: {
     flexDirection: 'row',
@@ -847,317 +857,256 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   prefValueText: {
-    fontFamily: Fonts.outfit.regular,
     fontSize: 12.5,
     color: '#64748B',
+    ...fontStyle('inter', 'medium'),
   },
   prefDivider: {
     height: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#F1F5F9',
     marginLeft: 52,
   },
 
-  /* Practice Monthly Card */
-  sectionSmallHeading: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 12.5,
-    color: '#64748B',
+  /* Current Plan Card */
+  currentPlanCardContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#EDF2F7',
+    paddingHorizontal: 28,
+    paddingTop: 24,
+    paddingBottom: 24,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 3px 12px 0px #1A366906',
+      } as any,
+      default: {
+        elevation: 2,
+        shadowColor: '#1A3669',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.04,
+        shadowRadius: 12,
+      },
+    }),
   },
-  practiceHeroRow: {
+  planCrownImg: {
+    width: 22,
+    height: 22,
+  },
+  planHeaderRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 6,
-    marginBottom: 12,
-  },
-  practiceTimeDisplayRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  practiceTimeBig: {
-    ...fontStyle('outfit', 'extraBold'),
-    fontSize: 32,
-    color: '#0F172A',
-    letterSpacing: -0.5,
-  },
-  practiceTimeLeftText: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 16,
-    color: '#64748B',
-  },
-  greenPlanPill: {
-    backgroundColor: '#10B981',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  greenPlanPillText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 11,
-    color: '#FFFFFF',
-  },
-  progressBarTrack: {
-    height: 8,
-    backgroundColor: '#E2E8F0',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#0057FF',
-    borderRadius: 4,
-  },
-  progressLabelsRow: {
-    flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 8,
     marginBottom: 16,
   },
-  progressSubLabel: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 12,
-    color: '#64748B',
-  },
-  progressBoldText: {
-    ...fontStyle('outfit', 'bold'),
-    color: '#0F172A',
-  },
-  subBoxesRow: {
+  planHeaderLeft: {
     flexDirection: 'row',
-    gap: 12,
+    alignItems: 'center',
+    gap: 8,
   },
-  subBoxCard: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 14,
-    padding: 14,
+  planHeaderLeftText: {
+    fontSize: 14,
+    color: '#0055FF',
+    ...fontStyle('inter', 'bold'),
+  },
+  starterBadgePill: {
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#F1F5F9',
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
   },
-  subBoxIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: '#EFF6FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
+  starterBadgeText: {
+    fontSize: 12,
+    color: '#0055FF',
+    ...fontStyle('inter', 'semiBold'),
   },
-  subBoxLabel: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 11.5,
-    color: '#64748B',
-  },
-  subBoxValue: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 15,
-    color: '#0057FF',
-    marginTop: 2,
-    marginBottom: 2,
-  },
-  subBoxSubtext: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 10.5,
-    color: '#94A3B8',
-  },
-
-  /* Pro Plan Perks Card */
-  perksHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 18,
-  },
-  cardHeaderTitle: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 16,
+  planMainTitle: {
+    fontSize: 24,
     color: '#0F172A',
+    letterSpacing: -0.4,
+    marginBottom: 6,
+    ...fontStyle('inter', 'bold'),
   },
-  managePlanText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 13,
-    color: '#0057FF',
+  planMainSubtitle: {
+    fontSize: 14,
+    color: '#64748B',
+    marginBottom: 24,
+    ...fontStyle('inter', 'regular'),
   },
-  perksIconsRow: {
+  planInfoTable: {
+    gap: 16,
+  },
+  planInfoRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 18,
+    alignItems: 'center',
   },
-  perkItemCol: {
+  planInfoLabel: {
+    width: 140,
+    fontSize: 13.5,
+    color: '#64748B',
+    ...fontStyle('inter', 'regular'),
+  },
+  planInfoValueCol: {
     flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 2,
-  },
-  perkIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#EFF6FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  perkItemLabel: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 10.5,
-    color: '#64748B',
-    textAlign: 'center',
-    lineHeight: 14,
-  },
-  perkBannerPill: {
-    backgroundColor: '#EFF6FF',
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  perkBannerPillText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 12.5,
-    color: '#0057FF',
-    textAlign: 'center',
-  },
-
-  /* About Card */
-  aboutHeaderRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+  },
+  planInfoValue: {
+    fontSize: 14,
+    color: '#0F172A',
+    ...fontStyle('inter', 'bold'),
+  },
+  paymentMethodRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
   },
-  aboutTitleRow: {
+  paymentCardInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
   },
-  aboutAppTitle: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 15,
-    color: '#0F172A',
+  changePaymentText: {
+    fontSize: 13.5,
+    color: '#0055FF',
+    ...fontStyle('inter', 'semiBold'),
   },
-  mayaLogoRow: {
-    alignItems: 'flex-end',
+  planCardDivider: {
+    height: 1,
+    backgroundColor: '#EEF2F6',
+    marginTop: 22,
+    marginBottom: 20,
+    width: '100%',
   },
-  mayaLogoText: {
-    ...fontStyle('outfit', 'extraBold'),
-    fontSize: 18,
-    fontStyle: 'italic',
-    color: '#0F172A',
+  planUpgradeBtn: {
+    width: '100%',
+    height: 52,
+    backgroundColor: '#1E50FF',
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 8px 24px rgba(30, 80, 255, 0.35)',
+      } as any,
+      default: {
+        elevation: 4,
+        shadowColor: '#1E50FF',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 10,
+      },
+    }),
   },
-  mayaTaglineText: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 10,
-    color: '#64748B',
-  },
-  aboutDescriptionText: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 13,
-    color: '#64748B',
-    lineHeight: 19,
-    marginBottom: 10,
-  },
-  versionText: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 11,
-    color: '#94A3B8',
+  planUpgradeBtnText: {
+    fontSize: 15.5,
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+    ...fontStyle('inter', 'bold'),
   },
 
   /* Customer Support Card */
   supportRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 14,
+    alignItems: 'center',
   },
   supportIconCircle: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 14,
     backgroundColor: '#EFF6FF',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 14,
   },
   supportTextCol: {
     flex: 1,
+    marginRight: 10,
   },
   supportTitle: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 15,
-    color: '#0F172A',
-    marginBottom: 3,
+    fontSize: 14,
+    color: '#10213D',
+    marginBottom: 2,
+    ...fontStyle('inter', 'bold'),
   },
   supportSubtitle: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 12.5,
+    fontSize: 11.5,
     color: '#64748B',
-    lineHeight: 17,
-    marginBottom: 6,
+    marginBottom: 3,
+    ...fontStyle('inter', 'regular'),
   },
   supportEmailLink: {
-    ...fontStyle('outfit', 'semiBold'),
-    fontSize: 13,
-    color: '#0057FF',
+    fontSize: 12,
+    color: '#2563EB',
+    ...fontStyle('inter', 'semiBold'),
   },
 
-  /* Mobile Upgrade Card */
-  mobileUpgradeCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-    padding: 18,
-    ...(Platform.OS === 'web'
-      ? ({ boxShadow: '0px 2px 10px rgba(0, 0, 0, 0.02)' } as any)
-      : {
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.03,
-          shadowRadius: 6,
-          elevation: 1,
-        }),
+  /* About Card */
+  aboutRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
   },
-  mobileUpgradeHeaderRow: {
+  aboutLeftCol: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  aboutAppTitle: {
+    fontSize: 14,
+    color: '#10213D',
+    marginBottom: 4,
+    ...fontStyle('inter', 'bold'),
+  },
+  aboutDescriptionText: {
+    fontSize: 11.5,
+    lineHeight: 17,
+    color: '#64748B',
+    marginBottom: 10,
+    ...fontStyle('inter', 'regular'),
+  },
+  versionText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    ...fontStyle('inter', 'medium'),
+  },
+  aboutRightCol: {
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  mayaBrandText: {
+    fontFamily: Platform.select({
+      ios: 'Georgia',
+      android: 'serif',
+      default: 'Georgia, serif',
+    }),
+    fontWeight: '700',
+    fontStyle: 'italic',
+    fontSize: 28,
+    lineHeight: 42,
+    letterSpacing: 0,
+    color: '#0A2540',
+  },
+  partnerDotRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
+    marginTop: 1,
+    gap: 5,
   },
-  mobileUpgradeTitle: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 16,
-    color: '#0F172A',
+  partnerBlueDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#0055FF',
   },
-  hotBadge: {
-    backgroundColor: '#EF4444',
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+  partnerText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 8,
+    lineHeight: 12,
+    letterSpacing: 0,
+    color: '#737E94',
   },
-  hotBadgeText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 10.5,
-    color: '#FFFFFF',
-  },
-  mobileUpgradeSubtitle: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 12.5,
-    color: '#64748B',
-    lineHeight: 17,
-    marginBottom: 14,
-  },
-  mobileUpgradeBtn: {
-    backgroundColor: '#0057FF',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mobileUpgradeBtnText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 14,
-    color: '#FFFFFF',
-  },
-
 });

@@ -1,5 +1,6 @@
 import React from 'react';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { Ionicons } from '@expo/vector-icons';
 
 export interface NavIconProps {
   active?: boolean;
@@ -10,27 +11,13 @@ export interface NavIconProps {
 export function HomeNavIcon({ active = false, color, size = 24 }: NavIconProps) {
   const activeColor = color || '#2B5BFF';
   const inactiveColor = color || '#9CA3AF';
-  const strokeColor = active ? activeColor : inactiveColor;
-  const fillColor = active ? activeColor : 'none';
 
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M3 9.5L12 3L21 9.5V20C21 20.2652 20.8946 20.5196 20.7071 20.7071C20.5196 20.8946 20.2652 21 20 21H4C3.73478 21 3.48043 20.8946 3.29289 20.7071C3.10536 20.5196 3 20.2652 3 20V9.5Z"
-        fill={fillColor}
-        stroke={strokeColor}
-        strokeWidth={2}
-      />
-      <Path
-        d="M9 21V12H15V21"
-        fill={fillColor}
-      />
-      <Path
-        d="M9 21V12H15V21"
-        stroke={strokeColor}
-        strokeWidth={2}
-      />
-    </Svg>
+    <Ionicons
+      name={active ? 'home' : 'home-outline'}
+      size={size}
+      color={active ? activeColor : inactiveColor}
+    />
   );
 }
 
