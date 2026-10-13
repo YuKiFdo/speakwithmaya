@@ -12,7 +12,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
-import { MayaPrimaryButton } from '@/components/ui';
+import { MayaPrimaryButton, ConfettiOverlay } from '@/components/ui';
 import {
   playAnalysisCompleteSound,
   playOtherButtonSound,
@@ -34,7 +34,7 @@ export default function ClaimDiscountScreen() {
       playOtherButtonSound();
     } catch {}
     router.replace({
-      pathname: '/onboarding/complete' as any,
+      pathname: '/onboarding/personalized-plan' as any,
       params: {
         ...params,
         discountWon: '20-off',
@@ -44,6 +44,9 @@ export default function ClaimDiscountScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* Celebratory Confetti Animation */}
+      <ConfettiOverlay />
+
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,

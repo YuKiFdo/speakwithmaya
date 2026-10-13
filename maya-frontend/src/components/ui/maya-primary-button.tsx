@@ -113,6 +113,8 @@ export interface MayaPrimaryButtonProps {
   label: string;
   onPress?: () => void;
   showArrow?: boolean;
+  icon?: React.ReactNode;
+  iconPosition?: 'left' | 'right';
   disabled?: boolean;
   loading?: boolean;
   playSound?: boolean;
@@ -127,6 +129,8 @@ export function MayaPrimaryButton({
   label,
   onPress,
   showArrow = true,
+  icon,
+  iconPosition = 'left',
   disabled = false,
   loading = false,
   playSound = true,
@@ -179,9 +183,15 @@ export function MayaPrimaryButton({
             <ActivityIndicator size="small" color="#ffffff" />
           ) : (
             <>
+              {icon && iconPosition === 'left' && (
+                <View style={{ marginRight: 8 }}>{icon}</View>
+              )}
               <Text style={[styles.primaryButtonText, textStyle]}>
                 {label}
               </Text>
+              {icon && iconPosition === 'right' && (
+                <View style={{ marginLeft: 8 }}>{icon}</View>
+              )}
               {showArrow && (
                 <Feather
                   name="arrow-right"
