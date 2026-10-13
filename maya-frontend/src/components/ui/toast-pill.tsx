@@ -1,17 +1,27 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Animated,
+  Easing,
   Platform,
   ViewStyle,
   TextStyle,
   Pressable,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
-import Svg, { Path, Circle, Rect, G } from 'react-native-svg';
+import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { Radii } from '@/theme/tokens';
+
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 // ─── SVG ICONS FOR TOAST PILL ────────────────────────────────────────────────
 
@@ -69,7 +79,7 @@ export function ToastMicOffIcon({ color, size = 16 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
-        d="M9 9V11C9 11.28 9.04 11.55 9.11 11.8M15 11C15 11.28 14.96 11.55 14.89 11.8M12 3C10.34 3 9 4.34 9 6V7M15 8V6C15 4.34 13.66 3 12 3Z"
+        d="M9 9V11C9 11.28 9.04 11.55 9.11 11.8M15 11C15 11.28 14.96 14.89 11.8M12 3C10.34 3 9 4.34 9 6V7M15 8V6C15 4.34 13.66 3 12 3Z"
         stroke={color}
         strokeWidth="2"
         strokeLinecap="round"
@@ -371,52 +381,22 @@ const VARIANT_PALETTES: Record<
 // ─── PROPS ────────────────────────────────────────────────────────────────────
 
 export interface ToastPillProps {
-  /**
-   * Predefined preset from Figma design
-   */
   preset?: ToastPillPreset;
-
-  /**
-   * Custom text to display (overrides preset text).
-   * E.g. "The session ends in 4 seconds"
-   */
   text?: string;
-
-  /**
-   * Optional countdown seconds, dynamically formatted into "Session ends in X seconds"
-   */
   secondsRemaining?: number;
-
-  /**
-   * Custom variant override ('warning' | 'error' | 'info')
-   */
   variant?: ToastVariant;
-
-  /**
-   * Custom icon element
-   */
   icon?: React.ReactNode;
-
-  /**
-   * Controls visibility with smooth fade in/out
-   */
   visible?: boolean;
-
-  /**
-   * Optional press handler
-   */
   onPress?: () => void;
-
-  /**
-   * Custom container style overrides
-   */
   style?: ViewStyle;
-
-  /**
-   * Custom text style overrides
-   */
   textStyle?: TextStyle;
 }
+
+const PILL_MORPH_ANIM = LayoutAnimation.create(
+  180,
+  LayoutAnimation.Types.easeInEaseOut,
+  LayoutAnimation.Properties.opacity
+);
 
 /**
  * ToastPill: Common pill notification component matching Figma design
@@ -433,32 +413,178 @@ export function ToastPill({
   style,
   textStyle,
 }: ToastPillProps) {
-  const config = TOAST_PRESET_CONFIGS[preset] || TOAST_PRESET_CONFIGS['session-ends'];
+  const useNative = Platform.OS !== 'web';
+  const [shouldRender, setShouldRender] = useState(visible);
+
+  const config =
+    TOAST_PRESET_CONFIGS[preset] || TOAST_PRESET_CONFIGS['session-ends'];
   const variant = propVariant || config.variant;
   const palette = VARIANT_PALETTES[variant];
 
   // Resolve display text:
   let displayText = text || config.text;
-  if (preset === 'session-ends' && typeof secondsRemaining === 'number') {
-    displayText = `The session ends in ${secondsRemaining} second${secondsRemaining === 1 ? '' : 's'}`;
+  if (
+    preset === 'session-ends' &&
+    typeof secondsRemaining === 'number' &&
+    !text
+  ) {
+    displayText = `The session ends in ${secondsRemaining} second${
+      secondsRemaining === 1 ? '' : 's'
+    }`;
   }
 
-  // Fade animation
-  const opacityAnim = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  // Entrance / Exit animations (starts at 0 so conditional mounting always animates in!)
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.92)).current;
+  const translateYAnim = useRef(new Animated.Value(-8)).current;
 
+  // Icon micro-animations (spin for reconnecting, pulse for thinking/countdown)
+  const iconSpinAnim = useRef(new Animated.Value(0)).current;
+  const iconPulseAnim = useRef(new Animated.Value(1)).current;
+
+  // 1. Mount / Visibility Entrance & Exit
   useEffect(() => {
-    Animated.timing(opacityAnim, {
-      toValue: visible ? 1 : 0,
-      duration: 220,
-      useNativeDriver: Platform.OS !== 'web',
-    }).start();
-  }, [visible, opacityAnim]);
+    if (visible) {
+      setShouldRender(true);
+      Animated.parallel([
+        Animated.timing(opacityAnim, {
+          toValue: 1,
+          duration: 200,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: useNative,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          tension: 110,
+          friction: 8,
+          useNativeDriver: useNative,
+        }),
+        Animated.spring(translateYAnim, {
+          toValue: 0,
+          tension: 110,
+          friction: 8,
+          useNativeDriver: useNative,
+        }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(opacityAnim, {
+          toValue: 0,
+          duration: 160,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 0.94,
+          duration: 160,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(translateYAnim, {
+          toValue: -6,
+          duration: 160,
+          useNativeDriver: useNative,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) {
+          setShouldRender(false);
+        }
+      });
+    }
+  }, [visible, opacityAnim, scaleAnim, translateYAnim, useNative]);
 
-  if (!visible && (opacityAnim as any)._value === 0) {
+  // 2. Smooth morph pop when switching between different presets while already visible
+  const prevPresetRef = useRef(preset);
+  useEffect(() => {
+    if (visible && prevPresetRef.current !== preset) {
+      prevPresetRef.current = preset;
+      LayoutAnimation.configureNext(PILL_MORPH_ANIM);
+      scaleAnim.setValue(0.95);
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 130,
+        friction: 7,
+        useNativeDriver: useNative,
+      }).start();
+    }
+  }, [preset, visible, scaleAnim, useNative]);
+
+  // 3. Continuous Spin for 'reconnecting' / 'please-wait' OR Pulse for 'slow-connection'
+  useEffect(() => {
+    if (!visible) return;
+
+    const isSpinningPreset =
+      preset === 'reconnecting' || preset === 'please-wait';
+    const isPulsingPreset =
+      preset === 'slow-connection' ||
+      preset === 'connection-lost' ||
+      (preset === 'session-ends' &&
+        typeof secondsRemaining === 'number' &&
+        secondsRemaining <= 10);
+
+    let spinLoop: Animated.CompositeAnimation | null = null;
+    let pulseLoop: Animated.CompositeAnimation | null = null;
+
+    if (isSpinningPreset) {
+      iconSpinAnim.setValue(0);
+      spinLoop = Animated.loop(
+        Animated.timing(iconSpinAnim, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.linear,
+          useNativeDriver: useNative,
+        })
+      );
+      spinLoop.start();
+    } else {
+      iconSpinAnim.setValue(0);
+    }
+
+    if (isPulsingPreset) {
+      pulseLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(iconPulseAnim, {
+            toValue: 1.16,
+            duration: 500,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: useNative,
+          }),
+          Animated.timing(iconPulseAnim, {
+            toValue: 0.92,
+            duration: 500,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: useNative,
+          }),
+        ])
+      );
+      pulseLoop.start();
+    } else {
+      iconPulseAnim.setValue(1);
+    }
+
+    return () => {
+      spinLoop?.stop();
+      pulseLoop?.stop();
+    };
+  }, [
+    preset,
+    visible,
+    secondsRemaining !== undefined && secondsRemaining <= 10,
+    iconSpinAnim,
+    iconPulseAnim,
+    useNative,
+  ]);
+
+  if (!shouldRender) {
     return null;
   }
 
-  const renderedIcon = propIcon !== undefined ? propIcon : config.icon(palette.iconColor);
+  const renderedIcon =
+    propIcon !== undefined ? propIcon : config.icon(palette.iconColor);
+
+  const iconRotate = iconSpinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   const content = (
     <Animated.View
@@ -468,11 +594,29 @@ export function ToastPill({
           backgroundColor: palette.backgroundColor,
           borderColor: palette.borderColor,
           opacity: opacityAnim,
+          transform: [
+            { translateY: translateYAnim },
+            { scale: scaleAnim },
+          ],
         },
         style,
       ]}
     >
-      {renderedIcon && <View style={styles.iconContainer}>{renderedIcon}</View>}
+      {renderedIcon && (
+        <Animated.View
+          style={[
+            styles.iconContainer,
+            {
+              transform: [
+                { rotate: iconRotate },
+                { scale: iconPulseAnim },
+              ],
+            },
+          ]}
+        >
+          {renderedIcon}
+        </Animated.View>
+      )}
       <Text
         style={[
           styles.pillText,
@@ -488,7 +632,11 @@ export function ToastPill({
 
   if (onPress) {
     return (
-      <Pressable onPress={onPress} accessibilityRole="button">
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        style={({ pressed }) => [pressed && { opacity: 0.85 }]}
+      >
         {content}
       </Pressable>
     );
@@ -507,14 +655,22 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingHorizontal: 18,
     paddingVertical: 8,
-    borderRadius: Radii.pill, // 9999 or 20
+    borderRadius: Radii.pill,
     borderWidth: 1,
     gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 8px rgba(15, 23, 42, 0.05)',
+        userSelect: 'none',
+      } as any,
+      default: {
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 1,
+      },
+    }),
   },
   iconContainer: {
     alignItems: 'center',
@@ -524,5 +680,6 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'semiBold'),
     fontSize: 13,
     letterSpacing: -0.15,
+    fontVariant: ['tabular-nums'],
   },
 });

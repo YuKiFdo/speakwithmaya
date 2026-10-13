@@ -19,7 +19,6 @@ import { EndCallIcon } from '@/components/icons/call-icons';
 import { ToastPill, ToastPillPreset } from '@/components/ui/toast-pill';
 import {
   GrammarFeedbackModal,
-  GrammarFeedbackData,
 } from '@/components/call/grammar-feedback-modal';
 import { ConversationDisplay } from '@/components/call/conversation-display';
 import { useConnectionMonitor } from '@/hooks/useConnectionMonitor';
@@ -35,10 +34,8 @@ import { HintFloatingButton } from '@/components/call/hint-floating-button';
 import { HintSuggestionCard } from '@/components/call/hint-suggestion-card';
 import { fetchTranslation, fetchHint, HintResponse } from '@/services/assistance/assistance-service';
 import { CommonPopup } from '@/components/ui/common-popup';
-import { triggerHaptic } from '@/utils/haptics-audio';
 import {
   playCallConnectedSound,
-  playHintButtonSound,
   playOtherButtonSound,
 } from '@/services/sound/sound-service';
 
@@ -70,6 +67,7 @@ export default function CallScreen() {
 
   const { isPhone } = useBreakpoint();
   const isWebOrDesktop = !isPhone;
+  const useNative = Platform.OS !== 'web';
 
   // Real-time network & connection monitor
   const connection = useConnectionMonitor();
@@ -116,7 +114,6 @@ export default function CallScreen() {
     hintsUsedCount: () => hintsHistoryRef.current.length,
   });
 
-
   const liveCallRef = useRef(liveCall);
   useEffect(() => {
     liveCallRef.current = liveCall;
@@ -130,8 +127,7 @@ export default function CallScreen() {
     };
   }, []);
 
-
-  // Translation & Conversational Hint State (Image 1 & 2 Design)
+  // Translation & Conversational Hint State
   const [isTranslationVisible, setIsTranslationVisible] = useState(false);
   const [translationText, setTranslationText] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
@@ -187,29 +183,24 @@ export default function CallScreen() {
   const handleToggleTranslation = async () => {
     playOtherButtonSound();
     if (isTranslationVisible) {
-      // User tapped to hide
       setIsTranslationVisible(false);
       return;
     }
 
-    // User tapped to show
     setIsTranslationVisible(true);
     const targetPrompt = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim();
     if (!targetPrompt) return;
 
-    // Instant reuse if already fetched for this prompt
     if (translationText && translationTargetPromptRef.current === targetPrompt) {
       return;
     }
 
-    // If Maya is currently speaking, wait for her to complete the full sentence
     if (liveCall.status === 'speaking') {
       setIsTranslating(true);
       pendingTranslationAfterSpeakingRef.current = true;
       return;
     }
 
-    // Maya has finished speaking: fetch full translation immediately
     translationTargetPromptRef.current = targetPrompt;
     setIsTranslating(true);
     const res = await fetchTranslation(targetPrompt);
@@ -220,22 +211,18 @@ export default function CallScreen() {
     setIsTranslating(false);
   };
 
-  // Timer: user gets the FULL targetDuration for uninterrupted conversation.
-  // Farewell only fires AFTER time is up. Display freezes at the target so extra farewell time is invisible.
+  // Timer & Farewell logic
   const hasTriggeredFarewellRef = useRef(false);
   const farewellGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTimeUp = liveCall.secondsElapsed >= targetDuration && liveCall.secondsElapsed > 0;
 
-  // Freeze displayed time at targetDuration — farewell grace period is invisible to the user
   const displayedElapsed = Math.min(liveCall.secondsElapsed, targetDuration);
   const remainingSeconds = Math.max(0, targetDuration - displayedElapsed);
   const isFarewellPhase = isTimeUp && hasTriggeredFarewellRef.current;
   const [isConcludingCall, setIsConcludingCall] = useState(false);
 
-  // Concluding or wrapping up state — hints must never be generated or shown here
   const isWrappingUp = isConcludingCall || isFarewellPhase || isTimeUp || liveCall.status === 'ended';
 
-  // Automatically dismiss and reset hint card if call enters concluding/wrapping up
   useEffect(() => {
     if (isWrappingUp) {
       setIsHintVisible(false);
@@ -243,15 +230,12 @@ export default function CallScreen() {
     }
   }, [isWrappingUp]);
 
-  // Conversational Hint: Only fetched when the student explicitly presses the Hint button (blocked when wrapping up)
   const handleToggleHint = async () => {
-    // 1. Never generate or display hints when call is concluding / wrapping up
     if (isWrappingUp) {
       setIsHintVisible(false);
       return;
     }
 
-    // Suppress mic capture & VAD for 1.4s so Hint button chime never leaks into Gemini Live
     liveCall.suppressMicFor?.(1400);
 
     if (isHintVisible) {
@@ -259,7 +243,6 @@ export default function CallScreen() {
       return;
     }
 
-    // If hint was already fetched for this prompt, show it immediately without re-fetching
     if (hintData) {
       setIsHintVisible(true);
       return;
@@ -267,7 +250,6 @@ export default function CallScreen() {
 
     if (isFetchingHintRef.current) return;
 
-    // User explicitly pressed Hint button: fetch hint on demand
     const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
     if (!question || question.length < 3) return;
 
@@ -293,7 +275,6 @@ export default function CallScreen() {
     }
   };
 
-  // When time is up, send the farewell cue to Maya (she speaks goodbye AFTER the full session)
   useEffect(() => {
     if (
       isTimeUp &&
@@ -304,7 +285,6 @@ export default function CallScreen() {
       console.log(`[call.tsx] ⏰ Session time reached (${targetDuration}s) -> dispatching farewell cue to Maya`);
       liveCall.sendTimeWrapupCue(0);
 
-      // Safety: auto-end the call after 25s grace period if Maya/Gemini fails to conclude
       farewellGraceTimerRef.current = setTimeout(() => {
         console.log('[call.tsx] ⏰ Farewell grace period (25s) elapsed -> auto-ending call');
         liveCall.endCall();
@@ -312,25 +292,17 @@ export default function CallScreen() {
     }
   }, [isTimeUp, liveCall.status]);
 
-  // Cleanup grace timer on unmount
   useEffect(() => {
     return () => {
       if (farewellGraceTimerRef.current) clearTimeout(farewellGraceTimerRef.current);
     };
   }, []);
 
-  const isCallActive = liveCall.status === 'speaking' || liveCall.status === 'listening';
   const isCallReconnecting = liveCall.status === 'reconnecting' || connection.isReconnecting;
   const isCallConnectionLost = (connection.isLost || !connection.isOnline) && liveCall.status !== 'ended';
   const isSlowNetwork = liveCall.isSlowResponse || connection.isWeak;
-
   const isNaturalTimeRunningOut = (remainingSeconds <= 30 && liveCall.secondsElapsed > 0) || isFarewellPhase;
 
-  // Priority:
-  // 1. Critical connection alerts (connection lost / reconnecting) - active throughout the session
-  // 2. Slow network / delayed response warning (>3.5s waiting for Maya response or backpressure)
-  // 3. Session ending countdown & farewell wrap-up (only during natural time expiration, NOT when user manually ends early)
-  // 4. Ambient network notices (weak connection, connection restored)
   const activeToastPreset: ToastPillPreset | null = isCallConnectionLost
     ? 'connection-lost'
     : isCallReconnecting
@@ -343,7 +315,7 @@ export default function CallScreen() {
     ? 'session-ends'
     : connection.toastPreset;
 
-  // Contextual Call Guide for Intro Call (Non-SVG Step Card)
+  // Contextual Call Guide for Intro Call
   const [guideStepIndex, setGuideStepIndex] = useState<number | null>(null);
 
   const displayedStatusText = isCallConnectionLost
@@ -372,17 +344,24 @@ export default function CallScreen() {
   const blueAuraAnim = useRef(new Animated.Value(0)).current;
   const blueScaleAnim = useRef(new Animated.Value(1.0)).current;
 
-  // Smooth cinematic entrance transition from ConnectingView into active CallScreen
+  // ─── CINEMATIC HANDOFF: ConnectingView -> Active CallScreen ────────────────
   const [connectingVisible, setConnectingVisible] = useState(true);
   const connectingFadeAnim = useRef(new Animated.Value(1)).current;
+  const connectingScaleAnim = useRef(new Animated.Value(1)).current;
+
+  // CallScreen content starts subtly scaled down (0.965) & slightly lower so it blooms forward as ConnectingView dissolves
+  const callContentOpacityAnim = useRef(new Animated.Value(0)).current;
+  const callContentScaleAnim = useRef(new Animated.Value(0.965)).current;
+  const callContentTranslateYAnim = useRef(new Animated.Value(10)).current;
+
   const hasTransitionedRef = useRef(false);
+  const transitionTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // User speech & minimum 60s guard for Intro Call
   const hasUserSpoken = liveCall.turns.some((t) => t.role === 'user');
   const isIntroEndCallLocked = isIntro && (displayedElapsed < 60 || !hasUserSpoken);
   const [introLockedNotice, setIntroLockedNotice] = useState<string | null>(null);
 
-  // Contextual Call Guide for Intro Call (Non-SVG Step Card)
   const hasShownGuideRef = useRef(false);
 
   useEffect(() => {
@@ -390,7 +369,7 @@ export default function CallScreen() {
       hasShownGuideRef.current = true;
       const timer = setTimeout(() => {
         setGuideStepIndex(0);
-      }, 900);
+      }, 450);
       return () => clearTimeout(timer);
     }
   }, [isIntro, connectingVisible]);
@@ -400,91 +379,140 @@ export default function CallScreen() {
     if (guideStepIndex === null) return;
 
     if (guideStepIndex === 0) {
-      // Step 0: Demonstrate Blue Speaking Aura alive
       Animated.parallel([
         Animated.timing(blueAuraAnim, {
           toValue: 0.85,
           duration: 350,
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: useNative,
         }),
         Animated.timing(purpleGlowAnim, {
           toValue: 0,
           duration: 250,
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: useNative,
         }),
       ]).start();
     } else if (guideStepIndex === 1) {
-      // Step 1: Demonstrate Purple Listening Bloom alive
       Animated.parallel([
         Animated.timing(purpleGlowAnim, {
           toValue: 0.95,
           duration: 350,
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: useNative,
         }),
         Animated.timing(blueAuraAnim, {
           toValue: 0,
           duration: 250,
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: useNative,
         }),
       ]).start();
     } else {
-      // Steps 2, 3, 4: Soften ambient glows so target buttons stand out with their beacon halos
       Animated.parallel([
         Animated.timing(blueAuraAnim, {
           toValue: 0.05,
           duration: 300,
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: useNative,
         }),
         Animated.timing(purpleGlowAnim, {
           toValue: 0.15,
           duration: 300,
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: useNative,
         }),
       ]).start();
     }
-  }, [guideStepIndex]);
+  }, [guideStepIndex, blueAuraAnim, purpleGlowAnim, useNative]);
 
+  // Orchestrate the smooth ConnectingView -> CallScreen transition
   useEffect(() => {
-    const isNowConnected = liveCall.isConnected || (liveCall.status !== 'connecting' && liveCall.status !== 'idle');
+    const isNowConnected =
+      liveCall.isConnected ||
+      (liveCall.status !== 'connecting' && liveCall.status !== 'idle');
 
     if (isNowConnected && !hasTransitionedRef.current) {
       hasTransitionedRef.current = true;
-      console.log('[call.tsx] 📞 Call connected! Showing green Connected state & releasing greeting.');
+      console.log('[call.tsx] 📞 Call connected! Showing green Connected state & choreographing reveal.');
 
-      // 1. Release Maya's greeting audio immediately only if NOT an intro call (intro waits for guide completion)
-      if (!isIntro) {
-        liveCall.releaseGreeting?.();
-      }
-
-      // 2. Play call connected chime in the background (non-blocking)
+      // 1. Play call connected chime immediately
       try {
         playCallConnectedSound();
       } catch {}
 
-      // 3. Keep green "Connected!" state visible for ~700ms so user sees the rings/dots turn green, then smoothly crossfade into active CallScreen
-      setTimeout(() => {
-        Animated.timing(connectingFadeAnim, {
-          toValue: 0,
-          duration: 380,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: Platform.OS !== 'web',
-        }).start(() => {
-          setConnectingVisible(false);
+      // 2. After 580ms of showing the green "Connected!" celebration in ConnectingView:
+      //    - Release Maya's greeting right as the curtain opens (so voice & subtitles start as CallScreen appears)
+      //    - Simultaneously dissolve + zoom-out ConnectingView AND spring-bloom CallScreen in!
+      const handoffTimer = setTimeout(() => {
+        if (!isIntro) {
+          liveCallRef.current.releaseGreeting?.();
+        }
+
+        Animated.parallel([
+          // ConnectingView dissolves & subtly expands outward
+          Animated.timing(connectingFadeAnim, {
+            toValue: 0,
+            duration: 420,
+            easing: Easing.bezier(0.22, 1, 0.36, 1),
+            useNativeDriver: useNative,
+          }),
+          Animated.timing(connectingScaleAnim, {
+            toValue: 1.035,
+            duration: 420,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: useNative,
+          }),
+          // Active CallScreen blooms forward into focus
+          Animated.timing(callContentOpacityAnim, {
+            toValue: 1,
+            duration: 360,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: useNative,
+          }),
+          Animated.spring(callContentScaleAnim, {
+            toValue: 1,
+            tension: 75,
+            friction: 9,
+            useNativeDriver: useNative,
+          }),
+          Animated.spring(callContentTranslateYAnim, {
+            toValue: 0,
+            tension: 75,
+            friction: 9,
+            useNativeDriver: useNative,
+          }),
+        ]).start(({ finished }) => {
+          if (finished) {
+            setConnectingVisible(false);
+          }
         });
-      }, 700);
+      }, 580);
+
+      transitionTimersRef.current.push(handoffTimer);
     }
-  }, [liveCall.isConnected, liveCall.status]);
+  }, [
+    liveCall.isConnected,
+    liveCall.status,
+    isIntro,
+    connectingFadeAnim,
+    connectingScaleAnim,
+    callContentOpacityAnim,
+    callContentScaleAnim,
+    callContentTranslateYAnim,
+    useNative,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      transitionTimersRef.current.forEach(clearTimeout);
+    };
+  }, []);
 
   // Animate glows reactively based on voice strength and call status
+  // (Yields when Intro Guide is actively demonstrating glows on steps 0 & 1)
   useEffect(() => {
-    const useNative = Platform.OS !== 'web';
+    if (guideStepIndex !== null) return;
 
     if (liveCall.status === 'speaking') {
       const isMayaProjecting = liveCall.modelVolume > 0.04;
       const targetBlueOpacity = 0.42 + Math.min(1, liveCall.modelVolume * 1.15) * 0.58;
       const targetBlueScale = 1.0 + Math.min(1, liveCall.modelVolume * 1.2) * 0.11;
 
-      // Maya speaking: fade out purple bottom glow, spring-pulse blue edge aura
       Animated.parallel([
         Animated.timing(purpleGlowAnim, {
           toValue: 0,
@@ -498,7 +526,7 @@ export default function CallScreen() {
         }),
         Animated.timing(blueAuraAnim, {
           toValue: targetBlueOpacity,
-          duration: isMayaProjecting ? 55 : 180,
+          duration: isMayaProjecting ? 65 : 180,
           useNativeDriver: useNative,
         }),
         Animated.spring(blueScaleAnim, {
@@ -509,8 +537,6 @@ export default function CallScreen() {
         }),
       ]).start();
     } else {
-      // Maya listening / idle: fade out blue aura
-      // Resting purple bottom glow breathes gently when silent and surges with spring physics on user voice
       const isUserSpeaking = liveCall.userVolume > 0.02;
       const boostedUserVol = Math.min(1, liveCall.userVolume * 1.3);
       const targetPurpleOpacity = 0.38 + boostedUserVol * 0.62;
@@ -529,7 +555,7 @@ export default function CallScreen() {
         }),
         Animated.timing(purpleGlowAnim, {
           toValue: targetPurpleOpacity,
-          duration: isUserSpeaking ? 45 : 180,
+          duration: isUserSpeaking ? 55 : 180,
           useNativeDriver: useNative,
         }),
         Animated.spring(purpleScaleAnim, {
@@ -540,22 +566,13 @@ export default function CallScreen() {
         }),
       ]).start();
     }
-  }, [liveCall.status, liveCall.userVolume, liveCall.modelVolume]);
+  }, [liveCall.status, liveCall.userVolume, liveCall.modelVolume, guideStepIndex, useNative]);
 
   // Format mm:ss
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
-
-  const handleToggleMute = () => {
-    if (liveCall.status === 'speaking') {
-      liveCall.interrupt();
-    } else {
-      liveCall.toggleMute();
-    }
   };
 
   const [showForceEndPopup, setShowForceEndPopup] = useState(false);
@@ -571,7 +588,6 @@ export default function CallScreen() {
         setTimeout(() => setIntroLockedNotice(null), 2800);
         return;
       }
-      // In intro call, NEVER trigger force-end popup. Always request graceful wrap-up:
       if (!isConcludingCall) {
         setIsConcludingCall(true);
         liveCall.requestGracefulHangup();
@@ -580,7 +596,6 @@ export default function CallScreen() {
     }
 
     if (isConcludingCall || isFarewellPhase) {
-      // Second press during concluding / farewell wrap-up phase: show force end confirmation popup
       setShowForceEndPopup(true);
       return;
     }
@@ -605,13 +620,6 @@ export default function CallScreen() {
     }
     liveCall.endCall(true);
   };
-
-  // const handleScreenTouch = () => {
-  //   liveCall.resumeAudio();
-  //   if (liveCall.status === 'speaking' && liveCall.modelVolume > 0.08) {
-  //     liveCall.interrupt();
-  //   }
-  // };
 
   // When session completes, navigate directly to analyzing screen before showing completion scorecard
   useEffect(() => {
@@ -667,40 +675,91 @@ export default function CallScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.mainContentWrapper}>
+      <Animated.View
+        style={[
+          styles.mainContentWrapper,
+          {
+            opacity: callContentOpacityAnim,
+            transform: [
+              { scale: callContentScaleAnim },
+              { translateY: callContentTranslateYAnim },
+            ],
+          },
+        ]}
+      >
         <Pressable style={styles.fullScreenTouch}>
           <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
+            {/* Ambient Edge Aura for Speaking State */}
+            <AmbientGlow
+              type="blue-aura"
+              opacity={blueAuraAnim}
+              scale={blueScaleAnim}
+              volume={guideStepIndex === 0 ? 0.65 : liveCall.modelVolume}
+              isActive={guideStepIndex === 0 || (liveCall.status === 'speaking' && liveCall.modelVolume > 0.04)}
+            />
 
-          {/* Ambient Edge Aura for Speaking State */}
-          <AmbientGlow
-            type="blue-aura"
-            opacity={blueAuraAnim}
-            scale={blueScaleAnim}
-            volume={guideStepIndex === 0 ? 0.65 : liveCall.modelVolume}
-            isActive={guideStepIndex === 0 || (liveCall.status === 'speaking' && liveCall.modelVolume > 0.04)}
-          />
+            {/* Top Bar Header */}
+            {isWebOrDesktop ? (
+              /* Desktop / Web Top Bar */
+              <View style={styles.desktopTopBar}>
+                {/* Left: Back to Home */}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.backLink,
+                    pressed && styles.buttonPressed,
+                  ]}
+                  onPress={handleBackToHome}
+                  hitSlop={12}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to Home"
+                >
+                  <Text style={styles.backArrow}>‹</Text>
+                  <Text style={styles.backText}>Back to Home</Text>
+                </Pressable>
 
-          {/* Top Bar Header */}
-          {isWebOrDesktop ? (
-            /* Desktop / Web Top Bar */
-            <View style={styles.desktopTopBar}>
-              {/* Left: Back to Home */}
-              <Pressable
-                style={({ pressed }) => [
-                  styles.backLink,
-                  pressed && styles.buttonPressed,
-                ]}
-                onPress={handleBackToHome}
-                hitSlop={12}
-                accessibilityRole="button"
-                accessibilityLabel="Back to Home"
-              >
-                <Text style={styles.backArrow}>‹</Text>
-                <Text style={styles.backText}>Back to Home</Text>
-              </Pressable>
+                {/* Right: Settings & End Session Pill */}
+                <View style={styles.desktopRightActions}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.settingsButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Call settings"
+                  >
+                    <Feather name="settings" size={20} color="#64748B" />
+                  </Pressable>
 
-              {/* Right: Settings & End Session Pill */}
-              <View style={styles.desktopRightActions}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.endSessionPillButton,
+                      isIntroEndCallLocked && styles.endSessionPillLocked,
+                      pressed && !isIntroEndCallLocked && styles.endSessionPressed,
+                    ]}
+                    onPress={handleHangup}
+                    accessibilityRole="button"
+                    accessibilityLabel={isIntroEndCallLocked ? 'End Session (Locked)' : 'End Session'}
+                  >
+                    <BeaconRing
+                      color="#F43F5E"
+                      radius={22}
+                      active={guideStepIndex === 4}
+                    />
+                    {isIntroEndCallLocked ? (
+                      <Feather name="lock" size={16} color="#94A3B8" />
+                    ) : (
+                      <EndCallIcon size={20} color="#ffffff" />
+                    )}
+                    <Text style={[styles.endSessionText, isIntroEndCallLocked && styles.endSessionTextLocked]}>
+                      {isIntroEndCallLocked ? 'Locked (1m)' : 'End Session'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              /* Mobile Phone Top Bar */
+              <View style={styles.mobileTopBar}>
                 <Pressable
                   style={({ pressed }) => [
                     styles.settingsButton,
@@ -713,276 +772,238 @@ export default function CallScreen() {
                   <Feather name="settings" size={20} color="#64748B" />
                 </Pressable>
 
+                <View style={styles.mobileHeaderInfo}>
+                  <View style={styles.avatarWrapperMobile}>
+                    <Image
+                      source={require('@/assets/images/maya-avatar.png')}
+                      style={styles.avatarImage}
+                      resizeMode="cover"
+                      accessibilityLabel="Maya"
+                    />
+                  </View>
+
+                  <View style={styles.headerTexts}>
+                    <Text style={styles.mayaNameMobile}>Maya</Text>
+                    <View style={styles.timerRow}>
+                      <View
+                        style={[
+                          styles.statusDot,
+                          isCallConnectionLost
+                            ? styles.statusDotRed
+                            : isCallReconnecting || isSlowNetwork
+                            ? styles.statusDotOrange
+                            : styles.statusDotGreen,
+                        ]}
+                      />
+                      <Text style={styles.timerText}>
+                        {formatTime(displayedElapsed)}{' '}
+                        <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.stateLabel,
+                        isCallConnectionLost
+                          ? styles.stateLabelLost
+                          : isCallReconnecting || isSlowNetwork
+                          ? styles.stateLabelWarning
+                          : liveCall.status === 'speaking'
+                          ? styles.stateLabelSpeaking
+                          : styles.stateLabelListening,
+                      ]}
+                    >
+                      {displayedStatusText}
+                    </Text>
+                  </View>
+                </View>
+
                 <Pressable
                   style={({ pressed }) => [
-                    styles.endSessionPillButton,
-                    isIntroEndCallLocked && styles.endSessionPillLocked,
-                    pressed && !isIntroEndCallLocked && styles.endSessionPressed,
+                    styles.mobileHangupButton,
+                    isIntroEndCallLocked && styles.hangupButtonLocked,
+                    pressed && !isIntroEndCallLocked && styles.hangupButtonPressed,
                   ]}
                   onPress={handleHangup}
                   accessibilityRole="button"
-                  accessibilityLabel={isIntroEndCallLocked ? 'End Session (Locked)' : 'End Session'}
+                  accessibilityLabel={isIntroEndCallLocked ? 'End call (Locked)' : 'End call'}
                 >
                   <BeaconRing
                     color="#F43F5E"
-                    radius={22}
+                    radius={27}
                     active={guideStepIndex === 4}
                   />
                   {isIntroEndCallLocked ? (
-                    <Feather name="lock" size={16} color="#94A3B8" />
+                    <Feather name="lock" size={24} color="#94A3B8" />
                   ) : (
-                    <EndCallIcon size={20} color="#ffffff" />
+                    <EndCallIcon size={28} color="#ffffff" />
                   )}
-                  <Text style={[styles.endSessionText, isIntroEndCallLocked && styles.endSessionTextLocked]}>
-                    {isIntroEndCallLocked ? 'Locked (1m)' : 'End Session'}
-                  </Text>
                 </Pressable>
               </View>
-            </View>
-          ) : (
-            /* Mobile Phone Top Bar */
-            <View style={styles.mobileTopBar}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.settingsButton,
-                  pressed && styles.buttonPressed,
-                ]}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Call settings"
-              >
-                <Feather name="settings" size={20} color="#64748B" />
-              </Pressable>
+            )}
 
-              <View style={styles.mobileHeaderInfo}>
-                <View style={styles.avatarWrapperMobile}>
-                  <Image
-                    source={require('@/assets/images/maya-avatar.png')}
-                    style={styles.avatarImage}
-                    resizeMode="cover"
-                    accessibilityLabel="Maya"
-                  />
-                </View>
-
-                <View style={styles.headerTexts}>
-                  <Text style={styles.mayaNameMobile}>Maya</Text>
-                  <View style={styles.timerRow}>
-                    <View
-                      style={[
-                        styles.statusDot,
-                        isCallConnectionLost
-                          ? styles.statusDotRed
-                          : isCallReconnecting || isSlowNetwork
-                          ? styles.statusDotOrange
-                          : styles.statusDotGreen,
-                      ]}
+            {/* Center Content Section */}
+            <View style={[styles.centerContent, isWebOrDesktop && styles.centerContentDesktop]}>
+              {/* On Desktop: Centered Avatar & Maya Status */}
+              {isWebOrDesktop && (
+                <View style={styles.desktopAvatarCard}>
+                  <View style={styles.avatarWrapperDesktop}>
+                    <Image
+                      source={require('@/assets/images/maya-avatar.png')}
+                      style={styles.avatarImage}
+                      resizeMode="cover"
+                      accessibilityLabel="Maya"
                     />
-                    <Text style={styles.timerText}>
-                      {formatTime(displayedElapsed)}{' '}
-                      <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
+                  </View>
+
+                  <View style={styles.desktopInfoTexts}>
+                    <Text style={styles.mayaNameDesktop}>Maya</Text>
+                    <View style={styles.timerRow}>
+                      <View
+                        style={[
+                          styles.statusDot,
+                          isCallConnectionLost
+                            ? styles.statusDotRed
+                            : isCallReconnecting || isSlowNetwork
+                            ? styles.statusDotOrange
+                            : styles.statusDotGreen,
+                        ]}
+                      />
+                      <Text style={styles.timerTextDesktop}>
+                        {formatTime(displayedElapsed)}{' '}
+                        <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.stateLabelDesktop,
+                        isCallConnectionLost
+                          ? styles.stateLabelLost
+                          : isCallReconnecting || isSlowNetwork
+                          ? styles.stateLabelWarning
+                          : liveCall.status === 'speaking'
+                          ? styles.stateLabelSpeaking
+                          : styles.stateLabelListening,
+                      ]}
+                    >
+                      {displayedStatusText}
                     </Text>
                   </View>
-                  <Text
-                    style={[
-                      styles.stateLabel,
-                      isCallConnectionLost
-                        ? styles.stateLabelLost
-                        : isCallReconnecting || isSlowNetwork
-                        ? styles.stateLabelWarning
-                        : liveCall.status === 'speaking'
-                        ? styles.stateLabelSpeaking
-                        : styles.stateLabelListening,
-                    ]}
-                  >
-                    {displayedStatusText}
-                  </Text>
                 </View>
+              )}
+
+              {/* Session Ending & Network Connection Toast Pill */}
+              <View style={styles.noticeWrapper}>
+                {introLockedNotice ? (
+                  <ToastPill
+                    variant="warning"
+                    text={introLockedNotice}
+                    visible={true}
+                  />
+                ) : activeToastPreset ? (
+                  <ToastPill
+                    preset={activeToastPreset}
+                    secondsRemaining={activeToastPreset === 'session-ends' && remainingSeconds > 0 ? remainingSeconds : undefined}
+                    text={activeToastPreset === 'session-ends' && remainingSeconds === 0 ? 'Wrapping up session...' : undefined}
+                    visible={true}
+                  />
+                ) : null}
               </View>
 
-              <Pressable
-                style={({ pressed }) => [
-                  styles.mobileHangupButton,
-                  isIntroEndCallLocked && styles.hangupButtonLocked,
-                  pressed && !isIntroEndCallLocked && styles.hangupButtonPressed,
-                ]}
-                onPress={handleHangup}
-                accessibilityRole="button"
-                accessibilityLabel={isIntroEndCallLocked ? 'End call (Locked)' : 'End call'}
-              >
-                <BeaconRing
-                  color="#F43F5E"
-                  radius={27}
-                  active={guideStepIndex === 4}
-                />
-                {isIntroEndCallLocked ? (
-                  <Feather name="lock" size={24} color="#94A3B8" />
-                ) : (
-                  <EndCallIcon size={28} color="#ffffff" />
-                )}
-              </Pressable>
-            </View>
-          )}
-
-          {/* Center Content Section */}
-          <View style={[styles.centerContent, isWebOrDesktop && styles.centerContentDesktop]}>
-            {/* On Desktop: Centered Avatar & Maya Status */}
-            {isWebOrDesktop && (
-              <View style={styles.desktopAvatarCard}>
-                <View style={styles.avatarWrapperDesktop}>
-                  <Image
-                    source={require('@/assets/images/maya-avatar.png')}
-                    style={styles.avatarImage}
-                    resizeMode="cover"
-                    accessibilityLabel="Maya"
+              {/* Evaluation Result Banner */}
+              {liveCall.evaluationResult && (
+                <View style={[
+                  styles.evalCardContainer,
+                  liveCall.evaluationResult.isPassed ? styles.evalCardPassed : styles.evalCardFailed,
+                ]}>
+                  <Feather
+                    name={liveCall.evaluationResult.isPassed ? 'check-circle' : 'refresh-cw'}
+                    size={20}
+                    color={liveCall.evaluationResult.isPassed ? '#059669' : '#D97706'}
                   />
-                </View>
-
-                <View style={styles.desktopInfoTexts}>
-                  <Text style={styles.mayaNameDesktop}>Maya</Text>
-                  <View style={styles.timerRow}>
-                    <View
-                      style={[
-                        styles.statusDot,
-                        isCallConnectionLost
-                          ? styles.statusDotRed
-                          : isCallReconnecting || isSlowNetwork
-                          ? styles.statusDotOrange
-                          : styles.statusDotGreen,
-                      ]}
-                    />
-                    <Text style={styles.timerTextDesktop}>
-                      {formatTime(displayedElapsed)}{' '}
-                      <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
+                  <View style={styles.evalTextCol}>
+                    <Text style={[
+                      styles.evalTitle,
+                      liveCall.evaluationResult.isPassed ? styles.evalTitlePassed : styles.evalTitleFailed,
+                    ]}>
+                      {liveCall.evaluationResult.isPassed
+                        ? `Level Mastered! (${liveCall.evaluationResult.scorePercent}%)`
+                        : `Needs Practice (${liveCall.evaluationResult.scorePercent}%)`}
+                    </Text>
+                    <Text style={styles.evalSubtitle}>
+                      {liveCall.evaluationResult.feedbackSinhala || liveCall.evaluationResult.feedbackEnglish || 'Great speaking session with Maya!'}
                     </Text>
                   </View>
-                  <Text
-                    style={[
-                      styles.stateLabelDesktop,
-                      isCallConnectionLost
-                        ? styles.stateLabelLost
-                        : isCallReconnecting || isSlowNetwork
-                        ? styles.stateLabelWarning
-                        : liveCall.status === 'speaking'
-                        ? styles.stateLabelSpeaking
-                        : styles.stateLabelListening,
-                    ]}
-                  >
-                    {displayedStatusText}
-                  </Text>
                 </View>
-              </View>
-            )}
+              )}
 
-            {/* Session Ending & Network Connection Toast Pill */}
-            <View style={styles.noticeWrapper}>
-              {introLockedNotice ? (
-                <ToastPill
-                  variant="warning"
-                  text={introLockedNotice}
-                  visible={true}
-                />
-              ) : activeToastPreset ? (
-                <ToastPill
-                  preset={activeToastPreset}
-                  secondsRemaining={activeToastPreset === 'session-ends' && remainingSeconds > 0 ? remainingSeconds : undefined}
-                  text={activeToastPreset === 'session-ends' && remainingSeconds === 0 ? 'Wrapping up session...' : undefined}
-                  visible={true}
-                />
-              ) : null}
-            </View>
-
-            {/* Evaluation Result Banner */}
-            {liveCall.evaluationResult && (
-              <View style={[
-                styles.evalCardContainer,
-                liveCall.evaluationResult.isPassed ? styles.evalCardPassed : styles.evalCardFailed,
-              ]}>
-                <Feather
-                  name={liveCall.evaluationResult.isPassed ? 'check-circle' : 'refresh-cw'}
-                  size={20}
-                  color={liveCall.evaluationResult.isPassed ? '#059669' : '#D97706'}
-                />
-                <View style={styles.evalTextCol}>
-                  <Text style={[
-                    styles.evalTitle,
-                    liveCall.evaluationResult.isPassed ? styles.evalTitlePassed : styles.evalTitleFailed,
-                  ]}>
-                    {liveCall.evaluationResult.isPassed
-                      ? `Level Mastered! (${liveCall.evaluationResult.scorePercent}%)`
-                      : `Needs Practice (${liveCall.evaluationResult.scorePercent}%)`}
-                  </Text>
-                  <Text style={styles.evalSubtitle}>
-                    {liveCall.evaluationResult.feedbackSinhala || liveCall.evaluationResult.feedbackEnglish || 'Great speaking session with Maya!'}
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* Conversation Display with Multi-Turn History (Image 2 Design) */}
-            <ConversationDisplay
-              previousText={liveCall.previousSubtitles}
-              currentText={
-                isIntro && guideStepIndex !== null && !liveCall.subtitles
-                  ? "Welcome to Maya! Let's practice speaking English together."
-                  : liveCall.subtitles
-              }
-              isSpeaking={guideStepIndex === 0 || liveCall.status === 'speaking'}
-              isWebOrDesktop={isWebOrDesktop}
-              translationText={
-                isIntro && guideStepIndex !== null && !translationText
-                  ? "මායා වෙත සාදරයෙන් පිළිගනිමු! අපි එකට ඉංග්‍රීසි කතා කිරීමට පුරුදු වෙමු."
-                  : translationText
-              }
-              isTranslationVisible={isTranslationVisible}
-              isTranslating={isTranslating}
-              onToggleTranslation={handleToggleTranslation}
-              isTranslationHighlighted={guideStepIndex === 2}
-            />
-
-            {/* Hint Suggestion Card (Image 2 Design: "Try saying:") */}
-            {isHintVisible && !!hintData && (
-              <View style={styles.hintCardWrapper}>
-                <HintSuggestionCard
-                  hintEnglish={hintData.hintEnglish}
-                  hintSinhala={hintData.hintSinhala}
-                  onDismiss={() => setIsHintVisible(false)}
-                  isWebOrDesktop={isWebOrDesktop}
-                />
-              </View>
-            )}
-          </View>
-
-          {/* Floating Hint Button in Bottom Right Corner (hidden when hint is showing OR when wrapping up/concluding) */}
-          {!isHintVisible && !isWrappingUp && (
-            <View style={styles.floatingHintContainer} pointerEvents="box-none">
-              <HintFloatingButton
-                onPress={handleToggleHint}
-                isActive={isHintVisible}
-                disabled={liveCall.status === 'connecting' || liveCall.status === 'idle'}
-                isHighlighted={guideStepIndex === 3}
+              {/* Conversation Display with Multi-Turn History */}
+              <ConversationDisplay
+                previousText={liveCall.previousSubtitles}
+                currentText={
+                  isIntro && guideStepIndex !== null && !liveCall.subtitles
+                    ? "Welcome to Maya! Let's practice speaking English together."
+                    : liveCall.subtitles
+                }
+                isSpeaking={guideStepIndex === 0 || liveCall.status === 'speaking'}
+                isWebOrDesktop={isWebOrDesktop}
+                translationText={
+                  isIntro && guideStepIndex !== null && !translationText
+                    ? "මායා වෙත සාදරයෙන් පිළිගනිමු! අපි එකට ඉංග්‍රීසි කතා කිරීමට පුරුදු වෙමු."
+                    : translationText
+                }
+                isTranslationVisible={isTranslationVisible}
+                isTranslating={isTranslating}
+                onToggleTranslation={handleToggleTranslation}
+                isTranslationHighlighted={guideStepIndex === 2}
               />
+
+              {/* Hint Suggestion Card */}
+              {isHintVisible && !!hintData && (
+                <View style={styles.hintCardWrapper}>
+                  <HintSuggestionCard
+                    hintEnglish={hintData.hintEnglish}
+                    hintSinhala={hintData.hintSinhala}
+                    onDismiss={() => setIsHintVisible(false)}
+                    isWebOrDesktop={isWebOrDesktop}
+                  />
+                </View>
+              )}
             </View>
-          )}
 
-          {/* Bottom Purple Ambient Glow for Listening State (Speech-Reactive) */}
-          <AmbientGlow
-            type="purple-bottom"
-            opacity={purpleGlowAnim}
-            scale={purpleScaleAnim}
-            volume={guideStepIndex === 1 ? 0.75 : liveCall.userVolume}
-            isActive={guideStepIndex === 1 || (liveCall.status === 'listening' && liveCall.userVolume > 0.02)}
-          />
-        </View>
-      </Pressable>
-    </View>
+            {/* Floating Hint Button in Bottom Right Corner */}
+            {!isHintVisible && !isWrappingUp && (
+              <View style={styles.floatingHintContainer} pointerEvents="box-none">
+                <HintFloatingButton
+                  onPress={handleToggleHint}
+                  isActive={isHintVisible}
+                  disabled={liveCall.status === 'connecting' || liveCall.status === 'idle'}
+                  isHighlighted={guideStepIndex === 3}
+                />
+              </View>
+            )}
 
-      {/* Smooth connecting overlay with clean opacity crossfade */}
+            {/* Bottom Purple Ambient Glow for Listening State */}
+            <AmbientGlow
+              type="purple-bottom"
+              opacity={purpleGlowAnim}
+              scale={purpleScaleAnim}
+              volume={guideStepIndex === 1 ? 0.75 : liveCall.userVolume}
+              isActive={guideStepIndex === 1 || (liveCall.status === 'listening' && liveCall.userVolume > 0.02)}
+            />
+          </View>
+        </Pressable>
+      </Animated.View>
+
+      {/* Smooth connecting overlay with opacity + subtle zoom-out handoff */}
       {connectingVisible && (
         <Animated.View
+          renderToHardwareTextureAndroid={true}
+          shouldRasterizeIOS={true}
           style={[
             styles.connectingOverlay,
             {
               opacity: connectingFadeAnim,
+              transform: [{ scale: connectingScaleAnim }],
             },
           ]}
           pointerEvents={liveCall.status === 'connecting' ? 'auto' : 'none'}
@@ -994,14 +1015,14 @@ export default function CallScreen() {
         </Animated.View>
       )}
 
-      {/* Grammar Feedback Modal (Bottom Sheet on Mobile / Centered Card on Desktop) */}
+      {/* Grammar Feedback Modal */}
       <GrammarFeedbackModal
         visible={liveCall.feedbackVisible}
         onClose={liveCall.closeFeedbackModal}
         feedback={liveCall.feedbackData || undefined}
       />
 
-      {/* Microphone Permission Modal (matches common popup design language) */}
+      {/* Microphone Permission Modal */}
       <MicrophonePermissionPopup
         visible={liveCall.isPermissionModalVisible}
         onClose={() => {
@@ -1012,7 +1033,7 @@ export default function CallScreen() {
         errorType={liveCall.permissionErrorType}
       />
 
-      {/* Force End Call Confirmation Popup using CommonPopup */}
+      {/* Force End Call Confirmation Popup */}
       <CommonPopup
         visible={showForceEndPopup}
         onClose={() => setShowForceEndPopup(false)}
@@ -1031,7 +1052,7 @@ export default function CallScreen() {
         showCloseButton={true}
       />
 
-      {/* Contextual Call Guide (Non-SVG Step Card) */}
+      {/* Contextual Call Guide */}
       {isIntro && (
         <ContextualCallGuide
           visible={guideStepIndex !== null}
@@ -1050,7 +1071,6 @@ export default function CallScreen() {
   );
 }
 
-
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -1062,6 +1082,9 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     alignItems: 'center',
+    ...(Platform.OS === 'web'
+      ? ({ willChange: 'transform, opacity' } as any)
+      : {}),
   },
   connectingOverlay: {
     position: 'absolute',
@@ -1069,9 +1092,11 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f6f8fd',
     zIndex: 100,
-    ...(Platform.OS === 'web' ? ({ willChange: 'opacity' } as any) : {}),
+    ...(Platform.OS === 'web'
+      ? ({ willChange: 'transform, opacity' } as any)
+      : {}),
   },
   fullScreenTouch: {
     flex: 1,
@@ -1287,7 +1312,6 @@ const styles = StyleSheet.create({
       },
     }),
   },
-
   desktopInfoTexts: {
     justifyContent: 'center',
   },
@@ -1301,6 +1325,7 @@ const styles = StyleSheet.create({
     ...fontStyle('outfit', 'bold'),
     fontSize: 15,
     color: '#0f172a',
+    fontVariant: ['tabular-nums'],
   },
   stateLabelDesktop: {
     ...fontStyle('outfit', 'semiBold'),
@@ -1331,11 +1356,13 @@ const styles = StyleSheet.create({
     ...fontStyle('outfit', 'bold'),
     fontSize: 13,
     color: '#0f172a',
+    fontVariant: ['tabular-nums'],
   },
   timerMax: {
     ...fontStyle('outfit', 'regular'),
     fontSize: 13,
     color: '#94a3b8',
+    fontVariant: ['tabular-nums'],
   },
   stateLabel: {
     ...fontStyle('outfit', 'semiBold'),
@@ -1399,78 +1426,6 @@ const styles = StyleSheet.create({
   buttonPressed: {
     opacity: 0.7,
   },
-
-  /* Active Practice Task Card */
-  taskCardContainer: {
-    width: '100%',
-    maxWidth: 640,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  taskCardTeaching: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#BFDBFE',
-  },
-  taskCardTesting: {
-    backgroundColor: '#FFFBEB',
-    borderColor: '#FDE68A',
-  },
-  taskCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  taskPhaseBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    gap: 5,
-  },
-  taskPhaseBadgeTeaching: {
-    backgroundColor: '#EFF6FF',
-  },
-  taskPhaseBadgeTesting: {
-    backgroundColor: '#FEF3C7',
-  },
-  taskPhaseText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 11,
-    letterSpacing: 0.4,
-  },
-  taskPhaseTextTeaching: {
-    color: '#0057FF',
-  },
-  taskPhaseTextTesting: {
-    color: '#D97706',
-  },
-  taskModeHint: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 12,
-    color: '#B45309',
-  },
-  taskTitleText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 17,
-    color: '#0F172A',
-    marginBottom: 4,
-  },
-  taskHintText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 13.5,
-    color: '#64748B',
-    lineHeight: 18,
-  },
-
   /* Evaluation Result Banner */
   evalCardContainer: {
     flexDirection: 'row',
