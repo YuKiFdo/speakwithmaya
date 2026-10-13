@@ -6,14 +6,29 @@ const translationMemory = new Map<string, string>();
 const hintMemory = new Map<string, HintResponse>();
 const inFlightHintPromises = new Map<string, Promise<HintResponse | null>>();
 
-const FORBIDDEN_SCRIPT_REGEX = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0900-\u097F\u0590-\u05FF]/;
+const FORBIDDEN_SCRIPT_REGEX = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0900-\u097F\u0590-\u05FF\u0980-\u0CFF\u0D00-\u0D7F]/;
+const FORBIDDEN_TAMIL_WORDS_REGEX = /தேவையான|வணக்கம்|ரொம்ப/;
 const SINHALA_SCRIPT_REGEX = /[\u0D80-\u0DFF]/;
+
+export function sanitizeSinhalaText(text: string | null | undefined): string {
+  if (!text) return '';
+  return text
+    .replace(/தேவையான/g, 'අවශ්‍ය')
+    .replace(/வணக்கம்/g, 'ආයුබෝවන්')
+    .replace(/[\u0B80-\u0BFF\u0900-\u097F\u0600-\u06FF\u0980-\u0CFF\u0D00-\u0D7F]+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
 
 export function isValidSinhalaText(text: string | null | undefined): boolean {
   if (!text) return false;
   const trimmed = text.trim();
   if (!trimmed) return false;
-  return SINHALA_SCRIPT_REGEX.test(trimmed) && !FORBIDDEN_SCRIPT_REGEX.test(trimmed);
+  return (
+    SINHALA_SCRIPT_REGEX.test(trimmed) &&
+    !FORBIDDEN_SCRIPT_REGEX.test(trimmed) &&
+    !FORBIDDEN_TAMIL_WORDS_REGEX.test(trimmed)
+  );
 }
 
 export interface HintResponse {
@@ -48,7 +63,7 @@ export async function fetchTranslation(text: string): Promise<string> {
 
     if (res.ok) {
       const data = await res.json();
-      const translated = data?.translatedText?.trim() || '';
+      let translated = sanitizeSinhalaText(data?.translatedText?.trim() || '');
       if (translated) {
         if (!isValidSinhalaText(translated)) {
           console.warn('[assistance-service] Translation contained invalid or non-Sinhala script:', translated);
@@ -111,7 +126,7 @@ export async function fetchHint(
       if (res.ok) {
         const data: HintResponse = await res.json();
         if (data?.hintEnglish) {
-          let sinhala = (data.hintSinhala || '').trim();
+          let sinhala = sanitizeSinhalaText(data.hintSinhala || '');
           if (sinhala && !isValidSinhalaText(sinhala)) {
             console.warn('[assistance-service] hintSinhala contained invalid or foreign script, clearing:', sinhala);
             sinhala = '';

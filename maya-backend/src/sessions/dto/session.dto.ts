@@ -50,6 +50,14 @@ export class CreateSessionTokenDto {
 
   @IsOptional()
   @IsString()
+  challenge?: string;
+
+  @IsOptional()
+  @IsString()
+  dailyGoal?: string;
+
+  @IsOptional()
+  @IsString()
   memory?: string;
 
   @IsOptional()

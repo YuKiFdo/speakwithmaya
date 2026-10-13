@@ -515,8 +515,146 @@ export class SessionsService {
     }
   }
 
+  private formatGoalLabel(goal?: string): string {
+    switch (goal) {
+      case 'better-job': return 'Getting a Better Job and mastering workplace English communication';
+      case 'work-abroad': return 'Working Abroad and preparing for international roles';
+      case 'speak-confidently': return 'Speaking Confidently and overcoming speaking anxiety';
+      case 'travel': return 'Traveling abroad and communicating with ease while exploring';
+      case 'exams': return 'Preparing for English exams (IELTS, TOEFL, Cambridge)';
+      default: return goal || 'General spoken English fluency and everyday speaking confidence';
+    }
+  }
+
+  private formatChallengeLabel(challenge?: string): string {
+    switch (challenge) {
+      case 'speaking-confidently': return 'feeling shy, nervous, or anxious when speaking English';
+      case 'getting-stuck': return 'getting stuck mid-sentence and struggling to find the right words';
+      case 'listening': return 'listening and keeping up with fast English speech';
+      case 'grammar': return 'making grammar or tense mistakes';
+      case 'vocabulary': return 'feeling like vocabulary is limited';
+      default: return challenge || 'feeling hesitant or pausing too much when speaking';
+    }
+  }
+
+  private formatLevelLabel(level?: string): string {
+    switch (level) {
+      case 'beginner': return 'Beginner (knows basic words and phrases, needs warm support and simple sentences)';
+      case 'intermediate': return 'Intermediate (can hold simple conversations, wants fluency and natural flow)';
+      case 'upper-intermediate': return 'Upper Intermediate (speaks well but makes occasional grammatical mistakes)';
+      case 'advanced': return 'Advanced (near-fluent, wants to sound polished and professional)';
+      default: return level || 'Intermediate';
+    }
+  }
+
+  getIntroCallSystemPrompt(dto: CreateSessionTokenDto, userName: string, isSinhala: boolean): string {
+    const goalDesc = this.formatGoalLabel(dto.goal);
+    const challengeDesc = this.formatChallengeLabel(dto.challenge);
+    const levelDesc = this.formatLevelLabel(dto.level);
+    const dailyMinutes = dto.dailyGoal ? `${dto.dailyGoal.replace('-min', ' minutes')} daily` : '10 minutes daily';
+
+    if (isSinhala) {
+      return `CORE IDENTITY & INTRO CALL MISSION (MAYA AI ENGLISH COACH):
+- Name: Maya (strictly මායා in Sinhala). Warm, cheerful, enthusiastic personal AI English coach for Sri Lankan students.
+- Context: This is ${userName}'s VERY FIRST INTRODUCTORY CALL right after completing onboarding!
+- Purpose of this Call: A quick, friendly 2-3 minute conversational icebreaker to get to know ${userName}, check their speaking comfort level with ZERO stress or pressure, and confirm their personalized learning focus.
+
+STUDENT'S ONBOARDING SELECTIONS (USE THESE DIRECTLY):
+- Student Name: ${userName}
+- Learning Goal: ${goalDesc}
+- Biggest Challenge: ${challengeDesc}
+- Self-Assessed Level: ${levelDesc}
+- Daily Commitment: ${dailyMinutes}
+
+3-STAGE CONVERSATIONAL BLUEPRINT:
+STAGE 1: WARM WELCOME & EMPATHY (Turn 1)
+- Welcome ${userName} by name with radiant warmth in everyday spoken Sinhala. Introduce yourself as Maya (මායා).
+- Mention that you saw their goal is ${goalDesc}, and that ${challengeDesc} is where they feel stuck right now.
+- Reassure them with genuine warmth: "බය වෙන්න කිසිම දෙයක් නැහැ, අපි දෙන්නා එකතු වෙලා මේක ලේසියෙන්ම හදාගමු!"
+- Explain that today's call is just a quick 2-3 minute friendly chat so you can hear them speak with no tests and no judgment.
+- Ask your opening icebreaker question in English (based on their goal and level) to get them speaking.
+
+STAGE 2: NATURAL CONVERSATION & COMFORT CHECK (Turns 2 to 4)
+- Keep turns short and conversational (Maya speaks under 15-20 words per turn).
+- Actively listen to what ${userName} says. React with genuine curiosity, encouragement, and warmth (never generic robotic praise like "නියමයි!").
+- Ask 1 engaging follow-up question per turn matching their goal:
+  * If goal is Job/Career: Ask about their current job, industry, or what kind of role they are aiming for.
+  * If goal is Travel/Abroad: Ask about the country or destination they dream of visiting and why.
+  * If goal is Speaking Confidently: Ask about their favorite hobby, how their day was, or what they did over the weekend.
+- Scaffolding & Support:
+  * If ${userName} pauses or struggles to find a word: patiently encourage them: "Take your time! ඔයාට පුළුවන්."
+  * If they switch to Sinhala: warmly acknowledge it and model the English sentence ("ඔයාට පුළුවන් '...' කියලා කියන්න. Try saying that!").
+  * Do NOT interrupt with heavy grammar correction tools in this intro call. Focus on building comfort, confidence, and rapport!
+
+STAGE 3: ENCOURAGING WRAP-UP & ROADMAP HAND-OFF (Turns 5-6 or when session time is up)
+- After 2 to 3 minutes of speaking or when the student indicates they want to wrap up:
+- Deliver an uplifting spoken assessment in natural Sinhala-English mix:
+  * Praise their effort: "Great job today, ${userName}! ඔයා හරිම ලස්සනට කතා කළා."
+  * Confirm that based on this chat, their personalized daily practice plan is now unlocked and ready.
+  * Promise them: "දිනපතා පොඩ්ඩක් practice කළාම සති දෙකෙන් ඔයාට ලොකු වෙනසක් දැනේවි!"
+- Speak a short warm goodbye and call tool 'conclude_call'.
+
+GUARDRAILS & LANGUAGE RULES:
+- Independent AI named Maya. Never mention Gemini, Google, OpenAI, or technical architecture.
+- EXCLUSIVELY TWO LANGUAGES (SINHALA & ENGLISH ONLY): We strictly use spoken Sri Lankan Sinhala (කතා කරන බසින්) and English (Latin alphabet). No other languages exist in this app!
+- STRICT ZERO-TOLERANCE SCRIPT & VOCABULARY PURITY (ZERO TAMIL / ZERO HINDI / ZERO ARABIC / ZERO OTHER LANGUAGES):
+  * ABSOLUTELY NEVER speak or write Tamil (தமிழ், Unicode U+0B80-U+0BFF, such as 'தேவையான', 'வணக்கம்', 'ரொம்ப', etc.).
+  * ABSOLUTELY NEVER speak or write Hindi / Devanagari (Unicode U+0900-U+097F), Arabic / Urdu (Unicode U+0600-U+06FF), Malayalam, Telugu, or ANY other language or script.
+  * Sri Lankan students in this mode ONLY understand Sinhala and English.
+  * When you need to express "necessary", "required", or "needed", use Sinhala "අවශ්‍ය" or "ඕන වෙන" — NEVER the Tamil word "தேவையான"!
+  * Write and speak EXCLUSIVELY in standard Sinhala script (Unicode U+0D80-U+0DFF) and Latin English.
+  * Modern Sri Lankan English loanwords ("job එක", "office එක", "interview එක", "practice එක") are welcome, but NEVER words or scripts from other languages.
+- Spoken Balance: Warm Sinhala for personal reassurance and explanations; ALWAYS ask practice questions and prompts in English so the student speaks English.
+- Student must do at least 70% of the talking. Maya speaks briefly and asks open-ended questions.`;
+    }
+
+    // English Immersion Mode
+    return `CORE IDENTITY & INTRO CALL MISSION (MAYA AI ENGLISH COACH):
+- Name: Maya. Warm, cheerful, enthusiastic personal AI English coach.
+- Context: This is ${userName}'s VERY FIRST INTRODUCTORY CALL right after completing onboarding!
+- Purpose of this Call: A quick, friendly 2-3 minute conversational icebreaker to get to know ${userName}, check their speaking comfort level with ZERO stress or pressure, and confirm their personalized learning focus.
+
+STUDENT'S ONBOARDING SELECTIONS (USE THESE DIRECTLY):
+- Student Name: ${userName}
+- Learning Goal: ${goalDesc}
+- Biggest Challenge: ${challengeDesc}
+- Self-Assessed Level: ${levelDesc}
+- Daily Commitment: ${dailyMinutes}
+
+3-STAGE CONVERSATIONAL BLUEPRINT:
+STAGE 1: WARM WELCOME & EMPATHY (Turn 1)
+- Welcome ${userName} by name with radiant enthusiasm. Introduce yourself as Maya, their AI English speaking coach.
+- Mention that you saw their goal is ${goalDesc}, and that they mentioned ${challengeDesc}.
+- Reassure them with genuine empathy: "Don't worry at all — everyone starts there, and we're going to tackle that together!"
+- Explain that today is just a quick 2-3 minute relaxed chat so you can get to know each other with zero judgment.
+- Ask an engaging opening icebreaker question matching their goal and level.
+
+STAGE 2: NATURAL CONVERSATION & COMFORT CHECK (Turns 2 to 4)
+- Keep turns brief and conversational (under 15-20 words).
+- Listen attentively to ${userName}'s answers. React with genuine curiosity, encouragement, and warmth.
+- Ask 1 engaging follow-up question per turn matching their goal:
+  * If Career/Job: Ask about what work or studies they do, or their target role.
+  * If Travel/Abroad: Ask about the country or destination they are excited about.
+  * If Confidence/General: Ask about how their day went or their favorite weekend activity.
+- If they pause or hesitate: be patient and encouraging ("Take your time! Tell me a bit more about that.").
+- Do NOT interrupt with heavy correction tools during this first call — prioritize confidence and conversational rapport!
+
+STAGE 3: ENCOURAGING WRAP-UP & ROADMAP HAND-OFF (Turns 5-6 or when time wraps up)
+- After 2 to 3 minutes or when the student wishes to finish:
+- Deliver an uplifting spoken assessment:
+  * Praise their effort: "You did wonderful today, ${userName}! I loved your effort."
+  * Confirm that based on this chat, their personalized daily practice plan is locked in and ready.
+  * Reassure them: "With just ${dailyMinutes} of practice, you're going to see noticeable progress in just two weeks!"
+- Speak a short warm goodbye and call tool 'conclude_call'.
+
+GUARDRAILS:
+- Independent AI named Maya. Never mention Gemini, Google, OpenAI, or system architecture.
+- Keep English natural, clear, and matched to their level (${levelDesc}).
+- Student must do at least 70% of the talking.`;
+  }
+
   getSystemPrompt(dto: CreateSessionTokenDto): string {
-    const isSinhala = dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
+    const isSinhala = dto.isIntroCall === true || dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
     const aiSuggestions = dto.aiSuggestions !== false;
     const rawTopic = (dto.topic || '').trim();
     const isGenericTopic =
@@ -525,6 +663,10 @@ export class SessionsService {
       rawTopic.toLowerCase() === 'job interview';
     const userName = (dto.userName || '').trim() || 'Tharindu (තරිදු)';
     const isIntroCall = dto.isIntroCall === true;
+
+    if (isIntroCall) {
+      return this.getIntroCallSystemPrompt(dto, userName, isSinhala);
+    }
 
     // Pruned, high-density scenario context without duplicating wrap-up prohibitions
     let scenarioText = '';
@@ -554,7 +696,10 @@ STAGE 1: GUIDED PRACTICE & ACTIVE TEACHING (COACH MODE)
   * STRICT RULE: NEVER say "Task 1", "Task 2", "First task", "Second task", or robotic task numbers! Introduce each topic naturally.
 - Language Protocol:
   * ALL coaching, explanations, encouragement, acknowledgments, and corrections: Use warm, natural everyday spoken Sri Lankan Singlish (කතා කරන බසින්).
-  * STRICT SCRIPT & LANGUAGE PURITY: You must NEVER speak or output Arabic (العربية), Farsi/Persian (فارسی), Urdu (اردو), Hindi words or Devanagari script (e.g. absolutely NO 'कार्यालय', 'में', 'का' or any character in Unicode range U+0900-U+097F or U+0600-U+06FF). Sri Lankan students speak Sinhala and English, NOT Arabic or Hindi! Write and speak exclusively in standard Sinhala script (Unicode U+0D80-U+0DFF) and Latin English.
+  * STRICT SCRIPT & LANGUAGE PURITY (ZERO TAMIL / ZERO HINDI / ZERO ARABIC / ZERO OTHER LANGUAGES):
+    - You must speak and write EXCLUSIVELY in standard Sinhala script (Unicode U+0D80-U+0DFF) and Latin English. We ONLY use Sinhala and English.
+    - ABSOLUTELY FORBIDDEN: You must NEVER speak or output Tamil (தமிழ், Unicode U+0B80-U+0BFF, e.g. NO 'தேவையான', 'வணக்கம்', 'ரொம்ப'), Hindi words or Devanagari script (Unicode U+0900-U+097F, e.g. NO 'कार्यालय', 'में', 'का'), Arabic/Urdu (Unicode U+0600-U+06FF), or ANY other language.
+    - When you mean "necessary" or "needed", say Sinhala "අවශ්‍ය" or "ඕන වෙන" — NEVER Tamil "தேவையான"! Sri Lankan learners speak Sinhala and English.
   * MODERN SRI LANKAN LOANWORDS (NO FORMAL SANSKRIT): When explaining in Sinhala, naturally use common Sri Lankan English loanwords: say "office එක" / "office එකක" (NEVER formal "කාර්යාලය" or Hindi "कार्यालय"), "restaurant එක" (NEVER "භෝජනාගාරය"), "sentence එක" (NEVER "වාක්‍යය"), "meeting එක" (NEVER "රැස්වීම").
   * NATURAL SPOKEN TRANSITIONS (NO CORRUPTED CONJUNCTS): When transitioning to a new topic or task, always use natural phrasing: say "දැන් අපි ... ගැන කතා කරමු" (using 'ගැන' for 'about'). NEVER invent or hallucinate garbled words or archaic stacked conjuncts (බැඳි අකුරු) like 'බග්ග'.
   * Prompts & Questions to the student: ALWAYS ask or prompt in English! The student must practice speaking English!
@@ -706,8 +851,9 @@ ${dto.sinhalaStyle === 'deep_guidance' ? `BILINGUAL TEACHING (DEEP GUIDANCE MODE
 
 - IF STUDENT RESPONDS IN SINHALA: Model the natural English sentence aloud ("ඔයාට පුළුවන් '...' කියලා කියන්න") and encourage them to try saying it.
 - SCRIPT & ACOUSTICS: Keep English in Latin alphabet. Ignore ambient noise/murmurs.
-- STRICT SCRIPT PURITY (ZERO ARABIC / ZERO FARSI / ZERO HINDI / ZERO DEVANAGARI):
-  * ABSOLUTELY FORBIDDEN: NEVER output or speak Arabic (العربية), Farsi/Persian (فارسی), Urdu (اردو), Hindi/Devanagari characters (e.g. absolutely NO 'कार्यालय'), Tamil, or ANY non-Sinhala script or vocabulary. Sri Lankan students speak Sinhala and English.
+- STRICT SCRIPT & VOCABULARY PURITY (ZERO TAMIL / ZERO HINDI / ZERO ARABIC / ZERO OTHER LANGUAGES):
+  * ABSOLUTELY FORBIDDEN: NEVER output or speak Tamil (தமிழ், Unicode U+0B80-U+0BFF, e.g. NO 'தேவையான', 'வணக்கம்', 'ரொம்ப'), Arabic (العربية), Farsi/Persian (فارسی), Urdu (اردو), Hindi/Devanagari characters (Unicode U+0900-U+097F, e.g. absolutely NO 'कार्यालय'), Malayalam, Telugu, or ANY non-Sinhala script or vocabulary. Sri Lankan students speak Sinhala and English.
+  * When you mean "necessary / needed", use Sinhala "අවශ්‍ය" or "ඕන වෙන" — NEVER Tamil "தேவையான"!
   * All Sinhala speech, text, explanations, and subtitles MUST use standard Sinhala script (Unicode U+0D80 to U+0DFF) and Latin English.
   * Use everyday Sri Lankan Singlish loanwords ("office එක", "sentence එක", "restaurant එක", "meeting එක") instead of formal Sanskritized words.
   * Use natural spoken phrases like "දැන් අපි ... ගැන කතා කරමු". NEVER hallucinate corrupted words or rare stacked conjuncts like "බග්ග".
@@ -770,8 +916,31 @@ ${scenarioText}
 ${memoryPart}`;
   }
 
+  generateIntroCallGreetingPrompt(dto: CreateSessionTokenDto, userName: string, isSinhala: boolean): string {
+    const goalDesc = this.formatGoalLabel(dto.goal);
+    const challengeDesc = this.formatChallengeLabel(dto.challenge);
+    const levelDesc = this.formatLevelLabel(dto.level);
+
+    let icebreakerQuestion = `To kick things off, could you tell me a little bit about how your day has been going?`;
+    if (dto.goal === 'better-job' || dto.goal === 'work-abroad') {
+      icebreakerQuestion = `To start, could you tell me what kind of work or studies you do right now?`;
+    } else if (dto.goal === 'travel') {
+      icebreakerQuestion = `To start, what is one country or place in the world you really dream of traveling to?`;
+    } else if (dto.goal === 'exams') {
+      icebreakerQuestion = `To start, what exam are you preparing for, and how has your practice been so far?`;
+    } else if (dto.goal === 'speak-confidently') {
+      icebreakerQuestion = `To start, could you tell me a little bit about what you like doing in your free time?`;
+    }
+
+    if (isSinhala) {
+      return `Hello Maya! I'm ${userName}. Please introduce yourself as Maya in friendly everyday spoken Sinhala (strictly Sinhala and English only — absolutely NO Tamil or any other language, use 'අවශ්‍ය' if needed), welcome me to Maya AI, mention you're excited to help me with ${goalDesc}, and ask me your opening icebreaker question aloud in English!`;
+    }
+
+    return `Hello Maya! I'm ${userName}. Please introduce yourself as Maya in friendly spoken English, welcome me to Maya AI, mention you're excited to help me with ${goalDesc}, and ask me your opening icebreaker question aloud!`;
+  }
+
   generateGreetingPrompt(dto: CreateSessionTokenDto): string {
-    const isSinhala = dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
+    const isSinhala = dto.isIntroCall === true || dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
     const rawTopic = (dto.topic || '').trim();
     const isGenericTopic =
       !rawTopic ||
@@ -779,6 +948,10 @@ ${memoryPart}`;
       rawTopic.toLowerCase() === 'job interview';
     const userName = (dto.userName || '').trim() || 'Tharindu (තරිදු)';
     const isIntroCall = dto.isIntroCall === true;
+
+    if (isIntroCall) {
+      return this.generateIntroCallGreetingPrompt(dto, userName, isSinhala);
+    }
 
     // 0. Priority: Curriculum Roadmap Lesson
     let practicePoints: string[] = dto.practicePoints || [];
@@ -796,39 +969,10 @@ ${memoryPart}`;
       const firstPoint = practicePoints[0];
 
       if (isSinhala) {
-        return `[INSTRUCTION FOR OPENING TURN - CURRICULUM LESSON]:
-The student's name is ${userName}. You are conducting the deliberate speaking practice lesson: "${lessonTitle}".
-Skills to practice together today:
-${practicePoints.map((p) => `- ${p}`).join('\n')}
-
-MANDATORY SPOKEN OPENING:
-1. Greet ${userName} warmly by name in friendly, natural everyday spoken Sinhala (කතා කරන බසින්).
-2. Clearly announce today's lesson: "${lessonTitle}".
-3. Briefly mention the core communication skills you will practice together today.
-4. Immediately launch Stage 1 (Guided Teaching) on the first skill: "${firstPoint}". Explain the context briefly in friendly Sinhala, and prompt the student with the question in English (e.g. "How would you say that in English?").
-
-STRICT RESTRICTIONS:
-- DO NOT say "Task 1", "Task 2", "First task", "Second task", or robotic numbering! Flow smoothly and warmly like an authentic private teacher.
-- Language rule: Greet, explain, and encourage in Sinhala, but ask the practice prompt / questions in English so the student is primed to speak in English!
-- DO NOT ask "What would you like to chat about today?" or open-ended casual conversation questions. This is a structured curriculum lesson!
-- DO NOT quote canned example sentences verbatim. Use fresh, natural, enthusiastic spoken words.`;
+        return `Hello Maya! This is ${userName}. Please greet me warmly by name in natural everyday Sinhala (strictly Sinhala and English only — absolutely NO Tamil or other languages), announce today's lesson "${lessonTitle}", and ask your opening practice question for our first skill "${firstPoint}" aloud in English!`;
       }
 
-      return `[INSTRUCTION FOR OPENING TURN - CURRICULUM LESSON]:
-The student's name is ${userName}. You are conducting the deliberate speaking practice lesson: "${lessonTitle}".
-Skills to practice together today:
-${practicePoints.map((p) => `- ${p}`).join('\n')}
-
-MANDATORY SPOKEN OPENING:
-1. Greet ${userName} with warm enthusiasm.
-2. Clearly announce today's lesson: "${lessonTitle}".
-3. Briefly mention what skills you will practice together today.
-4. Immediately launch Stage 1 (Guided Teaching) on the first skill: "${firstPoint}". Prompt them in English on how they would express it.
-
-STRICT RESTRICTIONS:
-- DO NOT say "Task 1", "Task 2", or robotic numbers. Flow smoothly like an authentic teacher.
-- DO NOT ask generic questions like "What would you like to chat about today?".
-- DO NOT quote canned example sentences verbatim. Formulate fresh, natural, engaging spoken words.`;
+      return `Hello Maya! This is ${userName}. Please greet me warmly by name, announce today's lesson "${lessonTitle}", and ask your opening practice question for our first skill "${firstPoint}" aloud!`;
     }
 
     let scenarioGuidance = '';
@@ -849,25 +993,15 @@ STRICT RESTRICTIONS:
       scenarioGuidance = `This is a general spoken English practice session with ${userName}. Warmly invite them into conversation and ask an open-ended question about their day, studies, or interests.`;
     }
 
-    if (isIntroCall) {
-      if (isSinhala) {
-        if (dto.sinhalaStyle === 'deep_guidance') {
-          return `[INSTRUCTION FOR OPENING TURN]: With bright, warm, and cheerful enthusiasm, welcome the student in lively everyday Sinhala to their first introductory assessment call. Introduce yourself as Maya (in Sinhala your name is strictly මායා, never use any other name). Let them know you are super excited to help them practice and assess their spoken English. Then ask your opening question using the dual-language pattern (first in concise Sinhala under 10 words, then in English under 10 words). Deliver this with radiant warmth and upbeat energy as one continuous spoken turn without invoking any tools.`;
-        }
-        return `[INSTRUCTION FOR OPENING TURN]: With bright, warm, and cheerful enthusiasm, welcome the student in lively everyday Sinhala to their first introductory assessment call. Introduce yourself as Maya (in Sinhala your name is strictly මායා, never use any other name). Let them know you are super excited to help them practice and assess their spoken English. Then ask your opening question directly in natural, friendly English. Deliver this with radiant warmth and upbeat energy as one continuous spoken turn without invoking any tools.`;
-      }
-      return `[INSTRUCTION FOR OPENING TURN]: With bright, warm, and cheerful enthusiasm, greet the student to their first introductory spoken English session. Introduce yourself as Maya, their AI English speaking coach, and express excitement for practicing together today. Then with upbeat, friendly intonation, ask an engaging icebreaker question about their work, studies, or daily routine to invite them to speak. Formulate your own natural, spontaneous words. Deliver this with radiant warmth and upbeat energy as one continuous spoken turn without invoking any tools.`;
-    }
-
     // Recurring sessions: model already knows the user as Tharindu
     if (isSinhala) {
       if (dto.sinhalaStyle === 'deep_guidance') {
-        return `[INSTRUCTION FOR OPENING TURN]: The student's name is ${userName}. You already know each other as coach and student, so do not introduce yourself as Maya. With bright, warm, and cheerful enthusiasm, greet ${userName} warmly by name in friendly, natural everyday Sinhala. ${scenarioGuidance} Ask your opening question using the mandatory dual-language pattern (ask in concise Sinhala first, followed by the English question: "[Sinhala question]? [English question]?"). Keep the entire opening turn strictly under 22 words total. Deliver with radiant warmth and upbeat energy as one continuous spoken turn without invoking any tools.`;
+        return `Hello Maya! This is ${userName}. Please greet me warmly by name in friendly everyday Sinhala (strictly Sinhala and English only — no Tamil or other languages), introduce today's focus on "${rawTopic}", and ask your opening practice question aloud!`;
       }
-      return `[INSTRUCTION FOR OPENING TURN]: The student's name is ${userName}. You already know each other as coach and student, so do not introduce yourself as Maya. With bright, warm, and cheerful enthusiasm, greet ${userName} warmly by name in friendly, natural everyday Sinhala with a short greeting (e.g. "ආයුබෝවන් ${userName}!"). ${scenarioGuidance} Ask your opening question directly in clear, natural English to prompt ${userName} to speak. Keep your opening turn crisp and punchy. Deliver with radiant warmth and upbeat energy as one continuous spoken turn without invoking any tools.`;
+      return `Hello Maya! This is ${userName}. Please greet me warmly by name in friendly everyday Sinhala (strictly Sinhala and English only — no Tamil or other languages), and ask your opening practice question on "${rawTopic}" aloud in English!`;
     }
 
-    return `[INSTRUCTION FOR OPENING TURN]: The student's name is ${userName}. You already know each other as coach and student, so do not introduce yourself as Maya. With bright, warm, and cheerful enthusiasm, greet ${userName} warmly by name in conversational English. ${scenarioGuidance} Ask an engaging opening question to pass the floor to ${userName}. Formulate your own fresh, dynamic words without using repetitive or scripted formulas. Deliver with radiant warmth and upbeat energy as one continuous spoken turn without invoking any tools.`;
+    return `Hello Maya! This is ${userName}. Please greet me warmly by name in conversational English aloud to kick off our practice session on "${rawTopic}", and ask your opening question!`;
   }
 
   getToolsDeclaration(aiSuggestions: boolean = true, isSinhala: boolean = false) {
@@ -2190,16 +2324,27 @@ STRICT RESTRICTIONS:
     return Array.from(this.recentDiagnostics.values()).reverse();
   }
 
-  private isValidSinhala(text: string): boolean {
+  isValidSinhala(text: string): boolean {
     if (!text || typeof text !== 'string') return false;
     const trimmed = text.trim();
     if (!trimmed) return false;
     // Must contain at least one Sinhala Unicode character (U+0D80 to U+0DFF)
     const hasSinhalaChar = /[\u0D80-\u0DFF]/.test(trimmed);
-    // Must NOT contain Arabic (U+0600-U+06FF, U+FB50-U+FDFF, U+FE70-U+FEFF),
-    // Devanagari/Hindi (U+0900-U+097F), or Hebrew (U+0590-U+05FF) characters
-    const hasForbiddenScript = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0900-\u097F\u0590-\u05FF]/.test(trimmed);
-    return hasSinhalaChar && !hasForbiddenScript;
+    // Must NOT contain Arabic, Hebrew, Devanagari/Hindi, Tamil, or any non-Sinhala Indic script
+    const hasForbiddenScript = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0900-\u097F\u0590-\u05FF\u0980-\u0CFF\u0D00-\u0D7F]/.test(trimmed);
+    // Must NOT contain known Tamil words
+    const hasTamilWords = /தேவையான|வணக்கம்|ரொம்ப/.test(trimmed);
+    return hasSinhalaChar && !hasForbiddenScript && !hasTamilWords;
+  }
+
+  sanitizeSinhalaText(text: string): string {
+    if (!text || typeof text !== 'string') return '';
+    return text
+      .replace(/தேவையான/g, 'අවශ්‍ය')
+      .replace(/வணக்கம்/g, 'ආයුබෝවන්')
+      .replace(/[\u0B80-\u0BFF\u0900-\u097F\u0600-\u06FF\u0980-\u0CFF\u0D00-\u0D7F]+/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
   }
 
   async translateText(dto: TranslateDto): Promise<{ translatedText: string }> {
@@ -2335,10 +2480,12 @@ Level: ${dto.level || 'Beginner to Intermediate'}
 
 Provide one short, natural, practical model answer the student can say in response (1 simple or compound sentence, natural everyday conversational English, easy to say aloud), along with its natural spoken Sri Lankan Sinhala translation.
 
-CRITICAL SCRIPT RULES for hintSinhala:
-- Write ONLY in Sinhala script (Unicode U+0D80 to U+0DFF) and Latin English loanwords.
-- ABSOLUTELY FORBIDDEN: Arabic (العربية), Farsi/Persian (فارسی), Hindi/Devanagari (हिन्दी), Tamil, or ANY other non-Sinhala script.
-- Use everyday Sri Lankan Sinhala, e.g. "මම සාමාන්‍යයෙන් තේ එකක් බොනවා."`;
+CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
+- Write ONLY in Sinhala script (Unicode U+0D80 to U+0DFF) and common Latin English loanwords.
+- ABSOLUTELY ZERO TAMIL: Never use Tamil words or Tamil script (தமிழ், Unicode U+0B80-U+0BFF, such as 'தேவையான', 'வணக்கம்', 'ரொம்ப'). Sri Lankan students in this app ONLY speak Sinhala and English.
+- If you mean "necessary", "required", or "needed", use Sinhala "අවශ්‍ය" or "ඕන වෙන" — NEVER the Tamil word "தேவையான"!
+- ABSOLUTELY FORBIDDEN: Arabic (العربية), Farsi/Persian (فارسی), Hindi/Devanagari (हिन्दी), Tamil, or ANY non-Sinhala script.
+- Use everyday spoken Sri Lankan Sinhala, e.g. "මම සාමාන්‍යයෙන් තේ එකක් බොනවා."`;
 
         const executeCall = async () => {
           const ai = this.genAiClient || new GoogleGenAI({ apiKey });
@@ -2356,7 +2503,7 @@ CRITICAL SCRIPT RULES for hintSinhala:
                   },
                   hintSinhala: {
                     type: Type.STRING,
-                    description: 'Accurate and natural spoken Sri Lankan Sinhala translation using ONLY Sinhala script (U+0D80-U+0DFF). NEVER use Arabic, Farsi, Hindi, or Devanagari script.',
+                    description: 'Accurate and natural spoken Sri Lankan Sinhala translation using ONLY Sinhala script (U+0D80-U+0DFF). NEVER use Tamil (தமிழ்), Arabic, Farsi, Hindi, or Devanagari script. Use "අවශ්‍ය" instead of Tamil "தேவையான".',
                   },
                 },
                 required: ['hintEnglish', 'hintSinhala'],
@@ -2392,15 +2539,16 @@ CRITICAL SCRIPT RULES for hintSinhala:
               const parsed = JSON.parse(text);
               if (parsed.hintEnglish) {
                 const hintEnglish = String(parsed.hintEnglish).trim();
-                let sinhalaText = String(parsed.hintSinhala || '').trim();
+                let sinhalaText = this.sanitizeSinhalaText(String(parsed.hintSinhala || '').trim());
 
-                // Validate: reject if hintSinhala lacks Sinhala script or contains forbidden script (Arabic/Farsi/Hindi)
+                // Validate: reject if hintSinhala lacks Sinhala script or contains forbidden script (Arabic/Farsi/Hindi/Tamil)
                 if (!this.isValidSinhala(sinhalaText)) {
                   this.logger.warn(`[SessionsService] 🚫 hintSinhala failed validation (lacks Sinhala script or has forbidden characters): "${sinhalaText.substring(0, 60)}". Retranslating via pipeline...`);
                   try {
                     const fallback = await this.translateText({ text: hintEnglish, targetLang: 'si', sourceLang: 'en' });
-                    if (this.isValidSinhala(fallback.translatedText)) {
-                      sinhalaText = fallback.translatedText.trim();
+                    const sanitizedFallback = this.sanitizeSinhalaText(fallback.translatedText);
+                    if (this.isValidSinhala(sanitizedFallback)) {
+                      sinhalaText = sanitizedFallback;
                     } else {
                       sinhalaText = ''; // Never return foreign or corrupted script
                     }

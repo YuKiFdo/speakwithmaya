@@ -5,6 +5,8 @@ import {
   StyleSheet,
   ActivityIndicator,
   Platform,
+  StyleProp,
+  ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
@@ -14,6 +16,7 @@ interface TranslationToggleButtonProps {
   isLoading?: boolean;
   onToggle: () => void;
   disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
 }
 
 export function TranslationToggleButton({
@@ -21,6 +24,7 @@ export function TranslationToggleButton({
   isLoading = false,
   onToggle,
   disabled = false,
+  style,
 }: TranslationToggleButtonProps) {
   return (
     <Pressable
@@ -28,6 +32,7 @@ export function TranslationToggleButton({
         styles.container,
         pressed && styles.pressed,
         disabled && styles.disabled,
+        style,
       ]}
       onPress={onToggle}
       disabled={disabled || isLoading}
@@ -63,12 +68,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
     paddingVertical: 7,
-    borderRadius: 20,
-    // backgroundColor: '#ffffff',
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2E8F0',
     gap: 6,
-    marginTop: 12,
     alignSelf: 'center',
     ...Platform.select({
       web: {

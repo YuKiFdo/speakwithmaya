@@ -27,6 +27,8 @@ import { fontStyle } from '@/theme/fonts';
 
 import { useLiveCall } from '@/hooks/useLiveCall';
 import { ConnectingView } from '@/components/call/connecting-view';
+import { ContextualCallGuide } from '@/components/call/contextual-call-guide';
+import { BeaconRing } from '@/components/call/beacon-ring';
 import { MicrophonePermissionPopup } from '@/components/call/microphone-permission-popup';
 import { setLatestSessionReport } from '@/utils/session-report-store';
 import { HintFloatingButton } from '@/components/call/hint-floating-button';
@@ -63,6 +65,7 @@ export default function CallScreen() {
     passingScorePercent?: string;
     levelNumber?: string;
     targetSpeakingShare?: string;
+    dailyGoal?: string;
   }>();
 
   const { isPhone } = useBreakpoint();
@@ -74,14 +77,13 @@ export default function CallScreen() {
   const durationSec = params.duration ? parseInt(params.duration, 10) : 300;
   const targetDuration = isNaN(durationSec) ? 300 : durationSec;
   const aiSug = params.aiSuggestions !== 'false';
-  const langMode = params.languageMode === 'english' ? 'english' : 'sinhala';
-  const sinhalaStyle: 'balanced' | 'deep_guidance' =
-    params.sinhalaStyle === 'deep_guidance'
-      ? 'deep_guidance'
-      : 'balanced';
+  const isIntro = params.isIntroCall === 'true';
+  const langMode = isIntro ? 'sinhala' : (params.languageMode === 'english' ? 'english' : 'sinhala');
+  const sinhalaStyle: 'balanced' | 'deep_guidance' = isIntro
+    ? 'balanced'
+    : (params.sinhalaStyle === 'deep_guidance' ? 'deep_guidance' : 'balanced');
   const effectiveTopic = params.topic || params.goal || 'General Speaking Practice';
   const effectiveUserName = (params.name || params.userName || '').trim() || 'Tharindu';
-  const isIntro = params.isIntroCall === 'true';
 
   let parsedPracticePoints: string[] = [];
   if (params.practicePoints) {
@@ -102,6 +104,8 @@ export default function CallScreen() {
     scenarioId: params.scenarioId,
     userName: effectiveUserName,
     isIntroCall: isIntro,
+    challenge: params.challenge,
+    dailyGoal: params.dailyGoal,
     roadmapLevelId: params.roadmapLevelId,
     levelNumber: params.levelNumber ? parseInt(params.levelNumber, 10) : undefined,
     levelTitle: params.scenarioTitle || params.topic,
@@ -339,6 +343,9 @@ export default function CallScreen() {
     ? 'session-ends'
     : connection.toastPreset;
 
+  // Contextual Call Guide for Intro Call (Non-SVG Step Card)
+  const [guideStepIndex, setGuideStepIndex] = useState<number | null>(null);
+
   const displayedStatusText = isCallConnectionLost
     ? 'Connection lost'
     : isCallReconnecting
@@ -347,8 +354,10 @@ export default function CallScreen() {
     ? 'Session ended'
     : (isConcludingCall || isFarewellPhase)
     ? 'Wrapping up...'
+    : isIntro && guideStepIndex !== null
+    ? 'Intro guide'
     : liveCall.isSlowResponse
-    ? 'Waiting for Maya...'
+    ? 'Maya is thinking...'
     : connection.isWeak
     ? 'Weak connection'
     : liveCall.status === 'speaking'
@@ -368,6 +377,73 @@ export default function CallScreen() {
   const connectingFadeAnim = useRef(new Animated.Value(1)).current;
   const hasTransitionedRef = useRef(false);
 
+  // User speech & minimum 60s guard for Intro Call
+  const hasUserSpoken = liveCall.turns.some((t) => t.role === 'user');
+  const isIntroEndCallLocked = isIntro && (displayedElapsed < 60 || !hasUserSpoken);
+  const [introLockedNotice, setIntroLockedNotice] = useState<string | null>(null);
+
+  // Contextual Call Guide for Intro Call (Non-SVG Step Card)
+  const hasShownGuideRef = useRef(false);
+
+  useEffect(() => {
+    if (isIntro && !connectingVisible && !hasShownGuideRef.current) {
+      hasShownGuideRef.current = true;
+      const timer = setTimeout(() => {
+        setGuideStepIndex(0);
+      }, 900);
+      return () => clearTimeout(timer);
+    }
+  }, [isIntro, connectingVisible]);
+
+  // Dynamically showcase the live ambient glows on Step 0 (Blue Aura) & Step 1 (Purple Bloom)
+  useEffect(() => {
+    if (guideStepIndex === null) return;
+
+    if (guideStepIndex === 0) {
+      // Step 0: Demonstrate Blue Speaking Aura alive
+      Animated.parallel([
+        Animated.timing(blueAuraAnim, {
+          toValue: 0.85,
+          duration: 350,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(purpleGlowAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start();
+    } else if (guideStepIndex === 1) {
+      // Step 1: Demonstrate Purple Listening Bloom alive
+      Animated.parallel([
+        Animated.timing(purpleGlowAnim, {
+          toValue: 0.95,
+          duration: 350,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(blueAuraAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start();
+    } else {
+      // Steps 2, 3, 4: Soften ambient glows so target buttons stand out with their beacon halos
+      Animated.parallel([
+        Animated.timing(blueAuraAnim, {
+          toValue: 0.05,
+          duration: 300,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(purpleGlowAnim, {
+          toValue: 0.15,
+          duration: 300,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start();
+    }
+  }, [guideStepIndex]);
+
   useEffect(() => {
     const isNowConnected = liveCall.isConnected || (liveCall.status !== 'connecting' && liveCall.status !== 'idle');
 
@@ -375,8 +451,10 @@ export default function CallScreen() {
       hasTransitionedRef.current = true;
       console.log('[call.tsx] 📞 Call connected! Showing green Connected state & releasing greeting.');
 
-      // 1. Release Maya's greeting audio immediately so it is not delayed or held
-      liveCall.releaseGreeting?.();
+      // 1. Release Maya's greeting audio immediately only if NOT an intro call (intro waits for guide completion)
+      if (!isIntro) {
+        liveCall.releaseGreeting?.();
+      }
 
       // 2. Play call connected chime in the background (non-blocking)
       try {
@@ -476,6 +554,24 @@ export default function CallScreen() {
   const [showForceEndPopup, setShowForceEndPopup] = useState(false);
 
   const handleHangup = () => {
+    if (isIntro) {
+      if (isIntroEndCallLocked) {
+        const remaining = Math.max(0, 60 - displayedElapsed);
+        const msg = !hasUserSpoken
+          ? 'Say hello to Maya first before finishing!'
+          : `Please chat with Maya for at least 1 minute (${remaining}s left)!`;
+        setIntroLockedNotice(msg);
+        setTimeout(() => setIntroLockedNotice(null), 2800);
+        return;
+      }
+      // In intro call, NEVER trigger force-end popup. Always request graceful wrap-up:
+      if (!isConcludingCall) {
+        setIsConcludingCall(true);
+        liveCall.requestGracefulHangup();
+      }
+      return;
+    }
+
     if (isConcludingCall || isFarewellPhase) {
       // Second press during concluding / farewell wrap-up phase: show force end confirmation popup
       setShowForceEndPopup(true);
@@ -524,6 +620,23 @@ export default function CallScreen() {
         sessionTurns: liveCall.turns,
         activeHints: hintsHistoryRef.current,
       });
+      if (isIntro) {
+        console.log('[call.tsx] 🏁 Intro call concluded -> routing directly to /onboarding/building-plan');
+        router.replace({
+          pathname: '/onboarding/building-plan' as any,
+          params: {
+            ...params,
+            sessionId: activeSessionId,
+            durationSeconds: String(liveCall.missionReport.durationSeconds || ''),
+            talkTimeSeconds: String(liveCall.missionReport.talkTimeSeconds || ''),
+            overallScore: String(liveCall.missionReport.overallScore || '85'),
+            passed: 'true',
+            isGeneralChat: 'true',
+          },
+        });
+        return;
+      }
+
       router.replace({
         pathname: '/onboarding/analyzing' as any,
         params: {
@@ -590,14 +703,26 @@ export default function CallScreen() {
                 <Pressable
                   style={({ pressed }) => [
                     styles.endSessionPillButton,
-                    pressed && styles.endSessionPressed,
+                    isIntroEndCallLocked && styles.endSessionPillLocked,
+                    pressed && !isIntroEndCallLocked && styles.endSessionPressed,
                   ]}
                   onPress={handleHangup}
                   accessibilityRole="button"
-                  accessibilityLabel="End Session"
+                  accessibilityLabel={isIntroEndCallLocked ? 'End Session (Locked)' : 'End Session'}
                 >
-                  <EndCallIcon size={20} color="#ffffff" />
-                  <Text style={styles.endSessionText}>End Session</Text>
+                  <BeaconRing
+                    color="#F43F5E"
+                    radius={22}
+                    active={guideStepIndex === 4}
+                  />
+                  {isIntroEndCallLocked ? (
+                    <Feather name="lock" size={16} color="#94A3B8" />
+                  ) : (
+                    <EndCallIcon size={20} color="#ffffff" />
+                  )}
+                  <Text style={[styles.endSessionText, isIntroEndCallLocked && styles.endSessionTextLocked]}>
+                    {isIntroEndCallLocked ? 'Locked (1m)' : 'End Session'}
+                  </Text>
                 </Pressable>
               </View>
             </View>
@@ -664,13 +789,23 @@ export default function CallScreen() {
               <Pressable
                 style={({ pressed }) => [
                   styles.mobileHangupButton,
-                  pressed && styles.hangupButtonPressed,
+                  isIntroEndCallLocked && styles.hangupButtonLocked,
+                  pressed && !isIntroEndCallLocked && styles.hangupButtonPressed,
                 ]}
                 onPress={handleHangup}
                 accessibilityRole="button"
-                accessibilityLabel="End call"
+                accessibilityLabel={isIntroEndCallLocked ? 'End call (Locked)' : 'End call'}
               >
-                <EndCallIcon size={28} color="#ffffff" />
+                <BeaconRing
+                  color="#F43F5E"
+                  radius={27}
+                  active={guideStepIndex === 4}
+                />
+                {isIntroEndCallLocked ? (
+                  <Feather name="lock" size={24} color="#94A3B8" />
+                ) : (
+                  <EndCallIcon size={28} color="#ffffff" />
+                )}
               </Pressable>
             </View>
           )}
@@ -727,14 +862,20 @@ export default function CallScreen() {
 
             {/* Session Ending & Network Connection Toast Pill */}
             <View style={styles.noticeWrapper}>
-              {activeToastPreset && (
+              {introLockedNotice ? (
+                <ToastPill
+                  variant="warning"
+                  text={introLockedNotice}
+                  visible={true}
+                />
+              ) : activeToastPreset ? (
                 <ToastPill
                   preset={activeToastPreset}
                   secondsRemaining={activeToastPreset === 'session-ends' && remainingSeconds > 0 ? remainingSeconds : undefined}
                   text={activeToastPreset === 'session-ends' && remainingSeconds === 0 ? 'Wrapping up session...' : undefined}
                   visible={true}
                 />
-              )}
+              ) : null}
             </View>
 
             {/* Evaluation Result Banner */}
@@ -767,13 +908,22 @@ export default function CallScreen() {
             {/* Conversation Display with Multi-Turn History (Image 2 Design) */}
             <ConversationDisplay
               previousText={liveCall.previousSubtitles}
-              currentText={liveCall.subtitles}
-              isSpeaking={liveCall.status === 'speaking'}
+              currentText={
+                isIntro && guideStepIndex !== null && !liveCall.subtitles
+                  ? "Welcome to Maya! Let's practice speaking English together."
+                  : liveCall.subtitles
+              }
+              isSpeaking={guideStepIndex === 0 || liveCall.status === 'speaking'}
               isWebOrDesktop={isWebOrDesktop}
-              translationText={translationText}
+              translationText={
+                isIntro && guideStepIndex !== null && !translationText
+                  ? "මායා වෙත සාදරයෙන් පිළිගනිමු! අපි එකට ඉංග්‍රීසි කතා කිරීමට පුරුදු වෙමු."
+                  : translationText
+              }
               isTranslationVisible={isTranslationVisible}
               isTranslating={isTranslating}
               onToggleTranslation={handleToggleTranslation}
+              isTranslationHighlighted={guideStepIndex === 2}
             />
 
             {/* Hint Suggestion Card (Image 2 Design: "Try saying:") */}
@@ -796,6 +946,7 @@ export default function CallScreen() {
                 onPress={handleToggleHint}
                 isActive={isHintVisible}
                 disabled={liveCall.status === 'connecting' || liveCall.status === 'idle'}
+                isHighlighted={guideStepIndex === 3}
               />
             </View>
           )}
@@ -860,6 +1011,22 @@ export default function CallScreen() {
         onFooterButtonPress={() => setShowForceEndPopup(false)}
         showCloseButton={true}
       />
+
+      {/* Contextual Call Guide (Non-SVG Step Card) */}
+      {isIntro && (
+        <ContextualCallGuide
+          visible={guideStepIndex !== null}
+          currentStepIndex={guideStepIndex ?? 0}
+          onStepChange={(idx) => setGuideStepIndex(idx)}
+          onFinish={() => {
+            setGuideStepIndex(null);
+            setIsTranslationVisible(false);
+            setTranslationText('');
+            liveCall.releaseGreeting?.();
+          }}
+          isDesktop={isWebOrDesktop}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -972,6 +1139,21 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 14,
   },
+  endSessionPillLocked: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    ...Platform.select({
+      web: { boxShadow: 'none' } as any,
+      default: {
+        shadowOpacity: 0,
+        elevation: 0,
+      },
+    }),
+  },
+  endSessionTextLocked: {
+    color: '#94A3B8',
+  },
   /* Mobile Top Bar */
   mobileTopBar: {
     width: '100%',
@@ -1021,6 +1203,18 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.35,
         shadowRadius: 10,
         elevation: 6,
+      },
+    }),
+  },
+  hangupButtonLocked: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    ...Platform.select({
+      web: { boxShadow: 'none' } as any,
+      default: {
+        shadowOpacity: 0,
+        elevation: 0,
       },
     }),
   },

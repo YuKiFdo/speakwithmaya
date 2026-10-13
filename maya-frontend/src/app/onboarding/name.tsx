@@ -98,7 +98,7 @@ export default function NameScreen() {
       ]).start();
     }, 2000);
 
-    // 3. Timing sequence: Input box appears at ~3600ms
+    // 3. Timing sequence: Input box & Button appear at ~3600ms
     const inputTimer = setTimeout(() => {
       setShowInput(true);
       Animated.parallel([
@@ -114,8 +114,20 @@ export default function NameScreen() {
           tension: 45,
           useNativeDriver: Platform.OS !== 'web',
         }),
+        Animated.timing(buttonOpacityAnim, {
+          toValue: 1,
+          duration: 450,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.spring(buttonSlideAnim, {
+          toValue: 0,
+          friction: 6,
+          tension: 45,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
       ]).start(() => {
-        // Subtle auto-focus on input once visible
+        // Fallback focus check
         inputRef.current?.focus();
       });
     }, 3600);
@@ -128,40 +140,20 @@ export default function NameScreen() {
     };
   }, []);
 
-  // 4. Timing sequence: Button appears when user types their name
-  const isNameEntered = name.trim().length > 0;
+  // iOS-compatible auto-focus: Triggers immediately when showInput switches to true
+  // with a slight tick to allow iOS UIKit responder chain & pointerEvents to settle
   useEffect(() => {
-    if (isNameEntered) {
-      Animated.parallel([
-        Animated.timing(buttonOpacityAnim, {
-          toValue: 1,
-          duration: 320,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.spring(buttonSlideAnim, {
-          toValue: 0,
-          friction: 6,
-          tension: 45,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(buttonOpacityAnim, {
-          toValue: 0,
-          duration: 200,
-          easing: Easing.in(Easing.ease),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(buttonSlideAnim, {
-          toValue: 12,
-          duration: 200,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]).start();
+    if (showInput) {
+      const focusTimer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, Platform.OS === 'ios' ? 120 : 50);
+
+      return () => clearTimeout(focusTimer);
     }
-  }, [isNameEntered]);
+  }, [showInput]);
+
+  // Button is enabled only when name is typed
+  const isNameEntered = name.trim().length > 0;
 
   // Soundwave animation while Maya is speaking
   useEffect(() => {
@@ -311,6 +303,7 @@ export default function NameScreen() {
                 autoCorrect={false}
                 returnKeyType="done"
                 blurOnSubmit={true}
+                showSoftInputOnFocus={true}
                 onSubmitEditing={() => {
                   Keyboard.dismiss();
                 }}
@@ -322,7 +315,7 @@ export default function NameScreen() {
               />
             </Animated.View>
 
-            {/* Card 3: Common MayaPrimaryButton (Appears when typed, feedback style + sound) */}
+            {/* Card 3: Common MayaPrimaryButton (Default shown, disabled until typed) */}
             <Animated.View
               style={[
                 styles.buttonWrapper,
@@ -331,10 +324,11 @@ export default function NameScreen() {
                   transform: [{ translateY: buttonSlideAnim }],
                 },
               ]}
-              pointerEvents={isNameEntered ? 'auto' : 'none'}
+              pointerEvents={showInput ? 'auto' : 'none'}
             >
               <MayaPrimaryButton
                 label="Continue"
+                disabled={!isNameEntered}
                 onPress={handleContinue}
                 height={58}
                 borderRadius={20}

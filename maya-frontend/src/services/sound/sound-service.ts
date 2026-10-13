@@ -19,6 +19,7 @@ const MAYA_CHALLENGE_PROMPT_ASSET = require('@/assets/sounds/maya-challenge-prom
 const MAYA_LEVEL_PROMPT_ASSET = require('@/assets/sounds/maya-level-prompt.wav');
 const MAYA_EMPLOYMENT_PROMPT_ASSET = require('@/assets/sounds/maya-employment-prompt.wav');
 const MAYA_DAILY_GOAL_PROMPT_ASSET = require('@/assets/sounds/maya-daily-goal-prompt.wav');
+const MAYA_SOCIAL_PROOF_PROMPT_ASSET = require('@/assets/sounds/maya-social-proof-prompt.wav');
 
 const GOAL_AUDIO_ASSETS: Record<string, any> = {
   'better-job': require('@/assets/sounds/maya-goal-job.wav'),
@@ -84,6 +85,7 @@ let employmentPromptVoiceHandle: VoicePlayerHandle | null = null;
 let employmentFeedbackVoiceHandle: VoicePlayerHandle | null = null;
 let dailyGoalPromptVoiceHandle: VoicePlayerHandle | null = null;
 let dailyGoalFeedbackVoiceHandle: VoicePlayerHandle | null = null;
+let socialProofPromptVoiceHandle: VoicePlayerHandle | null = null;
 
 // Decoded Web Audio Buffer Cache for 100% reliable iOS/Safari/Android/Windows playback
 const audioBufferCache = new Map<string, AudioBuffer>();
@@ -1307,3 +1309,21 @@ export function stopMayaChallengeFeedbackVoice(): void {
   challengeFeedbackVoiceHandle?.stop();
   challengeFeedbackVoiceHandle = null;
 }
+
+/**
+ * 11. Maya's Social Proof Screen Voice Prompt
+ * Plays Gemini TTS Callirrhoe voice:
+ * "See your progress in just two weeks! The more you practice, the more confident you'll become! Over ten thousand people already use Maya to speak English!"
+ */
+export function playMayaSocialProofPromptVoice(callbacks?: VoiceCallbacks): void {
+  stopMayaSocialProofPromptVoice();
+  playUniversalVoiceAsset(MAYA_SOCIAL_PROOF_PROMPT_ASSET, callbacks, (h) => {
+    socialProofPromptVoiceHandle = h;
+  });
+}
+
+export function stopMayaSocialProofPromptVoice(): void {
+  socialProofPromptVoiceHandle?.stop();
+  socialProofPromptVoiceHandle = null;
+}
+

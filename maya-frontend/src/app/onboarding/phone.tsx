@@ -101,7 +101,7 @@ export default function PhoneScreen() {
       ]).start();
     }, 2100);
 
-    // 3. Timing sequence: Input row appears at ~3800ms
+    // 3. Timing sequence: Input row & Button appear at ~3800ms
     const inputTimer = setTimeout(() => {
       setShowInput(true);
       Animated.parallel([
@@ -112,6 +112,18 @@ export default function PhoneScreen() {
           useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.spring(inputSlideAnim, {
+          toValue: 0,
+          friction: 6,
+          tension: 45,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(buttonOpacityAnim, {
+          toValue: 1,
+          duration: 450,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.spring(buttonSlideAnim, {
           toValue: 0,
           friction: 6,
           tension: 45,
@@ -131,40 +143,20 @@ export default function PhoneScreen() {
     };
   }, []);
 
-  // 4. Timing sequence: Button appears when user types their phone number
-  const isPhoneEntered = phone.trim().length > 0;
+  // iOS-compatible auto-focus: Triggers immediately when showInput switches to true
+  // with a slight tick to allow iOS UIKit responder chain & pointerEvents to settle
   useEffect(() => {
-    if (isPhoneEntered) {
-      Animated.parallel([
-        Animated.timing(buttonOpacityAnim, {
-          toValue: 1,
-          duration: 320,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.spring(buttonSlideAnim, {
-          toValue: 0,
-          friction: 6,
-          tension: 45,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(buttonOpacityAnim, {
-          toValue: 0,
-          duration: 200,
-          easing: Easing.in(Easing.ease),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(buttonSlideAnim, {
-          toValue: 12,
-          duration: 200,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]).start();
+    if (showInput) {
+      const focusTimer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, Platform.OS === 'ios' ? 120 : 50);
+
+      return () => clearTimeout(focusTimer);
     }
-  }, [isPhoneEntered]);
+  }, [showInput]);
+
+  // Button is enabled only when phone number is typed
+  const isPhoneEntered = phone.trim().length > 0;
 
   // Soundwave animation while Maya is speaking
   useEffect(() => {
@@ -337,6 +329,7 @@ export default function PhoneScreen() {
                     keyboardType="phone-pad"
                     returnKeyType="done"
                     blurOnSubmit={true}
+                    showSoftInputOnFocus={true}
                     onSubmitEditing={() => {
                       Keyboard.dismiss();
                     }}
@@ -349,7 +342,7 @@ export default function PhoneScreen() {
                 </View>
               </Animated.View>
 
-              {/* Card 3: Common MayaPrimaryButton & Terms Disclosure (Appears when typed) */}
+              {/* Card 3: Common MayaPrimaryButton & Terms Disclosure (Default shown, disabled until typed) */}
               <Animated.View
                 style={[
                   styles.buttonWrapper,
@@ -358,11 +351,12 @@ export default function PhoneScreen() {
                     transform: [{ translateY: buttonSlideAnim }],
                   },
                 ]}
-                pointerEvents={isPhoneEntered ? 'auto' : 'none'}
+                pointerEvents={showInput ? 'auto' : 'none'}
               >
                 <MayaPrimaryButton
                   label="Send Verification Code"
                   showArrow={false}
+                  disabled={!isPhoneEntered}
                   onPress={handleSendCode}
                   height={58}
                   borderRadius={20}

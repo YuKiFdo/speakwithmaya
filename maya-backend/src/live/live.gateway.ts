@@ -513,20 +513,33 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.addSessionLog(state, 'time_wrapup_cue');
         if (state.geminiSession && state.isConnectedToGemini) {
           try {
+            const isIntro = state.dto?.isIntroCall === true;
+            const isSinhala = state.dto?.languageMode === 'sinhala' || state.dto?.mode === 'sinhala_tutor';
+            const studentName = (state.dto?.userName || '').trim() || 'the student';
+
+            const wrapupNotice = isIntro
+              ? isSinhala
+                ? `[SYSTEM TIME NOTICE - INTRO CALL WRAP-UP]: The 2-minute introductory call is now complete. In your very next spoken turn: warmly praise ${studentName} for speaking with you today (e.g. "ගොඩක් හොඳයි ${studentName}!"), explain that based on this quick chat their personalized daily learning plan is now ready, speak a cheerful goodbye, and call tool conclude_call. Deliver this in under 15 seconds with zero test scoring.`
+                : `[SYSTEM TIME NOTICE - INTRO CALL WRAP-UP]: The 2-minute introductory call is now complete. In your very next spoken turn: warmly praise ${studentName} for speaking with you today, let them know their personalized daily learning roadmap is now ready, speak an enthusiastic goodbye, and call tool conclude_call. Deliver this in under 15 seconds with zero test scoring.`
+              : `[SYSTEM TIME NOTICE: The practice session time has ended. Right now, in your current spoken turn, wrap up naturally: share 1 short encouraging observation about how they did today, thank them warmly, speak your cheerful goodbye aloud, and then call conclude_call. Keep your farewell brief (under 15 seconds of speech).]`;
+
             state.geminiSession.sendClientContent({
               turns: [
                 {
                   role: 'user',
                   parts: [
                     {
-                      text: `[SYSTEM TIME NOTICE: The practice session time has ended. Right now, in your current spoken turn, wrap up naturally: share 1 short encouraging observation about how they did today, thank them warmly, speak your cheerful goodbye aloud, and then call conclude_call. Keep your farewell brief (under 15 seconds of speech).]`,
+                      text: wrapupNotice,
                     },
                   ],
                 },
               ],
               turnComplete: true,
             });
-            this.logger.log(`[${state.sessionId}] ⏰ Time wrapup cue dispatched to Gemini Live`);
+            try {
+              state.geminiSession.sendRealtimeInput({ activityEnd: {} });
+            } catch {}
+            this.logger.log(`[${state.sessionId}] ⏰ Time wrapup cue dispatched to Gemini Live (isIntro: ${isIntro})`);
           } catch (e: any) {
             this.logger.warn(`[${state.sessionId}] Failed to send time wrapup cue to Gemini: ${e?.message}`);
           }
@@ -717,18 +730,6 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.log(`[${state.sessionId}] Connecting to Gemini Live API (${this.liveModel})...`);
       this.addSessionLog(state, 'gemini_connecting', `model=${this.liveModel}`);
 
-      const isFreshSession = !dto.isReconnect && !dto.memory;
-      if (isFreshSession && greetingPrompt) {
-        state.isGreetingInProgress = true;
-        // Safety timeout: after 15s, guarantee audio input is un-shielded even if greeting fails
-        setTimeout(() => {
-          if (state.isGreetingInProgress) {
-            this.logger.warn(`[${state.sessionId}] Greeting safety timer expired (15s) — unlocking user audio input`);
-            state.isGreetingInProgress = false;
-          }
-        }, 15000);
-      }
-
       let session: any = null;
 
       session = await this.ai.live.connect({
@@ -768,65 +769,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
         callbacks: {
           onopen: () => {
-            this.logger.log(`[${state.sessionId}] ✅ Connected to Gemini Live API`);
-            state.isConnectedToGemini = true;
-            this.addSessionLog(state, 'gemini_connected');
-
-            // Notify client that session is ready
-            this.safeSendToClient(state, JSON.stringify({
-              type: 'ready',
-              model: this.liveModel,
-              voiceName,
-            }));
-
-            // If roadmap curriculum session with practice points, proactively prime Task 0 on client
-            if (dto.practicePoints && dto.practicePoints.length > 0) {
-              const firstPoint = dto.practicePoints[0];
-              state.activePracticeTask = {
-                pointIndex: 0,
-                phase: 'teaching',
-                pointTitle: firstPoint,
-                guidanceOrScenario: '',
-              };
-              this.safeSendToClient(state, JSON.stringify({
-                type: 'tool_call',
-                name: 'set_active_practice_task',
-                args: {
-                  pointIndex: 0,
-                  phase: 'teaching',
-                  taskTitle: firstPoint,
-                  hint: '',
-                },
-              }));
-            }
-
-            // Dispatch opening turn greeting prompt if fresh session
-            const isFreshSession = !dto.isReconnect && !dto.memory;
-            if (isFreshSession && greetingPrompt && session && !state.hasDispatchedGreeting) {
-              state.hasDispatchedGreeting = true;
-              state.isGreetingInProgress = true;
-              this.logger.log(`[${state.sessionId}] Dispatching opening turn greeting prompt (audio input shielded)`);
-              this.addSessionLog(state, 'greeting_dispatched');
-
-              // Start latency timer for greeting response
-              state.turnEndTimestamp = Date.now();
-              state.awaitingGeminiResponse = true;
-
-              session.sendClientContent({
-                turns: [
-                  {
-                    role: 'user',
-                    parts: [{ text: greetingPrompt }],
-                  },
-                ],
-                turnComplete: true,
-              });
-            } else if (!isFreshSession && !state.hasDispatchedGreeting) {
-              state.hasDispatchedGreeting = true;
-              state.isGreetingInProgress = false;
-              this.logger.log(`[${state.sessionId}] Reconnected session / existing memory present -> skipping opening greeting prompt`);
-              this.addSessionLog(state, 'greeting_skipped_reconnect');
-            }
+            this.logger.log(`[${state.sessionId}] 🔌 WebSocket transport opened with Gemini Live API`);
           },
 
           onmessage: (response: any) => {
@@ -855,17 +798,58 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       state.geminiSession = session;
+      state.isConnectedToGemini = true;
+      this.logger.log(`[${state.sessionId}] ✅ Gemini Live session established and ready`);
+      this.addSessionLog(state, 'gemini_connected');
 
-      // If onopen fired before await returned and greeting wasn't sent yet
-      if (isFreshSession && greetingPrompt && state.isConnectedToGemini && session && !state.hasDispatchedGreeting) {
+      // Notify client that session is ready (sent AFTER Gemini handshake completed)
+      this.safeSendToClient(state, JSON.stringify({
+        type: 'ready',
+        model: this.liveModel,
+        voiceName,
+      }));
+
+      // If roadmap curriculum session with practice points, proactively prime Task 0 on client
+      if (dto.practicePoints && dto.practicePoints.length > 0) {
+        const firstPoint = dto.practicePoints[0];
+        state.activePracticeTask = {
+          pointIndex: 0,
+          phase: 'teaching',
+          pointTitle: firstPoint,
+          guidanceOrScenario: '',
+        };
+        this.safeSendToClient(state, JSON.stringify({
+          type: 'tool_call',
+          name: 'set_active_practice_task',
+          args: {
+            pointIndex: 0,
+            phase: 'teaching',
+            taskTitle: firstPoint,
+            hint: '',
+          },
+        }));
+      }
+
+      // Dispatch opening turn greeting prompt if fresh session
+      const isFreshSession = !dto.isReconnect && !dto.memory;
+      if (isFreshSession && greetingPrompt && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         state.isGreetingInProgress = true;
-        this.logger.log(`[${state.sessionId}] Ensuring opening turn greeting prompt is dispatched (audio input shielded)`);
-        this.addSessionLog(state, 'greeting_dispatched_fallback');
+        this.logger.log(`[${state.sessionId}] 🚀 Dispatching opening turn greeting prompt to Gemini Live (audio input shielded)`);
+        this.addSessionLog(state, 'greeting_dispatched');
 
         // Start latency timer for greeting response
         state.turnEndTimestamp = Date.now();
         state.awaitingGeminiResponse = true;
+
+        // Safety watchdog: after 6s, unlock audio input even if Gemini drops the turn
+        setTimeout(() => {
+          if (state.isGreetingInProgress) {
+            this.logger.warn(`[${state.sessionId}] ⚠️ Greeting safety watchdog expired (6s) — unlocking user audio gate`);
+            state.isGreetingInProgress = false;
+            state.awaitingGeminiResponse = false;
+          }
+        }, 6000);
 
         session.sendClientContent({
           turns: [
@@ -876,6 +860,20 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           ],
           turnComplete: true,
         });
+
+        // Crucial for Manual VAD: since automaticActivityDetection is disabled,
+        // send activityEnd so Gemini's speech pipeline recognizes that the user turn is complete
+        // and begins audio output generation!
+        try {
+          session.sendRealtimeInput({ activityEnd: {} });
+        } catch (actErr: any) {
+          this.logger.warn(`[${state.sessionId}] Failed to send activityEnd after greeting: ${actErr?.message}`);
+        }
+      } else if (!isFreshSession && !state.hasDispatchedGreeting) {
+        state.hasDispatchedGreeting = true;
+        state.isGreetingInProgress = false;
+        this.logger.log(`[${state.sessionId}] Reconnected session / existing memory present -> skipping opening greeting prompt`);
+        this.addSessionLog(state, 'greeting_skipped_reconnect');
       }
     } catch (err: any) {
       this.logger.error(`[${state.sessionId}] Failed to connect to Gemini Live: ${err?.message}`, err?.stack);
@@ -885,6 +883,14 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         message: `Failed to initialize Gemini Live: ${err?.message}`,
       }));
     }
+  }
+
+  private cleanLiveTranscriptText(text: string): string {
+    if (!text) return text;
+    return text
+      .replace(/தேவையான/g, 'අවශ්‍ය')
+      .replace(/வணக்கம்/g, 'ආයුබෝවන්')
+      .replace(/[\u0B80-\u0BFF\u0900-\u097F\u0600-\u06FF\u0980-\u0CFF\u0D00-\u0D7F]+/g, '');
   }
 
   private handleGeminiServerMessage(
@@ -967,7 +973,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // 2. Transcriptions (User & Model)
     if (serverContent?.outputTranscription?.text) {
-      const text = serverContent.outputTranscription.text;
+      const rawText = serverContent.outputTranscription.text;
+      const text = this.cleanLiveTranscriptText(rawText);
       state.modelTranscriptAccumulator += text;
       state.hasModelSpokenThisTurn = true;
 
@@ -1025,7 +1032,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       const userText = (state.userTranscriptAccumulator || state.lastStudentTranscript).trim();
-      const modelText = state.modelTranscriptAccumulator.trim();
+      const modelText = this.cleanLiveTranscriptText(state.modelTranscriptAccumulator.trim());
 
       // Only print turn complete summary when the model actually responded or when user turn finished
       if (state.hasModelSpokenThisTurn || modelText) {
@@ -1150,14 +1157,19 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }));
 
         if (fc.name === 'conclude_call') {
+          const isIntro = state.dto?.isIntroCall === true;
           functionResponses.push({
             name: fc.name,
             id: fc.id,
             response: {
               result: 'concluding',
-              instruction: isSinhala
-                ? 'The call is terminating right now. Speak a warm, 1-sentence definitive final goodbye statement (e.g. wishing them a great day or to keep practicing). ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK "ප්‍රශ්න තියෙනවද?" OR "කරමුද?". Then stop speaking.'
-                : 'The call is terminating right now. Speak a warm, 1-sentence definitive final goodbye statement (e.g. wishing them a great day or to keep practicing). ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK ANY QUESTION. Then stop speaking.',
+              instruction: isIntro
+                ? (isSinhala
+                    ? 'The introductory call is concluding right now. Speak a warm, cheerful 1-sentence final goodbye statement (e.g. "ඔයාගේ personalized roadmap එක දැන් ready, see you in your next practice session!"). ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK "ප්‍රශ්න තියෙනවද?". Then stop speaking.'
+                    : 'The introductory call is concluding right now. Speak a warm, cheerful 1-sentence final goodbye statement (e.g. "Your personalized daily learning plan is ready, see you in our first practice session!"). ABSOLUTELY NEVER ASK ANY QUESTION. Then stop speaking.')
+                : (isSinhala
+                    ? 'The call is terminating right now. Speak a warm, 1-sentence definitive final goodbye statement (e.g. wishing them a great day or to keep practicing). ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK "ප්‍රශ්න තියෙනවද?" OR "කරමුද?". Then stop speaking.'
+                    : 'The call is terminating right now. Speak a warm, 1-sentence definitive final goodbye statement (e.g. wishing them a great day or to keep practicing). ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK ANY QUESTION. Then stop speaking.'),
             },
           });
         } else if (fc.name === 'show_grammar_correction') {

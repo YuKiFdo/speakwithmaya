@@ -277,9 +277,9 @@ export const TOAST_PRESET_CONFIGS: Record<ToastPillPreset, ToastPillConfig> = {
     icon: (color) => <ToastWifiWeakIcon color={color} size={15} />,
   },
   'slow-connection': {
-    variant: 'warning',
-    text: 'Slow connection, waiting for Maya...',
-    icon: (color) => <ToastWifiWeakIcon color={color} size={15} />,
+    variant: 'info',
+    text: 'Maya is thinking...',
+    icon: (color) => <ToastClockIcon color={color} size={15} />,
   },
   'reconnecting': {
     variant: 'warning',

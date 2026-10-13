@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
 import { TranslationToggleButton } from './translation-toggle-button';
+import { BeaconRing } from './beacon-ring';
 
 interface ConversationDisplayProps {
   previousText?: string;
@@ -19,6 +20,7 @@ interface ConversationDisplayProps {
   isTranslationVisible?: boolean;
   isTranslating?: boolean;
   onToggleTranslation?: () => void;
+  isTranslationHighlighted?: boolean;
 }
 
 /**
@@ -50,6 +52,7 @@ function ConversationDisplayComponent({
   isTranslationVisible = false,
   isTranslating = false,
   onToggleTranslation,
+  isTranslationHighlighted = false,
 }: ConversationDisplayProps) {
   const scrollRef = useRef<ScrollView>(null);
 
@@ -307,15 +310,22 @@ function ConversationDisplayComponent({
             </Animated.Text>
           )}
 
-          {/* Translation Toggle Pill Button (ONLY appears when all words have finished appearing) */}
-          {!!onToggleTranslation && isTextFinished && (
-            <TranslationToggleButton
-              isExpanded={Boolean(isTranslationVisible)}
-              isLoading={isTranslating}
-              onToggle={() => {
-                onToggleTranslation();
-              }}
-            />
+          {/* Translation Toggle Pill Button (ONLY appears when all words have finished appearing or when highlighted in tour) */}
+          {!!onToggleTranslation && (isTextFinished || isTranslationHighlighted) && (
+            <View style={styles.translationButtonWrapper}>
+              <BeaconRing
+                color="#14B8A6"
+                radius={999}
+                active={isTranslationHighlighted}
+              />
+              <TranslationToggleButton
+                isExpanded={Boolean(isTranslationVisible)}
+                isLoading={isTranslating}
+                onToggle={() => {
+                  onToggleTranslation();
+                }}
+              />
+            </View>
           )}
         </View>
       </ScrollView>
@@ -387,5 +397,10 @@ const styles = StyleSheet.create({
   sinhalaTranslationTextDesktop: {
     fontSize: 18.5,
     lineHeight: 27,
+  },
+  translationButtonWrapper: {
+    position: 'relative',
+    alignSelf: 'center',
+    marginTop: 12,
   },
 });

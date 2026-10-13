@@ -30,18 +30,18 @@ type FontWeight = 'regular' | 'medium' | 'semiBold' | 'bold' | 'extraBold';
 
 const FONT_MAP: Record<FontFamily, Record<FontWeight, { native: string; web: string; weight: TextStyle['fontWeight'] }>> = {
   outfit: {
-    regular:   { native: 'Outfit_400Regular',   web: 'Outfit', weight: '400' },
-    medium:    { native: 'Outfit_500Medium',     web: 'Outfit', weight: '500' },
-    semiBold:  { native: 'Outfit_600SemiBold',   web: 'Outfit', weight: '600' },
-    bold:      { native: 'Outfit_700Bold',       web: 'Outfit', weight: '700' },
-    extraBold: { native: 'Outfit_800ExtraBold',  web: 'Outfit', weight: '800' },
+    regular:   { native: 'Outfit_400Regular',   web: 'Outfit_400Regular, Outfit, sans-serif', weight: '400' },
+    medium:    { native: 'Outfit_500Medium',     web: 'Outfit_500Medium, Outfit, sans-serif', weight: '500' },
+    semiBold:  { native: 'Outfit_600SemiBold',   web: 'Outfit_600SemiBold, Outfit, sans-serif', weight: '600' },
+    bold:      { native: 'Outfit_700Bold',       web: 'Outfit_700Bold, Outfit, sans-serif', weight: '700' },
+    extraBold: { native: 'Outfit_800ExtraBold',  web: 'Outfit_800ExtraBold, Outfit-ExtraBold, Outfit, sans-serif', weight: '800' },
   },
   inter: {
-    regular:   { native: 'Inter_400Regular',     web: 'Inter', weight: '400' },
-    medium:    { native: 'Inter_500Medium',       web: 'Inter', weight: '500' },
-    semiBold:  { native: 'Inter_600SemiBold',     web: 'Inter', weight: '600' },
-    bold:      { native: 'Inter_700Bold',         web: 'Inter', weight: '700' },
-    extraBold: { native: 'Inter_800ExtraBold',    web: 'Inter', weight: '800' },
+    regular:   { native: 'Inter_400Regular',     web: 'Inter_400Regular, Inter, sans-serif', weight: '400' },
+    medium:    { native: 'Inter_500Medium',       web: 'Inter_500Medium, Inter, sans-serif', weight: '500' },
+    semiBold:  { native: 'Inter_600SemiBold',     web: 'Inter_600SemiBold, Inter, sans-serif', weight: '600' },
+    bold:      { native: 'Inter_700Bold',         web: 'Inter_700Bold, Inter, sans-serif', weight: '700' },
+    extraBold: { native: 'Inter_800ExtraBold',    web: 'Inter_800ExtraBold, Inter-ExtraBold, Inter, sans-serif', weight: '800' },
   },
 };
 

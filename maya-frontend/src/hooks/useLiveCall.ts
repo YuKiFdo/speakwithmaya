@@ -76,6 +76,8 @@ interface UseLiveCallOptions {
   scenarioId?: string;
   userName?: string;
   isIntroCall?: boolean;
+  challenge?: string;
+  dailyGoal?: string;
   roadmapLevelId?: string;
   levelNumber?: number;
   levelTitle?: string;
@@ -133,6 +135,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const initialGreetingBufferRef = useRef<
     Array<{ type: 'samples'; data: Float32Array } | { type: 'chunk'; data: string }>
   >([]);
+  const initialGreetingTranscriptRef = useRef<string>('');
 
   // Next-generation deliberate practice & testing states
   const [activePracticeTask, setActivePracticeTask] = useState<PracticeTaskPayload | null>(null);
@@ -360,7 +363,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         initialGreetingBufferRef.current = [];
         setIsConnected(false);
         setTimeout(() => {
-          if (isFirstGreetingPendingRef.current) {
+          if (isFirstGreetingPendingRef.current && !isInitialGreetingHeldRef.current) {
             console.warn('[useLiveCall] Initial greeting safety timeout expired (7s) — unlocking mic');
             isFirstGreetingPendingRef.current = false;
             if (modelVolume === 0) {
@@ -437,6 +440,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           const isBlocked =
             isMutedRef.current ||
             isConcludingRef.current ||
+            isInitialGreetingHeldRef.current ||
             statusRef.current === 'reconnecting' ||
             statusRef.current === 'ended' ||
             isFirstGreetingPendingRef.current ||
@@ -456,6 +460,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           const isBlocked =
             isMutedRef.current ||
             isConcludingRef.current ||
+            isInitialGreetingHeldRef.current ||
             statusRef.current === 'reconnecting' ||
             statusRef.current === 'ended' ||
             isFirstGreetingPendingRef.current ||
@@ -472,13 +477,13 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             transportRef.current.sendEndOfTurn();
             userChunksSentRef.current = 0;
 
-            // Start round-trip timer for turn response: if no response in 3.5s, warn UI
+            // Start round-trip timer for turn response: if no response in 5s, show "thinking" indicator
             turnStartTimeRef.current = Date.now();
             if (responseTimeoutRef.current) clearTimeout(responseTimeoutRef.current);
             responseTimeoutRef.current = setTimeout(() => {
-              console.warn('[useLiveCall] ⚠️ Response delay > 3.5s — waiting for Maya response');
+              console.warn('[useLiveCall] ⚠️ Response delay > 5s — Maya is still thinking');
               setIsSlowResponse(true);
-            }, 3500);
+            }, 5000);
           } else {
             // Discard transient mic click or throat clear without signaling turn complete
             currentUserTurnPcmChunksRef.current = [];
@@ -489,6 +494,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           const isBlocked =
             isMutedRef.current ||
             isModelSpeakingRef.current ||
+            isInitialGreetingHeldRef.current ||
             isConcludingRef.current ||
             Date.now() < echoHangoverUntilRef.current;
 
@@ -534,6 +540,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           scenarioId: options.scenarioId,
           userName: options.userName,
           isIntroCall: options.isIntroCall,
+          challenge: options.challenge,
+          dailyGoal: options.dailyGoal,
           roadmapLevelId: options.roadmapLevelId,
           practicePoints: options.practicePoints,
           canonicalContent: options.canonicalContent,
@@ -579,6 +587,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             scenarioId: options.scenarioId,
             userName: options.userName,
             isIntroCall: options.isIntroCall,
+            challenge: options.challenge,
+            dailyGoal: options.dailyGoal,
             roadmapLevelId: options.roadmapLevelId,
             practicePoints: options.practicePoints,
             canonicalContent: options.canonicalContent,
@@ -708,6 +718,17 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onOutputTranscript: (text) => {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
+
+            // If greeting is currently held (e.g. during intro tutorial), buffer transcript text
+            if (isInitialGreetingHeldRef.current) {
+              initialGreetingTranscriptRef.current = initialGreetingTranscriptRef.current
+                ? (text.startsWith(' ') || initialGreetingTranscriptRef.current.endsWith(' ')
+                    ? initialGreetingTranscriptRef.current + text
+                    : initialGreetingTranscriptRef.current + ' ' + text)
+                : text;
+              return;
+            }
+
             isModelSpeakingRef.current = true;
             if (responseTimeoutRef.current) {
               clearTimeout(responseTimeoutRef.current);
@@ -1440,11 +1461,19 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     }, 12000);
   }, []);
 
-  // Release buffered greeting audio once connected chime finishes
+  // Release buffered greeting audio and transcript once connected chime or intro guide finishes
   const releaseGreeting = useCallback(() => {
     if (!isInitialGreetingHeldRef.current) return;
-    console.log('[useLiveCall] 🚀 Releasing initial greeting audio now that chime finished');
+    console.log('[useLiveCall] 🚀 Releasing initial greeting audio and transcript now that guide/chime finished');
     isInitialGreetingHeldRef.current = false;
+
+    // Release buffered transcript to subtitles
+    if (initialGreetingTranscriptRef.current) {
+      currentModelTextRef.current = initialGreetingTranscriptRef.current;
+      initialGreetingTranscriptRef.current = '';
+      activeRoleRef.current = 'model';
+      setSubtitles(sanitizeModelText(currentModelTextRef.current));
+    }
 
     const buffered = [...initialGreetingBufferRef.current];
     initialGreetingBufferRef.current = [];

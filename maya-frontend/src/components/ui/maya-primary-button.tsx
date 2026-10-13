@@ -95,10 +95,10 @@ function GlowingParticle({ p }: { p: (typeof GLOW_PARTICLES)[0] }) {
 const BUTTON_ANIMATION_CSS = `
 @keyframes mayaButtonGlowPulse {
   0%, 100% {
-    box-shadow: 0 8px 24px rgba(0, 107, 229, 0.42), 0 0 16px rgba(56, 189, 248, 0.35);
+    box-shadow: 0 6px 20px rgba(0, 107, 229, 0.35);
   }
   50% {
-    box-shadow: 0 10px 32px rgba(0, 107, 229, 0.65), 0 0 24px rgba(56, 189, 248, 0.6);
+    box-shadow: 0 8px 26px rgba(0, 107, 229, 0.48);
   }
 }
 @keyframes mayaShimmerSweep {
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         backgroundImage: 'linear-gradient(180deg, #087FF5 0%, #006BE5 100%)',
-        boxShadow: '0 8px 24px rgba(0, 107, 229, 0.42), 0 0 16px rgba(56, 189, 248, 0.35)',
+        boxShadow: '0 6px 20px rgba(0, 107, 229, 0.35)',
         animationKeyframes: 'mayaButtonGlowPulse',
         animationDuration: '3s',
         animationTimingFunction: 'ease-in-out',

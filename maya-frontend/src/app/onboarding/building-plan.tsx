@@ -6,10 +6,19 @@ import {
   Animated,
   Easing,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import Svg, { Circle } from 'react-native-svg';
+import { fontStyle } from '@/theme/fonts';
+import { useBreakpoint } from '@/hooks/useBreakpoint';
+import {
+  playScanningSound,
+  stopScanningSound,
+  playStepPop,
+  playAnalysisCompleteSound,
+} from '@/services/sound/sound-service';
 
 // Strip out React Native Web's synthetic collapsable attribute before passing to SVG circle on Web only
 const BaseCircle = Platform.OS === 'web'
@@ -22,29 +31,36 @@ if (Platform.OS === 'web') {
 
 const AnimatedCircle = Animated.createAnimatedComponent(BaseCircle);
 
-// Checklist steps with their trigger thresholds
+// Checklist steps matching design
 const CHECKLIST_ITEMS = [
-  { label: 'Goal locked in', triggerAt: 0.2 },
-  { label: 'Level assessed', triggerAt: 0.5 },
-  { label: 'Daily schedule set', triggerAt: 0.85 },
+  { label: 'Understanding your goals...', triggerAt: 0.22 },
+  { label: 'Personalizing your practice...', triggerAt: 0.58 },
+  { label: 'Getting Maya ready for you...', triggerAt: 0.88 },
 ];
 
-// Status messages that rotate as progress increases
-const STATUS_MESSAGES = [
-  { at: 0, text: 'Analyzing your goals...' },
-  { at: 0.2, text: 'Matching your level...' },
-  { at: 0.5, text: 'Setting your schedule...' },
-  { at: 0.85, text: 'Finalizing your plan...' },
+// Rotating testimonials
+const TESTIMONIALS = [
+  {
+    quote: '"I finally started speaking without translating in my head. Maya corrects me instantly."',
+    author: 'Dilini R. · Colombo',
+  },
+  {
+    quote: '"Speaking with Maya feels like chatting with a real friend. My confidence went way up!"',
+    author: 'Kaveen P. · Kandy',
+  },
+  {
+    quote: '"Just 10 minutes a day made a massive difference before my job interview."',
+    author: 'Sanduni M. · Gampaha',
+  },
 ];
 
 // Circle dimensions
-const CIRCLE_SIZE = 140;
-const STROKE_WIDTH = 8;
+const CIRCLE_SIZE = 144;
+const STROKE_WIDTH = 9;
 const RADIUS = (CIRCLE_SIZE - STROKE_WIDTH) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-// Isolated counter component: only the percentage number re-renders on ticks,
-// leaving the parent screen, SVG tree, and checklist completely calm at 60 FPS
+// Isolated counter component: only the percentage number re-renders on ticks
 const PercentageCounter = React.memo(function PercentageCounter({
   anim,
 }: {
@@ -73,16 +89,21 @@ export default function BuildingPlanScreen() {
   const params = useLocalSearchParams<{
     phone?: string;
     name?: string;
+    userName?: string;
     goal?: string;
     challenge?: string;
     level?: string;
     language?: string;
+    languageMode?: string;
     dailyGoal?: string;
+    isIntroCall?: string;
+    sessionId?: string;
   }>();
 
+  const { isPhone } = useBreakpoint();
   const progressAnim = useRef(new Animated.Value(0)).current;
 
-  // Stored in ref so it is created once, not 100 times during ticks
+  // Stored in ref so it is created once, not on every tick
   const strokeDashoffset = useRef(
     progressAnim.interpolate({
       inputRange: [0, 1],
@@ -90,25 +111,23 @@ export default function BuildingPlanScreen() {
     }),
   ).current;
 
-  const [statusText, setStatusText] = useState(STATUS_MESSAGES[0].text);
   const [checkedCount, setCheckedCount] = useState(0);
+  const [activeTestimonialIdx, setActiveTestimonialIdx] = useState(0);
+
+  // Testimonial card transition animations (fade & smooth slide)
+  const cardOpacityAnim = useRef(new Animated.Value(1)).current;
+  const cardTranslateAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    let lastMsg = STATUS_MESSAGES[0].text;
+    // 1. Start gentle ambient processing whoosh sound
+    try {
+      playScanningSound();
+    } catch {}
+
     let lastCount = 0;
 
     const listenerId = progressAnim.addListener(({ value }) => {
-      // 1. Update status message ONLY when milestone is crossed (4 times total)
-      let currentMsg = STATUS_MESSAGES[0].text;
-      for (const msg of STATUS_MESSAGES) {
-        if (value >= msg.at) currentMsg = msg.text;
-      }
-      if (currentMsg !== lastMsg) {
-        lastMsg = currentMsg;
-        setStatusText(currentMsg);
-      }
-
-      // 2. Update checklist ONLY when a threshold is crossed (3 times total)
+      // Update checklist ONLY when a threshold is crossed
       let count = 0;
       for (let i = 0; i < CHECKLIST_ITEMS.length; i++) {
         if (value >= CHECKLIST_ITEMS[i].triggerAt) count = i + 1;
@@ -116,100 +135,193 @@ export default function BuildingPlanScreen() {
       if (count !== lastCount) {
         lastCount = count;
         setCheckedCount(count);
+        // Play gamified pop sound on step milestone
+        try {
+          playStepPop(count - 1);
+        } catch {}
       }
     });
 
-    // Run the progress animation (~3.2 seconds) with smooth cubic ease-out
+    // Run the progress animation (~3.6 seconds) with smooth cubic ease-out
     Animated.timing(progressAnim, {
       toValue: 1,
-      duration: 3200,
+      duration: 3600,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start(() => {
+      // Stop background scanning sound and play completion chime
+      try {
+        stopScanningSound();
+        playAnalysisCompleteSound();
+      } catch {}
+
+      // Transition to Special One-Time Offer (Spin Wheel) Screen
       setTimeout(() => {
         router.replace({
-          pathname: '/onboarding/intro-call',
-          params,
+          pathname: '/onboarding/special-offer' as any,
+          params: {
+            ...params,
+            isIntroCall: 'true',
+          },
         });
       }, 500);
     });
 
+    // Cycle testimonials with smooth slide & fade animation every 2.4s
+    const testimonialTimer = setInterval(() => {
+      // Fade & slide out
+      Animated.parallel([
+        Animated.timing(cardOpacityAnim, {
+          toValue: 0,
+          duration: 220,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(cardTranslateAnim, {
+          toValue: -12,
+          duration: 220,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start(() => {
+        setActiveTestimonialIdx((prev) => (prev + 1) % TESTIMONIALS.length);
+        cardTranslateAnim.setValue(12);
+        // Fade & slide in
+        Animated.parallel([
+          Animated.timing(cardOpacityAnim, {
+            toValue: 1,
+            duration: 260,
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+          Animated.timing(cardTranslateAnim, {
+            toValue: 0,
+            duration: 260,
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+        ]).start();
+      });
+    }, 2400);
+
     return () => {
       progressAnim.removeListener(listenerId);
+      clearInterval(testimonialTimer);
+      try {
+        stopScanningSound();
+      } catch {}
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const activeTestimonial = TESTIMONIALS[activeTestimonialIdx];
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        {/* Circular Progress */}
-        <View style={styles.circleContainer}>
-          <Svg
-            width={CIRCLE_SIZE}
-            height={CIRCLE_SIZE}
-            viewBox={`0 0 ${CIRCLE_SIZE} ${CIRCLE_SIZE}`}
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          !isPhone && styles.scrollContentDesktop,
+        ]}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
+        <View style={styles.mainContainer}>
+          {/* Top Circular Progress */}
+          <View style={styles.circleContainer}>
+            <Svg
+              width={CIRCLE_SIZE}
+              height={CIRCLE_SIZE}
+              viewBox={`0 0 ${CIRCLE_SIZE} ${CIRCLE_SIZE}`}
+            >
+              {/* Background track circle */}
+              <Circle
+                cx={CIRCLE_SIZE / 2}
+                cy={CIRCLE_SIZE / 2}
+                r={RADIUS}
+                stroke="#EEF2F6"
+                strokeWidth={STROKE_WIDTH}
+                fill="none"
+              />
+              {/* Animated progress arc */}
+              <AnimatedCircle
+                cx={CIRCLE_SIZE / 2}
+                cy={CIRCLE_SIZE / 2}
+                r={RADIUS}
+                stroke="#3B5BF6"
+                strokeWidth={STROKE_WIDTH}
+                fill="none"
+                strokeLinecap="round"
+                strokeDasharray={CIRCUMFERENCE}
+                strokeDashoffset={strokeDashoffset}
+                transform={`rotate(-90 ${CIRCLE_SIZE / 2} ${CIRCLE_SIZE / 2})`}
+              />
+            </Svg>
+            {/* Centered percentage number */}
+            <View style={styles.percentOverlay}>
+              <PercentageCounter anim={progressAnim} />
+            </View>
+          </View>
+
+          {/* Heading */}
+          <Text style={styles.title}>Building Your Plan</Text>
+          <Text style={styles.subtitle}>Personalizing your learning experience...</Text>
+
+          {/* Checklist */}
+          <View style={styles.checklist}>
+            {CHECKLIST_ITEMS.map((item, index) => {
+              const isChecked = index < checkedCount;
+              return (
+                <View key={item.label} style={styles.checklistRow}>
+                  <View
+                    style={[
+                      styles.checkCircle,
+                      isChecked ? styles.checkCircleActive : styles.checkCirclePending,
+                    ]}
+                  >
+                    {isChecked && <Text style={styles.checkMark}>✓</Text>}
+                  </View>
+                  <Text
+                    style={[
+                      styles.checkLabel,
+                      isChecked ? styles.checkLabelActive : styles.checkLabelPending,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Testimonial Card with Animated Transitions */}
+          <Animated.View
+            style={[
+              styles.testimonialCard,
+              {
+                opacity: cardOpacityAnim,
+                transform: [{ translateY: cardTranslateAnim }],
+              },
+            ]}
           >
-            {/* Background track circle */}
-            <Circle
-              cx={CIRCLE_SIZE / 2}
-              cy={CIRCLE_SIZE / 2}
-              r={RADIUS}
-              stroke="#e8ecf0"
-              strokeWidth={STROKE_WIDTH}
-              fill="none"
-            />
-            {/* Animated progress arc */}
-            <AnimatedCircle
-              cx={CIRCLE_SIZE / 2}
-              cy={CIRCLE_SIZE / 2}
-              r={RADIUS}
-              stroke="#0085db"
-              strokeWidth={STROKE_WIDTH}
-              fill="none"
-              strokeLinecap="round"
-              strokeDasharray={CIRCUMFERENCE}
-              strokeDashoffset={strokeDashoffset}
-              transform={`rotate(-90 ${CIRCLE_SIZE / 2} ${CIRCLE_SIZE / 2})`}
-            />
-          </Svg>
-          {/* Isolated percentage counter */}
-          <View style={styles.percentOverlay}>
-            <PercentageCounter anim={progressAnim} />
+            <View style={styles.starsRow}>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <Text key={i} style={styles.starIcon}>★</Text>
+              ))}
+            </View>
+            <Text style={styles.quoteText}>{activeTestimonial.quote}</Text>
+            <Text style={styles.authorText}>{activeTestimonial.author}</Text>
+          </Animated.View>
+
+          {/* Pagination Dots */}
+          <View style={styles.dotsRow}>
+            {TESTIMONIALS.map((_, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.dot,
+                  i === activeTestimonialIdx ? styles.dotActive : styles.dotInactive,
+                ]}
+              />
+            ))}
           </View>
         </View>
-
-        {/* Title */}
-        <Text style={styles.title}>Building Your Plan</Text>
-        <Text style={styles.subtitle}>{statusText}</Text>
-
-        {/* Checklist */}
-        <View style={styles.checklist}>
-          {CHECKLIST_ITEMS.map((item, index) => {
-            const isChecked = index < checkedCount;
-            return (
-              <View key={item.label} style={styles.checklistRow}>
-                <View
-                  style={[
-                    styles.checkCircle,
-                    isChecked && styles.checkCircleActive,
-                  ]}
-                >
-                  {isChecked && <Text style={styles.checkMark}>✓</Text>}
-                </View>
-                <Text
-                  style={[
-                    styles.checkLabel,
-                    !isChecked && styles.checkLabelInactive,
-                  ]}
-                >
-                  {item.label}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -217,23 +329,29 @@ export default function BuildingPlanScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
   },
-  container: {
-    width: '100%',
-    maxWidth: 440,
-    paddingHorizontal: 32,
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    alignSelf: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  scrollContentDesktop: {
+    paddingVertical: 56,
+  },
+  mainContainer: {
+    width: '100%',
+    maxWidth: 380,
+    alignItems: 'center',
   },
   circleContainer: {
     width: CIRCLE_SIZE,
     height: CIRCLE_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 32,
+    marginBottom: 28,
   },
   percentOverlay: {
     ...StyleSheet.absoluteFill,
@@ -241,36 +359,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   percentText: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: '#0085db',
-    letterSpacing: -0.5,
-    ...(Platform.OS === 'web'
-      ? { fontFamily: 'Outfit, sans-serif' }
-      : { fontFamily: 'Outfit_700Bold' }),
+    fontSize: 38,
+    color: '#3B5BF6',
+    letterSpacing: -0.8,
+    ...fontStyle('outfit', 'extraBold'),
   },
   title: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#0f172a',
-    letterSpacing: -0.4,
-    marginBottom: 6,
-    ...(Platform.OS === 'web'
-      ? { fontFamily: 'Outfit, sans-serif' }
-      : { fontFamily: 'Outfit_800ExtraBold' }),
+    fontSize: 26,
+    color: '#10213D',
+    letterSpacing: -0.6,
+    textAlign: 'center',
+    marginBottom: 8,
+    ...fontStyle('inter', 'extraBold'),
   },
   subtitle: {
     fontSize: 15,
-    color: '#64748b',
+    color: '#64748B',
+    textAlign: 'center',
     marginBottom: 36,
-    height: 22,
-    ...(Platform.OS === 'web'
-      ? { fontFamily: 'Inter, sans-serif' }
-      : { fontFamily: 'Inter_400Regular' }),
+    lineHeight: 22,
+    ...fontStyle('inter', 'regular'),
   },
   checklist: {
     width: '100%',
-    gap: 16,
+    paddingHorizontal: 12,
+    gap: 18,
+    marginBottom: 44,
   },
   checklistRow: {
     flexDirection: 'row',
@@ -278,33 +392,96 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   checkCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: '#cbd5e1',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkCircleActive: {
-    backgroundColor: '#0085db',
-    borderColor: '#0085db',
+    backgroundColor: '#3B5BF6',
+  },
+  checkCirclePending: {
+    backgroundColor: '#F1F5F9',
   },
   checkMark: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 18,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 16,
+    textAlign: 'center',
   },
   checkLabel: {
     fontSize: 16,
-    color: '#0f172a',
-    fontWeight: '500',
-    ...(Platform.OS === 'web'
-      ? { fontFamily: 'Inter, sans-serif' }
-      : { fontFamily: 'Inter_500Medium' }),
+    letterSpacing: -0.2,
   },
-  checkLabelInactive: {
-    color: '#94a3b8',
+  checkLabelActive: {
+    color: '#10213D',
+    ...fontStyle('inter', 'semiBold'),
+  },
+  checkLabelPending: {
+    color: '#94A3B8',
+    ...fontStyle('inter', 'regular'),
+  },
+  testimonialCard: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 22,
+    paddingVertical: 20,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 18px rgba(0, 0, 0, 0.04)',
+      } as any,
+      default: {
+        elevation: 1,
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 10,
+      },
+    }),
+  },
+  starsRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 10,
+  },
+  starIcon: {
+    fontSize: 16,
+    color: '#F59E0B',
+  },
+  quoteText: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#1E293B',
+    marginBottom: 14,
+    ...fontStyle('inter', 'medium'),
+  },
+  authorText: {
+    fontSize: 13,
+    color: '#64748B',
+    ...fontStyle('inter', 'medium'),
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 18,
+  },
+  dot: {
+    height: 4,
+    borderRadius: 2,
+  },
+  dotActive: {
+    width: 18,
+    backgroundColor: '#3B5BF6',
+  },
+  dotInactive: {
+    width: 8,
+    backgroundColor: '#CBD5E1',
   },
 });

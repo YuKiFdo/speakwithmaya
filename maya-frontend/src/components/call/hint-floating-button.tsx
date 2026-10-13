@@ -12,17 +12,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { triggerHaptic, playMicroChime } from '@/utils/haptics-audio';
 import { playHintButtonSound } from '@/services/sound/sound-service';
+import { BeaconRing } from './beacon-ring';
 
 interface HintFloatingButtonProps {
   onPress: () => void;
   isActive?: boolean;
   disabled?: boolean;
+  isHighlighted?: boolean;
 }
 
 export function HintFloatingButton({
   onPress,
   isActive = false,
   disabled = false,
+  isHighlighted = false,
 }: HintFloatingButtonProps) {
   const ringScale = useRef(new Animated.Value(1)).current;
   const ringOpacity = useRef(new Animated.Value(0)).current;
@@ -77,24 +80,31 @@ export function HintFloatingButton({
         />
       )}
 
-      <Pressable
-        style={({ pressed }) => [
-          styles.circleButton,
-          (isActive || isRippling) && styles.circleButtonActive,
-          pressed && styles.circleButtonPressed,
-          disabled && styles.circleButtonDisabled,
-        ]}
-        onPress={handlePress}
-        disabled={disabled || isRippling}
-        accessibilityRole="button"
-        accessibilityLabel="Ask for conversation hint"
-      >
-        <Ionicons
-          name={isActive || isRippling ? 'bulb' : 'bulb-outline'}
-          size={26}
-          color={isActive || isRippling ? '#0085DB' : '#0F172A'}
+      <View style={{ position: 'relative' }}>
+        <BeaconRing
+          color="#F59E0B"
+          radius={28}
+          active={isHighlighted}
         />
-      </Pressable>
+        <Pressable
+          style={({ pressed }) => [
+            styles.circleButton,
+            (isActive || isRippling) && styles.circleButtonActive,
+            pressed && styles.circleButtonPressed,
+            disabled && styles.circleButtonDisabled,
+          ]}
+          onPress={handlePress}
+          disabled={disabled || isRippling}
+          accessibilityRole="button"
+          accessibilityLabel="Ask for conversation hint"
+        >
+          <Ionicons
+            name={isActive || isRippling ? 'bulb' : 'bulb-outline'}
+            size={26}
+            color={isActive || isRippling ? '#0085DB' : '#0F172A'}
+          />
+        </Pressable>
+      </View>
       <Text style={styles.label}>Hint</Text>
     </View>
   );
@@ -134,7 +144,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#ffffff8f',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1.2,
     borderColor: '#E2E8F0',
     alignItems: 'center',
