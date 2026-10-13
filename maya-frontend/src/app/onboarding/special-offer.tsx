@@ -231,6 +231,14 @@ export default function SpecialOfferScreen() {
   const [hasSpun, setHasSpun] = useState(false);
   const [isSpinning, setIsSpinning] = useState(false);
 
+  // --- Staggered Entrance Animation Values ---
+  const badgeAnim = useRef(new Animated.Value(0)).current;
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const wheelEntranceAnim = useRef(new Animated.Value(0)).current;
+  const ctaAnim = useRef(new Animated.Value(0)).current;
+  const buttonPulseAnim = useRef(new Animated.Value(1)).current;
+
+  // --- Wheel Spin & Pointer Physics Values ---
   const spinAnim = useRef(new Animated.Value(0)).current;
   const pointerBounceAnim = useRef(new Animated.Value(0)).current;
   const lastSliceIndexRef = useRef(0);
@@ -238,6 +246,71 @@ export default function SpecialOfferScreen() {
   const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const useNative = Platform.OS !== 'web';
+
+  // 1. Staggered Page Entrance Choreography on Mount
+  useEffect(() => {
+    Animated.stagger(95, [
+      // Top Pill Pop
+      Animated.spring(badgeAnim, {
+        toValue: 1,
+        tension: 75,
+        friction: 7,
+        useNativeDriver: useNative,
+      }),
+      // Title & Subtitle Glide Up
+      Animated.timing(headerAnim, {
+        toValue: 1,
+        duration: 400,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: useNative,
+      }),
+      // Wheel Spring Scale + Subtle Intro Rotation
+      Animated.spring(wheelEntranceAnim, {
+        toValue: 1,
+        tension: 55,
+        friction: 7,
+        useNativeDriver: useNative,
+      }),
+      // CTA Button & Disclaimer Glide Up
+      Animated.spring(ctaAnim, {
+        toValue: 1,
+        tension: 65,
+        friction: 8,
+        useNativeDriver: useNative,
+      }),
+    ]).start();
+  }, [badgeAnim, headerAnim, wheelEntranceAnim, ctaAnim, useNative]);
+
+  // 2. Idle Breathing Pulse on "Tap to Spin" Button until spun
+  useEffect(() => {
+    if (isSpinning || hasSpun) {
+      buttonPulseAnim.stopAnimation();
+      buttonPulseAnim.setValue(1);
+      return;
+    }
+
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(buttonPulseAnim, {
+          toValue: 1.025,
+          duration: 1100,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(buttonPulseAnim, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: useNative,
+        }),
+      ])
+    );
+    pulseLoop.start();
+
+    return () => {
+      pulseLoop.stop();
+    };
+  }, [isSpinning, hasSpun, buttonPulseAnim, useNative]);
 
   // Spin rotation interpolation: 2400deg lands directly on Slice 2 (20% OFF)
   const spinInterpolate = spinAnim.interpolate({
@@ -267,7 +340,9 @@ export default function SpecialOfferScreen() {
     const listenerId = spinAnim.addListener(({ value }) => {
       const currentDeg = value * TARGET_DEG;
       // Slice boundaries are offset by 30 deg (half a 60 deg slice)
-      const boundaryCount = Math.floor((currentDeg + SLICE_ANGLE / 2) / SLICE_ANGLE);
+      const boundaryCount = Math.floor(
+        (currentDeg + SLICE_ANGLE / 2) / SLICE_ANGLE
+      );
 
       if (boundaryCount > lastSliceIndexRef.current) {
         lastSliceIndexRef.current = boundaryCount;
@@ -331,6 +406,73 @@ export default function SpecialOfferScreen() {
     });
   };
 
+  // --- Entrance Interpolations ---
+  const badgeStyle = {
+    opacity: badgeAnim,
+    transform: [
+      {
+        scale: badgeAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.7, 1],
+        }),
+      },
+      {
+        translateY: badgeAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [-12, 0],
+        }),
+      },
+    ],
+  };
+
+  const headerStyle = {
+    opacity: headerAnim,
+    transform: [
+      {
+        translateY: headerAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [18, 0],
+        }),
+      },
+    ],
+  };
+
+  const wheelEntranceStyle = {
+    opacity: wheelEntranceAnim,
+    transform: [
+      {
+        scale: wheelEntranceAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.78, 1],
+        }),
+      },
+      {
+        rotate: wheelEntranceAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: ['-18deg', '0deg'],
+        }),
+      },
+      {
+        translateY: wheelEntranceAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [20, 0],
+        }),
+      },
+    ],
+  };
+
+  const ctaStyle = {
+    opacity: ctaAnim,
+    transform: [
+      {
+        translateY: ctaAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [22, 0],
+        }),
+      },
+    ],
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
@@ -343,23 +485,24 @@ export default function SpecialOfferScreen() {
       >
         <View style={styles.container}>
           {/* Top Pill: Special One-Time Offer */}
-          <View style={styles.pillBadge}>
+          <Animated.View style={[styles.pillBadge, badgeStyle]}>
             <Text style={styles.giftEmoji}>🎁</Text>
             <Text style={styles.pillText}>Special One-Time Offer</Text>
-          </View>
+          </Animated.View>
 
-          {/* Heading */}
-          <Text style={styles.titleLine1}>Spin & Get Your</Text>
-          <Text style={styles.titleLine2}>Special Discount!</Text>
+          {/* Heading & Subtitle */}
+          <Animated.View style={[styles.headerGroup, headerStyle]}>
+            <Text style={styles.titleLine1}>Spin & Get Your</Text>
+            <Text style={styles.titleLine2}>Special Discount!</Text>
 
-          {/* Subtitle */}
-          <Text style={styles.subtitle}>
-            Try your luck and claim your exclusive discount{'\n'}for the 3 Months
-            Premium plan.{'\n'}only one spin per user.
-          </Text>
+            <Text style={styles.subtitle}>
+              Try your luck and claim your exclusive discount{'\n'}for the 3
+              Months Premium plan.{'\n'}only one spin per user.
+            </Text>
+          </Animated.View>
 
           {/* Wheel Container */}
-          <View style={styles.wheelWrapper}>
+          <Animated.View style={[styles.wheelWrapper, wheelEntranceStyle]}>
             {/* Non-rotating Circular Base with Shadow */}
             <View style={styles.wheelShadowBase} />
 
@@ -392,10 +535,21 @@ export default function SpecialOfferScreen() {
             >
               <WheelGraphic />
             </Animated.View>
-          </View>
+          </Animated.View>
 
           {/* Tap to Spin CTA Button */}
-          <View style={styles.buttonWrapper}>
+          <Animated.View
+            style={[
+              styles.buttonWrapper,
+              ctaStyle,
+              {
+                transform: [
+                  ...ctaStyle.transform,
+                  { scale: buttonPulseAnim },
+                ],
+              },
+            ]}
+          >
             <MayaPrimaryButton
               label={
                 isSpinning
@@ -411,10 +565,10 @@ export default function SpecialOfferScreen() {
               height={56}
               borderRadius={28}
             />
-          </View>
+          </Animated.View>
 
           {/* Disclaimer with Lock Icon */}
-          <View style={styles.disclaimerRow}>
+          <Animated.View style={[styles.disclaimerRow, ctaStyle]}>
             <Feather
               name="lock"
               size={13}
@@ -425,7 +579,7 @@ export default function SpecialOfferScreen() {
               Only one spin per user. Discount will be applied{'\n'}to the 3
               Months Premium plan.
             </Text>
-          </View>
+          </Animated.View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -470,6 +624,10 @@ const styles = StyleSheet.create({
     color: '#E11D48',
     letterSpacing: -0.2,
     ...fontStyle('inter', 'bold'),
+  },
+  headerGroup: {
+    alignItems: 'center',
+    width: '100%',
   },
   titleLine1: {
     fontSize: 30,
