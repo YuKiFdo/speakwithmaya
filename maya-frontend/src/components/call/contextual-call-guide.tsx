@@ -5,12 +5,25 @@ import {
   StyleSheet,
   Pressable,
   Animated,
+  Easing,
   Platform,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
 import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { playStepPop, playOtherButtonSound } from '@/services/sound/sound-service';
+import {
+  playStepPop,
+  playOtherButtonSound,
+} from '@/services/sound/sound-service';
+
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 export interface GuideStep {
   id: 'blue-glow' | 'purple-glow' | 'translation' | 'hint' | 'end-call';
@@ -27,62 +40,62 @@ export interface GuideStep {
 export const GUIDE_STEPS: GuideStep[] = [
   {
     id: 'blue-glow',
-    title: 'Blue Glow = Maya is Speaking',
+    title: 'When Maya is speaking',
     description:
-      'When this blue aura pulses around the screen, Maya is speaking. Listen carefully to her sentence!',
-    icon: <Ionicons name="volume-high" size={16} color="#2563EB" />,
-    badge: 'MAYA SPEAKING',
+      'A soft blue glow appears around the screen while Maya talks. Just listen naturally.',
+    icon: <Ionicons name="volume-high" size={18} color="#2563EB" />,
+    badge: 'Tip 1 of 5',
     badgeColor: '#2563EB',
     badgeBg: '#EFF6FF',
-    targetPointer: '✦ Screen Edges',
+    targetPointer: 'Screen edges',
     position: 'top',
   },
   {
     id: 'purple-glow',
-    title: 'Purple Glow = Maya is Listening',
+    title: 'Your turn to speak',
     description:
-      'When the bottom glows purple, Maya is listening to your microphone in real time. Speak naturally!',
-    icon: <Ionicons name="mic" size={16} color="#8B5CF6" />,
-    badge: 'MAYA LISTENING',
-    badgeColor: '#8B5CF6',
+      'When the bottom wave turns purple, your mic is live. Reply in your own words!',
+    icon: <Ionicons name="mic" size={18} color="#7C3AED" />,
+    badge: 'Tip 2 of 5',
+    badgeColor: '#7C3AED',
     badgeBg: '#F5F3FF',
-    targetPointer: '⬇ Bottom Wave',
+    targetPointer: 'Bottom wave',
     position: 'top',
   },
   {
     id: 'translation',
-    title: 'Sinhala Translation Pill',
+    title: 'Need Sinhala help?',
     description:
-      "Tap 'Show Translation' anytime below Maya's text to read what she said translated into everyday Sinhala.",
-    icon: <MaterialIcons name="translate" size={16} color="#0D9488" />,
-    badge: 'SINHALA HELP',
+      'Tap "Show Translation" under Maya’s message anytime to see what she meant in Sinhala.',
+    icon: <MaterialIcons name="translate" size={18} color="#0D9488" />,
+    badge: 'Tip 3 of 5',
     badgeColor: '#0D9488',
     badgeBg: '#F0FDFA',
-    targetPointer: '⬇ Below Subtitle',
+    targetPointer: 'Below subtitle',
     position: 'top',
   },
   {
     id: 'hint',
-    title: 'Speaking Hints Lightbulb',
+    title: 'Not sure what to say?',
     description:
-      'Stuck or not sure what to say? Tap the floating lightbulb in the bottom right for instant sentence suggestions!',
-    icon: <Feather name="zap" size={16} color="#D97706" />,
-    badge: 'HINTS & SUGGESTIONS',
+      'Tap the lightbulb in the bottom-right corner for instant reply ideas you can read aloud.',
+    icon: <Feather name="zap" size={18} color="#D97706" />,
+    badge: 'Tip 4 of 5',
     badgeColor: '#D97706',
     badgeBg: '#FFFBEB',
-    targetPointer: '↘ Bottom Right',
+    targetPointer: 'Bottom right',
     position: 'top',
   },
   {
     id: 'end-call',
-    title: 'Ending Your Intro Call',
+    title: 'Finishing your call',
     description:
-      'Locked for the first 60s until you chat with Maya. Once unlocked, tap once to conclude with a natural goodbye.',
-    icon: <Feather name="phone-off" size={16} color="#E11D48" />,
-    badge: '1-MIN MINIMUM CHAT',
+      'After 1 minute of practice, the red button at the top-right unlocks so you can wrap up anytime.',
+    icon: <Feather name="phone-off" size={17} color="#E11D48" />,
+    badge: 'Tip 5 of 5',
     badgeColor: '#E11D48',
     badgeBg: '#FFF1F2',
-    targetPointer: '↗ Top Right',
+    targetPointer: 'Top right',
     position: 'bottom',
   },
 ];
@@ -95,6 +108,12 @@ interface ContextualCallGuideProps {
   isDesktop?: boolean;
 }
 
+const DOT_LAYOUT_ANIM = LayoutAnimation.create(
+  200,
+  LayoutAnimation.Types.easeInEaseOut,
+  LayoutAnimation.Properties.opacity
+);
+
 export function ContextualCallGuide({
   visible,
   currentStepIndex,
@@ -103,45 +122,64 @@ export function ContextualCallGuide({
   isDesktop = false,
 }: ContextualCallGuideProps) {
   const insets = useSafeAreaInsets();
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(14)).current;
+  const useNative = Platform.OS !== 'web';
+
+  // Card entrance animation
+  const cardOpacity = useRef(new Animated.Value(0)).current;
+  const cardScale = useRef(new Animated.Value(0.95)).current;
+
+  // Inner step content transition
+  const contentOpacity = useRef(new Animated.Value(1)).current;
+  const contentSlideX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
       Animated.parallel([
-        Animated.timing(fadeAnim, {
+        Animated.timing(cardOpacity, {
           toValue: 1,
-          duration: 260,
-          useNativeDriver: Platform.OS !== 'web',
+          duration: 220,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: useNative,
         }),
-        Animated.spring(slideAnim, {
-          toValue: 0,
+        Animated.spring(cardScale, {
+          toValue: 1,
+          tension: 75,
           friction: 8,
-          tension: 70,
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: useNative,
         }),
       ]).start();
     } else {
-      Animated.timing(fadeAnim, {
+      Animated.timing(cardOpacity, {
         toValue: 0,
-        duration: 180,
-        useNativeDriver: Platform.OS !== 'web',
+        duration: 160,
+        useNativeDriver: useNative,
       }).start();
     }
-  }, [visible]);
+  }, [visible, cardOpacity, cardScale, useNative]);
 
-  // Subtle bounce & fade on step change
+  // Smooth horizontal glide when switching steps
   useEffect(() => {
-    if (visible) {
-      slideAnim.setValue(8);
-      Animated.spring(slideAnim, {
+    if (!visible) return;
+    LayoutAnimation.configureNext(DOT_LAYOUT_ANIM);
+
+    contentOpacity.setValue(0);
+    contentSlideX.setValue(10);
+
+    Animated.parallel([
+      Animated.timing(contentOpacity, {
+        toValue: 1,
+        duration: 200,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: useNative,
+      }),
+      Animated.spring(contentSlideX, {
         toValue: 0,
-        friction: 8,
-        tension: 80,
-        useNativeDriver: Platform.OS !== 'web',
-      }).start();
-    }
-  }, [currentStepIndex]);
+        tension: 90,
+        friction: 9,
+        useNativeDriver: useNative,
+      }),
+    ]).start();
+  }, [currentStepIndex, visible, contentOpacity, contentSlideX, useNative]);
 
   if (!visible) return null;
 
@@ -166,10 +204,9 @@ export function ContextualCallGuide({
     onFinish();
   };
 
-  // Smart vertical anchoring based on active step target
   const isTopPosition = currentStep.position === 'top';
   const verticalStyle = isTopPosition
-    ? { top: insets.top + (isDesktop ? 86 : 76) }
+    ? { top: insets.top + (isDesktop ? 84 : 74) }
     : { bottom: insets.bottom + (isDesktop ? 28 : 20) };
 
   return (
@@ -180,110 +217,97 @@ export function ContextualCallGuide({
         isDesktop ? styles.containerDesktop : styles.containerMobile,
         verticalStyle,
         {
-          opacity: fadeAnim,
-          transform: [
-            {
-              translateY: isTopPosition
-                ? slideAnim.interpolate({
-                    inputRange: [0, 8],
-                    outputRange: [0, -8],
-                  })
-                : slideAnim,
-            },
-          ],
+          opacity: cardOpacity,
+          transform: [{ scale: cardScale }],
         },
       ]}
     >
       <View style={styles.card}>
-        <View style={styles.cardInner}>
-          {/* Header Row: Badge, Direction Pointer & Close */}
-          <View style={styles.headerRow}>
-            <View style={styles.headerLeft}>
-              <View
-                style={[
-                  styles.badgePill,
-                  { backgroundColor: currentStep.badgeBg },
-                ]}
-              >
-                {currentStep.icon}
-                <Text
-                  style={[styles.badgeText, { color: currentStep.badgeColor }]}
-                >
-                  {currentStep.badge}
-                </Text>
-              </View>
-
-              {/* Target Pointer Chip */}
-              <View style={styles.pointerChip}>
-                <Text style={styles.pointerText}>
-                  {currentStep.targetPointer}
-                </Text>
-              </View>
-            </View>
-
-            <Pressable
-              onPress={handleSkip}
-              hitSlop={12}
-              style={({ pressed }) => [
-                styles.closeButton,
-                pressed && styles.closeButtonPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Skip intro guide"
-            >
-              <Feather name="x" size={16} color="#94A3B8" />
-            </Pressable>
+        {/* Main Content Row */}
+        <Animated.View
+          style={[
+            styles.bodyRow,
+            {
+              opacity: contentOpacity,
+              transform: [{ translateX: contentSlideX }],
+            },
+          ]}
+        >
+          {/* Soft Icon Circle */}
+          <View
+            style={[
+              styles.iconCircle,
+              { backgroundColor: currentStep.badgeBg },
+            ]}
+          >
+            {currentStep.icon}
           </View>
 
-          {/* Title & Description */}
-          <Text style={styles.title}>{currentStep.title}</Text>
-          <Text style={styles.description}>{currentStep.description}</Text>
-
-          {/* Footer Row: Step Dots & Next Button */}
-          <View style={styles.footerRow}>
-            {/* Step Indicators */}
-            <View style={styles.dotsRow}>
-              {GUIDE_STEPS.map((step, idx) => {
-                const isActive = idx === currentStepIndex;
-                const isPassed = idx < currentStepIndex;
-                return (
-                  <Pressable
-                    key={step.id}
-                    onPress={() => onStepChange(idx)}
-                    hitSlop={8}
-                    style={[
-                      styles.dot,
-                      isActive && [
-                        styles.dotActive,
-                        { backgroundColor: currentStep.badgeColor },
-                      ],
-                      isPassed && styles.dotPassed,
-                    ]}
-                  />
-                );
-              })}
-              <Text style={styles.stepCounterText}>
-                {currentStepIndex + 1} of {GUIDE_STEPS.length}
-              </Text>
+          {/* Natural Copy */}
+          <View style={styles.textColumn}>
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>{currentStep.title}</Text>
+              <Pressable
+                onPress={handleSkip}
+                hitSlop={12}
+                style={({ pressed }) => [
+                  styles.closeBtn,
+                  pressed && styles.closeBtnPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss guide"
+              >
+                <Feather name="x" size={15} color="#94A3B8" />
+              </Pressable>
             </View>
 
-            {/* Next / Got it Button */}
+            <Text style={styles.description}>{currentStep.description}</Text>
+          </View>
+        </Animated.View>
+
+        {/* Clean Minimal Footer */}
+        <View style={styles.footerRow}>
+          {/* Minimal Pill Dots */}
+          <View style={styles.dotsContainer}>
+            {GUIDE_STEPS.map((step, idx) => {
+              const isActive = idx === currentStepIndex;
+              return (
+                <Pressable
+                  key={step.id}
+                  onPress={() => onStepChange(idx)}
+                  hitSlop={8}
+                  style={[styles.dot, isActive && styles.dotActive]}
+                />
+              );
+            })}
+          </View>
+
+          <View style={styles.actionsRight}>
+            {!isLast && (
+              <Pressable
+                onPress={handleSkip}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.skipButton,
+                  pressed && { opacity: 0.6 },
+                ]}
+              >
+                <Text style={styles.skipText}>Skip</Text>
+              </Pressable>
+            )}
+
             <Pressable
+              onPress={handleNext}
               style={({ pressed }) => [
                 styles.nextButton,
-                { backgroundColor: currentStep.badgeColor },
-                pressed && styles.buttonPressed,
+                pressed && styles.nextButtonPressed,
               ]}
-              onPress={handleNext}
               accessibilityRole="button"
-              accessibilityLabel={isLast ? 'Got it' : 'Next tip'}
+              accessibilityLabel={isLast ? 'Start speaking' : 'Next tip'}
             >
               <Text style={styles.nextButtonText}>
-                {isLast ? 'Got it!' : 'Next'}
+                {isLast ? 'Got it' : 'Next'}
               </Text>
-              {!isLast && (
-                <Feather name="arrow-right" size={14} color="#FFFFFF" />
-              )}
             </Pressable>
           </View>
         </View>
@@ -308,152 +332,125 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: 390,
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    overflow: 'hidden',
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 15,
+    paddingBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.95)',
+    borderColor: '#E2E8F0',
     ...Platform.select({
       web: {
-        boxShadow:
-          '0 16px 36px -6px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.04)',
+        boxShadow: '0 12px 32px -4px rgba(15, 23, 42, 0.12)',
       } as any,
       default: {
         shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.16,
-        shadowRadius: 20,
-        elevation: 10,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.12,
+        shadowRadius: 18,
+        elevation: 8,
       },
     }),
   },
-  cardInner: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 14,
+  bodyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
   },
-  headerRow: {
+  iconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  textColumn: {
+    flex: 1,
+  },
+  titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  badgePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 999,
-    gap: 5,
-  },
-  badgeText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 10.5,
-    letterSpacing: 0.6,
-  },
-  pointerChip: {
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  pointerText: {
-    ...fontStyle('outfit', 'medium'),
-    fontSize: 10.5,
-    color: '#64748B',
-  },
-  closeButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#F1F5F9',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeButtonPressed: {
-    backgroundColor: '#E2E8F0',
+    marginBottom: 3,
   },
   title: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 15.5,
+    ...fontStyle('inter', 'bold'),
+    fontSize: 15,
     color: '#0F172A',
-    marginBottom: 4,
-    lineHeight: 20,
+    letterSpacing: -0.2,
+    flex: 1,
+    paddingRight: 8,
+  },
+  closeBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -4,
+  },
+  closeBtnPressed: {
+    backgroundColor: '#F1F5F9',
   },
   description: {
-    ...fontStyle('outfit', 'regular'),
+    ...fontStyle('inter', 'regular'),
     fontSize: 13,
     color: '#475569',
     lineHeight: 18.5,
-    marginBottom: 12,
   },
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
+    marginTop: 12,
     paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F8FAFC',
   },
-  dotsRow: {
+  dotsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
+    paddingLeft: 2,
   },
   dot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: '#CBD5E1',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#E2E8F0',
   },
   dotActive: {
-    width: 14,
-    borderRadius: 3,
+    width: 16,
+    backgroundColor: '#2563EB',
   },
-  dotPassed: {
-    backgroundColor: '#94A3B8',
-  },
-  stepCounterText: {
-    ...fontStyle('outfit', 'medium'),
-    fontSize: 11.5,
-    color: '#94A3B8',
-    marginLeft: 4,
-  },
-  nextButton: {
+  actionsRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 999,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 3px 8px rgba(0, 0, 0, 0.12)',
-      } as any,
-      default: {
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.12,
-        shadowRadius: 5,
-        elevation: 2,
-      },
-    }),
+    gap: 12,
   },
-  buttonPressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.98 }],
+  skipButton: {
+    paddingVertical: 5,
+    paddingHorizontal: 6,
+  },
+  skipText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 12.5,
+    color: '#94A3B8',
+  },
+  nextButton: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 15,
+    paddingVertical: 6.5,
+    borderRadius: 999,
+  },
+  nextButtonPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.97 }],
   },
   nextButtonText: {
-    ...fontStyle('outfit', 'bold'),
+    ...fontStyle('inter', 'semiBold'),
     fontSize: 12.5,
     color: '#FFFFFF',
   },
