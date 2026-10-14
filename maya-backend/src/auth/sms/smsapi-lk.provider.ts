@@ -7,7 +7,7 @@ export class SmsApiLkProvider implements ISmsGatewayProvider {
   private readonly apiEndpoint = 'https://dashboard.smsapi.lk/api/v3/sms/send';
   private readonly apiToken =
     process.env.SMSAPI_LK_TOKEN || '144|kMx9xkQ0VDVdfFLVkJPJLPXDYXKJgXtAKG62GtBa';
-  private readonly senderId = process.env.SMSAPI_LK_SENDER_ID || 'MayaAI';
+  private readonly senderId = process.env.SMSAPI_LK_SENDER_ID || 'SMSAPI Demo';
 
   /**
    * Normalizes phone number into standard international format without '+'
@@ -55,15 +55,45 @@ export class SmsApiLkProvider implements ISmsGatewayProvider {
 
       if (response.ok && data?.status === 'success') {
         const msgId = typeof data.data === 'object' ? data.data?.uid || data.data?.id : String(data.data || '');
-        this.logger.log(`[SMSAPI.LK] ✅ SMS delivered successfully to ${recipient}. MsgId: ${msgId}`);
+        this.logger.log(`[SMSAPI.LK] ✅ SMS delivered successfully to ${recipient} using '${this.senderId}'. MsgId: ${msgId}`);
         return {
           success: true,
           messageId: msgId,
         };
       }
 
-      this.logger.warn(`[SMSAPI.LK] ⚠️ API response status: ${response.status}, message: ${data?.message || JSON.stringify(data)}`);
-      // Even if gateway returns an error (e.g. sender ID awaiting approval), return success for OTP verification flow
+      this.logger.warn(`[SMSAPI.LK] ⚠️ Sender ID '${this.senderId}' rejected by gateway (Status ${response.status}: ${data?.message || 'Failed'}). Mask may not be approved yet by telecom operators.`);
+
+      // Automatic fallback: If custom sender ID is not yet approved by TRCSL/telecom operators,
+      // fallback to the approved account mask 'KoreaMaster' so the user receives their OTP immediately!
+      if (this.senderId !== 'SMSAPI Demo') {
+        this.logger.log(`[SMSAPI.LK] 🔄 Auto-retrying delivery with approved account sender ID 'SMSAPI Demo'...`);
+        const fallbackRes = await fetch(this.apiEndpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.apiToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            recipient,
+            sender_id: 'SMSAPI Demo',
+            type: 'plain',
+            message,
+          }),
+        });
+
+        const fallbackData = await fallbackRes.json().catch(() => null);
+        if (fallbackRes.ok && fallbackData?.status === 'success') {
+          const msgId = typeof fallbackData.data === 'object' ? fallbackData.data?.uid || fallbackData.data?.id : String(fallbackData.data || '');
+          this.logger.log(`[SMSAPI.LK] ✅ SMS delivered successfully to ${recipient} via fallback sender ID 'SMSAPI Demo'. MsgId: ${msgId}`);
+          return {
+            success: true,
+            messageId: msgId,
+          };
+        }
+      }
+
       return {
         success: false,
         error: data?.message || `HTTP ${response.status}`,
