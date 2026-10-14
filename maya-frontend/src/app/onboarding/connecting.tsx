@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { ConnectingView } from '@/components/call/connecting-view';
 
 /**
@@ -8,13 +8,8 @@ import { ConnectingView } from '@/components/call/connecting-view';
  * uniformly inside the active call lifecycle without duplicate screen flashes.
  */
 export default function ConnectingScreen() {
-  const params = useLocalSearchParams();
-
   useEffect(() => {
-    router.replace({
-      pathname: '/onboarding/call',
-      params,
-    });
+    router.replace('/onboarding/call');
   }, []);
 
   return <ConnectingView onCancel={() => router.back()} />;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,10 @@ import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-si
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { CreateSessionModal, CreateSessionConfig } from '@/components/call/create-session-modal';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
+import { Feather } from '@expo/vector-icons';
+import { useOnboardingStore } from '@/services/store/onboarding-store';
+import { CallSessionStore } from '@/services/store/call-session-store';
+import { authService } from '@/services/auth/auth-service';
 
 interface ScenarioItem {
   id: string;
@@ -92,10 +96,20 @@ export default function DashboardScreen() {
     popup?: string;
   }>();
 
-  const displayName = params.name || 'Tharindu';
+  const store = useOnboardingStore();
+  const user = store.user;
+  const displayName = user?.displayName || store.name || params.name || '';
+  const minutesBalance = user?.minutesBalance ?? 10;
+  const isTimeExpired = minutesBalance <= 0;
+  const planTier = user?.planTier || (params.pro === 'false' ? 'starter' : 'starter');
+
   const { isPhone } = useBreakpoint();
   const isDesktop = !isPhone;
   const { height: windowHeight } = useWindowDimensions();
+
+  useEffect(() => {
+    authService.fetchUserProfile();
+  }, []);
 
   // Dynamically scale card & hero heights so they fill space on taller desktop screens,
   // while staying compact enough on laptop screens (≤768px height) to prevent any vertical scrolling:
@@ -134,7 +148,7 @@ export default function DashboardScreen() {
     : 16;
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('home');
-  const [isPro, setIsPro] = useState(params.pro !== 'false');
+  const [isPro, setIsPro] = useState(planTier === 'pro' || planTier === 'premium');
   const [activePopup, setActivePopup] = useState<PopupPreset | null>(
     (params.popup as PopupPreset) || null
   );
@@ -148,23 +162,30 @@ export default function DashboardScreen() {
 
   const handleStartSession = (config: CreateSessionConfig) => {
     setCreateSessionVisible(false);
-    router.push({
-      pathname: '/onboarding/call',
-      params: {
-        ...params,
-        duration: String(config.durationSeconds),
-        durationMinutes: String(config.durationMinutes),
-        languageMode: config.languageMode,
-        sinhalaStyle: config.sinhalaStyle || (config.languageMode === 'sinhala' ? 'balanced' : undefined),
-        aiSuggestions: String(config.aiSuggestions),
-        topic: config.topic,
-        scenarioId: config.scenarioId || '',
-        scenarioTitle: config.scenarioTitle || '',
-      },
+
+    if (isTimeExpired) {
+      setActivePopup('get-extra-time');
+      return;
+    }
+
+    CallSessionStore.startCall({
+      durationSeconds: config.durationSeconds,
+      durationMinutes: config.durationMinutes,
+      languageMode: config.languageMode,
+      sinhalaStyle: config.sinhalaStyle || (config.languageMode === 'sinhala' ? 'balanced' : undefined),
+      aiSuggestions: config.aiSuggestions,
+      topic: config.topic,
+      scenarioId: config.scenarioId || '',
+      scenarioTitle: config.scenarioTitle || '',
+      userName: user?.displayName || store.name || 'Learner',
     });
   };
 
   const handleStartTalking = () => {
+    if (isTimeExpired) {
+      setActivePopup('get-extra-time');
+      return;
+    }
     handleOpenCreateSession();
   };
 
@@ -1280,5 +1301,27 @@ const styles = StyleSheet.create({
   },
   buttonPressed: {
     opacity: 0.85,
+  },
+  minutesQuotaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 6,
+    marginBottom: 14,
+  },
+  minutesQuotaPillExpired: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FCA5A5',
+  },
+  minutesQuotaText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 12,
+    color: '#0284C7',
   },
 });

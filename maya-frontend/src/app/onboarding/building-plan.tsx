@@ -21,6 +21,7 @@ import {
   playStepPop,
   playAnalysisCompleteSound,
 } from '@/services/sound/sound-service';
+import { authService } from '@/services/auth/auth-service';
 
 // Enable smooth LayoutAnimation on Android for pagination dot morphing
 if (
@@ -288,6 +289,8 @@ export default function BuildingPlanScreen() {
   const cardScaleAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    authService.syncStep('/onboarding/building-plan');
+
     // 1. Start gentle ambient processing whoosh sound
     try {
       playScanningSound();
@@ -374,13 +377,7 @@ export default function BuildingPlanScreen() {
 
       // Transition to Special One-Time Offer (Spin Wheel) Screen
       redirectTimeoutRef.current = setTimeout(() => {
-        router.replace({
-          pathname: '/onboarding/special-offer' as any,
-          params: {
-            ...params,
-            isIntroCall: 'true',
-          },
-        });
+        router.replace('/onboarding/special-offer' as any);
       }, 550);
     });
 

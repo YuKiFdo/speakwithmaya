@@ -8,6 +8,7 @@ import { HealthModule } from './health/health.module.js';
 import { SessionsModule } from './sessions/sessions.module.js';
 import { LiveModule } from './live/live.module.js';
 import { RoadmapModule } from './roadmap/roadmap.module.js';
+import { AuthModule } from './auth/auth.module.js';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -25,6 +26,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
       serviceId: 'maya-backend',
     }),
     HealthModule,
+    AuthModule,
     SessionsModule,
     LiveModule,
     RoadmapModule,

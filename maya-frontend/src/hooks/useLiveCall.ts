@@ -23,6 +23,7 @@ import { getLogTimestamp } from '@/utils/time';
 import { sanitizeModelText } from '@/utils/text-sanitizer';
 import { createWavBlobUrlFromPcm } from '@/utils/audio-wav';
 import { registerMicSuppressor } from '@/services/sound/sound-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 
 // Default to true (Server-to-Server NestJS Gateway) unless explicitly set to 'false'
 const USE_SERVER_LIVE = process.env.EXPO_PUBLIC_USE_SERVER_LIVE !== 'false';
@@ -522,57 +523,62 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         .map((t) => `${t.role === 'user' ? 'Student' : 'Maya'}: ${t.text}`)
         .join('\n');
 
-      const backendBaseUrl = getBackendBaseUrl();
-      const authHeaders = await getAuthHeaders();
-      const res = await fetch(`${backendBaseUrl}/v1/session-token`, {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({
-          sessionId: isReconnect ? sessionIdRef.current : undefined,
-          isReconnect,
-          topic: options.topic,
-          goal: options.goal,
-          level: options.level,
-          durationSeconds: options.durationSeconds,
-          languageMode: options.languageMode,
-          sinhalaStyle: options.sinhalaStyle || 'balanced',
-          aiSuggestions: options.aiSuggestions,
-          scenarioId: options.scenarioId,
-          userName: options.userName,
-          isIntroCall: options.isIntroCall,
-          challenge: options.challenge,
-          dailyGoal: options.dailyGoal,
-          roadmapLevelId: options.roadmapLevelId,
-          practicePoints: options.practicePoints,
-          canonicalContent: options.canonicalContent,
-          passingScorePercent: options.passingScorePercent,
-          memory: rollingMemory || undefined,
-        }),
-      });
+      let tokenData: any = {};
 
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => '');
-        throw new Error(`Failed to obtain ephemeral session token from backend (${res.status}): ${errBody}`);
+      // If connecting directly to Google Live API, mint ephemeral token.
+      // If using NestJS Server WebSocket Gateway (USE_SERVER_LIVE=true), bypass session-token entirely!
+      if (!USE_SERVER_LIVE) {
+        const backendBaseUrl = getBackendBaseUrl();
+        const authHeaders = await getAuthHeaders();
+        const res = await fetch(`${backendBaseUrl}/v1/session-token`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({
+            sessionId: isReconnect ? sessionIdRef.current : undefined,
+            isReconnect,
+            topic: options.topic,
+            goal: options.goal,
+            level: options.level,
+            durationSeconds: options.durationSeconds,
+            languageMode: options.languageMode,
+            sinhalaStyle: options.sinhalaStyle || 'balanced',
+            aiSuggestions: options.aiSuggestions,
+            scenarioId: options.scenarioId,
+            userName: options.userName,
+            isIntroCall: options.isIntroCall,
+            challenge: options.challenge,
+            dailyGoal: options.dailyGoal,
+            roadmapLevelId: options.roadmapLevelId,
+            practicePoints: options.practicePoints,
+            canonicalContent: options.canonicalContent,
+            passingScorePercent: options.passingScorePercent,
+            memory: rollingMemory || undefined,
+          }),
+        });
+
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => '');
+          throw new Error(`Failed to obtain ephemeral session token from backend (${res.status}): ${errBody}`);
+        }
+
+        tokenData = await res.json();
+        if (!tokenData?.wsUrl || !tokenData?.token) {
+          throw new Error('Backend returned invalid session token response: wsUrl or token is missing');
+        }
+        sessionIdRef.current = tokenData.sessionId || sessionIdRef.current;
+      } else {
+        sessionIdRef.current =
+          sessionIdRef.current ||
+          `session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       }
-
-      const tokenData = await res.json();
-      if (!tokenData?.wsUrl || !tokenData?.token) {
-        throw new Error('Backend returned invalid session token response: wsUrl or token is missing');
-      }
-
-      sessionIdRef.current = tokenData.sessionId || sessionIdRef.current;
 
       // 4. Connect Live Transport WebSocket (Direct to Google or Server-to-Server)
       transportRef.current.connect(
         {
           wsUrl: tokenData.wsUrl,
           token: tokenData.token,
-          systemPrompt: tokenData.systemPrompt,
-          tools: tokenData.tools,
-          model: tokenData.model,
           voiceName: tokenData.voiceName || 'Callirrhoe',
           resumptionHandle: resumptionHandleRef.current,
-          greetingPrompt: tokenData.greetingPrompt,
           languageMode: tokenData.languageMode || options.languageMode,
           sinhalaStyle: (tokenData.sinhalaStyle as any) || options.sinhalaStyle || 'balanced',
           sessionOptions: {
@@ -1356,7 +1362,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         const thoughtsTokens = tokensRef.current.thoughtsTokens;
         const total = tokensRef.current.total;
 
-        await fetch(`${backendBaseUrl}/v1/sessions/${sessionIdRef.current}/finish`, {
+        const finishRes = await fetch(`${backendBaseUrl}/v1/sessions/${sessionIdRef.current}/finish`, {
           method: 'POST',
           headers: authHeaders,
           body: JSON.stringify({
@@ -1379,8 +1385,16 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             languageMode: options.languageMode || 'sinhala',
             sinhalaStyle: options.sinhalaStyle || 'balanced',
             hintsUsedCount: typeof options.hintsUsedCount === 'function' ? options.hintsUsedCount() : (options.hintsUsedCount ?? 0),
+            isIntroCall: Boolean(options.isIntroCall),
           }),
         });
+
+        if (finishRes.ok) {
+          const finishData = await finishRes.json().catch(() => null);
+          if (!options.isIntroCall && finishData && typeof finishData.remainingMinutes === 'number') {
+            OnboardingStore.updateMinutesBalance(finishData.remainingMinutes);
+          }
+        }
       } catch (err) {
         console.warn('[useLiveCall] Error calling finish endpoint:', err);
       }

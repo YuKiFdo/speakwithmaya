@@ -23,6 +23,7 @@ import {
   stopMayaNamePromptVoice,
 } from '@/services/sound/sound-service';
 import { MayaPrimaryButton } from '@/components/ui';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 
 export default function NameScreen() {
   const [name, setName] = useState('');
@@ -200,13 +201,12 @@ export default function NameScreen() {
   };
 
   const handleContinue = () => {
-    if (!name.trim()) return;
+    const cleanName = name.trim();
+    if (!cleanName) return;
     stopMayaNamePromptVoice();
     setIsSpeaking(false);
-    router.replace({
-      pathname: '/onboarding/phone',
-      params: { name: name.trim() },
-    });
+    OnboardingStore.updateField('name', cleanName);
+    router.replace('/onboarding/phone');
   };
 
   return (
@@ -288,9 +288,9 @@ export default function NameScreen() {
                 {
                   opacity: inputOpacityAnim,
                   transform: [{ translateY: inputSlideAnim }],
+                  pointerEvents: showInput ? 'auto' : 'none',
                 },
               ]}
-              pointerEvents={showInput ? 'auto' : 'none'}
             >
               <TextInput
                 ref={inputRef}
@@ -322,9 +322,9 @@ export default function NameScreen() {
                 {
                   opacity: buttonOpacityAnim,
                   transform: [{ translateY: buttonSlideAnim }],
+                  pointerEvents: showInput ? 'auto' : 'none',
                 },
               ]}
-              pointerEvents={showInput ? 'auto' : 'none'}
             >
               <MayaPrimaryButton
                 label="Continue"

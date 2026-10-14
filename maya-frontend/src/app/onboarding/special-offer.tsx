@@ -26,6 +26,8 @@ import {
   playGoodJobSound,
   playOtherButtonSound,
 } from '@/services/sound/sound-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
+import { authService } from '@/services/auth/auth-service';
 
 // Wheel configuration: 6 slices (60 degrees each)
 // Angles measured from -90 deg (12 o'clock)
@@ -217,7 +219,7 @@ const WheelGraphic = React.memo(() => {
       </Svg>
 
       {/* Center Gift Icon */}
-      <View style={styles.centerGiftOverlay} pointerEvents="none">
+      <View style={styles.centerGiftOverlay}>
         <Ionicons name="gift" size={24} color="#FFFFFF" />
       </View>
     </>
@@ -249,6 +251,8 @@ export default function SpecialOfferScreen() {
 
   // 1. Staggered Page Entrance Choreography on Mount
   useEffect(() => {
+    authService.syncStep('/onboarding/special-offer');
+
     Animated.stagger(95, [
       // Top Pill Pop
       Animated.spring(badgeAnim, {
@@ -395,13 +399,8 @@ export default function SpecialOfferScreen() {
 
       // Automatically transition to the congratulations claim discount screen
       redirectTimeoutRef.current = setTimeout(() => {
-        router.replace({
-          pathname: '/onboarding/claim-discount' as any,
-          params: {
-            ...params,
-            discountWon: '20-off',
-          },
-        });
+        OnboardingStore.updateField('discountWon', '20-off');
+        router.replace('/onboarding/claim-discount' as any);
       }, 750);
     });
   };
@@ -708,6 +707,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    pointerEvents: 'none',
   },
   buttonWrapper: {
     width: '100%',

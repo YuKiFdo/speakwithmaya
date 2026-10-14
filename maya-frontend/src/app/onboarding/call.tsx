@@ -38,6 +38,8 @@ import {
   playCallConnectedSound,
   playOtherButtonSound,
 } from '@/services/sound/sound-service';
+import { CallSessionStore } from '@/services/store/call-session-store';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -65,6 +67,9 @@ export default function CallScreen() {
     dailyGoal?: string;
   }>();
 
+  const storeConfig = CallSessionStore.getConfig();
+  const onboardingState = OnboardingStore.getState();
+
   const { isPhone } = useBreakpoint();
   const isWebOrDesktop = !isPhone;
   const useNative = Platform.OS !== 'web';
@@ -72,45 +77,53 @@ export default function CallScreen() {
   // Real-time network & connection monitor
   const connection = useConnectionMonitor();
 
-  const durationSec = params.duration ? parseInt(params.duration, 10) : 300;
+  const isIntro = storeConfig?.isIntroCall ?? (params.isIntroCall === 'true');
+  const durationSec = storeConfig?.durationSeconds || (params.duration ? parseInt(params.duration, 10) : 300);
   const targetDuration = isNaN(durationSec) ? 300 : durationSec;
-  const aiSug = params.aiSuggestions !== 'false';
-  const isIntro = params.isIntroCall === 'true';
-  const langMode = isIntro ? 'sinhala' : (params.languageMode === 'english' ? 'english' : 'sinhala');
+  const aiSug = storeConfig?.aiSuggestions ?? (params.aiSuggestions !== 'false');
+  const langMode = isIntro ? 'sinhala' : (storeConfig?.languageMode || (params.languageMode === 'english' ? 'english' : 'sinhala'));
   const sinhalaStyle: 'balanced' | 'deep_guidance' = isIntro
     ? 'balanced'
-    : (params.sinhalaStyle === 'deep_guidance' ? 'deep_guidance' : 'balanced');
-  const effectiveTopic = params.topic || params.goal || 'General Speaking Practice';
-  const effectiveUserName = (params.name || params.userName || '').trim() || 'Tharindu';
+    : (storeConfig?.sinhalaStyle || (params.sinhalaStyle === 'deep_guidance' ? 'deep_guidance' : 'balanced'));
+  const effectiveTopic = storeConfig?.topic || params.topic || params.goal || onboardingState.goal || 'General Speaking Practice';
+  const effectiveUserName = (storeConfig?.userName || onboardingState.user?.displayName || onboardingState.name || params.name || params.userName || '').trim() || 'Learner';
 
-  let parsedPracticePoints: string[] = [];
-  if (params.practicePoints) {
+  let parsedPracticePoints: string[] = storeConfig?.practicePoints || [];
+  if (parsedPracticePoints.length === 0 && params.practicePoints) {
     try {
       parsedPracticePoints = JSON.parse(params.practicePoints);
     } catch {}
   }
 
+  const effectiveScenarioId = storeConfig?.scenarioId || params.scenarioId;
+  const effectiveRoadmapLevelId = storeConfig?.roadmapLevelId || params.roadmapLevelId;
+  const effectiveLevelNumber = storeConfig?.levelNumber ?? (params.levelNumber ? parseInt(params.levelNumber, 10) : undefined);
+  const effectiveLevelTitle = storeConfig?.scenarioTitle || params.scenarioTitle || params.topic;
+  const effectiveCanonicalContent = storeConfig?.canonicalContent || params.canonicalContent;
+  const effectivePassingScorePercent = storeConfig?.passingScorePercent ?? (params.passingScorePercent ? parseInt(params.passingScorePercent, 10) : 75);
+  const effectiveTargetSpeakingShare = storeConfig?.targetSpeakingShare ?? (params.targetSpeakingShare ? parseInt(params.targetSpeakingShare, 10) : 40);
+
   // Core Gemini Live Audio & Call Engine
   const liveCall = useLiveCall({
     topic: effectiveTopic,
-    goal: params.goal,
-    level: params.level,
+    goal: storeConfig?.goal || params.goal || onboardingState.goal,
+    level: storeConfig?.level || params.level || onboardingState.level || 'Intermediate',
     durationSeconds: targetDuration,
     languageMode: langMode,
     sinhalaStyle,
     aiSuggestions: aiSug,
-    scenarioId: params.scenarioId,
+    scenarioId: effectiveScenarioId,
     userName: effectiveUserName,
     isIntroCall: isIntro,
-    challenge: params.challenge,
-    dailyGoal: params.dailyGoal,
-    roadmapLevelId: params.roadmapLevelId,
-    levelNumber: params.levelNumber ? parseInt(params.levelNumber, 10) : undefined,
-    levelTitle: params.scenarioTitle || params.topic,
+    challenge: storeConfig?.challenge || params.challenge || onboardingState.challenge,
+    dailyGoal: storeConfig?.dailyGoal || params.dailyGoal || (onboardingState.dailyGoalMinutes ? `${onboardingState.dailyGoalMinutes}-min` : '10-min'),
+    roadmapLevelId: effectiveRoadmapLevelId,
+    levelNumber: effectiveLevelNumber,
+    levelTitle: effectiveLevelTitle,
     practicePoints: parsedPracticePoints,
-    canonicalContent: params.canonicalContent,
-    passingScorePercent: params.passingScorePercent ? parseInt(params.passingScorePercent, 10) : 75,
-    targetSpeakingShare: params.targetSpeakingShare ? parseInt(params.targetSpeakingShare, 10) : 40,
+    canonicalContent: effectiveCanonicalContent,
+    passingScorePercent: effectivePassingScorePercent,
+    targetSpeakingShare: effectiveTargetSpeakingShare,
     hintsUsedCount: () => hintsHistoryRef.current.length,
   });
 
@@ -118,6 +131,34 @@ export default function CallScreen() {
   useEffect(() => {
     liveCallRef.current = liveCall;
   }, [liveCall]);
+
+  // Ensure browser URL bar displays clean route with zero query leakage on Web
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  // Document title and beforeunload safety guard on Web
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      document.title = 'Maya AI — Live Voice Practice';
+    }
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        if (liveCall.status === 'speaking' || liveCall.status === 'listening' || liveCall.status === 'connecting' || liveCall.status === 'reconnecting') {
+          e.preventDefault();
+          e.returnValue = 'You have an active English speaking session. Are you sure you want to leave?';
+          return e.returnValue;
+        }
+      };
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }
+  }, [liveCall.status]);
 
   // Auto-start Gemini Live call session on component mount with cleanup on unmount
   useEffect(() => {
@@ -637,23 +678,12 @@ export default function CallScreen() {
       });
       if (isIntro) {
         console.log('[call.tsx] 🏁 Intro call concluded -> routing directly to /onboarding/building-plan');
-        router.replace({
-          pathname: '/onboarding/building-plan' as any,
-          params: {
-            ...params,
-            sessionId: activeSessionId,
-            durationSeconds: String(liveCall.missionReport.durationSeconds || ''),
-            talkTimeSeconds: String(liveCall.missionReport.talkTimeSeconds || ''),
-            overallScore: String(liveCall.missionReport.overallScore || '85'),
-            passed: 'true',
-            isGeneralChat: 'true',
-          },
-        });
+        router.replace('/onboarding/building-plan' as any);
         return;
       }
 
       router.replace({
-        pathname: '/onboarding/analyzing' as any,
+        pathname: '/call/analyzing' as any,
         params: {
           sessionId: activeSessionId,
           roadmapLevelId: liveCall.missionReport.roadmapLevelId || '',
@@ -972,7 +1002,7 @@ export default function CallScreen() {
 
             {/* Floating Hint Button in Bottom Right Corner */}
             {!isHintVisible && !isWrappingUp && (
-              <View style={styles.floatingHintContainer} pointerEvents="box-none">
+              <View style={[styles.floatingHintContainer, { pointerEvents: 'box-none' }]}>
                 <HintFloatingButton
                   onPress={handleToggleHint}
                   isActive={isHintVisible}
@@ -1004,9 +1034,9 @@ export default function CallScreen() {
             {
               opacity: connectingFadeAnim,
               transform: [{ scale: connectingScaleAnim }],
+              pointerEvents: liveCall.status === 'connecting' ? 'auto' : 'none',
             },
           ]}
-          pointerEvents={liveCall.status === 'connecting' ? 'auto' : 'none'}
         >
           <ConnectingView
             onCancel={handleHangup}

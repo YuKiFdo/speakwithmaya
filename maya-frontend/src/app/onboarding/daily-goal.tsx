@@ -10,7 +10,7 @@ import {
   Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
@@ -22,6 +22,8 @@ import {
   preloadDailyGoalVoices,
   playUnderstoodTapSound,
 } from '@/services/sound/sound-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
+import { authService } from '@/services/auth/auth-service';
 
 interface PracticeOption {
   id: string;
@@ -55,16 +57,10 @@ const PRACTICE_OPTIONS: PracticeOption[] = [
 ];
 
 export default function DailyGoalScreen() {
-  const params = useLocalSearchParams<{
-    phone?: string;
-    name?: string;
-    goal?: string;
-    challenge?: string;
-    level?: string;
-    employment?: string;
-  }>();
   const { isTablet, isDesktop } = useBreakpoint();
-  const [selectedGoal, setSelectedGoal] = useState<string | null>('10-min');
+  const [selectedGoal, setSelectedGoal] = useState<string | null>(
+    OnboardingStore.getState().dailyGoalMinutes ? `${OnboardingStore.getState().dailyGoalMinutes}-min` : '10-min',
+  );
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Staggered Entrance Animations
@@ -165,10 +161,10 @@ export default function DailyGoalScreen() {
       if (!hasNavigated) {
         hasNavigated = true;
         stopMayaDailyGoalFeedbackVoice();
-        router.replace({
-          pathname: '/onboarding/social-proof',
-          params: { ...params, dailyGoal: item.id },
-        });
+        const mins = parseInt(item.id.replace('-min', ''), 10) || 10;
+        OnboardingStore.updateField('dailyGoalMinutes', mins);
+        authService.syncStep('/onboarding/social-proof');
+        router.replace('/onboarding/social-proof');
       }
     };
 

@@ -228,7 +228,7 @@ export class LiveTransport implements ILiveTransport {
           languageCodes: ['en-US', 'si-LK'],
         },
         outputAudioTranscription: {},
-        tools: this.config.tools || [],
+        tools: this.config.tools && this.config.tools.length > 0 ? this.config.tools : undefined,
         sessionResumption: this.resumptionHandle ? { handle: this.resumptionHandle } : undefined,
         contextWindowCompression: {
           triggerTokens: '25000',

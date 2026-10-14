@@ -18,9 +18,10 @@ import {
   playAnalysisCompleteSound,
   playOtherButtonSound,
 } from '@/services/sound/sound-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
+import { authService } from '@/services/auth/auth-service';
 
 export default function ClaimDiscountScreen() {
-  const params = useLocalSearchParams();
   const { isPhone } = useBreakpoint();
   const useNative = Platform.OS !== 'web';
 
@@ -42,6 +43,8 @@ export default function ClaimDiscountScreen() {
     try {
       playAnalysisCompleteSound();
     } catch {}
+
+    authService.syncStep('/onboarding/claim-discount');
 
     // 1. Staggered Entrance Sequence
     Animated.stagger(90, [
@@ -182,13 +185,8 @@ export default function ClaimDiscountScreen() {
     try {
       playOtherButtonSound();
     } catch {}
-    router.replace({
-      pathname: '/onboarding/personalized-plan' as any,
-      params: {
-        ...params,
-        discountWon: '20-off',
-      },
-    });
+    OnboardingStore.updateField('discountWon', '20-off');
+    router.replace('/onboarding/personalized-plan' as any);
   };
 
   // --- Interpolations ---

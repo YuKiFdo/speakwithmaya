@@ -217,6 +217,9 @@ export class FinishSessionDto {
   @IsOptional()
   @IsNumber()
   hintsUsedCount?: number;
+
+  @IsOptional()
+  isIntroCall?: boolean;
 }
 
 export class QueryUsageDto {

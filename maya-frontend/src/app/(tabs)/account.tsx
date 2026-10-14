@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,26 +18,38 @@ import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-si
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CrownNavIcon } from '@/components/icons/nav-icons';
+import { useOnboardingStore } from '@/services/store/onboarding-store';
+import { authService } from '@/services/auth/auth-service';
 
 const PLAN_CROWN_IMAGE = require('@/assets/images/plan-crown.png');
 
 export default function AccountScreen() {
-  const params = useLocalSearchParams<{ name?: string; plan?: string; isPro?: string }>();
-  const displayName = params.name || 'Tharindu Fernando';
+  const store = useOnboardingStore();
+  const user = store.user;
+  const displayName = user?.displayName || store.name || 'Tharindu Fernando';
+  const phoneNumber = user?.phoneNumber || store.phone || '+94 77 123 4567';
+  const minutesBalance = user?.minutesBalance ?? 10;
+  const isTimeExpired = minutesBalance <= 0;
+  const currentPlanTier = user?.planTier || (store.isCompleted ? 'starter' : 'starter');
+
   const { isPhone } = useBreakpoint();
   const isDesktop = !isPhone;
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('account');
-  const [isPro, setIsPro] = useState(params.plan === 'pro' || params.isPro === 'true');
+  const [isPro, setIsPro] = useState(currentPlanTier === 'pro' || currentPlanTier === 'premium');
   const [activePopup, setActivePopup] = useState<PopupPreset | null>(null);
+
+  useEffect(() => {
+    authService.fetchUserProfile();
+  }, []);
 
   const handleSelectTab = (tab: DashboardTab) => {
     if (tab === 'home') {
-      router.replace({ pathname: '/dashboard', params });
+      router.replace('/(tabs)/dashboard');
     } else if (tab === 'roadmap') {
-      router.replace({ pathname: '/roadmap', params });
+      router.replace('/(tabs)/roadmap');
     } else if (tab === 'history') {
-      router.replace({ pathname: '/history', params });
+      router.replace('/(tabs)/history');
     } else {
       setActiveTab(tab);
     }
@@ -141,9 +153,14 @@ export default function AccountScreen() {
                 {/* RIGHT COLUMN */}
                 <View style={styles.desktopRightCol}>
                   <CurrentPlanCard
-                    isPro={isPro}
-                    onTogglePlan={() => setIsPro((prev) => !prev)}
+                    planTier={currentPlanTier}
+                    minutesBalance={minutesBalance}
+                    monthlyAllowance={user?.monthlyMinutesAllowance ?? 10}
+                    isTimeExpired={isTimeExpired}
+                    phone={phoneNumber}
+                    renewalDate={user?.minutesResetAt ? new Date(user.minutesResetAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Next Month'}
                     onUpgrade={() => router.push('/upgrade')}
+                    onGetExtraTime={() => setActivePopup('get-extra-time')}
                     onChangePayment={() => {}}
                   />
 
@@ -165,9 +182,14 @@ export default function AccountScreen() {
                 <StatsCard />
 
                 <CurrentPlanCard
-                  isPro={isPro}
-                  onTogglePlan={() => setIsPro((prev) => !prev)}
+                  planTier={currentPlanTier}
+                  minutesBalance={minutesBalance}
+                  monthlyAllowance={user?.monthlyMinutesAllowance ?? 10}
+                  isTimeExpired={isTimeExpired}
+                  phone={phoneNumber}
+                  renewalDate={user?.minutesResetAt ? new Date(user.minutesResetAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Next Month'}
                   onUpgrade={() => router.push('/upgrade')}
+                  onGetExtraTime={() => setActivePopup('get-extra-time')}
                   onChangePayment={() => {}}
                 />
 
@@ -385,16 +407,29 @@ function PreferencesCard({ onRowPress }: { onRowPress: (id: string) => void }) {
  * Matches Image 1 for Pro Plan (Monthly) and Image 2 for Starter Plan (Daily)
  */
 function CurrentPlanCard({
-  isPro,
-  onTogglePlan,
+  planTier,
+  minutesBalance,
+  monthlyAllowance,
+  isTimeExpired,
+  phone,
+  renewalDate,
   onUpgrade,
+  onGetExtraTime,
   onChangePayment,
 }: {
-  isPro: boolean;
-  onTogglePlan?: () => void;
+  planTier: string;
+  minutesBalance: number;
+  monthlyAllowance: number;
+  isTimeExpired: boolean;
+  phone: string;
+  renewalDate: string;
   onUpgrade: () => void;
+  onGetExtraTime: () => void;
   onChangePayment: () => void;
 }) {
+  const isPro = planTier === 'pro' || planTier === 'premium';
+  const planDisplayName = planTier.charAt(0).toUpperCase() + planTier.slice(1) + ' Plan';
+
   return (
     <View style={styles.currentPlanCardContainer}>
       {/* Top Header Tag Row */}
@@ -408,27 +443,22 @@ function CurrentPlanCard({
           <Text style={styles.planHeaderLeftText}>Your Current Plan</Text>
         </View>
 
-        {/* Top-Right Badge: Tapping toggles between Starter & Pro preview */}
-        <Pressable
-          onPress={onTogglePlan}
-          hitSlop={8}
-          style={({ pressed }) => [
-            styles.starterBadgePill,
-            pressed && styles.cardPressed,
-          ]}
-        >
-          <Text style={styles.starterBadgeText}>
-            {isPro ? 'Pro Plan' : 'Starter Plan'}
+        {/* Top-Right Badge */}
+        <View style={[styles.starterBadgePill, isTimeExpired && { backgroundColor: '#FEF2F2' }]}>
+          <Text style={[styles.starterBadgeText, isTimeExpired && { color: '#DC2626' }]}>
+            {isTimeExpired ? 'Time Expired' : planDisplayName}
           </Text>
-        </Pressable>
+        </View>
       </View>
 
       {/* Main Title & Subtitle */}
       <Text style={styles.planMainTitle}>
-        {isPro ? 'Pro Plan (Monthly)' : 'Starter Plan (Daily)'}
+        {planDisplayName} ({isPro ? 'Monthly' : '10 Min/Month'})
       </Text>
       <Text style={styles.planMainSubtitle}>
-        Perfect for getting started with Maya.
+        {isTimeExpired
+          ? 'You have used all available minutes for this cycle. Get extra time to continue.'
+          : 'Practice speaking with Maya daily to build fluency.'}
       </Text>
 
       {/* Table Information Rows */}
@@ -437,79 +467,70 @@ function CurrentPlanCard({
         <View style={styles.planInfoRow}>
           <Text style={styles.planInfoLabel}>Current Plan</Text>
           <View style={styles.planInfoValueCol}>
-            <Text style={styles.planInfoValue}>
-              {isPro ? 'Pro Plan' : 'Starter Plan'}
+            <Text style={styles.planInfoValue}>{planDisplayName}</Text>
+          </View>
+        </View>
+
+        {/* Row 2: Available Practice Time */}
+        <View style={styles.planInfoRow}>
+          <Text style={styles.planInfoLabel}>Practice Time</Text>
+          <View style={styles.planInfoValueCol}>
+            <Text style={[styles.planInfoValue, isTimeExpired ? { color: '#DC2626', ...fontStyle('inter', 'bold') } : { color: '#0057FF' }]}>
+              {isTimeExpired ? '0m remaining (Expired)' : `${minutesBalance}m of ${monthlyAllowance}m remaining`}
             </Text>
           </View>
         </View>
 
-        {/* Row 2: Billing Date / Registered Date */}
+        {/* Row 3: Next Reset Date */}
         <View style={styles.planInfoRow}>
-          <Text style={styles.planInfoLabel}>
-            {isPro ? 'Next Billing Date' : 'Registered Date'}
-          </Text>
+          <Text style={styles.planInfoLabel}>Cycle Renews</Text>
           <View style={styles.planInfoValueCol}>
-            <Text style={styles.planInfoValue}>25 Jun 2026</Text>
+            <Text style={styles.planInfoValue}>{renewalDate}</Text>
           </View>
         </View>
 
-        {/* Row 3: Payment Method (Image 1) OR Mobile Number (Image 2) */}
-        {isPro ? (
-          <View style={styles.planInfoRow}>
-            <Text style={styles.planInfoLabel}>Payment Method</Text>
-            <View style={styles.paymentMethodRow}>
-              <View style={styles.paymentCardInfo}>
-                <Ionicons
-                  name="card-outline"
-                  size={16}
-                  color="#2563EB"
-                  style={{ marginRight: 8 }}
-                />
-                <Text style={styles.planInfoValue}>•••• 4582</Text>
-              </View>
-              <Pressable
-                onPress={onChangePayment}
-                hitSlop={8}
-                style={({ pressed }) => [pressed && styles.cardPressed]}
-              >
-                <Text style={styles.changePaymentText}>Change</Text>
-              </Pressable>
-            </View>
+        {/* Row 4: Registered Phone */}
+        <View style={styles.planInfoRow}>
+          <Text style={styles.planInfoLabel}>Mobile Number</Text>
+          <View style={styles.planInfoValueCol}>
+            <Text style={styles.planInfoValue}>{phone}</Text>
           </View>
-        ) : (
-          <View style={styles.planInfoRow}>
-            <Text style={styles.planInfoLabel}>Mobile Number</Text>
-            <View style={styles.planInfoValueCol}>
-              <Text style={styles.planInfoValue}>077 1234567</Text>
-            </View>
-          </View>
-        )}
+        </View>
       </View>
 
       {/* Thin Horizontal Divider Line above button */}
       <View style={styles.planCardDivider} />
 
-      {/* Upgrade to Pro Button */}
-      <Pressable
-        onPress={onUpgrade}
-        style={({ pressed }) => [
-          styles.planUpgradeBtn,
-          
-          pressed && styles.buttonPressed,
-        ]}
-      >
-        <CrownNavIcon
-          color="#FFFFFF"
-          size={19}
-        />
-        <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>Upgrade to Pro</Text>
-        <Feather
-          name="chevron-right"
-          size={18}
-          color="#FFFFFF"
-          style={{ marginLeft: 6 }}
-        />
-      </Pressable>
+      {/* Action Buttons: Get Extra Time & Upgrade */}
+      <View style={{ gap: 10 }}>
+        {isTimeExpired && (
+          <Pressable
+            onPress={onGetExtraTime}
+            style={({ pressed }) => [
+              styles.planUpgradeBtn,
+              { backgroundColor: '#0284C7' },
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Feather name="clock" size={18} color="#FFFFFF" />
+            <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>Get Extra Time (+30 / +120 Min)</Text>
+          </Pressable>
+        )}
+
+        <Pressable
+          onPress={onUpgrade}
+          style={({ pressed }) => [
+            styles.planUpgradeBtn,
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <CrownNavIcon color="#FFFFFF" size={19} />
+          <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>
+            {isPro ? 'Change Subscription Plan' : 'Upgrade to Pro'}
+          </Text>
+          <Feather name="chevron-right" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
+        </Pressable>
+      </View>
     </View>
   );
 }

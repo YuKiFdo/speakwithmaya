@@ -39,6 +39,8 @@ import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-si
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { MissionCardModal } from '@/components/roadmap/mission-card-modal';
+import { useOnboardingStore } from '@/services/store/onboarding-store';
+import { CallSessionStore } from '@/services/store/call-session-store';
 import {
   RoadmapGlowParticles,
   buildDesktopPathSegments,
@@ -79,6 +81,7 @@ export default function RoadmapScreen() {
   const params = useLocalSearchParams<{ name?: string }>();
   const displayName = params.name || 'Tharindu';
   const { isPhone } = useBreakpoint();
+  const onboardingState = useOnboardingStore();
   const isDesktop = !isPhone;
   const { width: windowWidth } = useWindowDimensions();
 
@@ -482,19 +485,23 @@ export default function RoadmapScreen() {
 
   const handleStartMission = (item: MilestoneItem) => {
     setSelectedMission(null);
-    router.push({
-      pathname: '/onboarding/call',
-      params: {
-        ...params,
-        roadmapLevelId: item.id,
-        levelNumber: String(item.levelNumber),
-        topic: item.topic || item.title,
-        scenarioTitle: item.title,
-        scenarioId: item.scenarioId || 'general-practice',
-        practicePoints: JSON.stringify(item.practicePoints || []),
-        canonicalContent: item.canonicalContent || '',
-        passingScorePercent: String(item.passingScorePercent || 75),
-      },
+
+    const minutesBalance = onboardingState.user?.minutesBalance ?? 10;
+    if (minutesBalance <= 0) {
+      setActivePopup('get-extra-time');
+      return;
+    }
+
+    CallSessionStore.startCall({
+      roadmapLevelId: item.id,
+      levelNumber: item.levelNumber,
+      topic: item.topic || item.title,
+      scenarioTitle: item.title,
+      scenarioId: item.scenarioId || 'general-practice',
+      practicePoints: item.practicePoints || [],
+      canonicalContent: item.canonicalContent || '',
+      passingScorePercent: item.passingScorePercent || 75,
+      userName: onboardingState.user?.displayName || onboardingState.name || 'Learner',
     });
   };
 

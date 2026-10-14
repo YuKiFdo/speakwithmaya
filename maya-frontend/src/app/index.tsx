@@ -22,11 +22,26 @@ import {
   preloadAllOnboardingVoicesInOrder,
 } from '@/services/sound/sound-service';
 import { MayaPrimaryButton } from '@/components/ui';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 
 export default function WelcomeScreen() {
   const { isDesktop, isTablet } = useBreakpoint();
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [buttonVisible, setButtonVisible] = useState(false);
+
+  // Auto-resume check on app open: If user already finished onboarding, go straight to dashboard.
+  // If user dropped off mid-onboarding (e.g. at /onboarding/personalized-plan), resume right there.
+  useEffect(() => {
+    const state = OnboardingStore.getState();
+    if (state.isCompleted) {
+      router.replace('/(tabs)/dashboard');
+      return;
+    }
+    if (state.lastActiveRoute && state.lastActiveRoute !== '/' && state.lastActiveRoute !== '/onboarding/name') {
+      router.replace(state.lastActiveRoute as any);
+      return;
+    }
+  }, []);
 
   // Animations
   const floatAnim = useRef(new Animated.Value(0)).current;

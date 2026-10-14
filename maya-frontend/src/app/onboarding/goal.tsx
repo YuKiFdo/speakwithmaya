@@ -10,7 +10,7 @@ import {
   Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
 import { fontStyle } from '@/theme/fonts';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +22,8 @@ import {
   preloadGoalVoices,
   playUnderstoodTapSound,
 } from '@/services/sound/sound-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
+import { authService } from '@/services/auth/auth-service';
 
 interface GoalOption {
   id: string;
@@ -64,8 +66,9 @@ const GOAL_OPTIONS: GoalOption[] = [
 ];
 
 export default function GoalScreen() {
-  const params = useLocalSearchParams<{ phone?: string; name?: string }>();
-  const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
+  const [selectedGoal, setSelectedGoal] = useState<string | null>(
+    OnboardingStore.getState().goal || null,
+  );
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Staggered Entrance Animations
@@ -166,10 +169,9 @@ export default function GoalScreen() {
       if (!hasNavigated) {
         hasNavigated = true;
         stopMayaGoalFeedbackVoice();
-        router.replace({
-          pathname: '/onboarding/challenge',
-          params: { ...params, goal: goal.id },
-        });
+        OnboardingStore.updateField('goal', goal.id);
+        authService.syncStep('/onboarding/challenge');
+        router.replace('/onboarding/challenge');
       }
     };
 

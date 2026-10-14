@@ -10,7 +10,7 @@ import {
   Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
 import { fontStyle } from '@/theme/fonts';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +22,8 @@ import {
   preloadChallengeVoices,
   playUnderstoodTapSound,
 } from '@/services/sound/sound-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
+import { authService } from '@/services/auth/auth-service';
 
 interface ChallengeOption {
   id: string;
@@ -58,8 +60,9 @@ const CHALLENGE_OPTIONS: ChallengeOption[] = [
 ];
 
 export default function ChallengeScreen() {
-  const params = useLocalSearchParams<{ phone?: string; name?: string; goal?: string }>();
-  const [selectedChallenge, setSelectedChallenge] = useState<string | null>(null);
+  const [selectedChallenge, setSelectedChallenge] = useState<string | null>(
+    OnboardingStore.getState().challenge || null,
+  );
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Staggered Entrance Animations
@@ -160,10 +163,9 @@ export default function ChallengeScreen() {
       if (!hasNavigated) {
         hasNavigated = true;
         stopMayaChallengeFeedbackVoice();
-        router.replace({
-          pathname: '/onboarding/level',
-          params: { ...params, challenge: item.id },
-        });
+        OnboardingStore.updateField('challenge', item.id);
+        authService.syncStep('/onboarding/level');
+        router.replace('/onboarding/level');
       }
     };
 

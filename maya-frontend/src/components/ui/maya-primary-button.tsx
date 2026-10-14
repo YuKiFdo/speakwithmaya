@@ -80,7 +80,6 @@ const GlowingParticle = React.memo(function GlowingParticle({
 
   return (
     <Animated.View
-      pointerEvents="none"
       style={[
         styles.glowParticle,
         {
@@ -275,7 +274,6 @@ export function MayaPrimaryButton({
         {/* Top 3D Specular Rim Highlight */}
         {!disabled && (
           <View
-            pointerEvents="none"
             style={[
               styles.topRimHighlight,
               {
@@ -289,7 +287,6 @@ export function MayaPrimaryButton({
         {/* Bottom Subtle Depth Lip */}
         {!disabled && (
           <View
-            pointerEvents="none"
             style={[
               styles.bottomLipShade,
               {
@@ -303,7 +300,6 @@ export function MayaPrimaryButton({
         {/* Cross-Platform Diagonal Light Sheen Sweep */}
         {!disabled && !loading && (
           <Animated.View
-            pointerEvents="none"
             style={[
               styles.shimmerBand,
               {
@@ -326,7 +322,7 @@ export function MayaPrimaryButton({
           GLOW_PARTICLES.map((p) => <GlowingParticle key={p.id} p={p} />)}
 
         {/* Button Content Row */}
-        <View style={styles.buttonContentRow} pointerEvents="none">
+        <View style={styles.buttonContentRow}>
           {loading ? (
             <ActivityIndicator size="small" color="#ffffff" />
           ) : (
@@ -429,6 +425,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.32)',
     zIndex: 1,
+    pointerEvents: 'none',
   },
   bottomLipShade: {
     position: 'absolute',
@@ -438,6 +435,7 @@ const styles = StyleSheet.create({
     height: 3,
     backgroundColor: 'rgba(0, 35, 95, 0.22)',
     zIndex: 1,
+    pointerEvents: 'none',
   },
   shimmerBand: {
     position: 'absolute',
@@ -446,6 +444,7 @@ const styles = StyleSheet.create({
     width: 68,
     flexDirection: 'row',
     zIndex: 2,
+    pointerEvents: 'none',
   },
   shimmerEdge: {
     flex: 1,
@@ -459,6 +458,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: '#FFFFFF',
     zIndex: 2,
+    pointerEvents: 'none',
     ...Platform.select({
       web: {
         boxShadow: '0 0 6px rgba(255, 255, 255, 0.85)',
@@ -477,6 +477,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 20,
     zIndex: 3,
+    pointerEvents: 'none',
   },
   iconLeft: {
     marginRight: 8,

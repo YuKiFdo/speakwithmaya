@@ -10,7 +10,7 @@ import {
   Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
@@ -22,6 +22,8 @@ import {
   preloadLevelVoices,
   playUnderstoodTapSound,
 } from '@/services/sound/sound-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
+import { authService } from '@/services/auth/auth-service';
 
 interface LevelOption {
   id: string;
@@ -58,14 +60,10 @@ const LEVEL_OPTIONS: LevelOption[] = [
 ];
 
 export default function LevelScreen() {
-  const params = useLocalSearchParams<{
-    phone?: string;
-    name?: string;
-    goal?: string;
-    challenge?: string;
-  }>();
   const { isTablet, isDesktop } = useBreakpoint();
-  const [selectedLevel, setSelectedLevel] = useState<string | null>(null);
+  const [selectedLevel, setSelectedLevel] = useState<string | null>(
+    OnboardingStore.getState().level || null,
+  );
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Staggered Entrance Animations
@@ -166,10 +164,9 @@ export default function LevelScreen() {
       if (!hasNavigated) {
         hasNavigated = true;
         stopMayaLevelFeedbackVoice();
-        router.replace({
-          pathname: '/onboarding/employment' as any,
-          params: { ...params, level: item.id },
-        });
+        OnboardingStore.updateField('level', item.id);
+        authService.syncStep('/onboarding/employment');
+        router.replace('/onboarding/employment' as any);
       }
     };
 

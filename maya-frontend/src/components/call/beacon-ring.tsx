@@ -63,7 +63,6 @@ export function BeaconRing({
 
   return (
     <Animated.View
-      pointerEvents="none"
       style={[
         styles.outerGlowRing,
         {

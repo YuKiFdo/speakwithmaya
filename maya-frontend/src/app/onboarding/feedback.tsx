@@ -96,7 +96,6 @@ function GlowingParticle({ p }: { p: (typeof GLOW_PARTICLES)[0] }) {
 
   return (
     <Animated.View
-      pointerEvents="none"
       style={[
         styles.glowParticle,
         {
@@ -490,7 +489,7 @@ export default function SessionFeedbackScreen() {
       // Brief delay so celebratory chime resonates before navigating
       setTimeout(() => {
         router.replace({
-          pathname: '/onboarding/complete' as any,
+          pathname: '/call/complete' as any,
           params: params as any,
         });
       }, 260);
@@ -513,7 +512,7 @@ export default function SessionFeedbackScreen() {
     stopActiveAudio();
     playUnderstoodTapSound();
     router.replace({
-      pathname: '/onboarding/complete' as any,
+      pathname: '/call/complete' as any,
       params: params as any,
     });
   };
@@ -900,7 +899,7 @@ export default function SessionFeedbackScreen() {
           >
             {/* Shimmer sweep ray */}
             {Platform.OS === 'web' && (
-              <View pointerEvents="none" style={styles.shimmerRay} />
+              <View style={styles.shimmerRay} />
             )}
 
             {/* Glowing floating particles */}
@@ -909,7 +908,7 @@ export default function SessionFeedbackScreen() {
             ))}
 
             {/* Button label & arrow */}
-            <View style={styles.buttonContentRow} pointerEvents="none">
+            <View style={styles.buttonContentRow}>
               <Text style={[styles.primaryButtonText, isPhone && styles.primaryButtonTextPhone]}>
                 {isLastCard ? 'Finish Review' : 'Understood'}
               </Text>
@@ -1270,6 +1269,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: '45%',
+    pointerEvents: 'none',
     ...Platform.select({
       web: {
         backgroundImage:
@@ -1285,12 +1285,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: '#FFFFFF',
     zIndex: 1,
+    pointerEvents: 'none',
   },
   buttonContentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 3,
+    pointerEvents: 'none',
   },
   primaryButtonText: {
     ...fontStyle('outfit', 'semiBold'),

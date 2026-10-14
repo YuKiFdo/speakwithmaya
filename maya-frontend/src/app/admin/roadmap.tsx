@@ -557,7 +557,7 @@ export default function AdminRoadmapScreen() {
     setIsPlaygroundOpen(false);
     setIsEditorOpen(false);
     router.push({
-      pathname: '/onboarding/call',
+      pathname: '/call' as any,
       params: {
         roadmapLevelId: lvl.id,
         levelNumber: String(lvl.levelNumber || 1),

@@ -231,7 +231,7 @@ export function MissionReportModal({
                   accessibilityLabel={isPassed ? 'Maya celebrating' : 'Maya encouraging you to try again'}
                 />
                 {/* White gradient fade blend at bottom to dissolve into card surface */}
-                <View style={styles.imageBottomFade} pointerEvents="none">
+                <View style={styles.imageBottomFade}>
                   <Svg width="100%" height="100%" preserveAspectRatio="none">
                     <Defs>
                       <LinearGradient

@@ -21,6 +21,8 @@ import {
   playOtherButtonSound,
   playAnalysisCompleteSound,
 } from '@/services/sound/sound-service';
+import { authService } from '@/services/auth/auth-service';
+import { OnboardingStore, useOnboardingStore } from '@/services/store/onboarding-store';
 
 const CLOCK_IMAGE = require('@/assets/images/offer-expired-clock.png');
 
@@ -129,13 +131,19 @@ const FAQS = [
 export default function PersonalizedPlanScreen() {
   const params = useLocalSearchParams<{ name?: string }>();
   const { isPhone } = useBreakpoint();
+  const onboardingState = useOnboardingStore();
 
   const userName = useMemo(() => {
-    if (params.name && params.name.trim().length > 0) {
-      return params.name.trim();
+    const raw = (onboardingState.name || onboardingState.user?.displayName || params.name || '').trim();
+    return raw || 'Learner';
+  }, [onboardingState.name, onboardingState.user?.displayName, params.name]);
+
+  // Ensure browser URL bar displays clean route with zero query leakage on Web
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search) {
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
-    return 'Tharindu';
-  }, [params.name]);
+  }, []);
 
   // Timer state
   const [timeLeft, setTimeLeft] = useState<number>(TEST_DURATION_SECONDS);
@@ -218,24 +226,52 @@ export default function PersonalizedPlanScreen() {
     setTimeLeft(EXTRA_MINUTES_SECONDS);
   };
 
-  const handleUpgrade = () => {
+  // Automatically sync this step with the database so opening on another phone loads here
+  useEffect(() => {
+    authService.syncStep('/onboarding/personalized-plan');
+  }, []);
+
+  const handleUpgrade = async () => {
     try {
       playAnalysisCompleteSound();
     } catch {}
-    // Navigate to next onboarding step / complete
+
+    const state = OnboardingStore.getState();
+    await authService.savePreferences({
+      displayName: state.name,
+      nativeLanguage: state.nativeLanguage,
+      level: state.level,
+      goal: state.goal,
+      challenge: state.challenge,
+      employmentStatus: state.employment,
+      dailyGoalMinutes: state.dailyGoalMinutes,
+      baselineScores: state.baselineScores || undefined,
+    });
+
     router.replace({
       pathname: '/onboarding/complete' as any,
-      params: {
-        ...params,
-        plan: selectedPlanId,
-      },
+      params: { plan: selectedPlanId },
     });
   };
 
-  const handleContinueSecondary = () => {
+  const handleContinueSecondary = async () => {
     try {
       playOtherButtonSound();
     } catch {}
+
+    const state = OnboardingStore.getState();
+    await authService.savePreferences({
+      displayName: state.name,
+      nativeLanguage: state.nativeLanguage,
+      level: state.level,
+      goal: state.goal,
+      challenge: state.challenge,
+      employmentStatus: state.employment,
+      dailyGoalMinutes: state.dailyGoalMinutes,
+      baselineScores: state.baselineScores || undefined,
+    });
+
+    OnboardingStore.setOnboardingCompleted();
     router.replace('/(tabs)/dashboard');
   };
 

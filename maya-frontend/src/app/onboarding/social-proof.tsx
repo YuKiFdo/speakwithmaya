@@ -9,7 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import Svg, {
   Path,
   Line,
@@ -31,6 +31,9 @@ import {
   playMayaSocialProofPromptVoice,
   stopMayaSocialProofPromptVoice,
 } from '@/services/sound/sound-service';
+import { CallSessionStore } from '@/services/store/call-session-store';
+import { authService } from '@/services/auth/auth-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 
 // 5 Separate Vector Personas for the Social Proof avatar row
 const AVATAR_PROFILES = [
@@ -129,16 +132,6 @@ function VectorAvatarItem({ profile, size = 42 }: { profile: typeof AVATAR_PROFI
 }
 
 export default function SocialProofScreen() {
-  const params = useLocalSearchParams<{
-    phone?: string;
-    name?: string;
-    goal?: string;
-    challenge?: string;
-    level?: string;
-    language?: string;
-    dailyGoal?: string;
-  }>();
-
   const { isDesktop, isTablet } = useBreakpoint();
 
   // Staggered Entrance Animations
@@ -306,17 +299,26 @@ export default function SocialProofScreen() {
 
   const handleStartSpeaking = () => {
     stopMayaSocialProofPromptVoice();
-    router.replace({
-      pathname: '/onboarding/call',
-      params: {
-        ...params,
-        userName: params.name || '',
-        isIntroCall: 'true',
-        duration: '180',
-        languageMode: 'sinhala',
-        sinhalaStyle: 'balanced',
-      },
+    const state = OnboardingStore.getState();
+    const effectiveName = (state.name || state.user?.displayName || '').trim() || 'Learner';
+    const effectiveDailyGoal = state.dailyGoalMinutes ? `${state.dailyGoalMinutes}-min` : '10-min';
+
+    CallSessionStore.setConfig({
+      topic: 'Introductory Practice',
+      durationSeconds: 180,
+      isIntroCall: true,
+      userName: effectiveName,
+      goal: state.goal,
+      challenge: state.challenge,
+      level: state.level || 'Intermediate',
+      dailyGoal: effectiveDailyGoal,
+      employment: state.employment,
+      phone: state.phone || state.user?.phoneNumber,
+      languageMode: 'sinhala',
+      sinhalaStyle: 'balanced',
     });
+    authService.syncStep('/onboarding/call');
+    router.replace('/onboarding/call');
   };
 
   return (

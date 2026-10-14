@@ -191,16 +191,26 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
   return [];
 }
 
+import { OnboardingStore } from './store/onboarding-store';
+
 /**
  * Resolves authentication headers for backend API requests.
- * Uses active Supabase user session JWT if logged in,
- * otherwise falls back to configured publishable/anon key.
+ * Uses active OnboardingStore user session JWT if logged in,
+ * otherwise Supabase session JWT, and falls back to configured publishable/anon key.
  */
 export async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
 
+  // 1. Check OnboardingStore user access token
+  const onboardingToken = OnboardingStore.getState().accessToken;
+  if (onboardingToken) {
+    headers['Authorization'] = `Bearer ${onboardingToken}`;
+    return headers;
+  }
+
+  // 2. Check Supabase auth session
   try {
     if (supabase) {
       const { data } = await supabase.auth.getSession();
@@ -213,6 +223,7 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
     console.warn('[getAuthHeaders] Error retrieving session:', err);
   }
 
+  // 3. Fallback to publishable/anon key
   if (supabaseAnonKey) {
     headers['Authorization'] = `Bearer ${supabaseAnonKey}`;
   }

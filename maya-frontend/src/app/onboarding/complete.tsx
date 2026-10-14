@@ -81,7 +81,6 @@ function GlowingParticle({ p }: { p: (typeof GLOW_PARTICLES)[0] }) {
 
   return (
     <Animated.View
-      pointerEvents="none"
       style={[
         styles.glowParticle,
         {
@@ -353,33 +352,30 @@ export default function SessionCompleteScreen() {
   const handlePrimaryPress = () => {
     playUnderstoodTapSound();
     const activeSessionId = params.sessionId || report?.id || (report as any)?.sessionId || '';
-    if (isGeneral || isPassed) {
+    if (isGeneral) {
+      router.replace('/(tabs)/dashboard');
+      return;
+    }
+
+    if (isPassed) {
       router.replace({
         pathname: '/onboarding/session-review' as any,
         params: {
           sessionId: activeSessionId,
           roadmapLevelId: params.roadmapLevelId || '',
-          isGeneral: String(isGeneral),
-          isPassed: String(isPassed),
+          isGeneral: 'false',
+          isPassed: 'true',
         },
       });
     } else {
-      // Re-attempt level with same parameters
+      // Re-attempt level cleanly through /call
       if (report?.callParams) {
         router.replace({
-          pathname: '/onboarding/call',
+          pathname: '/call' as any,
           params: report.callParams,
         });
       } else {
-        router.replace({
-          pathname: '/onboarding/session-review' as any,
-          params: {
-            sessionId: activeSessionId,
-            roadmapLevelId: params.roadmapLevelId || '',
-            isGeneral: String(isGeneral),
-            isPassed: String(isPassed),
-          },
-        });
+        router.replace('/call' as any);
       }
     }
   };
@@ -461,7 +457,6 @@ export default function SessionCompleteScreen() {
               {/* White gradient fade blend at bottom to dissolve into surface */}
               <View
                 style={[styles.imageBottomFade, { height: Math.round(avatarSize * 0.24) }]}
-                pointerEvents="none"
               >
                 <Svg width="100%" height="100%" preserveAspectRatio="none">
                   <Defs>
@@ -628,7 +623,7 @@ export default function SessionCompleteScreen() {
             >
               {/* Shimmer sweep ray */}
               {Platform.OS === 'web' && (
-                <View pointerEvents="none" style={styles.shimmerRay} />
+                <View style={styles.shimmerRay} />
               )}
 
               {/* Glowing floating particles */}
@@ -931,6 +926,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: '45%',
+    pointerEvents: 'none',
     ...Platform.select({
       web: {
         backgroundImage:
@@ -946,6 +942,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: '#FFFFFF',
     zIndex: 1,
+    pointerEvents: 'none',
   },
   secondaryButton: {
     width: '100%',

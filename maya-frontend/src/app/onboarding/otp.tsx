@@ -19,16 +19,21 @@ import { StepTransition } from '@/components/onboarding/step-transition';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { fontStyle } from '@/theme/fonts';
 import { MayaPrimaryButton } from '@/components/ui';
+import { authService } from '@/services/auth/auth-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 
 const OTP_LENGTH = 6;
 
 export default function OtpScreen() {
-  const params = useLocalSearchParams<{ phone?: string; name?: string }>();
-  const displayPhone = params.phone || '+94 77 123 4567';
+  const storePhone = OnboardingStore.getState().phone;
+  const displayPhone = storePhone || '+94 77 123 4567';
 
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(''));
-  const [resendTimer, setResendTimer] = useState(45);
+  const [resendTimer, setResendTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [errorText, setErrorText] = useState('');
 
   const inputRefs = useRef<(TextInput | null)[]>([]);
   const { isDesktop, isTablet } = useBreakpoint();
@@ -173,19 +178,54 @@ export default function OtpScreen() {
     }
   };
 
-  const handleResend = () => {
-    if (!canResend) return;
-    setResendTimer(45);
-    setCanResend(false);
-    setOtp(Array(OTP_LENGTH).fill(''));
-    inputRefs.current[0]?.focus();
+  const handleResend = async () => {
+    if (!canResend || isResending) return;
+    setErrorText('');
+    setIsResending(true);
+    try {
+      await authService.sendOtp(displayPhone);
+      setResendTimer(60);
+      setCanResend(false);
+      setOtp(Array(OTP_LENGTH).fill(''));
+      inputRefs.current[0]?.focus();
+    } catch (err: any) {
+      setErrorText(err.message || 'Failed to resend code');
+    } finally {
+      setIsResending(false);
+    }
   };
 
-  const handleVerify = () => {
-    router.replace({
-      pathname: '/onboarding/goal',
-      params: { name: params.name, phone: params.phone },
-    });
+  const handleVerify = async () => {
+    const code = otp.join('').trim();
+    if (code.length < OTP_LENGTH || isVerifying) return;
+    setErrorText('');
+    setIsVerifying(true);
+
+    try {
+      const res = await authService.verifyOtp(displayPhone, code);
+
+      // If user had finished onboarding, go straight to dashboard.
+      // Otherwise resume at the exact step they reached, or proceed to /onboarding/goal
+      let nextRoute = '/onboarding/goal';
+      if (res.isCompleted) {
+        nextRoute = '/(tabs)/dashboard';
+      } else if (
+        res.lastActiveRoute &&
+        res.lastActiveRoute !== '/' &&
+        res.lastActiveRoute !== '/onboarding/name' &&
+        res.lastActiveRoute !== '/onboarding/phone' &&
+        res.lastActiveRoute !== '/onboarding/otp'
+      ) {
+        nextRoute = res.lastActiveRoute;
+      }
+
+      OnboardingStore.setLastActiveRoute(nextRoute);
+      router.replace(nextRoute as any);
+    } catch (err: any) {
+      setErrorText(err.message || 'Invalid verification code. Please try again.');
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   return (
@@ -315,9 +355,18 @@ export default function OtpScreen() {
                   },
                 ]}
               >
+                {!!errorText && (
+                  <View style={{ marginBottom: 12, padding: 12, backgroundColor: '#FEF2F2', borderRadius: 12, borderWidth: 1, borderColor: '#FCA5A5' }}>
+                    <Text style={{ color: '#DC2626', fontSize: 13, textAlign: 'center', ...fontStyle('inter', 'medium') }}>
+                      {errorText}
+                    </Text>
+                  </View>
+                )}
+
                 <MayaPrimaryButton
-                  label="Verify and Continue"
+                  label={isVerifying ? "Verifying..." : "Verify and Continue"}
                   showArrow={false}
+                  disabled={otp.join('').trim().length < OTP_LENGTH || isVerifying}
                   onPress={handleVerify}
                   height={58}
                   borderRadius={20}

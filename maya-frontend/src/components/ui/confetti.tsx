@@ -119,7 +119,6 @@ const ConfettiPiece = React.memo(function ConfettiPiece({
 
   return (
     <Animated.View
-      pointerEvents="none"
       renderToHardwareTextureAndroid={true}
       shouldRasterizeIOS={true}
       style={[
@@ -281,7 +280,7 @@ export function ConfettiOverlay({
   }, [particles.length]);
 
   return (
-    <View pointerEvents="none" style={[styles.overlay, style]}>
+    <View style={[styles.overlay, style]}>
       {particles.map((p) => (
         <ConfettiPiece
           key={p.id}
@@ -302,11 +301,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     zIndex: 9999,
     overflow: 'hidden',
+    pointerEvents: 'none',
   },
   particle: {
     position: 'absolute',
     left: 0,
     top: 0,
+    pointerEvents: 'none',
     ...Platform.select({
       web: {
         willChange: 'transform, opacity',

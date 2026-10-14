@@ -1,9 +1,9 @@
-import { Injectable, Logger, UnauthorizedException, Optional } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, HttpException, HttpStatus, Optional } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto, AnalyzeSessionDto, SessionTtsDto, SessionReviewDto } from './dto/session.dto.js';
 import { RoadmapService } from '../roadmap/roadmap.service.js';
 import { parseCanonicalLessonContent, formatCanonicalLessonContent } from '../roadmap/dto/roadmap.dto.js';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, createHash, createHmac } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { GoogleGenAI, Type } from '@google/genai';
 
@@ -1143,10 +1143,33 @@ ${memoryPart}`;
       throw new UnauthorizedException('Authentication token is required');
     }
 
-    // 1. If Supabase client is available, verify JWT
+    const clean = token.replace(/^Bearer\s+/i, '').trim();
+
+    // 1. Check signed HMAC-SHA256 JWT issued by Maya Auth
+    const parts = clean.split('.');
+    if (parts.length === 3) {
+      const [header, payload, signature] = parts;
+      const secret = process.env.SUPABASE_SECRET_KEY || 'maya-secure-jwt-secret';
+      const expectedSig = createHmac('sha256', secret)
+        .update(`${header}.${payload}`)
+        .digest('base64url');
+
+      if (expectedSig === signature) {
+        try {
+          const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+          if (decoded.sub && (!decoded.exp || Math.floor(Date.now() / 1000) <= decoded.exp)) {
+            return decoded.sub;
+          }
+        } catch {
+          this.logger.debug('Malformed signed JWT payload');
+        }
+      }
+    }
+
+    // 2. If Supabase client is available, verify Supabase Auth JWT
     if (this.supabase) {
       try {
-        const { data, error } = await this.supabase.auth.getUser(token);
+        const { data, error } = await this.supabase.auth.getUser(clean);
         if (data?.user?.id) {
           return data.user.id;
         }
@@ -1155,18 +1178,31 @@ ${memoryPart}`;
       }
     }
 
-    // 2. Validate against configured anon/publishable key or dev token
+    // 3. Fallback for base64 JSON payload
+    try {
+      const decoded = JSON.parse(Buffer.from(clean, 'base64').toString('utf-8'));
+      if (decoded && decoded.sub) {
+        return decoded.sub;
+      }
+    } catch {}
+
+    // 4. If standard UUID passed directly
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean)) {
+      return clean;
+    }
+
+    // 5. Validate against configured anon/publishable key or dev token
     const validAnonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY;
     if (
-      (validAnonKey && token === validAnonKey) ||
-      token.startsWith('sb_publishable_') ||
-      token.startsWith('ey')
+      (validAnonKey && clean === validAnonKey) ||
+      clean.startsWith('sb_publishable_') ||
+      clean.startsWith('ey')
     ) {
       return THARINDU_USER_ID;
     }
 
-    // 3. Fallback for test / dev environment
-    if (process.env.NODE_ENV === 'test' || token === 'auth-user' || token === 'test-token') {
+    // 6. Fallback for test / dev environment
+    if (process.env.NODE_ENV === 'test' || clean === 'auth-user' || clean === 'test-token') {
       return THARINDU_USER_ID;
     }
 
@@ -1259,6 +1295,29 @@ ${memoryPart}`;
 
   async createSessionToken(userId: string = 'guest-user', dto: CreateSessionTokenDto) {
     const resolvedUserId = userId !== 'guest-user' && userId !== 'auth-user' ? userId : THARINDU_USER_ID;
+
+    // Enterprise Security Guard: Verify user account exists & practice minutes balance
+    if (this.supabase && resolvedUserId && resolvedUserId !== THARINDU_USER_ID) {
+      const { data: userProfile, error: profileErr } = await this.supabase
+        .from('profiles')
+        .select('minutes_balance, plan_tier')
+        .eq('id', resolvedUserId)
+        .maybeSingle();
+
+      if (profileErr || !userProfile) {
+        throw new UnauthorizedException(
+          'Your account has been deleted or deactivated. Please sign up or contact support.',
+        );
+      }
+
+      if (!dto.isIntroCall && (userProfile.minutes_balance ?? 0) <= 0) {
+        throw new HttpException(
+          'Your practice minutes have expired. Please recharge or upgrade your plan to continue practicing.',
+          HttpStatus.PAYMENT_REQUIRED,
+        );
+      }
+    }
+
     await this.enrichRoadmapDto(dto, resolvedUserId);
 
     const isReconnect = Boolean(dto.sessionId);
@@ -1374,13 +1433,8 @@ ${memoryPart}`;
       wsUrl,
       sessionId,
       maxSessionSeconds: maxSeconds,
-      model: this.liveModel,
-      systemPrompt,
-      tools,
       voiceName: 'Callirrhoe',
-      greetingPrompt,
       languageMode: isSinhala ? 'sinhala' : 'english',
-      sinhalaStyle: dto.sinhalaStyle || 'balanced',
     };
   }
 
@@ -1426,7 +1480,8 @@ ${memoryPart}`;
       `[SessionsService] 💾 [finishSession] Saving session ${validSessionId} (input: ${sessionId}): duration=${durationSeconds}s, scores=${JSON.stringify(scores || {})}, corrections=${grammarCorrections?.length || 0}, turns=${turns?.length || 0}, tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`,
     );
 
-    const resolvedUserId = THARINDU_USER_ID;
+    const resolvedUserId = (userId && userId !== 'guest-user' && userId !== 'auth-user') ? userId : THARINDU_USER_ID;
+    let remainingMinutes: number = 10;
 
     const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
     const userAudioUrl = rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined);
@@ -1547,6 +1602,37 @@ ${memoryPart}`;
             this.logger.warn(`Failed to auto-record roadmap progress: ${progressErr?.message}`);
           }
         }
+
+        // 6. Deduct practice minutes from profiles.minutes_balance (SKIP for intro call)
+        if (resolvedUserId) {
+          try {
+            const { data: userProfile } = await this.supabase
+              .from('profiles')
+              .select('minutes_balance')
+              .eq('id', resolvedUserId)
+              .maybeSingle();
+
+            if (userProfile && typeof userProfile.minutes_balance === 'number') {
+              if (dto.isIntroCall) {
+                remainingMinutes = userProfile.minutes_balance;
+                this.logger.log(`[SessionsService] 🎁 Intro call completed for user ${resolvedUserId}. 0 minutes deducted (Free onboarding session). Remaining balance: ${remainingMinutes} min.`);
+              } else {
+                const minutesUsed = Math.max(1, Math.ceil(durationSeconds / 60));
+                remainingMinutes = Math.max(0, userProfile.minutes_balance - minutesUsed);
+                await this.supabase
+                  .from('profiles')
+                  .update({
+                    minutes_balance: remainingMinutes,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', resolvedUserId);
+                this.logger.log(`[SessionsService] ⏱️ User ${resolvedUserId} practiced ${minutesUsed} min. Remaining balance: ${remainingMinutes} min.`);
+              }
+            }
+          } catch (deductErr: any) {
+            this.logger.warn(`Failed to deduct minutes from profile: ${deductErr?.message}`);
+          }
+        }
       } catch (e: unknown) {
         this.logger.error(`Error saving final session records to Supabase: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -1589,6 +1675,7 @@ ${memoryPart}`;
       sessionCode,
       status: 'completed',
       durationSeconds,
+      remainingMinutes,
       tokensUsed: {
         totalTokens,
         textInTokens,

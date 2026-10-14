@@ -25,13 +25,16 @@ import {
   stopMayaPhonePromptVoice,
 } from '@/services/sound/sound-service';
 import { MayaPrimaryButton } from '@/components/ui';
+import { authService } from '@/services/auth/auth-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 
 export default function PhoneScreen() {
-  const params = useLocalSearchParams<{ name?: string }>();
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(OnboardingStore.getState().phone || '');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [showSubtitle, setShowSubtitle] = useState(false);
   const [showInput, setShowInput] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorText, setErrorText] = useState('');
   const { isDesktop, isTablet } = useBreakpoint();
 
   const inputRef = useRef<TextInput>(null);
@@ -202,19 +205,32 @@ export default function PhoneScreen() {
     });
   };
 
-  const handleSendCode = () => {
-    if (!phone.trim()) return;
+  const handleSendCode = async () => {
+    if (!phone.trim() || isLoading) return;
+    setErrorText('');
     stopMayaPhonePromptVoice();
     setIsSpeaking(false);
 
-    const formattedPhone = phone.trim() ? `+94 ${phone.trim()}` : '+94 77 123 4567';
-    router.replace({
-      pathname: '/onboarding/otp',
-      params: {
-        name: params.name || '',
-        phone: formattedPhone,
-      },
-    });
+    const cleanInput = phone.trim().replace(/\s+/g, '');
+    const formattedPhone = cleanInput.startsWith('+')
+      ? cleanInput
+      : cleanInput.startsWith('0')
+      ? `+94${cleanInput.substring(1)}`
+      : cleanInput.startsWith('94')
+      ? `+${cleanInput}`
+      : `+94${cleanInput}`;
+
+    setIsLoading(true);
+    try {
+      await authService.sendOtp(formattedPhone);
+      OnboardingStore.updateField('phone', formattedPhone);
+      OnboardingStore.setLastActiveRoute('/onboarding/otp');
+      router.replace('/onboarding/otp');
+    } catch (err: any) {
+      setErrorText(err.message || 'Failed to send verification code. Please check your number.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -307,9 +323,9 @@ export default function PhoneScreen() {
                   {
                     opacity: inputOpacityAnim,
                     transform: [{ translateY: inputSlideAnim }],
+                    pointerEvents: showInput ? 'auto' : 'none',
                   },
                 ]}
-                pointerEvents={showInput ? 'auto' : 'none'}
               >
                 {/* Country Code Pill */}
                 <View style={styles.countryBox}>
@@ -349,14 +365,22 @@ export default function PhoneScreen() {
                   {
                     opacity: buttonOpacityAnim,
                     transform: [{ translateY: buttonSlideAnim }],
+                    pointerEvents: showInput ? 'auto' : 'none',
                   },
                 ]}
-                pointerEvents={showInput ? 'auto' : 'none'}
               >
+                {!!errorText && (
+                  <View style={{ marginBottom: 12, padding: 12, backgroundColor: '#FEF2F2', borderRadius: 12, borderWidth: 1, borderColor: '#FCA5A5' }}>
+                    <Text style={{ color: '#DC2626', fontSize: 13, textAlign: 'center', ...fontStyle('inter', 'medium') }}>
+                      {errorText}
+                    </Text>
+                  </View>
+                )}
+
                 <MayaPrimaryButton
-                  label="Send Verification Code"
+                  label={isLoading ? "Sending..." : "Send Verification Code"}
                   showArrow={false}
-                  disabled={!isPhoneEntered}
+                  disabled={!isPhoneEntered || isLoading}
                   onPress={handleSendCode}
                   height={58}
                   borderRadius={20}

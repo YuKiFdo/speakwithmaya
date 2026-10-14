@@ -28,8 +28,27 @@ import {
 } from '@expo-google-fonts/inter';
 import { DesktopLoadingScreen } from '@/components/ui/desktop-loading-screen';
 import { Ionicons, Feather, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useRouteGuard } from '@/hooks/useRouteGuard';
+if (Platform.OS === 'web' && typeof console !== 'undefined') {
+  const originalWarn = console.warn;
+  console.warn = (...args: any[]) => {
+    const first = typeof args[0] === 'string' ? args[0] : '';
+    if (
+      first.includes('"shadow*" style props are deprecated') ||
+      first.includes('props.pointerEvents is deprecated')
+    ) {
+      return;
+    }
+    originalWarn(...args);
+  };
+}
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+function RouteGuard() {
+  useRouteGuard();
+  return null;
+}
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -93,6 +112,7 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      <RouteGuard />
       <StatusBar style="dark" />
       <Stack
         screenOptions={{
@@ -127,11 +147,27 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="onboarding/call"
-          options={{ animation: 'fade', animationDuration: 260 }}
+          options={{ animation: 'fade', animationDuration: 260, gestureEnabled: false }}
         />
         <Stack.Screen
           name="onboarding/complete"
           options={{ animation: 'fade', animationDuration: 260 }}
+        />
+        <Stack.Screen
+          name="call/index"
+          options={{ animation: 'fade', animationDuration: 260, gestureEnabled: false }}
+        />
+        <Stack.Screen
+          name="call/analyzing"
+          options={{ animation: 'fade', animationDuration: 240, gestureEnabled: false }}
+        />
+        <Stack.Screen
+          name="call/feedback"
+          options={{ animation: 'slide_from_right', animationDuration: 260 }}
+        />
+        <Stack.Screen
+          name="call/complete"
+          options={{ animation: 'fade', animationDuration: 260, gestureEnabled: false }}
         />
         <Stack.Screen
           name="(tabs)"

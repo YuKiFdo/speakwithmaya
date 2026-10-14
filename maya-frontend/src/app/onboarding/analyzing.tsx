@@ -167,12 +167,12 @@ export default function AnalyzingScreen() {
       const fbItems = getLatestFeedbackItems();
       if (fbItems && fbItems.length > 0) {
         router.replace({
-          pathname: '/onboarding/feedback' as any,
+          pathname: '/call/feedback' as any,
           params: params as any,
         });
       } else {
         router.replace({
-          pathname: '/onboarding/complete' as any,
+          pathname: '/call/complete' as any,
           params: params as any,
         });
       }

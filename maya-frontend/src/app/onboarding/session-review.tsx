@@ -70,7 +70,7 @@ export default function SessionReviewScreen() {
   const navigateOut = () => {
     const isGeneral = params.isGeneral === 'true' || !params.roadmapLevelId;
     if (isGeneral) {
-      router.replace('/history');
+      router.replace('/(tabs)/dashboard');
     } else {
       router.replace('/(tabs)/roadmap');
     }

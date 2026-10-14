@@ -8,7 +8,21 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   level TEXT DEFAULT 'Intermediate',
   goal TEXT,
   challenge TEXT,
-  minutes_balance INTEGER DEFAULT 15,
+  plan_tier TEXT CHECK (plan_tier IN ('starter', 'basic', 'pro', 'premium')) DEFAULT 'starter',
+  plan_status TEXT CHECK (plan_status IN ('active', 'trialing', 'past_due', 'canceled')) DEFAULT 'active',
+  billing_cycle TEXT CHECK (billing_cycle IN ('monthly', 'quarterly', 'yearly')) DEFAULT 'monthly',
+  monthly_minutes_allowance INTEGER DEFAULT 10,
+  add_on_minutes_balance INTEGER DEFAULT 0,
+  minutes_reset_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '1 month'),
+  native_language TEXT DEFAULT 'sinhala',
+  employment_status TEXT,
+  daily_goal_minutes INTEGER DEFAULT 10,
+  baseline_fluency_score INTEGER DEFAULT 0,
+  baseline_grammar_score INTEGER DEFAULT 0,
+  baseline_pronunciation_score INTEGER DEFAULT 0,
+  last_active_step TEXT DEFAULT '/onboarding/personalized-plan',
+  onboarding_completed_at TIMESTAMPTZ,
+  minutes_balance INTEGER DEFAULT 10,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -174,8 +188,45 @@ CREATE POLICY "Public read session recordings"
 ON storage.objects FOR SELECT
 USING (bucket_id = 'session-recordings');
 
-CREATE POLICY "Service role upload session recordings"
-ON storage.objects FOR ALL
-USING (bucket_id = 'session-recordings');
+-- 10. Phone OTP Verification & Rate-Limiting Table
+CREATE TABLE IF NOT EXISTS public.phone_verifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone_number TEXT NOT NULL,
+  otp_hash TEXT NOT NULL,
+  attempts INTEGER DEFAULT 0,
+  max_attempts INTEGER DEFAULT 3,
+  is_verified BOOLEAN DEFAULT false,
+  expires_at TIMESTAMPTZ NOT NULL,
+  verified_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_phone_verifications_phone 
+  ON public.phone_verifications(phone_number, created_at DESC);
+
+ALTER TABLE public.phone_verifications ENABLE ROW LEVEL SECURITY;
+
+-- 11. Invoices / Order Transactions (Payment Gateway Ready)
+CREATE TABLE IF NOT EXISTS public.orders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  order_type TEXT CHECK (order_type IN ('subscription_new', 'subscription_renewal', 'add_on_topup')) NOT NULL,
+  plan_tier TEXT,
+  add_on_package_id TEXT,
+  amount_lkr NUMERIC(10, 2) NOT NULL,
+  minutes_credited INTEGER NOT NULL,
+  payment_gateway TEXT DEFAULT 'mock',
+  gateway_payment_id TEXT,
+  status TEXT CHECK (status IN ('pending', 'completed', 'failed', 'refunded')) DEFAULT 'completed',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users read own orders" ON public.orders;
+CREATE POLICY "Users read own orders" ON public.orders
+  FOR SELECT USING (auth.uid() = user_id);
+
 
 

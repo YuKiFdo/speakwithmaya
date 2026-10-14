@@ -10,7 +10,7 @@ import {
   Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
@@ -22,6 +22,8 @@ import {
   preloadEmploymentVoices,
   playUnderstoodTapSound,
 } from '@/services/sound/sound-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
+import { authService } from '@/services/auth/auth-service';
 
 interface EmploymentOption {
   id: string;
@@ -70,15 +72,10 @@ const EMPLOYMENT_OPTIONS: EmploymentOption[] = [
 ];
 
 export default function EmploymentScreen() {
-  const params = useLocalSearchParams<{
-    phone?: string;
-    name?: string;
-    goal?: string;
-    challenge?: string;
-    level?: string;
-  }>();
   const { isTablet, isDesktop } = useBreakpoint();
-  const [selectedEmployment, setSelectedEmployment] = useState<string | null>(null);
+  const [selectedEmployment, setSelectedEmployment] = useState<string | null>(
+    OnboardingStore.getState().employment || null,
+  );
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Staggered Entrance Animations
@@ -179,10 +176,9 @@ export default function EmploymentScreen() {
       if (!hasNavigated) {
         hasNavigated = true;
         stopMayaEmploymentFeedbackVoice();
-        router.replace({
-          pathname: '/onboarding/daily-goal' as any,
-          params: { ...params, employment: item.id },
-        });
+        OnboardingStore.updateField('employment', item.id);
+        authService.syncStep('/onboarding/daily-goal');
+        router.replace('/onboarding/daily-goal' as any);
       }
     };
 
