@@ -309,6 +309,13 @@ export const OnboardingStore = {
     if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
       try {
         window.localStorage.removeItem(STORAGE_KEY);
+        window.localStorage.removeItem('maya_active_conversation_v1');
+        for (let i = window.localStorage.length - 1; i >= 0; i--) {
+          const k = window.localStorage.key(i);
+          if (k && k.startsWith('maya_active_conversation_v1')) {
+            window.localStorage.removeItem(k);
+          }
+        }
         CookieStorage.delete('maya_auth_token');
       } catch {}
     }

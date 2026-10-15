@@ -2165,20 +2165,25 @@ ${memoryPart}`;
     };
   }
 
-  async getUserSessions() {
+  async getUserSessions(userId?: string) {
     if (!this.supabase) {
       return [];
     }
 
     try {
-      const { data: sessions, error } = await this.supabase
+      let query = this.supabase
         .from('sessions')
         .select(`
           *,
           session_turns (*),
           grammar_corrections (*)
-        `)
-        .order('created_at', { ascending: false });
+        `);
+
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
+
+      const { data: sessions, error } = await query.order('created_at', { ascending: false });
 
       if (error) {
         this.logger.error(`Error querying user sessions from Supabase: ${error.message}`);

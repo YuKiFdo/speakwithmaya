@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Platform } from 'react-native';
+import { OnboardingStore } from './onboarding-store';
 
 export interface ActiveConversationState {
+  userId?: string;          // Scoped owner ID
   sessionId?: string;
   scenarioId: string;       // e.g. 'casual-chat', 'workplace', 'job-interview', 'travel-english', 'role-play', 'ielts-speaking'
   scenarioTitle: string;    // e.g. 'Job Interview', 'Casual Chat', 'Workplace'
@@ -13,6 +15,14 @@ export interface ActiveConversationState {
 }
 
 const STORAGE_KEY = 'maya_active_conversation_v1';
+
+function getCurrentUserId(): string | undefined {
+  try {
+    return OnboardingStore.getState().user?.id;
+  } catch {
+    return undefined;
+  }
+}
 
 let memoryState: ActiveConversationState | null = loadInitialState();
 const listeners = new Set<(state: ActiveConversationState | null) => void>();
@@ -37,10 +47,16 @@ function isIntroTopic(topic?: string | null, scenarioTitle?: string | null, scen
 function loadInitialState(): ActiveConversationState | null {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const currentUserId = getCurrentUserId();
+      const userKey = currentUserId ? `${STORAGE_KEY}_${currentUserId}` : STORAGE_KEY;
+      const raw = window.localStorage.getItem(userKey) || window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
+        if (currentUserId && parsed.userId && parsed.userId !== currentUserId) {
+          return null;
+        }
         if (isIntroTopic(parsed.topic, parsed.scenarioTitle, parsed.scenarioId)) {
+          window.localStorage.removeItem(userKey);
           window.localStorage.removeItem(STORAGE_KEY);
           return null;
         }
@@ -56,9 +72,12 @@ function persistState(state: ActiveConversationState | null) {
   notify();
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
     try {
+      const currentUserId = state?.userId || getCurrentUserId();
+      const userKey = currentUserId ? `${STORAGE_KEY}_${currentUserId}` : STORAGE_KEY;
       if (state) {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        window.localStorage.setItem(userKey, JSON.stringify(state));
       } else {
+        window.localStorage.removeItem(userKey);
         window.localStorage.removeItem(STORAGE_KEY);
       }
     } catch {}
@@ -67,6 +86,12 @@ function persistState(state: ActiveConversationState | null) {
 
 export const ActiveConversationStore = {
   getState(): ActiveConversationState | null {
+    const currentUserId = getCurrentUserId();
+    if (memoryState && currentUserId && memoryState.userId && memoryState.userId !== currentUserId) {
+      // Belongs to a different account, clear stale cache
+      memoryState = null;
+      return null;
+    }
     return memoryState;
   },
 
@@ -76,7 +101,9 @@ export const ActiveConversationStore = {
       return;
     }
 
+    const currentUserId = conv.userId || getCurrentUserId();
     const updated: ActiveConversationState = {
+      userId: currentUserId,
       sessionId: conv.sessionId || memoryState?.sessionId,
       scenarioId: conv.scenarioId,
       scenarioTitle: conv.scenarioTitle,

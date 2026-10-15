@@ -141,10 +141,16 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
   // 2. Direct Supabase query if anon key is configured
   if (supabase && supabaseAnonKey.startsWith('ey')) {
     try {
-      const { data: sessions, error } = await supabase
+      const currentUserId = OnboardingStore.getState().user?.id;
+      let query = supabase
         .from('sessions')
-        .select('*, session_turns(*), grammar_corrections(*)')
-        .order('start_time', { ascending: false });
+        .select('*, session_turns(*), grammar_corrections(*)');
+
+      if (currentUserId) {
+        query = query.eq('user_id', currentUserId);
+      }
+
+      const { data: sessions, error } = await query.order('start_time', { ascending: false });
 
       if (!error && sessions && sessions.length > 0) {
         return sessions.map((s: any) => ({

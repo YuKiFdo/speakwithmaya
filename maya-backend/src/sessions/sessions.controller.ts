@@ -115,8 +115,17 @@ export class SessionsController {
   }
 
   @Get('sessions')
-  async getSessions() {
-    return this.sessionsService.getUserSessions();
+  async getSessions(@Headers('authorization') authHeader?: string) {
+    if (!authHeader) {
+      throw new UnauthorizedException('Missing Authorization header');
+    }
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!token) {
+      throw new UnauthorizedException('Invalid Bearer token');
+    }
+
+    const userId = await this.sessionsService.validateUser(token);
+    return this.sessionsService.getUserSessions(userId);
   }
 
   @Get('sessions/:id')
