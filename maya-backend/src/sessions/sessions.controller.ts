@@ -8,10 +8,12 @@ import {
   Headers,
   Res,
   UsePipes,
+  UseGuards,
   ValidationPipe,
   UnauthorizedException,
 } from '@nestjs/common';
 import { SessionsService } from './sessions.service.js';
+import { AuthGuard, GetUser } from '../auth/index.js';
 import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto, AnalyzeSessionDto, SessionTtsDto, SessionReviewDto } from './dto/session.dto.js';
 
 @Controller('v1')
@@ -78,53 +80,29 @@ export class SessionsController {
   }
 
   @Post('session-token')
+  @UseGuards(AuthGuard)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async createToken(
     @Body() dto: CreateSessionTokenDto,
-    @Headers('authorization') authHeader?: string,
+    @GetUser('id') userId: string,
   ) {
-    if (!authHeader) {
-      throw new UnauthorizedException('Missing Authorization header');
-    }
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    if (!token) {
-      throw new UnauthorizedException('Invalid Bearer token');
-    }
-
-    const userId = await this.sessionsService.validateUser(token);
     return this.sessionsService.createSessionToken(userId, dto);
   }
 
   @Post('sessions/:id/finish')
+  @UseGuards(AuthGuard)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async finishSession(
     @Param('id') sessionId: string,
     @Body() dto: FinishSessionDto,
-    @Headers('authorization') authHeader?: string,
+    @GetUser('id') userId: string,
   ) {
-    if (!authHeader) {
-      throw new UnauthorizedException('Missing Authorization header');
-    }
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    if (!token) {
-      throw new UnauthorizedException('Invalid Bearer token');
-    }
-
-    const userId = await this.sessionsService.validateUser(token);
     return this.sessionsService.finishSession(sessionId, userId, dto);
   }
 
   @Get('sessions')
-  async getSessions(@Headers('authorization') authHeader?: string) {
-    if (!authHeader) {
-      throw new UnauthorizedException('Missing Authorization header');
-    }
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    if (!token) {
-      throw new UnauthorizedException('Invalid Bearer token');
-    }
-
-    const userId = await this.sessionsService.validateUser(token);
+  @UseGuards(AuthGuard)
+  async getSessions(@GetUser('id') userId: string) {
     return this.sessionsService.getUserSessions(userId);
   }
 

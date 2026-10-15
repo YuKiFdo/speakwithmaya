@@ -3,12 +3,13 @@ import {
   Post,
   Get,
   Body,
-  Headers,
   UsePipes,
+  UseGuards,
   ValidationPipe,
-  UnauthorizedException,
 } from '@nestjs/common';
-import { AuthService } from './auth.service.js';
+import { AuthService, type UserProfileData } from './auth.service.js';
+import { AuthGuard } from './guards/auth.guard.js';
+import { GetUser } from './decorators/get-user.decorator.js';
 import {
   SendOtpDto,
   VerifyOtpDto,
@@ -35,64 +36,48 @@ export class AuthController {
   }
 
   @Get('auth/me')
-  async getMe(@Headers('authorization') authHeader?: string) {
-    if (!authHeader) {
-      throw new UnauthorizedException('Missing Authorization header');
-    }
-    const userId = this.authService.validateAuthToken(authHeader);
-    const profile = await this.authService.getProfile(userId);
-    return { success: true, profile };
+  @UseGuards(AuthGuard)
+  async getMe(@GetUser() user: UserProfileData) {
+    return { success: true, profile: user };
   }
 
   @Post('users/onboarding-preferences')
+  @UseGuards(AuthGuard)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async savePreferences(
     @Body() dto: SavePreferencesDto,
-    @Headers('authorization') authHeader?: string,
+    @GetUser('id') userId: string,
   ) {
-    if (!authHeader) {
-      throw new UnauthorizedException('Missing Authorization header');
-    }
-    const userId = this.authService.validateAuthToken(authHeader);
     return this.authService.savePreferences(userId, dto);
   }
 
   @Post('users/step')
+  @UseGuards(AuthGuard)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async updateStep(
     @Body() dto: UpdateStepDto,
-    @Headers('authorization') authHeader?: string,
+    @GetUser('id') userId: string,
   ) {
-    if (!authHeader) {
-      throw new UnauthorizedException('Missing Authorization header');
-    }
-    const userId = this.authService.validateAuthToken(authHeader);
     return this.authService.updateStep(userId, dto.step);
   }
 
   @Post('plans/upgrade')
+  @UseGuards(AuthGuard)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async upgradePlan(
     @Body() dto: UpgradePlanDto,
-    @Headers('authorization') authHeader?: string,
+    @GetUser('id') userId: string,
   ) {
-    if (!authHeader) {
-      throw new UnauthorizedException('Missing Authorization header');
-    }
-    const userId = this.authService.validateAuthToken(authHeader);
     return this.authService.upgradePlan(userId, dto);
   }
 
   @Post('plans/top-up')
+  @UseGuards(AuthGuard)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async addOnTopUp(
     @Body() dto: AddOnTopUpDto,
-    @Headers('authorization') authHeader?: string,
+    @GetUser('id') userId: string,
   ) {
-    if (!authHeader) {
-      throw new UnauthorizedException('Missing Authorization header');
-    }
-    const userId = this.authService.validateAuthToken(authHeader);
     return this.authService.addOnTopUp(userId, dto);
   }
 

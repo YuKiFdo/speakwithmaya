@@ -3,9 +3,11 @@ import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { SmsApiLkProvider } from './sms/smsapi-lk.provider.js';
 
+import { AuthGuard } from './guards/auth.guard.js';
+
 @Module({
   controllers: [AuthController],
-  providers: [AuthService, SmsApiLkProvider],
-  exports: [AuthService],
+  providers: [AuthService, SmsApiLkProvider, AuthGuard],
+  exports: [AuthService, AuthGuard],
 })
 export class AuthModule {}
