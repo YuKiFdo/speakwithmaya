@@ -367,6 +367,44 @@ export function CommonPopup({
 
     setPurchasingPkgId(pkg.id);
     try {
+      // 1. Check if user has a pre-approved saved card on file
+      const sub = await paymentApi.getMySubscription();
+      if (sub?.has_saved_card || sub?.card_masked) {
+        const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
+        let confirmed = false;
+        if (Platform.OS === 'web') {
+          confirmed = window.confirm(
+            `1-Click Deduction:\n\nDeduct ${pkg.price} for +${pkg.minutes} Minutes Talk Time from ${cardDisplay}?\n\nProceed to charge?`
+          );
+        } else {
+          confirmed = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              '1-Click Deduction',
+              `Deduct ${pkg.price} for +${pkg.minutes} Minutes Talk Time from ${cardDisplay}?`,
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Confirm & Pay', onPress: () => resolve(true) },
+              ]
+            );
+          });
+        }
+
+        if (confirmed) {
+          const res = await paymentApi.chargeSavedCard({ packageId: pkg.id as any });
+          onClose();
+          if (Platform.OS === 'web') {
+            window.alert(res.message || `Payment successful! +${pkg.minutes} minutes added.`);
+            window.location.reload();
+          } else {
+            Alert.alert('Top-up Successful', res.message || `+${pkg.minutes} minutes added!`);
+          }
+          return;
+        } else {
+          return;
+        }
+      }
+
+      // 2. Fallback to standard PayHere payment gateway checkout if no card saved yet
       const params = await paymentApi.getCheckoutParams(pkg.id as any);
       const result = await payHereGateway.startPayment(params);
 
@@ -387,7 +425,7 @@ export function CommonPopup({
         }
       }
     } catch (err: any) {
-      const errorMsg = err.message || 'Failed to initialize payment gateway.';
+      const errorMsg = err.message || 'Failed to process payment.';
       if (Platform.OS === 'web') {
         window.alert(errorMsg);
       } else {

@@ -76,6 +76,35 @@ class PaymentApiService {
   }
 
   /**
+   * Automated 1-Click Charging using pre-approved saved card.
+   * Auto-deducts without requiring card entry or gateway popups.
+   */
+  async chargeSavedCard(payload: {
+    packageId?: '30-min' | '120-min' | '300-min';
+    planTier?: 'basic' | 'pro' | 'premium';
+  }): Promise<{
+    success: boolean;
+    message: string;
+    orderId?: string;
+    newBalance?: number;
+    planTier?: string;
+    cardMasked?: string;
+  }> {
+    const res = await fetch(`${this.baseUrl}/v1/payments/payhere/charge-saved-card`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Auto-charge failed');
+    }
+
+    return data;
+  }
+
+  /**
    * User self-service cancellation of active recurring plan.
    */
   async cancelSubscription(subscriptionId?: string, reason?: string): Promise<{ success: boolean; msg: string }> {

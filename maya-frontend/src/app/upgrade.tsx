@@ -341,6 +341,47 @@ export default function UpgradeScreen() {
 
     setLoadingPlanId(planId);
     try {
+      // 1. Check if user already has a saved card on file
+      const sub = await paymentApi.getMySubscription();
+      if (sub?.has_saved_card || sub?.card_masked) {
+        const targetPlan = PLANS.find((p) => p.id === planId);
+        const planName = targetPlan?.name || planId.toUpperCase();
+        const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
+        
+        let confirmed = false;
+        if (Platform.OS === 'web') {
+          confirmed = window.confirm(
+            `1-Click Upgrade:\n\nDeduct ${targetPlan?.price}/${targetPlan?.period} from ${cardDisplay} and activate ${planName} immediately?\n\nProceed to upgrade?`
+          );
+        } else {
+          confirmed = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              '1-Click Upgrade',
+              `Deduct ${targetPlan?.price}/${targetPlan?.period} from ${cardDisplay} and activate ${planName} immediately?`,
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Confirm & Upgrade', onPress: () => resolve(true) },
+              ]
+            );
+          });
+        }
+
+        if (confirmed) {
+          const res = await paymentApi.chargeSavedCard({ planTier: planId as any });
+          await stats.refreshStats();
+          if (Platform.OS === 'web') {
+            window.alert(res.message || `Upgraded to ${planName}!`);
+          } else {
+            Alert.alert('Plan Updated', res.message || `Upgraded to ${planName}!`);
+          }
+          router.replace('/(tabs)/account');
+          return;
+        } else {
+          return;
+        }
+      }
+
+      // 2. Fallback to standard PayHere payment gateway checkout if no card saved yet
       const params = await paymentApi.getCheckoutParams(planId as any);
       const result = await payHereGateway.startPayment(params);
 
@@ -361,7 +402,7 @@ export default function UpgradeScreen() {
         }
       }
     } catch (err: any) {
-      const errorMsg = err.message || 'Failed to initialize payment gateway.';
+      const errorMsg = err.message || 'Failed to process upgrade.';
       if (Platform.OS === 'web') {
         window.alert(errorMsg);
       } else {

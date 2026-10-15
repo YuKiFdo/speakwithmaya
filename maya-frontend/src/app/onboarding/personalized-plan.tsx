@@ -257,10 +257,45 @@ export default function PersonalizedPlanScreen() {
         baselineScores: state.baselineScores || undefined,
       });
 
-      // 2. Fetch server-signed PayHere parameters
+      // 2. Check if user already has a pre-approved card on file
+      const sub = await paymentApi.getMySubscription();
+      if (sub?.has_saved_card || sub?.card_masked) {
+        const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
+        let confirmed = false;
+        if (Platform.OS === 'web') {
+          confirmed = window.confirm(
+            `1-Click Activation:\n\nDeduct ${selectedPlan?.pricePerMonth || 'LKR 3,600'}/month from ${cardDisplay} and activate ${selectedPlan?.name} immediately?\n\nProceed to activate?`
+          );
+        } else {
+          confirmed = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              '1-Click Activation',
+              `Deduct ${selectedPlan?.pricePerMonth || 'LKR 3,600'}/month from ${cardDisplay} and activate ${selectedPlan?.name} immediately?`,
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Confirm & Activate', onPress: () => resolve(true) },
+              ]
+            );
+          });
+        }
+
+        if (confirmed) {
+          await paymentApi.chargeSavedCard({ planTier: selectedPlanId as any });
+          await authService.fetchUserProfile();
+          router.replace({
+            pathname: '/onboarding/complete' as any,
+            params: { plan: selectedPlanId },
+          });
+          return;
+        } else {
+          return;
+        }
+      }
+
+      // 3. Fallback to standard PayHere Payment Gateway checkout if no card saved yet
       const params = await paymentApi.getCheckoutParams(selectedPlanId as any);
 
-      // 3. Launch PayHere Gateway (JS SDK popup modal on Web, Native SDK on mobile)
+      // 4. Launch PayHere Gateway (JS SDK popup modal on Web, Native SDK on mobile)
       const result = await payHereGateway.startPayment(params);
 
       if (result.status === 'completed') {

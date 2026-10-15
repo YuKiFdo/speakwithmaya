@@ -35,3 +35,15 @@ export class RetrySubscriptionDto {
   @IsNotEmpty()
   subscriptionId!: string;
 }
+
+export class ChargeSavedCardDto {
+  @IsString()
+  @IsOptional()
+  @IsIn(['30-min', '120-min', '300-min'])
+  packageId?: '30-min' | '120-min' | '300-min';
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['basic', 'pro', 'premium'])
+  planTier?: 'basic' | 'pro' | 'premium';
+}

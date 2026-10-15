@@ -43,6 +43,7 @@ export interface SubscriptionRecord {
   card_masked?: string;
   card_expiry?: string;
   payment_method?: string;
+  has_saved_card?: boolean;
   created_at: string;
   updated_at: string;
   profile?: {

@@ -21,6 +21,7 @@ import {
   GenerateCheckoutParamsDto,
   CancelSubscriptionDto,
   RetrySubscriptionDto,
+  ChargeSavedCardDto,
 } from './dto/payhere.dto.js';
 import type { PayHereWebhookPayload } from './payhere.types.js';
 
@@ -49,6 +50,24 @@ export class PayHereController {
     const userId = this.authService.validateAuthToken(authHeader);
     const params = await this.payHereService.generateCheckoutParams(userId, dto);
     return { success: true, params };
+  }
+
+  /**
+   * Automated Charging: 1-click automatic deduction using pre-approved saved card.
+   * Charges card programmatically on demand without opening PayHere checkout UI.
+   */
+  @Post('payments/payhere/charge-saved-card')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async chargeSavedCard(
+    @Body() dto: ChargeSavedCardDto,
+    @Headers('authorization') authHeader?: string
+  ) {
+    if (!authHeader) {
+      throw new UnauthorizedException('Missing Authorization header');
+    }
+    const userId = this.authService.validateAuthToken(authHeader);
+    const result = await this.payHereService.chargeSavedCard(userId, dto);
+    return result;
   }
 
   /**
