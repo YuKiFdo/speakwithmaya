@@ -518,6 +518,7 @@ export default function RoadmapScreen() {
             activeTab="roadmap"
             onSelectTab={handleSelectTab}
             isPro={isPro}
+            planTier={stats.planTier}
             usedMinutes={stats.usedMinutes}
             totalMinutes={stats.totalMinutes}
             resetsInText={stats.resetsInText}
@@ -547,6 +548,7 @@ export default function RoadmapScreen() {
                 xpLabel={stats.xpLabel}
                 progress={stats.progress}
                 isPro={isPro}
+                planTier={stats.planTier}
                 avatarSource={require('@/assets/images/maya-avatar.png')}
                 onPress={() => setActivePopup('level-up')}
               />
@@ -578,6 +580,7 @@ export default function RoadmapScreen() {
                   xpLabel={stats.xpLabel}
                   progress={stats.progress}
                   isPro={isPro}
+                  planTier={stats.planTier}
                   avatarSource={require('@/assets/images/maya-avatar.png')}
                   onPress={() => setActivePopup('level-up')}
                 />

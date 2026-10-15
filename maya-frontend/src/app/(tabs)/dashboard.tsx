@@ -330,6 +330,7 @@ export default function DashboardScreen() {
             activeTab={activeTab}
             onSelectTab={handleSelectTab}
             isPro={isPro}
+            planTier={stats.planTier}
             usedMinutes={usedMinutes}
             totalMinutes={totalMinutes}
             resetsInText={resetsInText}
@@ -368,6 +369,7 @@ export default function DashboardScreen() {
                 xpLabel={stats.xpLabel}
                 progress={stats.progress}
                 isPro={isPro}
+                planTier={stats.planTier}
                 avatarSource={require('@/assets/images/maya-avatar.png')}
                 onPress={() => setActivePopup('level-up')}
               />
@@ -394,6 +396,7 @@ export default function DashboardScreen() {
                   xpLabel={stats.xpLabel}
                   progress={stats.progress}
                   isPro={isPro}
+                  planTier={stats.planTier}
                   avatarSource={require('@/assets/images/maya-avatar.png')}
                   onPress={() => setActivePopup('level-up')}
                 />

@@ -4,6 +4,8 @@ import { Fonts, fontStyle } from '@/theme/fonts';
 import { Radii } from '@/theme/tokens';
 import { CrownSolidIcon } from '@/components/icons/nav-icons';
 
+import { Ionicons } from '@expo/vector-icons';
+
 export interface UserLevelBadgeProps {
   /** e.g. "Level 4" */
   levelLabel?: string;
@@ -11,8 +13,10 @@ export interface UserLevelBadgeProps {
   xpLabel?: string;
   /** 0-1 progress fraction */
   progress?: number;
-  /** Show the PRO badge? */
+  /** Show the PRO badge? (legacy fallback) */
   isPro?: boolean;
+  /** Specific active plan tier: 'starter' | 'basic' | 'pro' | 'premium' */
+  planTier?: 'starter' | 'basic' | 'pro' | 'premium' | string;
   /** Avatar image source */
   avatarSource?: any;
   /** Called when the badge is pressed */
@@ -32,11 +36,49 @@ export function UserLevelBadge({
   xpLabel = '0 / 500 XP',
   progress = 0,
   isPro = false,
+  planTier,
   avatarSource,
   onPress,
   accessibilityLabel = 'View level progress',
 }: UserLevelBadgeProps) {
   const progressWidth = `${Math.round(Math.min(1, Math.max(0, progress)) * 100)}%` as DimensionValue;
+
+  const resolvedTier = (planTier || (isPro ? 'pro' : 'starter')).toLowerCase();
+
+  const getTierBadgeConfig = () => {
+    switch (resolvedTier) {
+      case 'premium':
+        return {
+          show: true,
+          label: 'PREMIUM',
+          bgColor: '#7C3AED',
+          icon: <CrownSolidIcon color="#FDE047" size={9.5} />,
+        };
+      case 'pro':
+        return {
+          show: true,
+          label: 'PRO',
+          bgColor: '#D97706',
+          icon: <CrownSolidIcon color="#ffffff" size={9.5} />,
+        };
+      case 'basic':
+        return {
+          show: true,
+          label: 'BASIC',
+          bgColor: '#0284C7',
+          icon: <Ionicons name="flash" size={8.5} color="#ffffff" />,
+        };
+      default:
+        return {
+          show: false,
+          label: '',
+          bgColor: 'transparent',
+          icon: null,
+        };
+    }
+  };
+
+  const badgeConfig = getTierBadgeConfig();
 
   return (
     <Pressable
@@ -48,10 +90,10 @@ export function UserLevelBadge({
       <View style={styles.levelProgressCol}>
         <View style={styles.levelNameRow}>
           <Text style={styles.levelName}>{levelLabel}</Text>
-          {isPro && (
-            <View style={styles.proBadge}>
-              <CrownSolidIcon color="#ffffff" size={10} />
-              <Text style={styles.proBadgeText}>PRO</Text>
+          {badgeConfig.show && (
+            <View style={[styles.proBadge, { backgroundColor: badgeConfig.bgColor }]}>
+              {badgeConfig.icon}
+              <Text style={styles.proBadgeText}>{badgeConfig.label}</Text>
             </View>
           )}
         </View>

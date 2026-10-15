@@ -44,6 +44,14 @@ interface PricingPlan {
   iconBg: string;
 }
 
+export const TIER_ORDER: Record<string, number> = {
+  starter: 0,
+  free: 0,
+  basic: 1,
+  pro: 2,
+  premium: 3,
+};
+
 const PLANS: PricingPlan[] = [
   {
     id: 'basic',
@@ -300,7 +308,37 @@ export default function UpgradeScreen() {
 
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
 
+  const currentTier = (stats.planTier || (stats.isPro ? 'pro' : 'starter')).toLowerCase();
+  const currentWeight = TIER_ORDER[currentTier] ?? 0;
+  const isPaidUser = currentWeight > 0;
+
   const handleSelectPlan = async (planId: string) => {
+    const planWeight = TIER_ORDER[planId] ?? 0;
+    const isDowngrade = planWeight < currentWeight;
+
+    if (isDowngrade) {
+      const targetPlan = PLANS.find((p) => p.id === planId);
+      const planName = targetPlan?.name || planId.toUpperCase();
+      if (Platform.OS === 'web') {
+        const confirmed = window.confirm(
+          `Are you sure you want to switch to the ${planName} plan? Your subscription benefits and talk time will adjust accordingly.`
+        );
+        if (!confirmed) return;
+      } else {
+        const proceed = await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Confirm Plan Switch',
+            `Are you sure you want to switch to the ${planName} plan? Your subscription benefits and talk time will adjust accordingly.`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Switch Plan', onPress: () => resolve(true) },
+            ]
+          );
+        });
+        if (!proceed) return;
+      }
+    }
+
     setLoadingPlanId(planId);
     try {
       const params = await paymentApi.getCheckoutParams(planId as any);
@@ -311,7 +349,7 @@ export default function UpgradeScreen() {
         if (Platform.OS === 'web') {
           window.alert(`Payment successful! You are now subscribed to the ${planId.toUpperCase()} plan.`);
         } else {
-          Alert.alert('Upgrade Successful', `You are now on the ${planId.toUpperCase()} plan!`);
+          Alert.alert('Plan Updated', `You are now on the ${planId.toUpperCase()} plan!`);
         }
         router.replace('/(tabs)/account');
       } else if (result.status === 'error') {
@@ -361,6 +399,7 @@ export default function UpgradeScreen() {
             activeTab={activeTab}
             onSelectTab={handleSelectTab}
             isPro={stats.isPro}
+            planTier={stats.planTier}
             usedMinutes={stats.usedMinutes}
             totalMinutes={stats.totalMinutes}
             resetsInText={stats.resetsInText}
@@ -398,6 +437,7 @@ export default function UpgradeScreen() {
                 xpLabel={stats.xpLabel}
                 progress={stats.progress}
                 isPro={stats.isPro}
+                planTier={stats.planTier}
                 avatarSource={require('@/assets/images/maya-avatar.png')}
               />
             </View>
@@ -423,10 +463,12 @@ export default function UpgradeScreen() {
               >
                 <View>
                   <Text style={[styles.pageTitle, styles.pageTitleDesktop]}>
-                    Upgrade to Pro
+                    {isPaidUser ? 'Manage Your Plan' : 'Upgrade to Pro'}
                   </Text>
                   <Text style={[styles.pageSubtitle, styles.pageSubtitleDesktop]}>
-                    Unlock more practice time and powerful features to improve your English faster.
+                    {isPaidUser
+                      ? 'Switch between plans or manage your practice time and features.'
+                      : 'Unlock more practice time and powerful features to improve your English faster.'}
                   </Text>
                 </View>
                 <UserLevelBadge
@@ -434,16 +476,19 @@ export default function UpgradeScreen() {
                   xpLabel={stats.xpLabel}
                   progress={stats.progress}
                   isPro={stats.isPro}
+                  planTier={stats.planTier}
                   avatarSource={require('@/assets/images/maya-avatar.png')}
                 />
               </View>
             ) : (
               <View style={styles.mobileHeadingSection}>
                 <Text style={styles.pageTitle}>
-                  Upgrade to Pro
+                  {isPaidUser ? 'Manage Your Plan' : 'Upgrade to Pro'}
                 </Text>
                 <Text style={styles.pageSubtitle}>
-                  Unlock more practice time and powerful features to improve your English faster.
+                  {isPaidUser
+                    ? 'Switch between plans or manage your practice time and features.'
+                    : 'Unlock more practice time and powerful features to improve your English faster.'}
                 </Text>
               </View>
             )}
@@ -458,167 +503,207 @@ export default function UpgradeScreen() {
               ],
             ]}
           >
-            {PLANS.map((plan) => (
-              <View
-                key={plan.id}
-                style={[
-                  styles.card,
-                  isDesktop && [
-                    styles.cardDesktop,
-                    {
-                      paddingVertical: desktopCardPaddingV,
-                      paddingHorizontal: desktopCardPaddingH,
-                    },
-                  ],
-                  plan.highlighted && styles.cardHighlighted,
-                ]}
-              >
-                {/* "Most Popular" badge */}
-                {plan.badgeLabel && (
-                  <View style={styles.popularBadge}>
-                    <Text style={styles.popularBadgeText}>{plan.badgeLabel}</Text>
-                  </View>
-                )}
+            {PLANS.map((plan) => {
+              const planWeight = TIER_ORDER[plan.id] ?? 0;
+              const isCurrentPlan = currentTier === plan.id;
+              const isUpgrade = planWeight > currentWeight;
+              const isDowngrade = planWeight < currentWeight;
 
-                <View style={[styles.cardTopContent, isDesktop && styles.cardTopContentDesktop]}>
-                  {/* Plan header */}
-                  <View
-                    style={[
-                      styles.cardHeader,
-                      isDesktop && { marginBottom: desktopCardHeaderMarginBottom },
-                    ]}
-                  >
-                    <View style={[
-                      styles.planIconWrap,
-                      isDesktop && styles.planIconWrapDesktop,
-                      { backgroundColor: plan.iconBg },
-                    ]}>
-                      <PlanIcon planId={plan.id} color={plan.iconColor} />
+              let ctaText = plan.ctaLabel;
+              if (isCurrentPlan) {
+                ctaText = 'Active Plan';
+              } else if (isUpgrade) {
+                ctaText = `Upgrade to ${plan.name}`;
+              } else if (isDowngrade) {
+                ctaText = `Downgrade to ${plan.name}`;
+              }
+
+              return (
+                <View
+                  key={plan.id}
+                  style={[
+                    styles.card,
+                    isDesktop && [
+                      styles.cardDesktop,
+                      {
+                        paddingVertical: desktopCardPaddingV,
+                        paddingHorizontal: desktopCardPaddingH,
+                      },
+                    ],
+                    plan.highlighted && !isCurrentPlan && styles.cardHighlighted,
+                    isCurrentPlan && styles.cardCurrentPlan,
+                  ]}
+                >
+                  {/* "Active Plan" or "Most Popular" badge */}
+                  {isCurrentPlan ? (
+                    <View style={styles.activePlanBadge}>
+                      <Ionicons name="checkmark-circle" size={13} color="#ffffff" style={{ marginRight: 4 }} />
+                      <Text style={styles.activePlanBadgeText}>Active Plan</Text>
                     </View>
-                    <View style={styles.planNameCol}>
+                  ) : plan.badgeLabel ? (
+                    <View style={styles.popularBadge}>
+                      <Text style={styles.popularBadgeText}>{plan.badgeLabel}</Text>
+                    </View>
+                  ) : null}
+
+                  <View style={[styles.cardTopContent, isDesktop && styles.cardTopContentDesktop]}>
+                    {/* Plan header */}
+                    <View
+                      style={[
+                        styles.cardHeader,
+                        isDesktop && { marginBottom: desktopCardHeaderMarginBottom },
+                      ]}
+                    >
+                      <View style={[
+                        styles.planIconWrap,
+                        isDesktop && styles.planIconWrapDesktop,
+                        { backgroundColor: isCurrentPlan ? '#E0F2FE' : plan.iconBg },
+                      ]}>
+                        <PlanIcon planId={plan.id} color={isCurrentPlan ? '#0284C7' : plan.iconColor} />
+                      </View>
+                      <View style={styles.planNameCol}>
+                        <Text
+                          style={[
+                            styles.planName,
+                            isDesktop && styles.planNameDesktop,
+                            (plan.highlighted || isCurrentPlan) && styles.planNameHighlighted,
+                          ]}
+                        >
+                          {plan.name}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.planSubtitle,
+                            isDesktop && styles.planSubtitleDesktop,
+                            (plan.highlighted || isCurrentPlan) && styles.planSubtitleHighlighted,
+                          ]}
+                        >
+                          {plan.subtitle}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Price */}
+                    <View
+                      style={[
+                        styles.priceRow,
+                        isDesktop && { marginBottom: desktopPriceMarginBottom },
+                      ]}
+                    >
                       <Text
                         style={[
-                          styles.planName,
-                          isDesktop && styles.planNameDesktop,
-                          plan.highlighted && styles.planNameHighlighted,
+                          styles.priceText,
+                          isDesktop && styles.priceTextDesktop,
+                          isCompact && styles.priceTextCompact,
+                          (plan.highlighted || isCurrentPlan) && styles.priceTextHighlighted,
                         ]}
                       >
-                        {plan.name}
+                        {plan.price}
                       </Text>
                       <Text
                         style={[
-                          styles.planSubtitle,
-                          isDesktop && styles.planSubtitleDesktop,
-                          plan.highlighted && styles.planSubtitleHighlighted,
+                          styles.pricePeriod,
+                          isDesktop && styles.pricePeriodDesktop,
+                          (plan.highlighted || isCurrentPlan) && styles.pricePeriodHighlighted,
                         ]}
                       >
-                        {plan.subtitle}
+                        {plan.period}
                       </Text>
+                    </View>
+
+                    {/* Divider */}
+                    <View
+                      style={[
+                        styles.divider,
+                        isDesktop && { marginBottom: desktopDividerMarginBottom },
+                        plan.highlighted && styles.dividerHighlighted,
+                        isCurrentPlan && styles.dividerCurrentPlan,
+                      ]}
+                    />
+
+                    {/* Features list */}
+                    <View
+                      style={[
+                        styles.featuresList,
+                        isDesktop && [
+                          styles.featuresListDesktop,
+                          {
+                            gap: desktopFeatureGap,
+                            marginBottom: desktopFeatureMarginBottom,
+                          },
+                        ],
+                      ]}
+                    >
+                      {plan.features.map((feat, idx) => (
+                        <View key={idx} style={styles.featureRow}>
+                          {isCurrentPlan ? (
+                            <Ionicons name="checkmark-circle" size={isDesktop ? 18 : 16} color="#059669" />
+                          ) : plan.highlighted ? (
+                            <CheckIcon color="#0057FF" size={isDesktop ? 18 : 16} />
+                          ) : (
+                            <CheckOutlineIcon size={isDesktop ? 18 : 16} />
+                          )}
+                          <Text
+                            style={[
+                              styles.featureText,
+                              isDesktop && styles.featureTextDesktop,
+                              (plan.highlighted || isCurrentPlan) && styles.featureTextHighlighted,
+                            ]}
+                          >
+                            {feat.text}
+                          </Text>
+                        </View>
+                      ))}
                     </View>
                   </View>
 
-                  {/* Price */}
-                  <View
-                    style={[
-                      styles.priceRow,
-                      isDesktop && { marginBottom: desktopPriceMarginBottom },
+                  {/* CTA button */}
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.ctaButton,
+                      isDesktop && { height: desktopCtaHeight },
+                      isCurrentPlan
+                        ? styles.ctaButtonCurrentPlan
+                        : isUpgrade
+                        ? (plan.highlighted ? styles.ctaButtonHighlighted : styles.ctaButtonOutline)
+                        : styles.ctaButtonDowngrade,
+                      (pressed || loadingPlanId === plan.id) && !isCurrentPlan && styles.ctaButtonPressed,
                     ]}
+                    onPress={() => !isCurrentPlan && handleSelectPlan(plan.id)}
+                    disabled={isCurrentPlan || loadingPlanId !== null}
+                    accessibilityRole="button"
+                    accessibilityLabel={ctaText}
                   >
-                    <Text
-                      style={[
-                        styles.priceText,
-                        isDesktop && styles.priceTextDesktop,
-                        isCompact && styles.priceTextCompact,
-                        plan.highlighted && styles.priceTextHighlighted,
-                      ]}
-                    >
-                      {plan.price}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.pricePeriod,
-                        isDesktop && styles.pricePeriodDesktop,
-                        plan.highlighted && styles.pricePeriodHighlighted,
-                      ]}
-                    >
-                      {plan.period}
-                    </Text>
-                  </View>
-
-                  {/* Divider */}
-                  <View
-                    style={[
-                      styles.divider,
-                      isDesktop && { marginBottom: desktopDividerMarginBottom },
-                      plan.highlighted && styles.dividerHighlighted,
-                    ]}
-                  />
-
-                  {/* Features list */}
-                  <View
-                    style={[
-                      styles.featuresList,
-                      isDesktop && [
-                        styles.featuresListDesktop,
-                        {
-                          gap: desktopFeatureGap,
-                          marginBottom: desktopFeatureMarginBottom,
-                        },
-                      ],
-                    ]}
-                  >
-                    {plan.features.map((feat, idx) => (
-                      <View key={idx} style={styles.featureRow}>
-                        {plan.highlighted ? (
-                          <CheckIcon color="#0057FF" size={isDesktop ? 18 : 16} />
-                        ) : (
-                          <CheckOutlineIcon size={isDesktop ? 18 : 16} />
+                    {loadingPlanId === plan.id ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={plan.highlighted && !isDowngrade ? '#ffffff' : '#0057FF'}
+                      />
+                    ) : (
+                      <View style={styles.ctaButtonContent}>
+                        {isCurrentPlan && (
+                          <Ionicons name="checkmark-circle" size={16} color="#059669" style={{ marginRight: 6 }} />
                         )}
                         <Text
                           style={[
-                            styles.featureText,
-                            isDesktop && styles.featureTextDesktop,
-                            plan.highlighted && styles.featureTextHighlighted,
+                            styles.ctaButtonText,
+                            isCurrentPlan
+                              ? styles.ctaButtonTextCurrentPlan
+                              : isUpgrade && plan.highlighted
+                              ? styles.ctaButtonTextHighlighted
+                              : isDowngrade
+                              ? styles.ctaButtonTextDowngrade
+                              : null,
                           ]}
                         >
-                          {feat.text}
+                          {ctaText}
                         </Text>
                       </View>
-                    ))}
-                  </View>
+                    )}
+                  </Pressable>
                 </View>
-
-                {/* CTA button */}
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.ctaButton,
-                    isDesktop && { height: desktopCtaHeight },
-                    plan.highlighted ? styles.ctaButtonHighlighted : styles.ctaButtonOutline,
-                    (pressed || loadingPlanId === plan.id) && styles.ctaButtonPressed,
-                  ]}
-                  onPress={() => handleSelectPlan(plan.id)}
-                  disabled={loadingPlanId !== null}
-                  accessibilityRole="button"
-                  accessibilityLabel={plan.ctaLabel}
-                >
-                  {loadingPlanId === plan.id ? (
-                    <ActivityIndicator
-                      size="small"
-                      color={plan.highlighted ? '#ffffff' : '#0057FF'}
-                    />
-                  ) : (
-                    <Text
-                      style={[
-                        styles.ctaButtonText,
-                        plan.highlighted && styles.ctaButtonTextHighlighted,
-                      ]}
-                    >
-                      {plan.ctaLabel}
-                    </Text>
-                  )}
-                </Pressable>
-              </View>
-            ))}
+              );
+            })}
           </View>
 
           {/* ──────────── TRUST BADGES ──────────── */}
@@ -900,6 +985,16 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 6,
   },
+  cardCurrentPlan: {
+    borderColor: '#059669',
+    borderWidth: 2,
+    backgroundColor: '#ffffff',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 5,
+  },
   cardTopContent: {
     width: '100%',
   },
@@ -928,6 +1023,33 @@ const styles = StyleSheet.create({
   },
   popularBadgeText: {
     ...fontStyle('inter', 'semiBold'),
+    fontSize: 11.5,
+    color: '#ffffff',
+    letterSpacing: 0.3,
+  },
+
+  /* "Active Plan" pill */
+  activePlanBadge: {
+    position: 'absolute',
+    top: -12,
+    alignSelf: 'center',
+    backgroundColor: '#059669',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: Radii.pill,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 1,
+    left: '50%',
+    ...Platform.select({
+      web: {
+        transform: [{ translateX: '-50%' }],
+      } as any,
+      default: {},
+    }),
+  },
+  activePlanBadgeText: {
+    ...fontStyle('inter', 'bold'),
     fontSize: 11.5,
     color: '#ffffff',
     letterSpacing: 0.3,
@@ -1023,6 +1145,9 @@ const styles = StyleSheet.create({
   dividerHighlighted: {
     backgroundColor: '#e0e7ff',
   },
+  dividerCurrentPlan: {
+    backgroundColor: '#d1fae5',
+  },
 
   /* Features */
   featuresList: {
@@ -1073,6 +1198,34 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 4,
+  },
+  ctaButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ctaButtonCurrentPlan: {
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1.5,
+    borderColor: '#a7f3d0',
+    ...Platform.select({
+      web: {
+        cursor: 'default',
+      } as any,
+    }),
+  },
+  ctaButtonTextCurrentPlan: {
+    color: '#047857',
+    ...fontStyle('inter', 'bold'),
+  },
+  ctaButtonDowngrade: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1.5,
+    borderColor: '#cbd5e1',
+  },
+  ctaButtonTextDowngrade: {
+    color: '#475569',
+    ...fontStyle('inter', 'semiBold'),
   },
   ctaButtonPressed: {
     opacity: 0.9,

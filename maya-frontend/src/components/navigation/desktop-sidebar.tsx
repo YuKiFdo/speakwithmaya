@@ -17,6 +17,7 @@ export interface DesktopSidebarProps {
   activeTab: DashboardTab;
   onSelectTab: (tab: DashboardTab) => void;
   isPro?: boolean;
+  planTier?: string;
   usedMinutes?: number;
   totalMinutes?: number;
   resetsInText?: string;
@@ -100,6 +101,7 @@ export function DesktopSidebar({
   activeTab,
   onSelectTab,
   isPro = false,
+  planTier,
   usedMinutes,
   totalMinutes,
   resetsInText,
@@ -110,11 +112,16 @@ export function DesktopSidebar({
   const isCompact = windowHeight < 900;
   const isVeryCompact = windowHeight < 740;
 
-  const currentUsed = usedMinutes ?? (isPro ? 320 : 0);
-  const currentTotal = totalMinutes ?? (isPro ? 600 : 10);
-  const currentResetsIn = resetsInText ?? (isPro ? 'Resets in 30 days' : 'Resets in 30 days');
+  const resolvedTier = (planTier || (isPro ? 'pro' : 'starter')).toLowerCase();
+  const isPaid = resolvedTier !== 'starter';
+  const isPremium = resolvedTier === 'premium';
+  const isProTier = resolvedTier === 'pro';
+
+  const currentUsed = usedMinutes ?? (isPaid ? 320 : 0);
+  const currentTotal = totalMinutes ?? (resolvedTier === 'premium' ? 1200 : resolvedTier === 'pro' ? 600 : resolvedTier === 'basic' ? 240 : 10);
+  const currentResetsIn = resetsInText ?? 'Resets in 30 days';
   const percentFilled = Math.min(100, Math.round((currentUsed / currentTotal) * 100));
-  const displayMinutes = isPro ? String(currentUsed) : String(currentUsed).padStart(2, '0');
+  const displayMinutes = isPaid ? String(currentUsed) : String(currentUsed).padStart(2, '0');
 
   return (
     <View style={[
@@ -171,35 +178,33 @@ export function DesktopSidebar({
             onPress={() => onSelectTab('account')}
           />
 
-          {/* Upgrade to Pro (hidden when user is Pro) */}
-          {!isPro && (
-            <>
-              <View style={[styles.sidebarDivider, isCompact && styles.sidebarDividerCompact]} />
+          {/* Upgrade / Manage Plan */}
+          <View style={[styles.sidebarDivider, isCompact && styles.sidebarDividerCompact]} />
 
-              <SidebarNavItem
-                label="Upgrade to Pro"
-                icon={(active, hovered) => (
-                  <CrownNavIcon
-                    color={active ? '#2B5BFF' : hovered ? '#F59E0B' : '#D97706'}
-                    width={isCompact ? 18 : 20}
-                    height={isCompact ? 18 : 20}
-                  />
-                )}
-                isActive={activeTab === 'upgrade'}
-                isCompact={isCompact}
-                isUpgrade
-                onPress={() => {
-                  if (onUpgrade) onUpgrade();
-                  else onSelectTab('upgrade');
-                }}
-                badge={
-                  <View style={styles.discountBadge}>
-                    <Text style={styles.discountBadgeText}>20% off</Text>
-                  </View>
-                }
+          <SidebarNavItem
+            label={isPremium ? 'Manage Plan' : isProTier ? 'Upgrade to Premium' : 'Upgrade to Pro'}
+            icon={(active, hovered) => (
+              <CrownNavIcon
+                color={active ? '#2B5BFF' : isPremium ? '#7C3AED' : hovered ? '#F59E0B' : '#D97706'}
+                width={isCompact ? 18 : 20}
+                height={isCompact ? 18 : 20}
               />
-            </>
-          )}
+            )}
+            isActive={activeTab === 'upgrade'}
+            isCompact={isCompact}
+            isUpgrade={!isPremium}
+            onPress={() => {
+              if (onUpgrade) onUpgrade();
+              else onSelectTab('upgrade');
+            }}
+            badge={
+              !isPremium ? (
+                <View style={styles.discountBadge}>
+                  <Text style={styles.discountBadgeText}>20% off</Text>
+                </View>
+              ) : undefined
+            }
+          />
         </View>
       </View>
 
