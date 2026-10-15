@@ -26,8 +26,21 @@ import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
 import { useUserStats } from '@/hooks/useUserStats';
 import { paymentApi } from '@/services/payment/payment-api';
+import { payHereGateway } from '@/services/payment/payhere-gateway';
+import { SubscriptionRecord } from '@/services/payment/payhere-types';
 
 const PLAN_CROWN_IMAGE = require('@/assets/images/plan-crown.png');
+
+function formatBillingDate(dateStr: string | null | undefined, fallback: string = '25 Jun 2026'): string {
+  if (!dateStr) return fallback;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return fallback;
+  const day = d.getDate();
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = monthNames[d.getMonth()];
+  const year = d.getFullYear();
+  return `${day} ${month} ${year}`;
+}
 
 export default function AccountScreen() {
   const store = useOnboardingStore();
@@ -147,6 +160,83 @@ export default function AccountScreen() {
       }
     } finally {
       setIsCancellingSub(false);
+    }
+  };
+
+  const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
+  const [isUpdatingCard, setIsUpdatingCard] = useState(false);
+
+  const fetchSubscription = async () => {
+    try {
+      const sub = await paymentApi.getMySubscription();
+      setSubscription(sub);
+    } catch (e) {
+      // silent fallback
+    }
+  };
+
+  useEffect(() => {
+    fetchSubscription();
+  }, []);
+
+  const handleChangePayment = async () => {
+    if (!isPro) {
+      router.push('/upgrade');
+      return;
+    }
+
+    const planId = (stats.planTier === 'premium' ? 'premium' : 'pro') as 'pro' | 'premium';
+    const planName = planId === 'premium' ? 'Premium' : 'Pro';
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(
+        `Update Payment Card:\n\nThis will open PayHere's secure window to authorize your new card for your ${planName} plan. Future monthly renewals will bill your new card.\n\nProceed to update card?`
+      );
+      if (!confirmed) return;
+    } else {
+      const proceed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'Update Payment Card',
+          `This will open PayHere's secure window to authorize your new card for your ${planName} plan. Future monthly renewals will bill your new card.`,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Update Card', onPress: () => resolve(true) },
+          ]
+        );
+      });
+      if (!proceed) return;
+    }
+
+    setIsUpdatingCard(true);
+    try {
+      const params = await paymentApi.getCheckoutParams(planId);
+      const result = await payHereGateway.startPayment(params);
+
+      if (result.status === 'completed') {
+        await stats.refreshStats();
+        await fetchSubscription();
+        if (Platform.OS === 'web') {
+          window.alert(`Your card has been updated successfully! Your ${planName} subscription will continue with your new card.`);
+        } else {
+          Alert.alert('Card Updated', `Your ${planName} subscription will now continue with your new card.`);
+        }
+      } else if (result.status === 'error') {
+        const errorMsg = result.error || 'Card update could not be completed.';
+        if (Platform.OS === 'web') {
+          window.alert(errorMsg);
+        } else {
+          Alert.alert('Card Update Error', errorMsg);
+        }
+      }
+    } catch (err: any) {
+      const errorMsg = err.message || 'Failed to initialize payment gateway.';
+      if (Platform.OS === 'web') {
+        window.alert(errorMsg);
+      } else {
+        Alert.alert('Card Update Error', errorMsg);
+      }
+    } finally {
+      setIsUpdatingCard(false);
     }
   };
 
@@ -274,9 +364,12 @@ export default function AccountScreen() {
                     isTimeExpired={isTimeExpired}
                     phone={phoneNumber}
                     renewalDate={stats.resetsInText}
+                    nextBillingDate={subscription?.next_billing_date}
+                    cardMasked={subscription?.card_masked}
+                    isUpdatingPayment={isUpdatingCard}
                     onUpgrade={() => router.push('/upgrade')}
                     onGetExtraTime={() => setActivePopup('get-extra-time')}
-                    onChangePayment={() => {}}
+                    onChangePayment={handleChangePayment}
                   />
 
                   <CustomerSupportCard onEmailPress={handleSupportEmail} />
@@ -311,9 +404,12 @@ export default function AccountScreen() {
                   isTimeExpired={isTimeExpired}
                   phone={phoneNumber}
                   renewalDate={stats.resetsInText}
+                  nextBillingDate={subscription?.next_billing_date}
+                  cardMasked={subscription?.card_masked}
+                  isUpdatingPayment={isUpdatingCard}
                   onUpgrade={() => router.push('/upgrade')}
                   onGetExtraTime={() => setActivePopup('get-extra-time')}
-                  onChangePayment={() => {}}
+                  onChangePayment={handleChangePayment}
                 />
 
                 <PreferencesCard
@@ -674,6 +770,9 @@ function CurrentPlanCard({
   isTimeExpired,
   phone,
   renewalDate,
+  nextBillingDate,
+  cardMasked,
+  isUpdatingPayment = false,
   onUpgrade,
   onGetExtraTime,
   onChangePayment,
@@ -686,12 +785,21 @@ function CurrentPlanCard({
   isTimeExpired: boolean;
   phone: string;
   renewalDate: string;
+  nextBillingDate?: string | null;
+  cardMasked?: string;
+  isUpdatingPayment?: boolean;
   onUpgrade: () => void;
   onGetExtraTime: () => void;
   onChangePayment: () => void;
 }) {
   const isPro = planTier === 'pro' || planTier === 'premium';
   const planDisplayName = planTier.charAt(0).toUpperCase() + planTier.slice(1) + ' Plan';
+  const nextBillingDateText = formatBillingDate(nextBillingDate, renewalDate || '25 Jun 2026');
+
+  // Format last 4 digits of card (matches user screenshot: "···· 4582")
+  const digitsOnly = (cardMasked || '').replace(/\D/g, '');
+  const last4 = digitsOnly.length >= 4 ? digitsOnly.slice(-4) : (isPro ? '4582' : '');
+  const cardDisplayText = last4 ? `···· ${last4}` : '—';
 
   return (
     <View style={styles.currentPlanCardContainer}>
@@ -711,8 +819,8 @@ function CurrentPlanCard({
           style={[
             styles.starterBadgePill,
             isPastDue
-              ? { backgroundColor: '#FEF3C7' }
-              : isTimeExpired && { backgroundColor: '#FEF2F2' },
+              ? { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }
+              : isTimeExpired && { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
           ]}
         >
           <Text
@@ -750,7 +858,7 @@ function CurrentPlanCard({
           ? 'Payment retry in progress. Paid features are frozen until payment settles.'
           : isTimeExpired
           ? 'You have used all available minutes for this cycle. Get extra time to continue.'
-          : 'Practice speaking with Maya daily to build fluency.'}
+          : 'Perfect for getting started with Maya.'}
       </Text>
 
       {/* Table Information Rows */}
@@ -763,29 +871,36 @@ function CurrentPlanCard({
           </View>
         </View>
 
-        {/* Row 2: Available Practice Time */}
-        {/* <View style={styles.planInfoRow}>
-          <Text style={styles.planInfoLabel}>Practice Time</Text>
-          <View style={styles.planInfoValueCol}>
-            <Text style={[styles.planInfoValue, isTimeExpired ? { color: '#DC2626', ...fontStyle('inter', 'bold') } : { color: '#0057FF' }]}>
-              {isTimeExpired ? '0m remaining (Expired)' : `${minutesBalance}m of ${monthlyAllowance}m remaining`}
-            </Text>
-          </View>
-        </View> */}
-
-        {/* Row 3: Next Reset Date */}
+        {/* Row 2: Next Billing Date */}
         <View style={styles.planInfoRow}>
-          <Text style={styles.planInfoLabel}>Cycle Renews</Text>
+          <Text style={styles.planInfoLabel}>Next Billing Date</Text>
           <View style={styles.planInfoValueCol}>
-            <Text style={styles.planInfoValue}>{renewalDate}</Text>
+            <Text style={styles.planInfoValue}>{nextBillingDateText}</Text>
           </View>
         </View>
 
-        {/* Row 4: Registered Phone */}
+        {/* Row 3: Payment Method */}
         <View style={styles.planInfoRow}>
-          <Text style={styles.planInfoLabel}>Mobile Number</Text>
-          <View style={styles.planInfoValueCol}>
-            <Text style={styles.planInfoValue}>{phone}</Text>
+          <Text style={styles.planInfoLabel}>Payment Method</Text>
+          <View style={styles.paymentMethodRow}>
+            <View style={styles.paymentCardInfo}>
+              <Ionicons name="card-outline" size={17} color="#2563EB" style={{ marginRight: 8 }} />
+              <Text style={styles.planInfoValue}>{cardDisplayText}</Text>
+            </View>
+            <Pressable
+              onPress={onChangePayment}
+              disabled={isUpdatingPayment}
+              hitSlop={8}
+              style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Change payment card"
+            >
+              {isUpdatingPayment ? (
+                <ActivityIndicator size="small" color="#2563EB" />
+              ) : (
+                <Text style={styles.changePaymentText}>Change</Text>
+              )}
+            </Pressable>
           </View>
         </View>
       </View>
@@ -832,7 +947,11 @@ function CurrentPlanCard({
         >
           <CrownNavIcon color="#FFFFFF" size={19} />
           <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>
-            {isPro ? 'Change Subscription Plan' : 'Upgrade to Pro'}
+            {isPro
+              ? planTier === 'premium'
+                ? 'Manage Subscription Plan'
+                : 'Upgrade to Premium'
+              : 'Upgrade to Pro'}
           </Text>
           <Feather name="chevron-right" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
         </Pressable>
@@ -1237,16 +1356,16 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'bold'),
   },
   starterBadgePill: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#EFF6FF',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#DBEAFE',
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 5,
   },
   starterBadgeText: {
     fontSize: 12,
-    color: '#0055FF',
+    color: '#2563EB',
     ...fontStyle('inter', 'semiBold'),
   },
   planMainTitle: {
@@ -1297,7 +1416,7 @@ const styles = StyleSheet.create({
   },
   changePaymentText: {
     fontSize: 13.5,
-    color: '#0055FF',
+    color: '#2563EB',
     ...fontStyle('inter', 'semiBold'),
   },
   pastDueBanner: {

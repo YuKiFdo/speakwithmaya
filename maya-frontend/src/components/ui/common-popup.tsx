@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Modal,
   View,
@@ -11,9 +11,13 @@ import {
   Platform,
   ViewStyle,
   useWindowDimensions,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { paymentApi } from '@/services/payment/payment-api';
+import { payHereGateway } from '@/services/payment/payhere-gateway';
 import Svg, {
   Path,
   Polygon,
@@ -353,6 +357,47 @@ export function CommonPopup({
   const isDesktop = windowWidth >= 768;
   const isBottomSheet = !isDesktop && resolvedPreset === 'get-extra-time';
 
+  const [purchasingPkgId, setPurchasingPkgId] = useState<string | null>(null);
+
+  const handlePurchasePackage = async (pkg: { id: string; minutes: number; price: string }) => {
+    if (onSelectPackage) {
+      onSelectPackage(pkg);
+      return;
+    }
+
+    setPurchasingPkgId(pkg.id);
+    try {
+      const params = await paymentApi.getCheckoutParams(pkg.id as any);
+      const result = await payHereGateway.startPayment(params);
+
+      if (result.status === 'completed') {
+        onClose();
+        if (Platform.OS === 'web') {
+          window.alert(`Payment successful! +${pkg.minutes} minutes have been added to your talk time.`);
+          window.location.reload();
+        } else {
+          Alert.alert('Top-up Successful', `+${pkg.minutes} minutes have been added to your talk time!`);
+        }
+      } else if (result.status === 'error') {
+        const errorMsg = result.error || 'Payment was not completed. Please try again.';
+        if (Platform.OS === 'web') {
+          window.alert(errorMsg);
+        } else {
+          Alert.alert('Payment Error', errorMsg);
+        }
+      }
+    } catch (err: any) {
+      const errorMsg = err.message || 'Failed to initialize payment gateway.';
+      if (Platform.OS === 'web') {
+        window.alert(errorMsg);
+      } else {
+        Alert.alert('Checkout Error', errorMsg);
+      }
+    } finally {
+      setPurchasingPkgId(null);
+    }
+  };
+
   return (
     <Modal
       transparent
@@ -439,15 +484,21 @@ export function CommonPopup({
                   Rs. 300
                 </Text>
                 <Pressable
-                  style={({ pressed }) => [styles.extraGetBtnOutline, pressed && styles.btnPressed]}
-                  onPress={() => {
-                    onClose();
-                    onSelectPackage?.({ id: '30-min', minutes: 30, price: 'Rs. 300' });
-                  }}
+                  style={({ pressed }) => [
+                    styles.extraGetBtnOutline,
+                    pressed && styles.btnPressed,
+                    purchasingPkgId === '30-min' && { opacity: 0.8 },
+                  ]}
+                  disabled={purchasingPkgId !== null}
+                  onPress={() => handlePurchasePackage({ id: '30-min', minutes: 30, price: 'Rs. 300' })}
                 >
-                  <Text style={[styles.extraGetBtnOutlineText, !isDesktop && styles.extraGetBtnTextMobile]}>
-                    Get Now
-                  </Text>
+                  {purchasingPkgId === '30-min' ? (
+                    <ActivityIndicator size="small" color="#0284C7" />
+                  ) : (
+                    <Text style={[styles.extraGetBtnOutlineText, !isDesktop && styles.extraGetBtnTextMobile]}>
+                      Get Now
+                    </Text>
+                  )}
                 </Pressable>
               </View>
 
@@ -478,15 +529,21 @@ export function CommonPopup({
                   Rs. 900
                 </Text>
                 <Pressable
-                  style={({ pressed }) => [styles.extraGetBtnSolid, pressed && styles.btnPressed]}
-                  onPress={() => {
-                    onClose();
-                    onSelectPackage?.({ id: '120-min', minutes: 120, price: 'Rs. 900' });
-                  }}
+                  style={({ pressed }) => [
+                    styles.extraGetBtnSolid,
+                    pressed && styles.btnPressed,
+                    purchasingPkgId === '120-min' && { opacity: 0.8 },
+                  ]}
+                  disabled={purchasingPkgId !== null}
+                  onPress={() => handlePurchasePackage({ id: '120-min', minutes: 120, price: 'Rs. 900' })}
                 >
-                  <Text style={[styles.extraGetBtnSolidText, !isDesktop && styles.extraGetBtnTextMobile]}>
-                    Get Now
-                  </Text>
+                  {purchasingPkgId === '120-min' ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <Text style={[styles.extraGetBtnSolidText, !isDesktop && styles.extraGetBtnTextMobile]}>
+                      Get Now
+                    </Text>
+                  )}
                 </Pressable>
               </View>
 
@@ -508,15 +565,21 @@ export function CommonPopup({
                   Rs. 2,000
                 </Text>
                 <Pressable
-                  style={({ pressed }) => [styles.extraGetBtnOutline, pressed && styles.btnPressed]}
-                  onPress={() => {
-                    onClose();
-                    onSelectPackage?.({ id: '300-min', minutes: 300, price: 'Rs. 2,000' });
-                  }}
+                  style={({ pressed }) => [
+                    styles.extraGetBtnOutline,
+                    pressed && styles.btnPressed,
+                    purchasingPkgId === '30-min' && { opacity: 0.8 },
+                  ]}
+                  disabled={purchasingPkgId !== null}
+                  onPress={() => handlePurchasePackage({ id: '300-min', minutes: 300, price: 'Rs. 2,000' })}
                 >
-                  <Text style={[styles.extraGetBtnOutlineText, !isDesktop && styles.extraGetBtnTextMobile]}>
-                    Get Now
-                  </Text>
+                  {purchasingPkgId === '300-min' ? (
+                    <ActivityIndicator size="small" color="#DB2777" />
+                  ) : (
+                    <Text style={[styles.extraGetBtnOutlineText, !isDesktop && styles.extraGetBtnTextMobile]}>
+                      Get Now
+                    </Text>
+                  )}
                 </Pressable>
               </View>
             </View>

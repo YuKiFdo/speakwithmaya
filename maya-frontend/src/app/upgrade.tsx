@@ -372,6 +372,7 @@ export default function UpgradeScreen() {
     }
   };
 
+
   const handleSelectTab = (tab: DashboardTab) => {
     if (tab === 'home') {
       router.push('/dashboard');
@@ -701,6 +702,7 @@ export default function UpgradeScreen() {
                       </View>
                     )}
                   </Pressable>
+
                 </View>
               );
             })}

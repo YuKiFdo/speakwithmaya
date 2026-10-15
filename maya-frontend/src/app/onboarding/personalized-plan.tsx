@@ -487,7 +487,7 @@ export default function PersonalizedPlanScreen() {
           {/* Payment Trust & Gateways */}
           <View style={styles.securityRow}>
             <Feather name="lock" size={12} color="#64748B" style={styles.lockSmallIcon} />
-            <Text style={styles.securityText}>Secure payment powered by PayHere</Text>
+            <Text style={styles.securityText}>Secure payment powered by PayHere · Cancel anytime in 1 click</Text>
           </View>
 
           {/* Payment Methods Badges Row */}

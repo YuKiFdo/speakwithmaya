@@ -8,8 +8,8 @@ export interface PayHereCheckoutParams {
   items: string;
   currency: string;
   amount: string;
-  recurrence: string;
-  duration: string;
+  recurrence?: string;
+  duration?: string;
   startup_fee?: string;
   hash: string;
   first_name: string;

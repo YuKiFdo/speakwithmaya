@@ -41,7 +41,7 @@ class PaymentApiService {
    * Request server-signed checkout parameters for a subscription plan.
    */
   async getCheckoutParams(
-    planTier: 'basic' | 'pro' | 'premium' | '3-months-pro',
+    planTier: 'basic' | 'pro' | 'premium' | '3-months-pro' | '30-min' | '120-min' | '300-min',
     billingCycle: 'monthly' | '3-months' | 'yearly' = 'monthly'
   ): Promise<PayHereCheckoutParams> {
     const res = await fetch(`${this.baseUrl}/v1/payments/payhere/checkout-params`, {

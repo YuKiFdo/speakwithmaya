@@ -69,7 +69,15 @@ export class PayHereService {
     userId: string,
     dto: GenerateCheckoutParamsDto
   ): Promise<PayHereCheckoutParams> {
-    const planConfigs = {
+    const planConfigs: Record<string, {
+      name: string;
+      tier: string;
+      amount: number;
+      recurrence?: string;
+      duration?: string;
+      allowance: number;
+      isTopup?: boolean;
+    }> = {
       '3-months-pro': {
         name: 'Maya AI Pro (3 Months)',
         tier: 'pro',
@@ -102,6 +110,27 @@ export class PayHereService {
         duration: 'Forever',
         allowance: 1200,
       },
+      '30-min': {
+        name: 'Maya AI Extra Talk Time (+30 Min)',
+        tier: 'topup',
+        amount: 300.0,
+        allowance: 30,
+        isTopup: true,
+      },
+      '120-min': {
+        name: 'Maya AI Extra Talk Time (+120 Min)',
+        tier: 'topup',
+        amount: 900.0,
+        allowance: 120,
+        isTopup: true,
+      },
+      '300-min': {
+        name: 'Maya AI Extra Talk Time (+300 Min)',
+        tier: 'topup',
+        amount: 2000.0,
+        allowance: 300,
+        isTopup: true,
+      },
     };
 
     const plan = planConfigs[dto.planTier];
@@ -116,7 +145,9 @@ export class PayHereService {
       .eq('id', userId)
       .maybeSingle();
 
-    const orderId = `MAYA-SUB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const orderId = plan.isTopup
+      ? `MAYA-TOPUP-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`
+      : `MAYA-SUB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const formattedAmount = plan.amount.toFixed(2);
     const currency = 'LKR';
 
@@ -138,7 +169,7 @@ export class PayHereService {
     // Record pending order transaction
     await this.supabase.from('orders').insert({
       user_id: userId,
-      order_type: 'subscription_new',
+      order_type: plan.isTopup ? 'topup_minutes' : 'subscription_new',
       plan_tier: plan.tier,
       amount_lkr: plan.amount,
       minutes_credited: plan.allowance,
@@ -162,8 +193,8 @@ export class PayHereService {
       items: plan.name,
       currency,
       amount: formattedAmount,
-      recurrence: plan.recurrence,
-      duration: plan.duration,
+      ...(plan.recurrence ? { recurrence: plan.recurrence } : {}),
+      ...(plan.duration ? { duration: plan.duration } : {}),
       hash,
       first_name: firstName,
       last_name: lastName,
@@ -277,6 +308,55 @@ export class PayHereService {
     this.logger.log(`[PayHereWebhook] ✅ User resolved: ${userId}`);
 
     const planTierKey = payload.custom_2 || 'pro';
+    const isTopup = ['30-min', '120-min', '300-min'].includes(planTierKey) || payload.order_id?.startsWith('MAYA-TOPUP');
+
+    if (isTopup) {
+      this.logger.log(`[PayHereWebhook] ⚡ Processing Extra Talk Time Top-up payment: order=${payload.order_id}, tier=${planTierKey}`);
+      if (statusCode === 2) {
+        const topupAllowance = planTierKey === '300-min' ? 300 : planTierKey === '120-min' ? 120 : 30;
+
+        // Fetch current user balance
+        const { data: userProfile } = await this.supabase
+          .from('profiles')
+          .select('minutes_balance')
+          .eq('id', userId)
+          .maybeSingle();
+
+        const currentBalance = userProfile?.minutes_balance ?? 0;
+        const newBalance = currentBalance + topupAllowance;
+
+        const { error: profileErr } = await this.supabase
+          .from('profiles')
+          .update({
+            minutes_balance: newBalance,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', userId);
+
+        if (profileErr) {
+          this.logger.error(`[PayHereWebhook] ❌ Error crediting top-up minutes to profile: ${profileErr.message}`);
+        } else {
+          this.logger.log(`[PayHereWebhook] ⏱️ Credited +${topupAllowance}m to user ${userId} (new balance: ${newBalance}m)`);
+        }
+
+        // Update Order
+        await this.supabase
+          .from('orders')
+          .update({
+            status: 'completed',
+            payhere_payment_id: payload.payment_id,
+            md5sig: payload.md5sig,
+            raw_payload: payload,
+          })
+          .eq('gateway_payment_id', payload.order_id);
+
+        return { received: true, status: 'TOPUP_COMPLETED' };
+      } else {
+        this.logger.warn(`[PayHereWebhook] Topup payment failed or cancelled with status=${statusCode}`);
+        return { received: true, status: 'TOPUP_FAILED' };
+      }
+    }
+
     const planTier = planTierKey === '3-months-pro' ? 'pro' : planTierKey;
     const minutesAllowance =
       planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;

@@ -3,8 +3,8 @@ import { IsString, IsNotEmpty, IsOptional, IsIn } from 'class-validator';
 export class GenerateCheckoutParamsDto {
   @IsString()
   @IsNotEmpty()
-  @IsIn(['basic', 'pro', 'premium', '3-months-pro'])
-  planTier!: 'basic' | 'pro' | 'premium' | '3-months-pro';
+  @IsIn(['basic', 'pro', 'premium', '3-months-pro', '30-min', '120-min', '300-min'])
+  planTier!: 'basic' | 'pro' | 'premium' | '3-months-pro' | '30-min' | '120-min' | '300-min';
 
   @IsString()
   @IsOptional()
