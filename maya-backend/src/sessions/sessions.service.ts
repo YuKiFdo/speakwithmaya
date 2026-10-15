@@ -583,8 +583,7 @@ STAGE 2: NATURAL CONVERSATION & COMFORT CHECK (Turns 2 to 4)
   * If goal is Speaking Confidently: Ask about their favorite hobby, how their day was, or what they did over the weekend.
 - Scaffolding & Support:
   * If ${userName} pauses or struggles to find a word: patiently encourage them: "Take your time! ඔයාට පුළුවන්."
-  * If they switch to Sinhala: warmly acknowledge it and model the English sentence ("ඔයාට පුළුවන් '...' කියලා කියන්න. Try saying that!").
-  * Do NOT interrupt with heavy grammar correction tools in this intro call. Focus on building comfort, confidence, and rapport!
+  * STRICT RULE: Absolutely DO NOT make any grammar corrections or rephrase suggestions in this introductory call. Tools like 'show_grammar_correction' and 'show_rephrase_suggestion' are COMPLETELY REMOVED and DISABLED for this call. Do not model corrections or interrupt the student. Focus 100% on friendly conversation, listening, encouragement, and building comfort and rapport!
 
 STAGE 3: ENCOURAGING WRAP-UP & ROADMAP HAND-OFF (Turns 5-6 or when session time is up)
 - After 2 to 3 minutes of speaking or when the student indicates they want to wrap up:
@@ -637,7 +636,7 @@ STAGE 2: NATURAL CONVERSATION & COMFORT CHECK (Turns 2 to 4)
   * If Travel/Abroad: Ask about the country or destination they are excited about.
   * If Confidence/General: Ask about how their day went or their favorite weekend activity.
 - If they pause or hesitate: be patient and encouraging ("Take your time! Tell me a bit more about that.").
-- Do NOT interrupt with heavy correction tools during this first call — prioritize confidence and conversational rapport!
+- STRICT RULE: Absolutely DO NOT make any grammar corrections or rephrase suggestions during this introductory call. Tools like 'show_grammar_correction' and 'show_rephrase_suggestion' are COMPLETELY REMOVED and DISABLED for this call. Prioritize confidence, listening, and friendly conversational rapport!
 
 STAGE 3: ENCOURAGING WRAP-UP & ROADMAP HAND-OFF (Turns 5-6 or when time wraps up)
 - After 2 to 3 minutes or when the student wishes to finish:
@@ -1004,7 +1003,32 @@ ${memoryPart}`;
     return `Hello Maya! This is ${userName}. Please greet me warmly by name in conversational English aloud to kick off our practice session on "${rawTopic}", and ask your opening question!`;
   }
 
-  getToolsDeclaration(aiSuggestions: boolean = true, isSinhala: boolean = false) {
+  getToolsDeclaration(aiSuggestions: boolean = true, isSinhala: boolean = false, isIntroCall: boolean = false) {
+    if (isIntroCall) {
+      // Intro calls are friendly conversational assessments — strictly NO grammar correction or rephrase tools!
+      return [
+        {
+          functionDeclarations: [
+            {
+              name: 'conclude_call',
+              description:
+                'Terminate the session when student wants to wrap up, leaves, or the introductory chat is complete. MANDATORY: Your spoken response MUST be a definitive closing farewell statement. STRICTLY NEVER ask a question because the call terminates immediately.',
+              parameters: {
+                type: 'OBJECT',
+                properties: {
+                  farewellReason: {
+                    type: 'STRING',
+                    description: 'Departure phrase spoken by student, student wrap-up request, or introductory conversation complete',
+                  },
+                },
+                required: ['farewellReason'],
+              },
+            },
+          ],
+        },
+      ];
+    }
+
     const functions: any[] = [
       {
         name: 'conclude_call',
@@ -1322,9 +1346,15 @@ ${memoryPart}`;
 
     const isReconnect = Boolean(dto.sessionId);
     const sessionId = dto.sessionId || randomUUID();
-    const isSinhala = dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
+    const isIntroCall =
+      dto.isIntroCall === true ||
+      dto.scenarioId === 'intro-call' ||
+      dto.topic?.toLowerCase().includes('intro') ||
+      dto.topic?.toLowerCase().includes('placement') ||
+      dto.topic?.toLowerCase().includes('assessment');
+    const isSinhala = isIntroCall || dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
     const systemPrompt = this.getSystemPrompt(dto);
-    const tools = this.getToolsDeclaration(dto.aiSuggestions !== false, isSinhala);
+    const tools = this.getToolsDeclaration(!isIntroCall && dto.aiSuggestions !== false, isSinhala, isIntroCall);
 
     const apiKey = process.env.GEMINI_API_KEY || this.geminiApiKey;
     const maxSeconds = dto.durationSeconds || 600;

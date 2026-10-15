@@ -80,7 +80,7 @@ export default function CallScreen() {
   const isIntro = storeConfig?.isIntroCall ?? (params.isIntroCall === 'true');
   const durationSec = storeConfig?.durationSeconds || (params.duration ? parseInt(params.duration, 10) : 300);
   const targetDuration = isNaN(durationSec) ? 300 : durationSec;
-  const aiSug = storeConfig?.aiSuggestions ?? (params.aiSuggestions !== 'false');
+  const aiSug = isIntro ? false : (storeConfig?.aiSuggestions ?? (params.aiSuggestions !== 'false'));
   const langMode = isIntro ? 'sinhala' : (storeConfig?.languageMode || (params.languageMode === 'english' ? 'english' : 'sinhala'));
   const sinhalaStyle: 'balanced' | 'deep_guidance' = isIntro
     ? 'balanced'
