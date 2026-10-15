@@ -178,33 +178,35 @@ export function DesktopSidebar({
             onPress={() => onSelectTab('account')}
           />
 
-          {/* Upgrade / Manage Plan */}
-          <View style={[styles.sidebarDivider, isCompact && styles.sidebarDividerCompact]} />
+          {/* Upgrade button (hidden when user is on Premium) */}
+          {!isPremium && (
+            <>
+              <View style={[styles.sidebarDivider, isCompact && styles.sidebarDividerCompact]} />
 
-          <SidebarNavItem
-            label={isPremium ? 'Manage Plan' : isProTier ? 'Upgrade to Premium' : 'Upgrade to Pro'}
-            icon={(active, hovered) => (
-              <CrownNavIcon
-                color={active ? '#2B5BFF' : isPremium ? '#7C3AED' : hovered ? '#F59E0B' : '#D97706'}
-                width={isCompact ? 18 : 20}
-                height={isCompact ? 18 : 20}
+              <SidebarNavItem
+                label={isProTier ? 'Upgrade to Premium' : 'Upgrade to Pro'}
+                icon={(active, hovered) => (
+                  <CrownNavIcon
+                    color={active ? '#2B5BFF' : isProTier ? '#7C3AED' : hovered ? '#F59E0B' : '#D97706'}
+                    width={isCompact ? 18 : 20}
+                    height={isCompact ? 18 : 20}
+                  />
+                )}
+                isActive={activeTab === 'upgrade'}
+                isCompact={isCompact}
+                isUpgrade
+                onPress={() => {
+                  if (onUpgrade) onUpgrade();
+                  else onSelectTab('upgrade');
+                }}
+                badge={
+                  <View style={styles.discountBadge}>
+                    <Text style={styles.discountBadgeText}>20% off</Text>
+                  </View>
+                }
               />
-            )}
-            isActive={activeTab === 'upgrade'}
-            isCompact={isCompact}
-            isUpgrade={!isPremium}
-            onPress={() => {
-              if (onUpgrade) onUpgrade();
-              else onSelectTab('upgrade');
-            }}
-            badge={
-              !isPremium ? (
-                <View style={styles.discountBadge}>
-                  <Text style={styles.discountBadgeText}>20% off</Text>
-                </View>
-              ) : undefined
-            }
-          />
+            </>
+          )}
         </View>
       </View>
 
