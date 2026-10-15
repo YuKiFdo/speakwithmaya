@@ -10,6 +10,7 @@ import {
   Platform,
   Animated,
   Easing,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -23,6 +24,8 @@ import {
 } from '@/services/sound/sound-service';
 import { authService } from '@/services/auth/auth-service';
 import { OnboardingStore, useOnboardingStore } from '@/services/store/onboarding-store';
+import { paymentApi } from '@/services/payment/payment-api';
+import { payHereGateway } from '@/services/payment/payhere-gateway';
 
 const CLOCK_IMAGE = require('@/assets/images/offer-expired-clock.png');
 
@@ -226,6 +229,9 @@ export default function PersonalizedPlanScreen() {
     setTimeLeft(EXTRA_MINUTES_SECONDS);
   };
 
+  // Upgrade loading state
+  const [isUpgrading, setIsUpgrading] = useState<boolean>(false);
+
   // Automatically sync this step with the database so opening on another phone loads here
   useEffect(() => {
     authService.syncStep('/onboarding/personalized-plan');
@@ -236,22 +242,51 @@ export default function PersonalizedPlanScreen() {
       playAnalysisCompleteSound();
     } catch {}
 
-    const state = OnboardingStore.getState();
-    await authService.savePreferences({
-      displayName: state.name,
-      nativeLanguage: state.nativeLanguage,
-      level: state.level,
-      goal: state.goal,
-      challenge: state.challenge,
-      employmentStatus: state.employment,
-      dailyGoalMinutes: state.dailyGoalMinutes,
-      baselineScores: state.baselineScores || undefined,
-    });
+    setIsUpgrading(true);
+    try {
+      // 1. Save onboarding preferences first
+      const state = OnboardingStore.getState();
+      await authService.savePreferences({
+        displayName: state.name,
+        nativeLanguage: state.nativeLanguage,
+        level: state.level,
+        goal: state.goal,
+        challenge: state.challenge,
+        employmentStatus: state.employment,
+        dailyGoalMinutes: state.dailyGoalMinutes,
+        baselineScores: state.baselineScores || undefined,
+      });
 
-    router.replace({
-      pathname: '/onboarding/complete' as any,
-      params: { plan: selectedPlanId },
-    });
+      // 2. Fetch server-signed PayHere parameters
+      const params = await paymentApi.getCheckoutParams(selectedPlanId as any);
+
+      // 3. Launch PayHere Gateway (JS SDK popup modal on Web, Native SDK on mobile)
+      const result = await payHereGateway.startPayment(params);
+
+      if (result.status === 'completed') {
+        await authService.fetchUserProfile();
+        router.replace({
+          pathname: '/onboarding/complete' as any,
+          params: { plan: selectedPlanId },
+        });
+      } else if (result.status === 'error') {
+        const errorMsg = result.error || 'Payment could not be completed. Please try again.';
+        if (Platform.OS === 'web') {
+          window.alert(errorMsg);
+        } else {
+          Alert.alert('Payment Error', errorMsg);
+        }
+      }
+    } catch (err: any) {
+      const errMsg = err.message || 'Failed to initialize payment gateway.';
+      if (Platform.OS === 'web') {
+        window.alert(errMsg);
+      } else {
+        Alert.alert('Checkout Error', errMsg);
+      }
+    } finally {
+      setIsUpgrading(false);
+    }
   };
 
   const handleContinueSecondary = async () => {
@@ -429,7 +464,8 @@ export default function PersonalizedPlanScreen() {
                   : `Upgrade to ${selectedPlan.name}`
               }
               onPress={handleUpgrade}
-              showArrow={true}
+              loading={isUpgrading}
+              showArrow={!isUpgrading}
               height={54}
               borderRadius={27}
             />

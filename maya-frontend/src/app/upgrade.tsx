@@ -8,6 +8,8 @@ import {
   ScrollView,
   Platform,
   useWindowDimensions,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -19,6 +21,8 @@ import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { Ionicons } from '@expo/vector-icons';
 import { useUserStats } from '@/hooks/useUserStats';
+import { paymentApi } from '@/services/payment/payment-api';
+import { payHereGateway } from '@/services/payment/payhere-gateway';
 
 // ─── Plan Data ───────────────────────────────────────────────────────────────
 
@@ -294,9 +298,40 @@ export default function UpgradeScreen() {
     ? Math.min(16, Math.max(12, Math.round(windowHeight * 0.016)))
     : 16;
 
-  const handleSelectPlan = (planId: string) => {
-    // TODO: integrate payment flow
-    console.log('Selected plan:', planId);
+  const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
+
+  const handleSelectPlan = async (planId: string) => {
+    setLoadingPlanId(planId);
+    try {
+      const params = await paymentApi.getCheckoutParams(planId as any);
+      const result = await payHereGateway.startPayment(params);
+
+      if (result.status === 'completed') {
+        await stats.refreshStats();
+        if (Platform.OS === 'web') {
+          window.alert(`Payment successful! You are now subscribed to the ${planId.toUpperCase()} plan.`);
+        } else {
+          Alert.alert('Upgrade Successful', `You are now on the ${planId.toUpperCase()} plan!`);
+        }
+        router.replace('/(tabs)/account');
+      } else if (result.status === 'error') {
+        const errorMsg = result.error || 'Payment was not completed. Please try again.';
+        if (Platform.OS === 'web') {
+          window.alert(errorMsg);
+        } else {
+          Alert.alert('Payment Error', errorMsg);
+        }
+      }
+    } catch (err: any) {
+      const errorMsg = err.message || 'Failed to initialize payment gateway.';
+      if (Platform.OS === 'web') {
+        window.alert(errorMsg);
+      } else {
+        Alert.alert('Checkout Error', errorMsg);
+      }
+    } finally {
+      setLoadingPlanId(null);
+    }
   };
 
   const handleSelectTab = (tab: DashboardTab) => {
@@ -559,20 +594,28 @@ export default function UpgradeScreen() {
                     styles.ctaButton,
                     isDesktop && { height: desktopCtaHeight },
                     plan.highlighted ? styles.ctaButtonHighlighted : styles.ctaButtonOutline,
-                    pressed && styles.ctaButtonPressed,
+                    (pressed || loadingPlanId === plan.id) && styles.ctaButtonPressed,
                   ]}
                   onPress={() => handleSelectPlan(plan.id)}
+                  disabled={loadingPlanId !== null}
                   accessibilityRole="button"
                   accessibilityLabel={plan.ctaLabel}
                 >
-                  <Text
-                    style={[
-                      styles.ctaButtonText,
-                      plan.highlighted && styles.ctaButtonTextHighlighted,
-                    ]}
-                  >
-                    {plan.ctaLabel}
-                  </Text>
+                  {loadingPlanId === plan.id ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={plan.highlighted ? '#ffffff' : '#0057FF'}
+                    />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.ctaButtonText,
+                        plan.highlighted && styles.ctaButtonTextHighlighted,
+                      ]}
+                    >
+                      {plan.ctaLabel}
+                    </Text>
+                  )}
                 </Pressable>
               </View>
             ))}

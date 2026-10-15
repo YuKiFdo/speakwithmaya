@@ -11,6 +11,7 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -24,6 +25,7 @@ import { CrownNavIcon } from '@/components/icons/nav-icons';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
 import { useUserStats } from '@/hooks/useUserStats';
+import { paymentApi } from '@/services/payment/payment-api';
 
 const PLAN_CROWN_IMAGE = require('@/assets/images/plan-crown.png');
 
@@ -107,6 +109,45 @@ export default function AccountScreen() {
 
   const handleSupportEmail = () => {
     Linking.openURL('mailto:support@talkwithmaya.com').catch(() => {});
+  };
+
+  const [isCancellingSub, setIsCancellingSub] = useState(false);
+
+  const handleCancelSubscription = async () => {
+    if (!isPro) {
+      if (Platform.OS === 'web') {
+        window.alert('You are currently on the free Starter plan. There is no active recurring subscription to cancel.');
+      } else {
+        Alert.alert('Starter Plan', 'You are currently on the free Starter plan with no active recurring charges.');
+      }
+      return;
+    }
+
+    const confirmMsg =
+      'Are you sure you want to cancel your recurring subscription? Future renewals will be stopped on PayHere, and your plan will revert to Starter at the end of your billing cycle.';
+
+    const proceed = Platform.OS === 'web' ? window.confirm(confirmMsg) : true;
+    if (!proceed) return;
+
+    setIsCancellingSub(true);
+    try {
+      const res = await paymentApi.cancelSubscription();
+      await stats.refreshStats();
+      if (Platform.OS === 'web') {
+        window.alert(res.msg || 'Your subscription has been successfully cancelled.');
+      } else {
+        Alert.alert('Subscription Cancelled', res.msg || 'Your subscription has been cancelled.');
+      }
+    } catch (err: any) {
+      const errMsg = err.message || 'Failed to cancel subscription.';
+      if (Platform.OS === 'web') {
+        window.alert(errMsg);
+      } else {
+        Alert.alert('Cancellation Error', errMsg);
+      }
+    } finally {
+      setIsCancellingSub(false);
+    }
   };
 
   return (
@@ -203,7 +244,7 @@ export default function AccountScreen() {
                     isPro={isPro}
                     onEdit={handleOpenEditModal}
                     onTogglePlan={() => {}}
-                    onCancelSubscription={() => setActivePopup('level-locked')}
+                    onCancelSubscription={handleCancelSubscription}
                   />
 
                   <StatsCard
@@ -223,6 +264,8 @@ export default function AccountScreen() {
                 <View style={styles.desktopRightCol}>
                   <CurrentPlanCard
                     planTier={currentPlanTier}
+                    planStatus={stats.planStatus}
+                    isPastDue={stats.isPastDue}
                     minutesBalance={minutesBalance}
                     monthlyAllowance={stats.monthlyMinutesAllowance}
                     isTimeExpired={isTimeExpired}
@@ -247,7 +290,7 @@ export default function AccountScreen() {
                   isPro={isPro}
                   onEdit={handleOpenEditModal}
                   onTogglePlan={() => {}}
-                  onCancelSubscription={() => setActivePopup('level-locked')}
+                  onCancelSubscription={handleCancelSubscription}
                 />
 
                 <StatsCard
@@ -258,6 +301,8 @@ export default function AccountScreen() {
 
                 <CurrentPlanCard
                   planTier={currentPlanTier}
+                  planStatus={stats.planStatus}
+                  isPastDue={stats.isPastDue}
                   minutesBalance={minutesBalance}
                   monthlyAllowance={stats.monthlyMinutesAllowance}
                   isTimeExpired={isTimeExpired}
@@ -619,6 +664,8 @@ function PreferencesCard({
  */
 function CurrentPlanCard({
   planTier,
+  planStatus,
+  isPastDue = false,
   minutesBalance,
   monthlyAllowance,
   isTimeExpired,
@@ -629,6 +676,8 @@ function CurrentPlanCard({
   onChangePayment,
 }: {
   planTier: string;
+  planStatus?: string;
+  isPastDue?: boolean;
   minutesBalance: number;
   monthlyAllowance: number;
   isTimeExpired: boolean;
@@ -655,19 +704,48 @@ function CurrentPlanCard({
         </View>
 
         {/* Top-Right Badge */}
-        <View style={[styles.starterBadgePill, isTimeExpired && { backgroundColor: '#FEF2F2' }]}>
-          <Text style={[styles.starterBadgeText, isTimeExpired && { color: '#DC2626' }]}>
-            {isTimeExpired ? 'Time Expired' : planDisplayName}
+        <View
+          style={[
+            styles.starterBadgePill,
+            isPastDue
+              ? { backgroundColor: '#FEF3C7' }
+              : isTimeExpired && { backgroundColor: '#FEF2F2' },
+          ]}
+        >
+          <Text
+            style={[
+              styles.starterBadgeText,
+              isPastDue
+                ? { color: '#B45309' }
+                : isTimeExpired && { color: '#DC2626' },
+            ]}
+          >
+            {isPastDue ? 'Payment Past Due' : isTimeExpired ? 'Time Expired' : planDisplayName}
           </Text>
         </View>
       </View>
+
+      {/* Warning banner if payment deduction failed */}
+      {isPastDue && (
+        <View style={styles.pastDueBanner}>
+          <Feather name="alert-triangle" size={18} color="#D97706" style={{ marginTop: 2 }} />
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={styles.pastDueBannerTitle}>Monthly Deduction Unsuccessful</Text>
+            <Text style={styles.pastDueBannerSubtitle}>
+              Your subscription renewal could not be deducted. PayHere is retrying your card. You can also re-authorize or change your payment plan now.
+            </Text>
+          </View>
+        </View>
+      )}
 
       {/* Main Title & Subtitle */}
       <Text style={styles.planMainTitle}>
         {planDisplayName} ({isPro ? 'Monthly' : '10 Min/Month'})
       </Text>
       <Text style={styles.planMainSubtitle}>
-        {isTimeExpired
+        {isPastDue
+          ? 'Payment retry in progress. Paid features are frozen until payment settles.'
+          : isTimeExpired
           ? 'You have used all available minutes for this cycle. Get extra time to continue.'
           : 'Practice speaking with Maya daily to build fluency.'}
       </Text>
@@ -714,7 +792,21 @@ function CurrentPlanCard({
 
       {/* Action Buttons: Get Extra Time & Upgrade */}
       <View style={{ gap: 10 }}>
-        {isTimeExpired && (
+        {isPastDue && (
+          <Pressable
+            onPress={onUpgrade}
+            style={({ pressed }) => [
+              styles.planUpgradeBtn,
+              { backgroundColor: '#D97706' },
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Feather name="credit-card" size={18} color="#FFFFFF" />
+            <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>Update Payment / Retry Now</Text>
+          </Pressable>
+        )}
+
+        {isTimeExpired && !isPastDue && (
           <Pressable
             onPress={onGetExtraTime}
             style={({ pressed }) => [
@@ -1204,6 +1296,29 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     color: '#0055FF',
     ...fontStyle('inter', 'semiBold'),
+  },
+  pastDueBanner: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  pastDueBannerTitle: {
+    fontSize: 13,
+    color: '#92400E',
+    ...fontStyle('inter', 'bold'),
+    marginBottom: 2,
+  },
+  pastDueBannerSubtitle: {
+    fontSize: 11.5,
+    color: '#B45309',
+    lineHeight: 16,
+    ...fontStyle('inter', 'regular'),
   },
   planCardDivider: {
     height: 1,

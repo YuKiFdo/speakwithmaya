@@ -26,6 +26,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     ],
   },
   {
+    group: 'BILLING & PAYMENTS',
+    items: [
+      { id: 'subscriptions', label: 'Subscriptions & MRR', icon: 'credit-card', route: '/admin/subscriptions' },
+    ],
+  },
+  {
     group: 'STUDENT APP',
     items: [
       { id: 'dashboard', label: 'Student Dashboard', icon: 'home', route: '/(tabs)/dashboard' },

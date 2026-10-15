@@ -15,6 +15,8 @@ export interface UserStats {
   isTimeExpired: boolean;
   isPro: boolean;
   planTier: 'starter' | 'basic' | 'pro' | 'premium';
+  planStatus: string;
+  isPastDue: boolean;
 
   // Level & XP
   completedLessonsCount: number;
@@ -198,6 +200,8 @@ export function useUserStats(): UserStats {
     isTimeExpired,
     isPro,
     planTier,
+    planStatus: user?.planStatus || 'active',
+    isPastDue: user?.planStatus === 'past_due',
     completedLessonsCount,
     currentLevelNumber,
     levelLabel,

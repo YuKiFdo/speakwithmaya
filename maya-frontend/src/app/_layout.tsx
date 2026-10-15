@@ -164,10 +164,6 @@ export default function RootLayout() {
           options={{ animation: 'fade', animationDuration: 240 }}
         />
         <Stack.Screen
-          name="onboarding/intro-call"
-          options={{ animation: 'slide_from_right', animationDuration: 280 }}
-        />
-        <Stack.Screen
           name="onboarding/connecting"
           options={{ animation: 'fade', animationDuration: 240 }}
         />

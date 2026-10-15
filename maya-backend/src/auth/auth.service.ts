@@ -444,15 +444,33 @@ export class AuthService {
 
     if (now >= resetDate) {
       const nextResetIso = new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString();
-      const updatedBalance = profile.monthly_minutes_allowance + (profile.add_on_minutes_balance || 0);
 
-      profile.minutes_balance = updatedBalance;
+      // If user's recurring subscription failed (past_due) or was canceled:
+      // Do NOT grant paid minutes without successful payment deduction.
+      if (profile.plan_tier !== 'starter' && profile.plan_status !== 'active') {
+        if (profile.plan_status === 'canceled') {
+          // Revert to free starter tier if subscription ended
+          profile.plan_tier = 'starter';
+          profile.monthly_minutes_allowance = 10;
+          profile.minutes_balance = 10 + (profile.add_on_minutes_balance || 0);
+        } else if (profile.plan_status === 'past_due') {
+          // Freeze paid tier quota until recurring charge is successfully captured
+          profile.minutes_balance = 0 + (profile.add_on_minutes_balance || 0);
+        }
+      } else {
+        const updatedBalance =
+          profile.monthly_minutes_allowance + (profile.add_on_minutes_balance || 0);
+        profile.minutes_balance = updatedBalance;
+      }
+
       profile.minutes_reset_at = nextResetIso;
 
       const { error: resetError } = await this.supabase
         .from('profiles')
         .update({
-          minutes_balance: updatedBalance,
+          plan_tier: profile.plan_tier,
+          minutes_balance: profile.minutes_balance,
+          monthly_minutes_allowance: profile.monthly_minutes_allowance,
           minutes_reset_at: nextResetIso,
           updated_at: new Date().toISOString(),
         })
