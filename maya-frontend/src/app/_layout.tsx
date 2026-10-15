@@ -59,69 +59,80 @@ export default function RootLayout() {
     ...Feather.font,
     ...MaterialIcons.font,
     ...MaterialCommunityIcons.font,
-    Outfit: Outfit_400Regular,
     'Outfit-Regular': Outfit_400Regular,
     'Outfit-Medium': Outfit_500Medium,
     'Outfit-SemiBold': Outfit_600SemiBold,
     'Outfit-Bold': Outfit_700Bold,
     'Outfit-ExtraBold': Outfit_800ExtraBold,
-    Inter: Inter_400Regular,
     'Inter-Regular': Inter_400Regular,
     'Inter-Medium': Inter_500Medium,
     'Inter-SemiBold': Inter_600SemiBold,
     'Inter-Bold': Inter_700Bold,
     'Inter-ExtraBold': Inter_800ExtraBold,
-    Outfit_400Regular,
-    Outfit_500Medium,
-    Outfit_600SemiBold,
-    Outfit_700Bold,
-    Outfit_800ExtraBold,
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-    Inter_800ExtraBold,
   });
 
   const [isAppReady, setIsAppReady] = useState(false);
+  const [fontTimeout, setFontTimeout] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(OnboardingStore.getState().isHydrated);
+
+  // Safety font timeout: if custom fonts take >1200ms over network, render immediately with system fallbacks
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFontTimeout(true);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     // Settle DOM layout and prevent any millisecond mobile flicker on web refresh
     const timer = setTimeout(() => {
       setIsAppReady(true);
-    }, 350);
+    }, 280);
     return () => clearTimeout(timer);
   }, []);
 
-  // Wait for encrypted storage hydration before rendering routes
+  // Wait for encrypted storage hydration before rendering routes (capped at 1000ms safety timeout)
   useEffect(() => {
     if (isStoreHydrated) return;
     let mounted = true;
+    const safetyTimer = setTimeout(() => {
+      if (mounted) setIsStoreHydrated(true);
+    }, 1000);
+
     OnboardingStore.waitForHydration().then(() => {
       if (mounted) setIsStoreHydrated(true);
     });
     const unsub = OnboardingStore.subscribe((state) => {
       if (state.isHydrated && mounted) setIsStoreHydrated(true);
     });
-    return () => { mounted = false; unsub(); };
+    return () => {
+      mounted = false;
+      clearTimeout(safetyTimer);
+      unsub();
+    };
   }, [isStoreHydrated]);
 
+  const isFontsReady = fontsLoaded || !!fontError || fontTimeout;
+
   useEffect(() => {
-    if ((fontsLoaded || fontError) && isAppReady) {
+    if (isFontsReady && isAppReady) {
       SplashScreen.hideAsync().catch(() => {});
       if (Platform.OS === 'web' && typeof document !== 'undefined') {
-        const loader = document.getElementById('app-initial-loader');
-        if (loader) {
-          loader.style.opacity = '0';
-          loader.style.pointerEvents = 'none';
-          setTimeout(() => loader.remove(), 260);
+        if ((window as any).__dismissAppLoader) {
+          (window as any).__dismissAppLoader();
+        } else {
+          const loader = document.getElementById('app-initial-loader');
+          if (loader) {
+            loader.style.opacity = '0';
+            loader.style.pointerEvents = 'none';
+            setTimeout(() => loader.remove(), 260);
+          }
         }
       }
     }
-  }, [fontsLoaded, fontError, isAppReady]);
+  }, [isFontsReady, isAppReady]);
 
-  if ((!fontsLoaded && !fontError) || !isAppReady || !isStoreHydrated) {
+  if (!isFontsReady || !isAppReady || !isStoreHydrated) {
     return <DesktopLoadingScreen message="Loading SpeakwithMaya..." />;
   }
 

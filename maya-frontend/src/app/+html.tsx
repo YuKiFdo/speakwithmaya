@@ -356,6 +356,38 @@ export default function RootHtml({ children }: PropsWithChildren) {
             </div>
           </div>
         </div>
+
+        {/* Fail-safe timeout & instant dismissal helper for pre-bundle loader */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                var isDismissed = false;
+                function dismissLoader() {
+                  if (isDismissed) return;
+                  isDismissed = true;
+                  var loader = document.getElementById('app-initial-loader');
+                  if (loader) {
+                    loader.style.transition = 'opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1)';
+                    loader.style.opacity = '0';
+                    loader.style.pointerEvents = 'none';
+                    setTimeout(function() {
+                      if (loader && loader.parentNode) {
+                        loader.parentNode.removeChild(loader);
+                      }
+                    }, 300);
+                  }
+                }
+                // Safety escape hatch: never lock the user screen for more than 2.8s under slow network
+                var timer = setTimeout(dismissLoader, 2800);
+                window.__dismissAppLoader = function() {
+                  clearTimeout(timer);
+                  dismissLoader();
+                };
+              })();
+            `,
+          }}
+        />
         {children}
       </body>
     </html>

@@ -129,28 +129,34 @@ function loadPersistedState(): OnboardingState {
         }
 
         // Decrypt asynchronously in background and notify listeners
-        decryptData(raw).then((decrypted) => {
-          if (decrypted) {
-            try {
-              const parsed = JSON.parse(decrypted);
-              memoryState = {
-                ...defaultState,
-                ...parsed,
-                isAuthenticated: !!parsed.accessToken,
-                isHydrated: true,
-              };
-            } catch {
+        decryptData(raw)
+          .then((decrypted) => {
+            if (decrypted) {
+              try {
+                const parsed = JSON.parse(decrypted);
+                memoryState = {
+                  ...defaultState,
+                  ...parsed,
+                  isAuthenticated: !!parsed.accessToken,
+                  isHydrated: true,
+                };
+              } catch {
+                memoryState = { ...defaultState, isHydrated: true };
+              }
+            } else {
+              // Tamper detected! Clear corrupted/tampered storage
+              console.warn('[OnboardingStore] ⚠️ Purging tampered client storage.');
+              window.localStorage.removeItem(STORAGE_KEY);
+              CookieStorage.delete('maya_auth_token');
               memoryState = { ...defaultState, isHydrated: true };
             }
-          } else {
-            // Tamper detected! Clear corrupted/tampered storage
-            console.warn('[OnboardingStore] ⚠️ Purging tampered client storage.');
-            window.localStorage.removeItem(STORAGE_KEY);
-            CookieStorage.delete('maya_auth_token');
+            markHydrated();
+          })
+          .catch((err) => {
+            console.warn('[OnboardingStore] Decryption error, proceeding with default state:', err);
             memoryState = { ...defaultState, isHydrated: true };
-          }
-          markHydrated();
-        });
+            markHydrated();
+          });
 
         // Return default (not yet hydrated) state — guard will wait for hydration
         return memoryState;
@@ -200,7 +206,13 @@ export const OnboardingStore = {
    * Use this to block routing decisions until state is ready.
    */
   waitForHydration(): Promise<void> {
-    return hydrationPromise;
+    if (memoryState.isHydrated) {
+      return Promise.resolve();
+    }
+    return Promise.race([
+      hydrationPromise,
+      new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+    ]);
   },
 
   subscribe(listener: (state: OnboardingState) => void): () => void {
