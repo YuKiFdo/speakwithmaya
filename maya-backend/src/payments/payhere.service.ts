@@ -381,6 +381,7 @@ export class PayHereService {
             {
               user_id: userId,
               payhere_subscription_id: payload.subscription_id,
+              customer_token: payload.customer_token || null,
               plan_tier: planTier,
               billing_cycle: payload.item_recurrence || '1 Month',
               amount_lkr: parseFloat(payload.payhere_amount),
@@ -754,9 +755,13 @@ export class PayHereService {
 
     if (!data) return null;
 
+    const hasCustomerToken = Boolean(data.customer_token && String(data.customer_token).trim().length > 0);
+
     return {
       ...data,
-      has_saved_card: !!(data.card_masked || data.payhere_subscription_id || (data as any).customer_token),
+      has_saved_card: Boolean(data.card_masked),
+      can_auto_charge: hasCustomerToken,
+      customer_token: data.customer_token || null,
     };
   }
 
@@ -780,12 +785,14 @@ export class PayHereService {
       this.logger.error(`[PayHereAutoCharge] Error looking up user subscription: ${subErr.message}`);
     }
 
-    if (!sub || (!sub.card_masked && !sub.payhere_subscription_id && !(sub as any).customer_token)) {
-      throw new BadRequestException('No pre-approved card found on file. Please complete standard checkout first.');
+    if (!sub || !sub.customer_token || !String(sub.customer_token).trim()) {
+      throw new BadRequestException(
+        'No pre-approved card token found on file for 1-click charging. Please complete payment via standard PayHere checkout.'
+      );
     }
 
-    const cardMasked = sub.card_masked || '···· 4582';
-    const customerToken = (sub as any).customer_token || sub.payhere_subscription_id;
+    const cardMasked = sub.card_masked || '···· Card';
+    const customerToken = String(sub.customer_token).trim();
 
     // 2. Resolve price, allowance, item details
     let amount = 0;
@@ -835,39 +842,61 @@ export class PayHereService {
       ? `MAYA-TOPUP-AUTO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`
       : `MAYA-SUB-AUTO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // 3. Trigger PayHere Automated Charging API if OAuth credentials are configured
-    if (this.appId && this.appSecret && customerToken) {
-      try {
-        const accessToken = await this.getOAuthAccessToken();
-        const chargeUrl = `${this.getBaseUrl()}/merchant/v1/payment/charge`;
-        this.logger.log(`[PayHereAutoCharge] Calling PayHere Charging API: ${chargeUrl} for order ${orderId}, amount=${amount} LKR...`);
+    // 3. Trigger PayHere Automated Charging API
+    if (!this.appId || !this.appSecret) {
+      throw new BadRequestException('PayHere Automated Charging credentials are not configured on the server.');
+    }
 
-        const chargeResponse = await fetch(chargeUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            type: 'PAYMENT',
-            order_id: orderId,
-            items: itemName,
-            currency: 'LKR',
-            amount: amount,
-            customer_token: customerToken,
-            custom_1: userId,
-            custom_2: dto.packageId || dto.planTier,
-            notify_url: this.notifyUrl,
-          }),
-        });
+    const accessToken = await this.getOAuthAccessToken();
+    const chargeUrl = `${this.getBaseUrl()}/merchant/v1/payment/charge`;
+    this.logger.log(`[PayHereAutoCharge] Calling PayHere Charging API: ${chargeUrl} for order ${orderId}, amount=${amount} LKR...`);
 
-        const chargeData = await chargeResponse.json();
-        this.logger.log(`[PayHereAutoCharge] Gateway response: ${JSON.stringify(chargeData)}`);
-      } catch (gatewayErr: any) {
-        this.logger.warn(`[PayHereAutoCharge] Note on gateway call: ${gatewayErr.message}`);
-      }
-    } else {
-      this.logger.log(`[PayHereAutoCharge] Simulating pre-approved token deduction for user ${userId} (order=${orderId})`);
+    let chargeData: any;
+    try {
+      const chargeResponse = await fetch(chargeUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'PAYMENT',
+          order_id: orderId,
+          items: itemName,
+          currency: 'LKR',
+          amount: amount,
+          customer_token: customerToken,
+          custom_1: userId,
+          custom_2: dto.packageId || dto.planTier,
+          notify_url: this.notifyUrl,
+        }),
+      });
+
+      chargeData = await chargeResponse.json();
+      this.logger.log(`[PayHereAutoCharge] Gateway response: ${JSON.stringify(chargeData)}`);
+    } catch (gatewayErr: any) {
+      this.logger.error(`[PayHereAutoCharge] Network error calling PayHere Charging API: ${gatewayErr.message}`);
+      throw new InternalServerErrorException(`Payment gateway connection failed: ${gatewayErr.message}`);
+    }
+
+    if (!chargeData || chargeData.status !== 1) {
+      const errorMsg = chargeData?.msg || 'Card charge declined by payment gateway';
+      this.logger.error(`[PayHereAutoCharge] Charge failed for order ${orderId}: ${errorMsg}`);
+
+      // Record failed transaction in orders table for audit trail
+      await this.supabase.from('orders').insert({
+        user_id: userId,
+        order_type: isTopup ? 'topup_minutes' : 'subscription_upgrade',
+        plan_tier: dto.planTier || sub.plan_tier,
+        amount_lkr: amount,
+        minutes_credited: 0,
+        payment_gateway: 'payhere_token',
+        gateway_payment_id: orderId,
+        status: 'failed',
+        raw_payload: chargeData,
+      });
+
+      throw new BadRequestException(`Payment failed: ${errorMsg}`);
     }
 
     // 4. Update Database: Credit minutes or activate plan

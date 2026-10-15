@@ -33,6 +33,7 @@ export interface SubscriptionRecord {
   id: string;
   user_id: string;
   payhere_subscription_id: string;
+  customer_token?: string | null;
   plan_tier: 'starter' | 'basic' | 'pro' | 'premium';
   billing_cycle: string;
   amount_lkr: number;
@@ -44,6 +45,7 @@ export interface SubscriptionRecord {
   card_expiry?: string;
   payment_method?: string;
   has_saved_card?: boolean;
+  can_auto_charge?: boolean;
   created_at: string;
   updated_at: string;
   profile?: {

@@ -332,9 +332,9 @@ export default function UpgradeScreen() {
 
     setLoadingPlanId(planId);
     try {
-      // 1. Check if user already has a saved card on file
+      // 1. Check if user already has a pre-approved token on file for 1-click upgrade
       const sub = await paymentApi.getMySubscription();
-      if (sub?.has_saved_card || sub?.card_masked) {
+      if (sub?.can_auto_charge && sub?.customer_token) {
         const targetPlan = PLANS.find((p) => p.id === planId);
         const planName = targetPlan?.name || planId.toUpperCase();
         const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';

@@ -258,9 +258,9 @@ export default function PersonalizedPlanScreen() {
         baselineScores: state.baselineScores || undefined,
       });
 
-      // 2. Check if user already has a pre-approved card on file
+      // 2. Check if user already has a pre-approved token on file for 1-click activation
       const sub = await paymentApi.getMySubscription();
-      if (sub?.has_saved_card || sub?.card_masked) {
+      if (sub?.can_auto_charge && sub?.customer_token) {
         const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
         const confirmed = await mayaAlert.confirm({
           title: '1-Click Activation',

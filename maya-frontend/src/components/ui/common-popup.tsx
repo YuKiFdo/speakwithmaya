@@ -368,9 +368,9 @@ export function CommonPopup({
 
     setPurchasingPkgId(pkg.id);
     try {
-      // 1. Check if user has a pre-approved saved card on file
+      // 1. Check if user has a verified pre-approved customer token for 1-click charging
       const sub = await paymentApi.getMySubscription();
-      if (sub?.has_saved_card || sub?.card_masked) {
+      if (sub?.can_auto_charge && sub?.customer_token) {
         const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
         const confirmed = await mayaAlert.confirm({
           title: '1-Click Deduction',

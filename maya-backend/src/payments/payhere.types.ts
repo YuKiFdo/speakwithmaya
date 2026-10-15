@@ -28,6 +28,7 @@ export interface PayHereWebhookPayload {
   order_id: string;
   payment_id: string;
   subscription_id?: string;
+  customer_token?: string;
   payhere_amount: string;
   payhere_currency: string;
   status_code: string; // "2", "0", "-1", "-2", "-3"

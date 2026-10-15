@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS public.subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   payhere_subscription_id TEXT UNIQUE,
+  customer_token TEXT,
   plan_tier TEXT CHECK (plan_tier IN ('starter', 'basic', 'pro', 'premium')) NOT NULL,
   billing_cycle TEXT NOT NULL, -- e.g. '1 Month', '3 Month', '1 Year'
   amount_lkr NUMERIC(10, 2) NOT NULL,
