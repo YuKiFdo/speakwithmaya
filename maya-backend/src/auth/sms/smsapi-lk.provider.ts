@@ -36,13 +36,17 @@ export class SmsApiLkProvider implements ISmsGatewayProvider {
     );
 
     try {
+      const headers = {
+        Authorization: `Bearer ${this.apiToken}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      };
+
       const response = await fetch(this.apiEndpoint, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiToken}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           recipient,
           sender_id: this.senderId,
@@ -65,16 +69,12 @@ export class SmsApiLkProvider implements ISmsGatewayProvider {
       this.logger.warn(`[SMSAPI.LK] ⚠️ Sender ID '${this.senderId}' rejected by gateway (Status ${response.status}: ${data?.message || 'Failed'}). Mask may not be approved yet by telecom operators.`);
 
       // Automatic fallback: If custom sender ID is not yet approved by TRCSL/telecom operators,
-      // fallback to the approved account mask 'KoreaMaster' so the user receives their OTP immediately!
+      // fallback to the approved account mask 'SMSAPI Demo' so the user receives their OTP immediately!
       if (this.senderId !== 'SMSAPI Demo') {
         this.logger.log(`[SMSAPI.LK] 🔄 Auto-retrying delivery with approved account sender ID 'SMSAPI Demo'...`);
         const fallbackRes = await fetch(this.apiEndpoint, {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.apiToken}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
+          headers,
           body: JSON.stringify({
             recipient,
             sender_id: 'SMSAPI Demo',
