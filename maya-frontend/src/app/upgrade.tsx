@@ -18,6 +18,7 @@ import { Radii } from '@/theme/tokens';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { Ionicons } from '@expo/vector-icons';
+import { useUserStats } from '@/hooks/useUserStats';
 
 // ─── Plan Data ───────────────────────────────────────────────────────────────
 
@@ -229,6 +230,7 @@ const TRUST_ICON_MAP = {
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 export default function UpgradeScreen() {
+  const stats = useUserStats();
   const { isPhone } = useBreakpoint();
   const isDesktop = !isPhone;
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -323,10 +325,10 @@ export default function UpgradeScreen() {
           <DesktopSidebar
             activeTab={activeTab}
             onSelectTab={handleSelectTab}
-            isPro={false}
-            usedMinutes={320}
-            totalMinutes={600}
-            resetsInText="Resets in 12 days"
+            isPro={stats.isPro}
+            usedMinutes={stats.usedMinutes}
+            totalMinutes={stats.totalMinutes}
+            resetsInText={stats.resetsInText}
             onUpgrade={() => {}}
             onGetExtraTime={() => {}}
           />
@@ -357,7 +359,10 @@ export default function UpgradeScreen() {
               </View>
 
               <UserLevelBadge
-                isPro={false}
+                levelLabel={stats.levelLabel}
+                xpLabel={stats.xpLabel}
+                progress={stats.progress}
+                isPro={stats.isPro}
                 avatarSource={require('@/assets/images/maya-avatar.png')}
               />
             </View>
@@ -390,7 +395,10 @@ export default function UpgradeScreen() {
                   </Text>
                 </View>
                 <UserLevelBadge
-                  isPro={false}
+                  levelLabel={stats.levelLabel}
+                  xpLabel={stats.xpLabel}
+                  progress={stats.progress}
+                  isPro={stats.isPro}
                   avatarSource={require('@/assets/images/maya-avatar.png')}
                 />
               </View>

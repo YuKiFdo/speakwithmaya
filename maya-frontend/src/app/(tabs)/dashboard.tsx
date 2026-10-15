@@ -26,9 +26,11 @@ import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { CreateSessionModal, CreateSessionConfig } from '@/components/call/create-session-modal';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { Feather } from '@expo/vector-icons';
-import { useOnboardingStore } from '@/services/store/onboarding-store';
+import { useOnboardingStore, OnboardingStore } from '@/services/store/onboarding-store';
 import { CallSessionStore } from '@/services/store/call-session-store';
 import { authService } from '@/services/auth/auth-service';
+import { useUserStats } from '@/hooks/useUserStats';
+import { UserLevelBadge } from '@/components/ui/user-level-badge';
 
 interface ScenarioItem {
   id: string;
@@ -97,11 +99,16 @@ export default function DashboardScreen() {
   }>();
 
   const store = useOnboardingStore();
+  const stats = useUserStats();
   const user = store.user;
-  const displayName = user?.displayName || store.name || params.name || '';
-  const minutesBalance = user?.minutesBalance ?? 10;
-  const isTimeExpired = minutesBalance <= 0;
-  const planTier = user?.planTier || (params.pro === 'false' ? 'starter' : 'starter');
+  const displayName = stats.displayName || params.name || '';
+  const minutesBalance = stats.minutesBalance;
+  const isTimeExpired = stats.isTimeExpired;
+  const planTier = stats.planTier;
+  const isPro = stats.isPro;
+  const usedMinutes = stats.usedMinutes;
+  const totalMinutes = stats.totalMinutes;
+  const resetsInText = stats.resetsInText;
 
   const { isPhone } = useBreakpoint();
   const isDesktop = !isPhone;
@@ -148,12 +155,17 @@ export default function DashboardScreen() {
     : 16;
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('home');
-  const [isPro, setIsPro] = useState(planTier === 'pro' || planTier === 'premium');
   const [activePopup, setActivePopup] = useState<PopupPreset | null>(
     (params.popup as PopupPreset) || null
   );
   const [createSessionVisible, setCreateSessionVisible] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<{ id: string; title: string } | null>(null);
+
+  // When user reaches dashboard, ensure database and store record this as their last active step
+  useEffect(() => {
+    OnboardingStore.setOnboardingCompleted();
+    authService.syncStep('/(tabs)/dashboard');
+  }, []);
 
   const handleOpenCreateSession = (scenario?: { id: string; title: string }) => {
     setSelectedScenario(scenario || null);
@@ -221,6 +233,9 @@ export default function DashboardScreen() {
             activeTab={activeTab}
             onSelectTab={handleSelectTab}
             isPro={isPro}
+            usedMinutes={usedMinutes}
+            totalMinutes={totalMinutes}
+            resetsInText={resetsInText}
             onUpgrade={() => router.push('/upgrade')}
             onGetExtraTime={() => setActivePopup('get-extra-time')}
           />
@@ -251,35 +266,14 @@ export default function DashboardScreen() {
               </View>
 
               {/* User Level Badge */}
-              <Pressable
-                style={styles.userBadgeRow}
+              <UserLevelBadge
+                levelLabel={stats.levelLabel}
+                xpLabel={stats.xpLabel}
+                progress={stats.progress}
+                isPro={isPro}
+                avatarSource={require('@/assets/images/maya-avatar.png')}
                 onPress={() => setActivePopup('level-up')}
-                accessibilityRole="button"
-                accessibilityLabel="View Level 4 progress"
-              >
-                <View style={styles.levelProgressCol}>
-                  <View style={styles.levelNameRow}>
-                    <Text style={styles.levelName}>Level 4</Text>
-                    {isPro && (
-                      <View style={styles.proBadge}>
-                        <CrownSolidIcon color="#ffffff" size={10} />
-                        <Text style={styles.proBadgeText}>PRO</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.xpText}>420 / 800 XP</Text>
-                  <View style={styles.miniProgressTrack}>
-                    <View style={[styles.miniProgressFill, { width: '52%' }]} />
-                  </View>
-                </View>
-                <View style={styles.userAvatarWrapper}>
-                  <Image
-                    source={require('@/assets/images/maya-avatar.png')}
-                    style={styles.userAvatarImage}
-                    resizeMode="cover"
-                  />
-                </View>
-              </Pressable>
+              />
             </View>
           )}
 
@@ -298,35 +292,14 @@ export default function DashboardScreen() {
                 </View>
 
                 {/* User Level Badge */}
-                <Pressable
-                  style={styles.userBadgeRow}
+                <UserLevelBadge
+                  levelLabel={stats.levelLabel}
+                  xpLabel={stats.xpLabel}
+                  progress={stats.progress}
+                  isPro={isPro}
+                  avatarSource={require('@/assets/images/maya-avatar.png')}
                   onPress={() => setActivePopup('level-up')}
-                  accessibilityRole="button"
-                  accessibilityLabel="View Level 4 progress"
-                >
-                  <View style={styles.levelProgressCol}>
-                    <View style={styles.levelNameRow}>
-                      <Text style={styles.levelName}>Level 4</Text>
-                      {isPro && (
-                        <View style={styles.proBadge}>
-                          <CrownSolidIcon color="#ffffff" size={10} />
-                          <Text style={styles.proBadgeText}>PRO</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.xpText}>420 / 800 XP</Text>
-                    <View style={styles.miniProgressTrack}>
-                      <View style={[styles.miniProgressFill, { width: '52%' }]} />
-                    </View>
-                  </View>
-                  <View style={styles.userAvatarWrapper}>
-                    <Image
-                      source={require('@/assets/images/maya-avatar.png')}
-                      style={styles.userAvatarImage}
-                      resizeMode="cover"
-                    />
-                  </View>
-                </Pressable>
+                />
               </View>
             )}
 
@@ -537,14 +510,14 @@ export default function DashboardScreen() {
                 <View style={styles.talkTimeHeader}>
                   <Text style={styles.talkTimeTitle}>Your Talk Time</Text>
                   <Text style={styles.talkTimeReset}>
-                    {isPro ? 'Resets in 12 days' : 'Resets in 24 hours'}
+                    {resetsInText}
                   </Text>
                 </View>
 
                 <Text style={styles.talkTimeMinutes}>
-                  {isPro ? '320' : '01'}{' '}
+                  {String(usedMinutes).padStart(2, '0')}{' '}
                   <Text style={styles.talkTimeTotal}>
-                    / {isPro ? '600' : '5'} minutes
+                    / {totalMinutes} minutes
                   </Text>
                 </Text>
 
@@ -552,7 +525,12 @@ export default function DashboardScreen() {
                   <View
                     style={[
                       styles.progressBarFill,
-                      { width: isPro ? '53%' : '20%' },
+                      {
+                        width: `${Math.min(
+                          100,
+                          Math.round((usedMinutes / Math.max(1, totalMinutes)) * 100)
+                        )}%`,
+                      },
                     ]}
                   />
                 </View>
@@ -661,9 +639,21 @@ export default function DashboardScreen() {
         <CommonPopup
           visible={activePopup !== null}
           preset={activePopup || 'custom'}
+          levelNumber={stats.currentLevelNumber}
+          title={activePopup === 'level-up' ? 'Your Level Progress' : undefined}
+          subtitle={
+            activePopup === 'level-up'
+              ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep completing speaking lessons to reach Level ${stats.currentLevelNumber + 1}!`
+              : undefined
+          }
+          primaryButtonText={activePopup === 'level-up' ? 'View Learning Roadmap' : undefined}
+          primaryButtonIcon={activePopup === 'level-up' ? 'arrow' : undefined}
+          showPrimaryArrow={activePopup === 'level-up' ? true : undefined}
           onClose={() => setActivePopup(null)}
           onPrimaryPress={() => {
-            if (activePopup === 'unlock-premium' || activePopup === 'daily-limit') {
+            if (activePopup === 'level-up') {
+              router.push('/(tabs)/roadmap');
+            } else if (activePopup === 'unlock-premium' || activePopup === 'daily-limit') {
               router.push('/upgrade');
             } else if (activePopup === 'practice-complete') {
               handleStartTalking();

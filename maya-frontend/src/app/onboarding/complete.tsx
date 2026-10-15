@@ -19,6 +19,8 @@ import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getLatestSessionReport, ExtendedSessionReport } from '@/utils/session-report-store';
 import { playUnderstoodTapSound, playFinishReviewFanfare, playGoodJobSound } from '@/services/sound/sound-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
+import { authService } from '@/services/auth/auth-service';
 
 const GLOW_PARTICLES = [
   { id: 1, left: '12%', top: '65%', size: 4, delay: '0s', duration: '2.5s' },
@@ -353,6 +355,8 @@ export default function SessionCompleteScreen() {
     playUnderstoodTapSound();
     const activeSessionId = params.sessionId || report?.id || (report as any)?.sessionId || '';
     if (isGeneral) {
+      OnboardingStore.setOnboardingCompleted();
+      authService.syncStep('/(tabs)/dashboard');
       router.replace('/(tabs)/dashboard');
       return;
     }

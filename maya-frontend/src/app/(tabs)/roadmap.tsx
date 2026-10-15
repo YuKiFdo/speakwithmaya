@@ -41,6 +41,7 @@ import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { MissionCardModal } from '@/components/roadmap/mission-card-modal';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { CallSessionStore } from '@/services/store/call-session-store';
+import { useUserStats } from '@/hooks/useUserStats';
 import {
   RoadmapGlowParticles,
   buildDesktopPathSegments,
@@ -79,14 +80,15 @@ function getInitialMilestones(): MilestoneItem[] {
 
 export default function RoadmapScreen() {
   const params = useLocalSearchParams<{ name?: string }>();
-  const displayName = params.name || 'Tharindu';
+  const stats = useUserStats();
+  const displayName = stats.displayName || params.name || 'Learner';
   const { isPhone } = useBreakpoint();
   const onboardingState = useOnboardingStore();
   const isDesktop = !isPhone;
   const { width: windowWidth } = useWindowDimensions();
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('roadmap');
-  const [isPro, setIsPro] = useState(false);
+  const isPro = stats.isPro;
   const [activePopup, setActivePopup] = useState<PopupPreset | null>(null);
   const [lockedTargetLevel, setLockedTargetLevel] = useState<MilestoneItem | null>(null);
   const [selectedMission, setSelectedMission] = useState<MilestoneItem | null>(null);
@@ -516,6 +518,9 @@ export default function RoadmapScreen() {
             activeTab="roadmap"
             onSelectTab={handleSelectTab}
             isPro={isPro}
+            usedMinutes={stats.usedMinutes}
+            totalMinutes={stats.totalMinutes}
+            resetsInText={stats.resetsInText}
             onUpgrade={() => router.push('/upgrade')}
             onGetExtraTime={() => setActivePopup('get-extra-time')}
           />
@@ -538,6 +543,9 @@ export default function RoadmapScreen() {
               </View>
 
               <UserLevelBadge
+                levelLabel={stats.levelLabel}
+                xpLabel={stats.xpLabel}
+                progress={stats.progress}
                 isPro={isPro}
                 avatarSource={require('@/assets/images/maya-avatar.png')}
                 onPress={() => setActivePopup('level-up')}
@@ -566,6 +574,9 @@ export default function RoadmapScreen() {
 
                 {/* User Level Badge */}
                 <UserLevelBadge
+                  levelLabel={stats.levelLabel}
+                  xpLabel={stats.xpLabel}
+                  progress={stats.progress}
                   isPro={isPro}
                   avatarSource={require('@/assets/images/maya-avatar.png')}
                   onPress={() => setActivePopup('level-up')}
@@ -997,12 +1008,20 @@ export default function RoadmapScreen() {
         <CommonPopup
           visible={activePopup !== null}
           preset={effectivePopup}
-          levelNumber={effectiveLockedLevel?.levelNumber}
-          title={isLevelLocked ? 'Level Locked' : undefined}
+          levelNumber={effectiveLockedLevel?.levelNumber || stats.currentLevelNumber}
+          title={
+            isLevelLocked
+              ? 'Level Locked'
+              : activePopup === 'level-up'
+              ? 'Your Level Progress'
+              : undefined
+          }
           titleHighlight={isLevelLocked ? 'Locked' : undefined}
           subtitle={
             isLevelLocked && effectiveLockedLevel
               ? `Complete Level ${Math.max(1, (effectiveLockedLevel.levelNumber ?? 2) - 1)} first to unlock this session and keep moving forward on your journey.`
+              : activePopup === 'level-up'
+              ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep completing lessons on your roadmap to reach Level ${stats.currentLevelNumber + 1}!`
               : undefined
           }
           primaryButtonText={
@@ -1010,6 +1029,8 @@ export default function RoadmapScreen() {
               ? currentActiveLevel
                 ? `Go to Level ${currentActiveLevel.levelNumber}`
                 : 'Got It'
+              : activePopup === 'level-up'
+              ? 'Keep Learning'
               : undefined
           }
           primaryButtonIcon={isLevelLocked ? 'play' : undefined}

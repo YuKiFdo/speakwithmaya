@@ -28,9 +28,9 @@ export interface UserLevelBadgeProps {
  * Source-of-truth styling matches the dashboard home screen.
  */
 export function UserLevelBadge({
-  levelLabel = 'Level 4',
-  xpLabel = '420 / 800 XP',
-  progress = 0.52,
+  levelLabel = 'Level 1',
+  xpLabel = '0 / 500 XP',
+  progress = 0,
   isPro = false,
   avatarSource,
   onPress,

@@ -110,9 +110,9 @@ export function DesktopSidebar({
   const isCompact = windowHeight < 900;
   const isVeryCompact = windowHeight < 740;
 
-  const currentUsed = usedMinutes ?? (isPro ? 320 : 1);
-  const currentTotal = totalMinutes ?? (isPro ? 600 : 5);
-  const currentResetsIn = resetsInText ?? (isPro ? 'Resets in 12 days' : 'Resets in 24 hours');
+  const currentUsed = usedMinutes ?? (isPro ? 320 : 0);
+  const currentTotal = totalMinutes ?? (isPro ? 600 : 10);
+  const currentResetsIn = resetsInText ?? (isPro ? 'Resets in 30 days' : 'Resets in 30 days');
   const percentFilled = Math.min(100, Math.round((currentUsed / currentTotal) * 100));
   const displayMinutes = isPro ? String(currentUsed) : String(currentUsed).padStart(2, '0');
 

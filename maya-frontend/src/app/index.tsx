@@ -29,18 +29,46 @@ export default function WelcomeScreen() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [buttonVisible, setButtonVisible] = useState(false);
 
-  // Auto-resume check on app open: If user already finished onboarding, go straight to dashboard.
+  // Post-auth routes require a valid session to resume into
+  const POST_AUTH_ROUTES = [
+    '/onboarding/goal', '/onboarding/challenge', '/onboarding/level',
+    '/onboarding/language', '/onboarding/employment', '/onboarding/daily-goal',
+    '/onboarding/social-proof', '/onboarding/call', '/onboarding/connecting',
+    '/onboarding/analyzing', '/onboarding/feedback', '/onboarding/session-review',
+    '/onboarding/building-plan', '/onboarding/special-offer', '/onboarding/claim-discount',
+    '/onboarding/personalized-plan', '/onboarding/complete',
+  ];
+
+  // Auto-resume check on app open: waits for encrypted storage hydration first.
+  // If user already finished onboarding, go straight to dashboard.
   // If user dropped off mid-onboarding (e.g. at /onboarding/personalized-plan), resume right there.
   useEffect(() => {
-    const state = OnboardingStore.getState();
-    if (state.isCompleted) {
-      router.replace('/(tabs)/dashboard');
-      return;
-    }
-    if (state.lastActiveRoute && state.lastActiveRoute !== '/' && state.lastActiveRoute !== '/onboarding/name') {
-      router.replace(state.lastActiveRoute as any);
-      return;
-    }
+    let mounted = true;
+
+    OnboardingStore.waitForHydration().then(() => {
+      if (!mounted) return;
+      const state = OnboardingStore.getState();
+
+      if (state.isCompleted && state.isAuthenticated) {
+        router.replace('/(tabs)/dashboard');
+        return;
+      }
+
+      if (state.lastActiveRoute && state.lastActiveRoute !== '/' && state.lastActiveRoute !== '/onboarding/name') {
+        // If resuming to a post-auth route, verify we actually have a valid token
+        const isPostAuth = POST_AUTH_ROUTES.includes(state.lastActiveRoute) ||
+          state.lastActiveRoute.startsWith('/(tabs)');
+        if (isPostAuth && !state.isAuthenticated) {
+          // Auth was lost — restart from phone verification
+          router.replace('/onboarding/phone');
+          return;
+        }
+        router.replace(state.lastActiveRoute as any);
+        return;
+      }
+    });
+
+    return () => { mounted = false; };
   }, []);
 
   // Animations

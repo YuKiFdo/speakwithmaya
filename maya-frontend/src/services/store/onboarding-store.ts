@@ -18,6 +18,7 @@ export interface UserSessionData {
   dailyGoalMinutes?: number | null;
   lastActiveStep?: string | null;
   isCompleted?: boolean;
+  createdAt?: string;
 }
 
 export interface BaselineScores {
@@ -36,6 +37,9 @@ export interface OnboardingState {
   // Navigation resume point
   lastActiveRoute: string | null;
   isCompleted: boolean;
+
+  // Hydration flag — true once encrypted storage has been fully decrypted & loaded
+  isHydrated: boolean;
 
   // Onboarding answers
   name: string;
@@ -59,6 +63,7 @@ const defaultState: OnboardingState = {
   isAuthenticated: false,
   lastActiveRoute: null,
   isCompleted: false,
+  isHydrated: false,
   name: '',
   phone: '',
   goal: '',
@@ -86,6 +91,19 @@ import {
   CookieStorage,
 } from '@/utils/encrypted-storage';
 
+// Hydration tracking — resolves once encrypted storage has been fully loaded
+let hydrationResolve: (() => void) | null = null;
+const hydrationPromise = new Promise<void>((resolve) => {
+  hydrationResolve = resolve;
+});
+
+function markHydrated() {
+  memoryState = { ...memoryState, isHydrated: true };
+  hydrationResolve?.();
+  hydrationResolve = null;
+  notify();
+}
+
 // Cross-platform persistence adapter with AES-GCM encryption & tamper detection
 function loadPersistedState(): OnboardingState {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
@@ -95,15 +113,18 @@ function loadPersistedState(): OnboardingState {
         // If legacy cleartext JSON, parse immediately and queue encrypted migration
         if (raw.startsWith('{')) {
           const parsed = JSON.parse(raw);
-          const state = {
+          const state: OnboardingState = {
             ...defaultState,
             ...parsed,
             isAuthenticated: !!parsed.accessToken,
+            isHydrated: true,
           };
           // Migrate to encrypted payload in background
           encryptData(JSON.stringify(state)).then((enc) => {
             window.localStorage.setItem(STORAGE_KEY, enc);
           });
+          // Resolve hydration immediately for legacy cleartext
+          setTimeout(() => { hydrationResolve?.(); hydrationResolve = null; }, 0);
           return state;
         }
 
@@ -116,29 +137,40 @@ function loadPersistedState(): OnboardingState {
                 ...defaultState,
                 ...parsed,
                 isAuthenticated: !!parsed.accessToken,
+                isHydrated: true,
               };
-              notify();
-            } catch {}
+            } catch {
+              memoryState = { ...defaultState, isHydrated: true };
+            }
           } else {
             // Tamper detected! Clear corrupted/tampered storage
             console.warn('[OnboardingStore] ⚠️ Purging tampered client storage.');
             window.localStorage.removeItem(STORAGE_KEY);
             CookieStorage.delete('maya_auth_token');
-            memoryState = { ...defaultState };
-            notify();
+            memoryState = { ...defaultState, isHydrated: true };
           }
+          markHydrated();
         });
+
+        // Return default (not yet hydrated) state — guard will wait for hydration
+        return memoryState;
       }
     } catch {}
   }
-  return memoryState;
+
+  // No persisted data or not on web — hydrated immediately
+  const immediateState = { ...defaultState, isHydrated: true };
+  setTimeout(() => { hydrationResolve?.(); hydrationResolve = null; }, 0);
+  return immediateState;
 }
 
 function persistState(state: OnboardingState) {
   memoryState = state;
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
     try {
-      const json = JSON.stringify(state);
+      // Don't persist the isHydrated flag — it's runtime-only
+      const { isHydrated, ...persistable } = state;
+      const json = JSON.stringify(persistable);
       // Save encrypted envelope into localStorage
       encryptData(json).then((encrypted) => {
         window.localStorage.setItem(STORAGE_KEY, encrypted);
@@ -163,6 +195,14 @@ export const OnboardingStore = {
     return memoryState;
   },
 
+  /**
+   * Returns a promise that resolves once encrypted storage has been fully loaded.
+   * Use this to block routing decisions until state is ready.
+   */
+  waitForHydration(): Promise<void> {
+    return hydrationPromise;
+  },
+
   subscribe(listener: (state: OnboardingState) => void): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);
@@ -179,7 +219,7 @@ export const OnboardingStore = {
       user,
       isAuthenticated: true,
       phone: user.phoneNumber || memoryState.phone,
-      name: user.displayName || memoryState.name,
+      name: user.displayName !== undefined && user.displayName !== null && user.displayName !== '' ? user.displayName : memoryState.name,
       level: user.level || memoryState.level,
       goal: user.goal || memoryState.goal,
       challenge: user.challenge || memoryState.challenge,
@@ -210,6 +250,12 @@ export const OnboardingStore = {
     const updated: OnboardingState = {
       ...memoryState,
       lastActiveRoute: route,
+      user: memoryState.user
+        ? {
+            ...memoryState.user,
+            lastActiveStep: route,
+          }
+        : null,
     };
     persistState(updated);
   },
@@ -222,6 +268,13 @@ export const OnboardingStore = {
       ...memoryState,
       isCompleted: true,
       lastActiveRoute: '/(tabs)/dashboard',
+      user: memoryState.user
+        ? {
+            ...memoryState.user,
+            isCompleted: true,
+            lastActiveStep: '/(tabs)/dashboard',
+          }
+        : null,
     };
     persistState(updated);
   },
@@ -247,7 +300,8 @@ export const OnboardingStore = {
         CookieStorage.delete('maya_auth_token');
       } catch {}
     }
-    memoryState = { ...defaultState };
+    // Keep isHydrated true — the store is already loaded, this is a runtime clear (logout)
+    memoryState = { ...defaultState, isHydrated: true };
     notify();
   },
 };

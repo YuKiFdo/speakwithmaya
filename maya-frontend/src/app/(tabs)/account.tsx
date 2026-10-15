@@ -8,6 +8,9 @@ import {
   ScrollView,
   Platform,
   Linking,
+  Modal,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -20,24 +23,71 @@ import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CrownNavIcon } from '@/components/icons/nav-icons';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
+import { useUserStats } from '@/hooks/useUserStats';
 
 const PLAN_CROWN_IMAGE = require('@/assets/images/plan-crown.png');
 
 export default function AccountScreen() {
   const store = useOnboardingStore();
-  const user = store.user;
-  const displayName = user?.displayName || store.name || 'Tharindu Fernando';
-  const phoneNumber = user?.phoneNumber || store.phone || '+94 77 123 4567';
-  const minutesBalance = user?.minutesBalance ?? 10;
-  const isTimeExpired = minutesBalance <= 0;
-  const currentPlanTier = user?.planTier || (store.isCompleted ? 'starter' : 'starter');
+  const stats = useUserStats();
+  const displayName = stats.displayName;
+  const phoneNumber = stats.phoneNumber || '+94 77 123 4567';
+  const minutesBalance = stats.minutesBalance;
+  const isTimeExpired = stats.isTimeExpired;
+  const currentPlanTier = stats.planTier;
+  const isPro = stats.isPro;
+  const usedMinutes = stats.usedMinutes;
+  const totalMinutes = stats.totalMinutes;
+  const resetsInText = stats.resetsInText;
 
   const { isPhone } = useBreakpoint();
   const isDesktop = !isPhone;
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('account');
-  const [isPro, setIsPro] = useState(currentPlanTier === 'pro' || currentPlanTier === 'premium');
   const [activePopup, setActivePopup] = useState<PopupPreset | null>(null);
+
+  // Edit Profile & Preferences modal state
+  const user = store.user;
+  const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
+  const [editName, setEditName] = useState(displayName);
+  const [editLang, setEditLang] = useState<'sinhala' | 'tamil' | 'english'>(
+    (user?.nativeLanguage as any) || 'sinhala'
+  );
+  const [editGoal, setEditGoal] = useState<number>(user?.dailyGoalMinutes || 10);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setEditName(displayName);
+    if (user?.nativeLanguage) {
+      setEditLang(user.nativeLanguage as any);
+    }
+    if (user?.dailyGoalMinutes) {
+      setEditGoal(user.dailyGoalMinutes);
+    }
+  }, [displayName, user?.nativeLanguage, user?.dailyGoalMinutes]);
+
+  const handleOpenEditModal = () => {
+    setEditName(displayName);
+    setEditLang((user?.nativeLanguage as any) || 'sinhala');
+    setEditGoal(user?.dailyGoalMinutes || 10);
+    setIsEditProfileModalOpen(true);
+  };
+
+  const handleSaveProfile = async () => {
+    if (!editName.trim()) return;
+    setIsSaving(true);
+    try {
+      await authService.savePreferences({
+        displayName: editName.trim(),
+        nativeLanguage: editLang,
+        dailyGoalMinutes: editGoal,
+      });
+      await stats.refreshStats();
+      setIsEditProfileModalOpen(false);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   useEffect(() => {
     authService.fetchUserProfile();
@@ -68,6 +118,9 @@ export default function AccountScreen() {
             activeTab="account"
             onSelectTab={handleSelectTab}
             isPro={isPro}
+            usedMinutes={usedMinutes}
+            totalMinutes={totalMinutes}
+            resetsInText={resetsInText}
             onUpgrade={() => router.push('/upgrade')}
             onGetExtraTime={() => setActivePopup('get-extra-time')}
           />
@@ -88,6 +141,9 @@ export default function AccountScreen() {
               </View>
 
               <UserLevelBadge
+                levelLabel={stats.levelLabel}
+                xpLabel={stats.xpLabel}
+                progress={stats.progress}
                 isPro={isPro}
                 avatarSource={require('@/assets/images/maya-avatar.png')}
                 onPress={() => setActivePopup('level-up')}
@@ -115,6 +171,9 @@ export default function AccountScreen() {
                 </View>
 
                 <UserLevelBadge
+                  levelLabel={stats.levelLabel}
+                  xpLabel={stats.xpLabel}
+                  progress={stats.progress}
                   isPro={isPro}
                   avatarSource={require('@/assets/images/maya-avatar.png')}
                   onPress={() => setActivePopup('level-up')}
@@ -139,15 +198,25 @@ export default function AccountScreen() {
                 <View style={styles.desktopLeftCol}>
                   <ProfileCard
                     name={displayName}
+                    initials={stats.initials}
+                    memberSince={stats.memberSinceText}
                     isPro={isPro}
-                    onEdit={() => setActivePopup('practice-complete')}
-                    onTogglePlan={() => setIsPro((prev) => !prev)}
+                    onEdit={handleOpenEditModal}
+                    onTogglePlan={() => {}}
                     onCancelSubscription={() => setActivePopup('level-locked')}
                   />
 
-                  <StatsCard />
+                  <StatsCard
+                    xp={stats.totalXp}
+                    levelNumber={stats.currentLevelNumber}
+                    lessonsCompleted={stats.completedLessonsCount}
+                  />
 
-                  <PreferencesCard onRowPress={(id) => {}} />
+                  <PreferencesCard
+                    language={stats.nativeLanguageDisplay}
+                    dailyGoal={stats.dailyGoalDisplay}
+                    onRowPress={() => handleOpenEditModal()}
+                  />
                 </View>
 
                 {/* RIGHT COLUMN */}
@@ -155,10 +224,10 @@ export default function AccountScreen() {
                   <CurrentPlanCard
                     planTier={currentPlanTier}
                     minutesBalance={minutesBalance}
-                    monthlyAllowance={user?.monthlyMinutesAllowance ?? 10}
+                    monthlyAllowance={stats.monthlyMinutesAllowance}
                     isTimeExpired={isTimeExpired}
                     phone={phoneNumber}
-                    renewalDate={user?.minutesResetAt ? new Date(user.minutesResetAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Next Month'}
+                    renewalDate={stats.resetsInText}
                     onUpgrade={() => router.push('/upgrade')}
                     onGetExtraTime={() => setActivePopup('get-extra-time')}
                     onChangePayment={() => {}}
@@ -173,27 +242,37 @@ export default function AccountScreen() {
               <View style={styles.mobileStackContainer}>
                 <ProfileCard
                   name={displayName}
+                  initials={stats.initials}
+                  memberSince={stats.memberSinceText}
                   isPro={isPro}
-                  onEdit={() => setActivePopup('practice-complete')}
-                  onTogglePlan={() => setIsPro((prev) => !prev)}
+                  onEdit={handleOpenEditModal}
+                  onTogglePlan={() => {}}
                   onCancelSubscription={() => setActivePopup('level-locked')}
                 />
 
-                <StatsCard />
+                <StatsCard
+                  xp={stats.totalXp}
+                  levelNumber={stats.currentLevelNumber}
+                  lessonsCompleted={stats.completedLessonsCount}
+                />
 
                 <CurrentPlanCard
                   planTier={currentPlanTier}
                   minutesBalance={minutesBalance}
-                  monthlyAllowance={user?.monthlyMinutesAllowance ?? 10}
+                  monthlyAllowance={stats.monthlyMinutesAllowance}
                   isTimeExpired={isTimeExpired}
                   phone={phoneNumber}
-                  renewalDate={user?.minutesResetAt ? new Date(user.minutesResetAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Next Month'}
+                  renewalDate={stats.resetsInText}
                   onUpgrade={() => router.push('/upgrade')}
                   onGetExtraTime={() => setActivePopup('get-extra-time')}
                   onChangePayment={() => {}}
                 />
 
-                <PreferencesCard onRowPress={(id) => {}} />
+                <PreferencesCard
+                  language={stats.nativeLanguageDisplay}
+                  dailyGoal={stats.dailyGoalDisplay}
+                  onRowPress={() => handleOpenEditModal()}
+                />
 
                 <CustomerSupportCard onEmailPress={handleSupportEmail} />
 
@@ -205,13 +284,124 @@ export default function AccountScreen() {
           </ScrollView>
         </View>
 
+        {/* EDIT PROFILE & PREFERENCES MODAL */}
+        <Modal
+          visible={isEditProfileModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsEditProfileModalOpen(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Edit Profile & Settings</Text>
+                <Pressable
+                  onPress={() => setIsEditProfileModalOpen(false)}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.modalCloseBtn, pressed && { opacity: 0.6 }]}
+                >
+                  <Feather name="x" size={20} color="#64748B" />
+                </Pressable>
+              </View>
+
+              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+                {/* Name Field */}
+                <Text style={styles.modalInputLabel}>Display Name</Text>
+                <TextInput
+                  style={styles.modalTextInput}
+                  value={editName}
+                  onChangeText={setEditName}
+                  placeholder="Enter your name"
+                  placeholderTextColor="#94A3B8"
+                />
+
+                {/* Explanation Language */}
+                <Text style={[styles.modalInputLabel, { marginTop: 16 }]}>Explanation Language</Text>
+                <View style={styles.chipRow}>
+                  {(['sinhala', 'tamil', 'english'] as const).map((lang) => {
+                    const isSelected = editLang === lang;
+                    const label = lang.charAt(0).toUpperCase() + lang.slice(1);
+                    return (
+                      <Pressable
+                        key={lang}
+                        style={[styles.modalChip, isSelected && styles.modalChipActive]}
+                        onPress={() => setEditLang(lang)}
+                      >
+                        <Text style={[styles.modalChipText, isSelected && styles.modalChipTextActive]}>
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {/* Daily Goal Minutes */}
+                <Text style={[styles.modalInputLabel, { marginTop: 16 }]}>Daily Practice Goal</Text>
+                <View style={styles.chipRow}>
+                  {[5, 10, 15, 20].map((mins) => {
+                    const isSelected = editGoal === mins;
+                    return (
+                      <Pressable
+                        key={mins}
+                        style={[styles.modalChip, isSelected && styles.modalChipActive]}
+                        onPress={() => setEditGoal(mins)}
+                      >
+                        <Text style={[styles.modalChipText, isSelected && styles.modalChipTextActive]}>
+                          {mins} mins
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text style={styles.modalSyncNotice}>
+                  Changes are saved directly to the database and synced across your session and devices.
+                </Text>
+              </ScrollView>
+
+              <View style={styles.modalFooter}>
+                <Pressable
+                  style={styles.modalCancelBtn}
+                  onPress={() => setIsEditProfileModalOpen(false)}
+                  disabled={isSaving}
+                >
+                  <Text style={styles.modalCancelBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modalSaveBtn, isSaving && { opacity: 0.7 }]}
+                  onPress={handleSaveProfile}
+                  disabled={isSaving}
+                >
+                  {isSaving ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.modalSaveBtnText}>Save Changes</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         {/* POPUP MODAL */}
         <CommonPopup
           visible={activePopup !== null}
           preset={activePopup || 'unlock-premium'}
+          levelNumber={stats.currentLevelNumber}
+          title={activePopup === 'level-up' ? 'Your Level Progress' : undefined}
+          subtitle={
+            activePopup === 'level-up'
+              ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep practicing speaking lessons to reach Level ${stats.currentLevelNumber + 1}!`
+              : undefined
+          }
+          primaryButtonText={activePopup === 'level-up' ? 'View Learning Roadmap' : undefined}
+          primaryButtonIcon={activePopup === 'level-up' ? 'arrow' : undefined}
+          showPrimaryArrow={activePopup === 'level-up' ? true : undefined}
           onClose={() => setActivePopup(null)}
           onPrimaryPress={() => {
-            if (activePopup === 'unlock-premium') {
+            if (activePopup === 'level-up') {
+              router.push('/(tabs)/roadmap');
+            } else if (activePopup === 'unlock-premium') {
               router.push('/upgrade');
             }
             setActivePopup(null);
@@ -231,12 +421,16 @@ export default function AccountScreen() {
  */
 function ProfileCard({
   name,
+  initials = 'M',
+  memberSince = 'Member since 2026',
   isPro,
   onEdit,
   onTogglePlan,
   onCancelSubscription,
 }: {
   name: string;
+  initials?: string;
+  memberSince?: string;
   isPro: boolean;
   onEdit: () => void;
   onTogglePlan?: () => void;
@@ -247,7 +441,7 @@ function ProfileCard({
       <View style={styles.profileRow}>
         {/* Avatar Initials Circle */}
         <View style={styles.avatarInitialsCircle}>
-          <Text style={styles.avatarInitialsText}>TF</Text>
+          <Text style={styles.avatarInitialsText}>{initials}</Text>
         </View>
 
         {/* Profile Info */}
@@ -264,7 +458,7 @@ function ProfileCard({
             </Pressable>
           </View>
 
-          <Text style={styles.memberSinceText}>Member since May 20, 2026</Text>
+          <Text style={styles.memberSinceText}>{memberSince}</Text>
 
           <View style={styles.profileBadgesRow}>
             <Pressable
@@ -294,13 +488,21 @@ function ProfileCard({
 /**
  * 2. Stats Row Card (3 Columns: XP, Level, Lessons Completed)
  */
-function StatsCard() {
+function StatsCard({
+  xp = 0,
+  levelNumber = 1,
+  lessonsCompleted = 0,
+}: {
+  xp?: number;
+  levelNumber?: number;
+  lessonsCompleted?: number;
+}) {
   return (
     <View style={[styles.cardContainer, styles.statsCardPadding]}>
       <View style={styles.statsRow}>
         <View style={styles.statCol}>
           <Feather name="zap" size={22} color="#2563EB" />
-          <Text style={styles.statNumberText}>1,250 XP</Text>
+          <Text style={styles.statNumberText}>{xp.toLocaleString()} XP</Text>
           <Text style={styles.statLabelText}>Keep practicing!</Text>
         </View>
 
@@ -308,7 +510,7 @@ function StatsCard() {
 
         <View style={styles.statCol}>
           <Feather name="bar-chart-2" size={22} color="#2563EB" />
-          <Text style={styles.statNumberText}>Level 7</Text>
+          <Text style={styles.statNumberText}>Level {levelNumber}</Text>
           <Text style={styles.statLabelText}>You're doing great</Text>
         </View>
 
@@ -316,7 +518,7 @@ function StatsCard() {
 
         <View style={styles.statCol}>
           <Feather name="book-open" size={22} color="#2563EB" />
-          <Text style={styles.statNumberText}>24</Text>
+          <Text style={styles.statNumberText}>{lessonsCompleted}</Text>
           <Text style={styles.statLabelText}>Lessons Completed</Text>
         </View>
       </View>
@@ -327,7 +529,15 @@ function StatsCard() {
 /**
  * 3. Settings & Preferences Card (4 Items)
  */
-function PreferencesCard({ onRowPress }: { onRowPress: (id: string) => void }) {
+function PreferencesCard({
+  language = 'Sinhala',
+  dailyGoal = '10 min daily',
+  onRowPress,
+}: {
+  language?: string;
+  dailyGoal?: string;
+  onRowPress: (id: string) => void;
+}) {
   const PREFERENCES = [
     {
       id: 'explanation-lang',
@@ -335,14 +545,14 @@ function PreferencesCard({ onRowPress }: { onRowPress: (id: string) => void }) {
       icon: <Ionicons name="globe-outline" size={19} color="#16A34A" />,
       title: 'Explanation Language',
       subtitle: 'Choose the language Maya uses for explanations.',
-      value: 'Sinhala',
+      value: language,
     },
     {
       id: 'speaking-pref',
       iconBg: '#FFEDD5',
       icon: <Feather name="activity" size={18} color="#EA580C" />,
       title: 'Speaking Preferences',
-      subtitle: 'Set speaking speed, feedback style and mo...',
+      subtitle: 'Set speaking speed, feedback style and more.',
       value: 'Normal Speed',
     },
     {
@@ -351,7 +561,7 @@ function PreferencesCard({ onRowPress }: { onRowPress: (id: string) => void }) {
       icon: <Feather name="bell" size={18} color="#9333EA" />,
       title: 'Notifications & Reminders',
       subtitle: 'Manage daily reminders and important alerts.',
-      value: '7:00 PM Daily',
+      value: dailyGoal,
     },
     {
       id: 'privacy-data',
@@ -359,6 +569,7 @@ function PreferencesCard({ onRowPress }: { onRowPress: (id: string) => void }) {
       icon: <Feather name="shield" size={18} color="#0284C7" />,
       title: 'Privacy & Data',
       subtitle: 'Manage your data and privacy settings.',
+      value: 'Protected',
     },
   ];
 
@@ -1129,5 +1340,131 @@ const styles = StyleSheet.create({
     lineHeight: 12,
     letterSpacing: 0,
     color: '#737E94',
+  },
+
+  /* Edit Profile Modal Styles */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 480,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 24,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+      } as any,
+      default: {
+        elevation: 8,
+      },
+    }),
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  modalTitle: {
+    fontSize: 20,
+    color: '#0F172A',
+    ...fontStyle('inter', 'bold'),
+  },
+  modalCloseBtn: {
+    padding: 4,
+  },
+  modalBody: {
+    marginBottom: 20,
+  },
+  modalInputLabel: {
+    fontSize: 13,
+    color: '#475569',
+    marginBottom: 6,
+    ...fontStyle('inter', 'semiBold'),
+  },
+  modalTextInput: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#0F172A',
+    ...fontStyle('inter', 'regular'),
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  modalChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+  },
+  modalChipActive: {
+    borderColor: '#2563EB',
+    backgroundColor: '#EFF6FF',
+  },
+  modalChipText: {
+    fontSize: 13.5,
+    color: '#475569',
+    ...fontStyle('inter', 'medium'),
+  },
+  modalChipTextActive: {
+    color: '#2563EB',
+    ...fontStyle('inter', 'bold'),
+  },
+  modalSyncNotice: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 18,
+    lineHeight: 17,
+    ...fontStyle('inter', 'regular'),
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  modalCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+  },
+  modalCancelBtnText: {
+    fontSize: 14,
+    color: '#475569',
+    ...fontStyle('inter', 'semiBold'),
+  },
+  modalSaveBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#2563EB',
+    minWidth: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalSaveBtnText: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    ...fontStyle('inter', 'bold'),
   },
 });

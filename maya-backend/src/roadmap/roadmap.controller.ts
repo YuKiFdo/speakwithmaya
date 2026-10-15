@@ -19,10 +19,14 @@ import {
   SimulateLevelTurnDto,
 } from './dto/roadmap.dto.js';
 import { RecordUserRoadmapProgressDto } from './dto/user-roadmap-progress.dto.js';
+import { AuthService } from '../auth/auth.service.js';
 
 @Controller('v1')
 export class RoadmapController {
-  constructor(private readonly roadmapService: RoadmapService) {}
+  constructor(
+    private readonly roadmapService: RoadmapService,
+    private readonly authService: AuthService,
+  ) {}
 
   // 1. Student / Public endpoint — returns only published levels
   @Get('roadmap')
@@ -93,7 +97,16 @@ export class RoadmapController {
     @Headers('authorization') authHeader?: string,
     @Query('userId') queryUserId?: string,
   ) {
-    const userId = queryUserId || 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
+    let userId = queryUserId;
+    if (authHeader) {
+      try {
+        userId = this.authService.validateAuthToken(authHeader);
+      } catch {}
+    }
+    if (!userId) {
+      userId = 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
+    }
+
     const progress = await this.roadmapService.getUserProgress(userId);
     const completedItems = progress.filter((p) => p.status === 'completed' || p.isPassed);
     return {
@@ -113,7 +126,16 @@ export class RoadmapController {
     @Headers('authorization') authHeader?: string,
     @Query('userId') queryUserId?: string,
   ) {
-    const userId = queryUserId || 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
+    let userId = queryUserId;
+    if (authHeader) {
+      try {
+        userId = this.authService.validateAuthToken(authHeader);
+      } catch {}
+    }
+    if (!userId) {
+      userId = 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
+    }
+
     return this.roadmapService.recordUserProgress(userId, dto);
   }
 }

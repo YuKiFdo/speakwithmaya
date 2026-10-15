@@ -206,6 +206,7 @@ export default function NameScreen() {
     stopMayaNamePromptVoice();
     setIsSpeaking(false);
     OnboardingStore.updateField('name', cleanName);
+    OnboardingStore.setLastActiveRoute('/onboarding/phone');
     router.replace('/onboarding/phone');
   };
 

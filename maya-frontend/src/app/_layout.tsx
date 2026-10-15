@@ -29,6 +29,7 @@ import {
 import { DesktopLoadingScreen } from '@/components/ui/desktop-loading-screen';
 import { Ionicons, Feather, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouteGuard } from '@/hooks/useRouteGuard';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 if (Platform.OS === 'web' && typeof console !== 'undefined') {
   const originalWarn = console.warn;
   console.warn = (...args: any[]) => {
@@ -83,6 +84,7 @@ export default function RootLayout() {
   });
 
   const [isAppReady, setIsAppReady] = useState(false);
+  const [isStoreHydrated, setIsStoreHydrated] = useState(OnboardingStore.getState().isHydrated);
 
   useEffect(() => {
     // Settle DOM layout and prevent any millisecond mobile flicker on web refresh
@@ -91,6 +93,19 @@ export default function RootLayout() {
     }, 350);
     return () => clearTimeout(timer);
   }, []);
+
+  // Wait for encrypted storage hydration before rendering routes
+  useEffect(() => {
+    if (isStoreHydrated) return;
+    let mounted = true;
+    OnboardingStore.waitForHydration().then(() => {
+      if (mounted) setIsStoreHydrated(true);
+    });
+    const unsub = OnboardingStore.subscribe((state) => {
+      if (state.isHydrated && mounted) setIsStoreHydrated(true);
+    });
+    return () => { mounted = false; unsub(); };
+  }, [isStoreHydrated]);
 
   useEffect(() => {
     if ((fontsLoaded || fontError) && isAppReady) {
@@ -106,7 +121,7 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, fontError, isAppReady]);
 
-  if ((!fontsLoaded && !fontError) || !isAppReady) {
+  if ((!fontsLoaded && !fontError) || !isAppReady || !isStoreHydrated) {
     return <DesktopLoadingScreen message="Loading SpeakwithMaya..." />;
   }
 

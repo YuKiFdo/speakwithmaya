@@ -272,6 +272,7 @@ export default function PersonalizedPlanScreen() {
     });
 
     OnboardingStore.setOnboardingCompleted();
+    authService.syncStep('/(tabs)/dashboard');
     router.replace('/(tabs)/dashboard');
   };
 

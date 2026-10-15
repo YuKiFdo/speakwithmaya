@@ -91,7 +91,7 @@ const PRESET_IMAGES = {
 /**
  * Level Hexagon Badge with soft glow for Level Up popups
  */
-export function LevelHexagonBadge({ level = 5, size = 130 }: { level?: number; size?: number }) {
+export function LevelHexagonBadge({ level = 1, size = 130 }: { level?: number; size?: number }) {
   return (
     <View style={badgeStyles.wrapper}>
       {/* Outer Glow */}
@@ -184,7 +184,7 @@ export function CommonPopup({
   preset = 'custom',
   imageSource,
   renderHeaderGraphic,
-  levelNumber = 5,
+  levelNumber = 1,
   title,
   titleHighlight,
   subtitle,

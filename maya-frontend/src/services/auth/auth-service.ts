@@ -127,6 +127,10 @@ class AuthService {
         },
         body: JSON.stringify(payload),
       });
+      if (res.ok) {
+        // Immediately sync database updates to store and encrypted storage/cookie
+        await this.fetchUserProfile();
+      }
       return res.ok;
     } catch {
       return false;
@@ -177,6 +181,13 @@ class AuthService {
             minutesResetAt: data.profile.minutes_reset_at,
             level: data.profile.level,
             nativeLanguage: data.profile.native_language,
+            goal: data.profile.goal,
+            challenge: data.profile.challenge,
+            employmentStatus: data.profile.employment_status,
+            dailyGoalMinutes: data.profile.daily_goal_minutes,
+            lastActiveStep: data.profile.last_active_step,
+            createdAt: data.profile.created_at,
+            isCompleted: Boolean(data.profile.onboarding_completed_at),
           };
           OnboardingStore.setAuthSession(token, user);
           return user;

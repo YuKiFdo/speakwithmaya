@@ -43,6 +43,7 @@ import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-si
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { fetchAllPracticeSessions } from '@/services/supabase';
+import { useUserStats } from '@/hooks/useUserStats';
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
@@ -399,14 +400,15 @@ const MobileSessionCard = React.memo(function MobileSessionCard({
 
 export default function HistoryScreen() {
   const params = useLocalSearchParams<{ name?: string }>();
-  const displayName = params.name || 'Tharindu Fernando';
+  const stats = useUserStats();
+  const displayName = stats.displayName || params.name || 'Learner';
   const { isPhone } = useBreakpoint();
   const isDesktop = !isPhone;
   const { width: windowWidth } = useWindowDimensions();
 
   // Navigation & Popups
   const [activeTab, setActiveTab] = useState<DashboardTab>('history');
-  const [isPro, setIsPro] = useState(true);
+  const isPro = stats.isPro;
   const [activePopup, setActivePopup] = useState<PopupPreset | null>(null);
 
   // Search & Filter
@@ -1593,6 +1595,9 @@ export default function HistoryScreen() {
             activeTab="history"
             onSelectTab={handleSelectTab}
             isPro={isPro}
+            usedMinutes={stats.usedMinutes}
+            totalMinutes={stats.totalMinutes}
+            resetsInText={stats.resetsInText}
             onUpgrade={() => router.push('/upgrade')}
             onGetExtraTime={() => setActivePopup('get-extra-time')}
           />
@@ -1618,6 +1623,9 @@ export default function HistoryScreen() {
               </View>
 
               <UserLevelBadge
+                levelLabel={stats.levelLabel}
+                xpLabel={stats.xpLabel}
+                progress={stats.progress}
                 isPro={isPro}
                 avatarSource={require('@/assets/images/maya-avatar.png')}
                 onPress={() => setActivePopup('level-up')}
@@ -1628,6 +1636,9 @@ export default function HistoryScreen() {
             <View style={styles.desktopTopHeader}>
               <View style={{ flex: 1 }} />
               <UserLevelBadge
+                levelLabel={stats.levelLabel}
+                xpLabel={stats.xpLabel}
+                progress={stats.progress}
                 isPro={isPro}
                 avatarSource={require('@/assets/images/maya-avatar.png')}
                 onPress={() => setActivePopup('level-up')}
@@ -2568,12 +2579,24 @@ export default function HistoryScreen() {
         {/* ================================================================== */}
         <CommonPopup
           visible={activePopup !== null}
-          preset={activePopup || 'level-up'}
+          preset={activePopup || 'custom'}
+          levelNumber={stats.currentLevelNumber}
+          title={activePopup === 'level-up' ? 'Your Level Progress' : undefined}
+          subtitle={
+            activePopup === 'level-up'
+              ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep practicing speaking lessons to reach Level ${stats.currentLevelNumber + 1}!`
+              : undefined
+          }
+          primaryButtonText={activePopup === 'level-up' ? 'View Learning Roadmap' : undefined}
+          primaryButtonIcon={activePopup === 'level-up' ? 'arrow' : undefined}
+          showPrimaryArrow={activePopup === 'level-up' ? true : undefined}
           onClose={() => setActivePopup(null)}
-          minutesUsed={320}
-          minutesTotal={600}
+          minutesUsed={stats.usedMinutes}
+          minutesTotal={stats.totalMinutes}
           onPrimaryPress={() => {
-            if (activePopup === 'get-extra-time' || activePopup === 'unlock-premium') {
+            if (activePopup === 'level-up') {
+              router.push('/(tabs)/roadmap');
+            } else if (activePopup === 'get-extra-time' || activePopup === 'unlock-premium') {
               router.push('/upgrade');
             }
             setActivePopup(null);

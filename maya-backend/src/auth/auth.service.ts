@@ -281,6 +281,16 @@ export class AuthService {
       } else {
         lastActiveRoute = '/onboarding/goal';
       }
+    } else {
+      lastActiveRoute = '/(tabs)/dashboard';
+      if (userProfile.last_active_step !== '/(tabs)/dashboard') {
+        userProfile.last_active_step = '/(tabs)/dashboard';
+        this.supabase
+          .from('profiles')
+          .update({ last_active_step: '/(tabs)/dashboard', updated_at: new Date().toISOString() })
+          .eq('id', userProfile.id)
+          .then(() => {});
+      }
     }
 
     return {
@@ -538,6 +548,7 @@ export class AuthService {
     const updates: any = {
       updated_at: new Date().toISOString(),
       onboarding_completed_at: new Date().toISOString(),
+      last_active_step: '/(tabs)/dashboard',
     };
 
     if (dto.displayName !== undefined) updates.display_name = dto.displayName.trim();
@@ -605,6 +616,16 @@ export class AuthService {
 
     if (!data) {
       throw new NotFoundException('User profile not found in database.');
+    }
+
+    // Auto-heal: If user completed onboarding, ensure last_active_step in DB is dashboard
+    if (data.onboarding_completed_at && data.last_active_step !== '/(tabs)/dashboard') {
+      data.last_active_step = '/(tabs)/dashboard';
+      this.supabase
+        .from('profiles')
+        .update({ last_active_step: '/(tabs)/dashboard', updated_at: new Date().toISOString() })
+        .eq('id', userId)
+        .then(() => {});
     }
 
     return await this.checkAndResetMonthlyQuota(data as UserProfileData);
