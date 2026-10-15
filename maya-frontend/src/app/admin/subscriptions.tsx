@@ -19,6 +19,7 @@ import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { paymentApi } from '@/services/payment/payment-api';
 import { SubscriptionRecord } from '@/services/payment/payhere-types';
+import { AdminTableSkeleton } from '@/components/ui/skeleton';
 
 export default function AdminSubscriptionsScreen() {
   const { isPhone } = useBreakpoint();
@@ -318,10 +319,7 @@ export default function AdminSubscriptionsScreen() {
               </View>
 
               {isLoading ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color="#0d9488" />
-                  <Text style={styles.loadingText}>Fetching subscribers from PayHere...</Text>
-                </View>
+                <AdminTableSkeleton rows={6} />
               ) : filteredSubscriptions.length === 0 ? (
                 <View style={styles.emptyContainer}>
                   <Feather name="inbox" size={36} color="#cbd5e1" />

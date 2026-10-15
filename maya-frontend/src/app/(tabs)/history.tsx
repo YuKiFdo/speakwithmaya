@@ -42,6 +42,7 @@ import {
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
+import { HistoryDetailSkeleton } from '@/components/ui/skeleton';
 import { fetchAllPracticeSessions } from '@/services/supabase';
 import { useUserStats } from '@/hooks/useUserStats';
 
@@ -1737,13 +1738,7 @@ export default function HistoryScreen() {
                 {/* ── RIGHT COLUMN: SELECTED SESSION DETAIL ── */}
                 <View style={styles.desktopDetailColumn}>
                   {isLoading ? (
-                    <View style={styles.emptyDetailContainer}>
-                      <ActivityIndicator size="large" color="#0057FF" style={{ marginBottom: 16 }} />
-                      <Text style={styles.loadingStateTitle}>Loading conversations...</Text>
-                      <Text style={styles.loadingStateSubtitle}>
-                        Retrieving your past speaking sessions and AI feedback.
-                      </Text>
-                    </View>
+                    <HistoryDetailSkeleton />
                   ) : activeSession ? (
                     <ScrollView
                       key={activeSession.id}

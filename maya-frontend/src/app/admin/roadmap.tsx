@@ -20,6 +20,7 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
+import { AdminTableSkeleton } from '@/components/ui/skeleton';
 import {
   RoadmapRobotIcon,
   RoadmapChatIcon,
@@ -663,10 +664,7 @@ export default function AdminRoadmapScreen() {
           {/* Level List */}
           <ScrollView style={styles.levelsScroll} showsVerticalScrollIndicator={false}>
             {isLoading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#0d9488" />
-                <Text style={styles.loadingText}>Loading Roadmap levels...</Text>
-              </View>
+              <AdminTableSkeleton rows={5} />
             ) : errorMsg ? (
               <View style={styles.errorContainer}>
                 <Feather name="alert-triangle" size={24} color="#dc2626" />

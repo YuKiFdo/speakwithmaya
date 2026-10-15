@@ -20,6 +20,7 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
+import { AdminTableSkeleton } from '@/components/ui/skeleton';
 
 interface DailyUsagePoint {
   date: string;
@@ -1499,10 +1500,7 @@ export default function AdminUsageScreen() {
 
             <ScrollView style={styles.modalLogsScrollView} contentContainerStyle={styles.modalLogsBodyContent} showsVerticalScrollIndicator={true}>
               {logsLoading ? (
-                <View style={styles.logsLoadingContainer}>
-                  <ActivityIndicator size="large" color="#0d9488" />
-                  <Text style={styles.logsLoadingText}>Loading session network diagnostics and event logs...</Text>
-                </View>
+                <AdminTableSkeleton rows={4} />
               ) : logsData ? (
                 <>
                   {/* Filter inside logs */}

@@ -38,6 +38,7 @@ import {
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
+import { RoadmapTrackSkeleton } from '@/components/ui/skeleton';
 import { MissionCardModal } from '@/components/roadmap/mission-card-modal';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { CallSessionStore } from '@/services/store/call-session-store';
@@ -601,10 +602,7 @@ export default function RoadmapScreen() {
           {/* ROADMAP TRACK & MILESTONES */}
           {/* ==================================================================== */}
           {isLoadingLevels ? (
-            <View style={styles.roadmapStatusCard}>
-              <ActivityIndicator size="large" color="#0057FF" />
-              <Text style={styles.roadmapStatusText}>Loading your learning path...</Text>
-            </View>
+            <RoadmapTrackSkeleton isDesktop={isDesktop} />
           ) : milestones.length === 0 ? (
             <View style={styles.roadmapStatusCard}>
               <View style={styles.roadmapEmptyIconWrapper}>
