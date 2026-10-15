@@ -1,11 +1,16 @@
 import { NestFactory } from '@nestjs/core';
 import { WsAdapter } from '@nestjs/platform-ws';
+import express from 'express';
 import { AppModule, ObserveInstrument } from './app.module.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     instrument: ObserveInstrument,
   });
+
+  // PayHere notify_url sends application/x-www-form-urlencoded POST requests
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(express.json({ limit: '10mb' }));
 
   app.useWebSocketAdapter(new WsAdapter(app));
 

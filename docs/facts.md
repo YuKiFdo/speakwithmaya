@@ -99,3 +99,23 @@
 | **Validation**          | `class-validator` & `class-transformer` via global `ValidationPipe` (`whitelist: true`, `forbidNonWhitelisted: true`) | [NestJS Validation](https://docs.nestjs.com/techniques/validation) |
 | **Security Headers**    | Helmet (`helmet`), strict CORS origin allowlist                                                                       | [NestJS Security](https://docs.nestjs.com/security/cors)           |
 | **Playwright Version**  | Playwright `^1.50.0` with Desktop Chromium, Mobile Chromium (Pixel 7), Mobile WebKit (iPhone 14)                      | [Playwright Docs](https://playwright.dev/)                         |
+
+---
+
+## 5. PayHere Payment Gateway & Subscriptions Facts
+
+*Date fetched: October 15, 2026*
+
+| Dimension | Verified Fact | Source URL |
+| :--- | :--- | :--- |
+| **Recurring Billing API Endpoint** | Live: `https://www.payhere.lk/pay/checkout`<br>Sandbox: `https://sandbox.payhere.lk/pay/checkout` | [PayHere Recurring API](https://support.payhere.lk/api-&-mobile-sdk/recurring-api) |
+| **Recurring Parameters** | `recurrence` (e.g., `'1 Month'`, `'3 Month'`, `'1 Year'`), `duration` (`'Forever'` or fixed period like `'1 Year'`), `amount`, `currency` (`'LKR'`/`'USD'`), `startup_fee` (optional initial charge override) | [PayHere Recurring API](https://support.payhere.lk/api-&-mobile-sdk/recurring-api) |
+| **Hash Signature Rule** | `hash = strtoupper(md5(merchant_id + order_id + number_format(amount, 2, '.', '') + currency + strtoupper(md5(merchant_secret))))`. Must be generated strictly on server-side to protect `merchant_secret`. | [PayHere Recurring API](https://support.payhere.lk/api-&-mobile-sdk/recurring-api) |
+| **Webhook Callback (`notify_url`)** | PayHere notifies `notify_url` via `POST` with `application/x-www-form-urlencoded`. Must verify `md5sig = strtoupper(md5(merchant_id + order_id + payhere_amount + payhere_currency + status_code + strtoupper(md5(merchant_secret))))`. | [PayHere Recurring API](https://support.payhere.lk/api-&-mobile-sdk/recurring-api) |
+| **Payment Status Codes** | `2` = Success, `0` = Pending, `-1` = Canceled, `-2` = Failed, `-3` = Chargedback | [PayHere Recurring API](https://support.payhere.lk/api-&-mobile-sdk/recurring-api) |
+| **Recurring Message Types** | `AUTHORIZATION_SUCCESS`, `AUTHORIZATION_FAILED`, `RECURRING_INSTALLMENT_SUCCESS`, `RECURRING_INSTALLMENT_FAILED`, `RECURRING_COMPLETE`, `RECURRING_STOPPED` | [PayHere Recurring API](https://support.payhere.lk/api-&-mobile-sdk/recurring-api) |
+| **Sandbox Accelerated Interval** | In PayHere Sandbox, recurring installments trigger ~1 minute after initial authorization to allow immediate testing without waiting a month. | [PayHere Recurring API](https://support.payhere.lk/api-&-mobile-sdk/recurring-api) |
+| **Subscription Manager API** | REST API authenticated via OAuth2 Bearer Token (`/merchant/v1/oauth/token` using `Basic base64(app_id:app_secret)`). Endpoints: `/merchant/v1/subscription`, `/merchant/v1/subscription/{id}`, `/merchant/v1/subscription/{id}/payments`, `/merchant/v1/subscription/retry`, `/merchant/v1/subscription/cancel`. Rate limit: 20 req/10s. | [PayHere Subscription Manager API](https://support.payhere.lk/api-&-mobile-sdk/subscription-manager-api) |
+| **React Native SDK Compatibility** | `@payhere/payhere-mobilesdk-reactnative` is a native bridge for Android (JitPack AAR) and iOS (CocoaPods). It is **native only** and does not work on React Native Web. Requires Expo prebuild / config plugin for native iOS/Android builds. | [PayHere React Native SDK](https://support.payhere.lk/api-&-mobile-sdk/react-native-sdk) |
+| **Web SDK Compatibility** | Web applications must use the PayHere JavaScript SDK (`https://www.payhere.lk/lib/payhere-2.0.js`) or form POST redirect. JavaScript SDK provides an onsite iframe popup modal without leaving the application. | [PayHere JavaScript SDK](https://support.payhere.lk/api-&-mobile-sdk/javascript-sdk) |
+
