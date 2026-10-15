@@ -27,6 +27,7 @@ import {
   Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
 import { DesktopLoadingScreen } from '@/components/ui/desktop-loading-screen';
+import { AlertHost } from '@/components/ui/alert-modal';
 import { Ionicons, Feather, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouteGuard } from '@/hooks/useRouteGuard';
 import { OnboardingStore } from '@/services/store/onboarding-store';
@@ -208,6 +209,7 @@ export default function RootLayout() {
           options={{ animation: 'fade', animationDuration: 200 }}
         />
       </Stack>
+      <AlertHost />
     </ThemeProvider>
   );
 }

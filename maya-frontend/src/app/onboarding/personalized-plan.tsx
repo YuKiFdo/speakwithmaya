@@ -26,6 +26,7 @@ import { authService } from '@/services/auth/auth-service';
 import { OnboardingStore, useOnboardingStore } from '@/services/store/onboarding-store';
 import { paymentApi } from '@/services/payment/payment-api';
 import { payHereGateway } from '@/services/payment/payhere-gateway';
+import { mayaAlert } from '@/components/ui/alert-modal';
 
 const CLOCK_IMAGE = require('@/assets/images/offer-expired-clock.png');
 
@@ -261,23 +262,13 @@ export default function PersonalizedPlanScreen() {
       const sub = await paymentApi.getMySubscription();
       if (sub?.has_saved_card || sub?.card_masked) {
         const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
-        let confirmed = false;
-        if (Platform.OS === 'web') {
-          confirmed = window.confirm(
-            `1-Click Activation:\n\nDeduct ${selectedPlan?.pricePerMonth || 'LKR 3,600'}/month from ${cardDisplay} and activate ${selectedPlan?.name} immediately?\n\nProceed to activate?`
-          );
-        } else {
-          confirmed = await new Promise<boolean>((resolve) => {
-            Alert.alert(
-              '1-Click Activation',
-              `Deduct ${selectedPlan?.pricePerMonth || 'LKR 3,600'}/month from ${cardDisplay} and activate ${selectedPlan?.name} immediately?`,
-              [
-                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                { text: 'Confirm & Activate', onPress: () => resolve(true) },
-              ]
-            );
-          });
-        }
+        const confirmed = await mayaAlert.confirm({
+          title: '1-Click Activation',
+          message: `Deduct ${selectedPlan?.pricePerMonth || 'LKR 3,600'}/month from ${cardDisplay} and activate ${selectedPlan?.name} immediately?`,
+          confirmText: 'Confirm & Activate',
+          cancelText: 'Cancel',
+          type: 'info',
+        });
 
         if (confirmed) {
           await paymentApi.chargeSavedCard({ planTier: selectedPlanId as any });
@@ -306,19 +297,11 @@ export default function PersonalizedPlanScreen() {
         });
       } else if (result.status === 'error') {
         const errorMsg = result.error || 'Payment could not be completed. Please try again.';
-        if (Platform.OS === 'web') {
-          window.alert(errorMsg);
-        } else {
-          Alert.alert('Payment Error', errorMsg);
-        }
+        await mayaAlert.error(errorMsg, 'Payment Error');
       }
     } catch (err: any) {
       const errMsg = err.message || 'Failed to initialize payment gateway.';
-      if (Platform.OS === 'web') {
-        window.alert(errMsg);
-      } else {
-        Alert.alert('Checkout Error', errMsg);
-      }
+      await mayaAlert.error(errMsg, 'Checkout Error');
     } finally {
       setIsUpgrading(false);
     }

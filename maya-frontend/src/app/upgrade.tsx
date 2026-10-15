@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useUserStats } from '@/hooks/useUserStats';
 import { paymentApi } from '@/services/payment/payment-api';
 import { payHereGateway } from '@/services/payment/payhere-gateway';
+import { mayaAlert } from '@/components/ui/alert-modal';
 
 // ─── Plan Data ───────────────────────────────────────────────────────────────
 
@@ -319,24 +320,14 @@ export default function UpgradeScreen() {
     if (isDowngrade) {
       const targetPlan = PLANS.find((p) => p.id === planId);
       const planName = targetPlan?.name || planId.toUpperCase();
-      if (Platform.OS === 'web') {
-        const confirmed = window.confirm(
-          `Are you sure you want to switch to the ${planName} plan? Your subscription benefits and talk time will adjust accordingly.`
-        );
-        if (!confirmed) return;
-      } else {
-        const proceed = await new Promise<boolean>((resolve) => {
-          Alert.alert(
-            'Confirm Plan Switch',
-            `Are you sure you want to switch to the ${planName} plan? Your subscription benefits and talk time will adjust accordingly.`,
-            [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Switch Plan', onPress: () => resolve(true) },
-            ]
-          );
-        });
-        if (!proceed) return;
-      }
+      const confirmed = await mayaAlert.confirm({
+        title: 'Confirm Plan Switch',
+        message: `Are you sure you want to switch to the ${planName} plan? Your subscription benefits and talk time will adjust accordingly.`,
+        confirmText: 'Switch Plan',
+        cancelText: 'Cancel',
+        type: 'warning',
+      });
+      if (!confirmed) return;
     }
 
     setLoadingPlanId(planId);
@@ -348,32 +339,18 @@ export default function UpgradeScreen() {
         const planName = targetPlan?.name || planId.toUpperCase();
         const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
         
-        let confirmed = false;
-        if (Platform.OS === 'web') {
-          confirmed = window.confirm(
-            `1-Click Upgrade:\n\nDeduct ${targetPlan?.price}/${targetPlan?.period} from ${cardDisplay} and activate ${planName} immediately?\n\nProceed to upgrade?`
-          );
-        } else {
-          confirmed = await new Promise<boolean>((resolve) => {
-            Alert.alert(
-              '1-Click Upgrade',
-              `Deduct ${targetPlan?.price}/${targetPlan?.period} from ${cardDisplay} and activate ${planName} immediately?`,
-              [
-                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                { text: 'Confirm & Upgrade', onPress: () => resolve(true) },
-              ]
-            );
-          });
-        }
+        const confirmed = await mayaAlert.confirm({
+          title: '1-Click Upgrade',
+          message: `Deduct ${targetPlan?.price}/${targetPlan?.period} from ${cardDisplay} and activate ${planName} immediately?`,
+          confirmText: 'Confirm & Upgrade',
+          cancelText: 'Cancel',
+          type: 'info',
+        });
 
         if (confirmed) {
           const res = await paymentApi.chargeSavedCard({ planTier: planId as any });
           await stats.refreshStats();
-          if (Platform.OS === 'web') {
-            window.alert(res.message || `Upgraded to ${planName}!`);
-          } else {
-            Alert.alert('Plan Updated', res.message || `Upgraded to ${planName}!`);
-          }
+          await mayaAlert.success(res.message || `Upgraded to ${planName}!`, 'Plan Updated');
           router.replace('/(tabs)/account');
           return;
         } else {
@@ -387,27 +364,15 @@ export default function UpgradeScreen() {
 
       if (result.status === 'completed') {
         await stats.refreshStats();
-        if (Platform.OS === 'web') {
-          window.alert(`Payment successful! You are now subscribed to the ${planId.toUpperCase()} plan.`);
-        } else {
-          Alert.alert('Plan Updated', `You are now on the ${planId.toUpperCase()} plan!`);
-        }
+        await mayaAlert.success(`You are now subscribed to the ${planId.toUpperCase()} plan!`, 'Payment Successful');
         router.replace('/(tabs)/account');
       } else if (result.status === 'error') {
         const errorMsg = result.error || 'Payment was not completed. Please try again.';
-        if (Platform.OS === 'web') {
-          window.alert(errorMsg);
-        } else {
-          Alert.alert('Payment Error', errorMsg);
-        }
+        await mayaAlert.error(errorMsg, 'Payment Error');
       }
     } catch (err: any) {
       const errorMsg = err.message || 'Failed to process upgrade.';
-      if (Platform.OS === 'web') {
-        window.alert(errorMsg);
-      } else {
-        Alert.alert('Checkout Error', errorMsg);
-      }
+      await mayaAlert.error(errorMsg, 'Checkout Error');
     } finally {
       setLoadingPlanId(null);
     }

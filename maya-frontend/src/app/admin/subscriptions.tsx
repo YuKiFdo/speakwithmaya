@@ -20,6 +20,7 @@ import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { paymentApi } from '@/services/payment/payment-api';
 import { SubscriptionRecord } from '@/services/payment/payhere-types';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
+import { mayaAlert } from '@/components/ui/alert-modal';
 
 export default function AdminSubscriptionsScreen() {
   const { isPhone } = useBreakpoint();
@@ -108,31 +109,34 @@ export default function AdminSubscriptionsScreen() {
     setActionLoadingId(sub.id);
     try {
       const res = await paymentApi.retrySubscription(sub.payhere_subscription_id);
-      Alert.alert('Success', res.msg || 'Payment retry scheduled successfully.');
+      await mayaAlert.success(res.msg || 'Payment retry scheduled successfully.', 'Retry Success');
       await loadData();
     } catch (err: any) {
-      Alert.alert('Retry Failed', err.message || 'Could not retry subscription.');
+      await mayaAlert.error(err.message || 'Could not retry subscription.', 'Retry Failed');
     } finally {
       setActionLoadingId(null);
     }
   };
 
   const handleCancelSubscription = async (sub: SubscriptionRecord) => {
-    const confirmMsg = `Are you sure you want to cancel ${sub.profile?.display_name || 'this user'}'s ${sub.plan_tier.toUpperCase()} subscription? Future recurring payments will be stopped.`;
+    const confirmed = await mayaAlert.confirm({
+      title: 'Cancel Subscription',
+      message: `Are you sure you want to cancel ${sub.profile?.display_name || 'this user'}'s ${sub.plan_tier.toUpperCase()} subscription? Future recurring payments will be stopped.`,
+      confirmText: 'Cancel Subscription',
+      cancelText: 'Keep Plan',
+      type: 'warning',
+      isDestructive: true,
+    });
     
-    const proceed = Platform.OS === 'web' 
-      ? window.confirm(confirmMsg)
-      : true;
-
-    if (!proceed) return;
+    if (!confirmed) return;
 
     setActionLoadingId(sub.id);
     try {
       const res = await paymentApi.adminCancelSubscription(sub.payhere_subscription_id);
-      Alert.alert('Subscription Cancelled', res.msg || 'Subscription cancelled successfully.');
+      await mayaAlert.success(res.msg || 'Subscription cancelled successfully.', 'Subscription Cancelled');
       await loadData();
     } catch (err: any) {
-      Alert.alert('Cancellation Error', err.message || 'Failed to cancel subscription.');
+      await mayaAlert.error(err.message || 'Failed to cancel subscription.', 'Cancellation Error');
     } finally {
       setActionLoadingId(null);
     }
@@ -145,19 +149,11 @@ export default function AdminSubscriptionsScreen() {
     try {
       const res = await paymentApi.reconcileSubscriptions();
       const summaryMsg = `Reconciliation completed!\n• Checked Past Due: ${res.totalPastDueChecked}\n• Reinstated: ${res.pastDueReinstated}\n• Downgraded (>7d): ${res.pastDueDowngraded}\n• Quotas Refreshed: ${res.quotasReset}`;
-      if (Platform.OS === 'web') {
-        window.alert(summaryMsg);
-      } else {
-        Alert.alert('Reconciliation Done', summaryMsg);
-      }
+      await mayaAlert.success(summaryMsg, 'Reconciliation Done');
       await loadData();
     } catch (err: any) {
       const errMsg = err.message || 'Failed to run reconciliation.';
-      if (Platform.OS === 'web') {
-        window.alert(errMsg);
-      } else {
-        Alert.alert('Error', errMsg);
-      }
+      await mayaAlert.error(errMsg, 'Reconciliation Error');
     } finally {
       setIsReconciling(false);
     }

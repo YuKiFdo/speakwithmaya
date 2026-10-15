@@ -18,6 +18,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { paymentApi } from '@/services/payment/payment-api';
 import { payHereGateway } from '@/services/payment/payhere-gateway';
+import { mayaAlert } from '@/components/ui/alert-modal';
 import Svg, {
   Path,
   Polygon,
@@ -371,32 +372,20 @@ export function CommonPopup({
       const sub = await paymentApi.getMySubscription();
       if (sub?.has_saved_card || sub?.card_masked) {
         const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
-        let confirmed = false;
-        if (Platform.OS === 'web') {
-          confirmed = window.confirm(
-            `1-Click Deduction:\n\nDeduct ${pkg.price} for +${pkg.minutes} Minutes Talk Time from ${cardDisplay}?\n\nProceed to charge?`
-          );
-        } else {
-          confirmed = await new Promise<boolean>((resolve) => {
-            Alert.alert(
-              '1-Click Deduction',
-              `Deduct ${pkg.price} for +${pkg.minutes} Minutes Talk Time from ${cardDisplay}?`,
-              [
-                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                { text: 'Confirm & Pay', onPress: () => resolve(true) },
-              ]
-            );
-          });
-        }
+        const confirmed = await mayaAlert.confirm({
+          title: '1-Click Deduction',
+          message: `Deduct ${pkg.price} for +${pkg.minutes} Minutes Talk Time from ${cardDisplay}?`,
+          confirmText: 'Confirm & Pay',
+          cancelText: 'Cancel',
+          type: 'info',
+        });
 
         if (confirmed) {
           const res = await paymentApi.chargeSavedCard({ packageId: pkg.id as any });
           onClose();
+          await mayaAlert.success(res.message || `+${pkg.minutes} minutes added!`, 'Top-up Successful');
           if (Platform.OS === 'web') {
-            window.alert(res.message || `Payment successful! +${pkg.minutes} minutes added.`);
             window.location.reload();
-          } else {
-            Alert.alert('Top-up Successful', res.message || `+${pkg.minutes} minutes added!`);
           }
           return;
         } else {
@@ -410,27 +399,17 @@ export function CommonPopup({
 
       if (result.status === 'completed') {
         onClose();
+        await mayaAlert.success(`+${pkg.minutes} minutes have been added to your talk time!`, 'Top-up Successful');
         if (Platform.OS === 'web') {
-          window.alert(`Payment successful! +${pkg.minutes} minutes have been added to your talk time.`);
           window.location.reload();
-        } else {
-          Alert.alert('Top-up Successful', `+${pkg.minutes} minutes have been added to your talk time!`);
         }
       } else if (result.status === 'error') {
         const errorMsg = result.error || 'Payment was not completed. Please try again.';
-        if (Platform.OS === 'web') {
-          window.alert(errorMsg);
-        } else {
-          Alert.alert('Payment Error', errorMsg);
-        }
+        await mayaAlert.error(errorMsg, 'Payment Error');
       }
     } catch (err: any) {
       const errorMsg = err.message || 'Failed to process payment.';
-      if (Platform.OS === 'web') {
-        window.alert(errorMsg);
-      } else {
-        Alert.alert('Checkout Error', errorMsg);
-      }
+      await mayaAlert.error(errorMsg, 'Checkout Error');
     } finally {
       setPurchasingPkgId(null);
     }

@@ -28,6 +28,7 @@ import { useUserStats } from '@/hooks/useUserStats';
 import { paymentApi } from '@/services/payment/payment-api';
 import { payHereGateway } from '@/services/payment/payhere-gateway';
 import { SubscriptionRecord } from '@/services/payment/payhere-types';
+import { mayaAlert } from '@/components/ui/alert-modal';
 
 const PLAN_CROWN_IMAGE = require('@/assets/images/plan-crown.png');
 
@@ -128,36 +129,33 @@ export default function AccountScreen() {
 
   const handleCancelSubscription = async () => {
     if (!isPro) {
-      if (Platform.OS === 'web') {
-        window.alert('You are currently on the free Starter plan. There is no active recurring subscription to cancel.');
-      } else {
-        Alert.alert('Starter Plan', 'You are currently on the free Starter plan with no active recurring charges.');
-      }
+      await mayaAlert.alert(
+        'You are currently on the free Starter plan with no active recurring charges.',
+        'Starter Plan',
+        'info'
+      );
       return;
     }
 
-    const confirmMsg =
-      'Are you sure you want to cancel your recurring subscription? Future renewals will be stopped on PayHere, and your plan will revert to Starter at the end of your billing cycle.';
-
-    const proceed = Platform.OS === 'web' ? window.confirm(confirmMsg) : true;
-    if (!proceed) return;
+    const confirmed = await mayaAlert.confirm({
+      title: 'Cancel Subscription',
+      message:
+        'Are you sure you want to cancel your recurring subscription? Future renewals will be stopped on PayHere, and your plan will revert to Starter at the end of your billing cycle.',
+      confirmText: 'Cancel Subscription',
+      cancelText: 'Keep Plan',
+      type: 'warning',
+      isDestructive: true,
+    });
+    if (!confirmed) return;
 
     setIsCancellingSub(true);
     try {
       const res = await paymentApi.cancelSubscription();
       await stats.refreshStats();
-      if (Platform.OS === 'web') {
-        window.alert(res.msg || 'Your subscription has been successfully cancelled.');
-      } else {
-        Alert.alert('Subscription Cancelled', res.msg || 'Your subscription has been cancelled.');
-      }
+      await mayaAlert.success(res.msg || 'Your subscription has been cancelled.', 'Subscription Cancelled');
     } catch (err: any) {
       const errMsg = err.message || 'Failed to cancel subscription.';
-      if (Platform.OS === 'web') {
-        window.alert(errMsg);
-      } else {
-        Alert.alert('Cancellation Error', errMsg);
-      }
+      await mayaAlert.error(errMsg, 'Cancellation Error');
     } finally {
       setIsCancellingSub(false);
     }
@@ -188,24 +186,14 @@ export default function AccountScreen() {
     const planId = (stats.planTier === 'premium' ? 'premium' : 'pro') as 'pro' | 'premium';
     const planName = planId === 'premium' ? 'Premium' : 'Pro';
 
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm(
-        `Update Payment Card:\n\nThis will open PayHere's secure window to authorize your new card for your ${planName} plan. Future monthly renewals will bill your new card.\n\nProceed to update card?`
-      );
-      if (!confirmed) return;
-    } else {
-      const proceed = await new Promise<boolean>((resolve) => {
-        Alert.alert(
-          'Update Payment Card',
-          `This will open PayHere's secure window to authorize your new card for your ${planName} plan. Future monthly renewals will bill your new card.`,
-          [
-            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Update Card', onPress: () => resolve(true) },
-          ]
-        );
-      });
-      if (!proceed) return;
-    }
+    const confirmed = await mayaAlert.confirm({
+      title: 'Update Payment Card',
+      message: `This will open PayHere's secure window to authorize your new card for your ${planName} plan. Future monthly renewals will bill your new card.`,
+      confirmText: 'Update Card',
+      cancelText: 'Cancel',
+      type: 'info',
+    });
+    if (!confirmed) return;
 
     setIsUpdatingCard(true);
     try {
@@ -215,26 +203,17 @@ export default function AccountScreen() {
       if (result.status === 'completed') {
         await stats.refreshStats();
         await fetchSubscription();
-        if (Platform.OS === 'web') {
-          window.alert(`Your card has been updated successfully! Your ${planName} subscription will continue with your new card.`);
-        } else {
-          Alert.alert('Card Updated', `Your ${planName} subscription will now continue with your new card.`);
-        }
+        await mayaAlert.success(
+          `Your card has been updated successfully! Your ${planName} subscription will now continue with your new card.`,
+          'Card Updated'
+        );
       } else if (result.status === 'error') {
         const errorMsg = result.error || 'Card update could not be completed.';
-        if (Platform.OS === 'web') {
-          window.alert(errorMsg);
-        } else {
-          Alert.alert('Card Update Error', errorMsg);
-        }
+        await mayaAlert.error(errorMsg, 'Card Update Error');
       }
     } catch (err: any) {
       const errorMsg = err.message || 'Failed to initialize payment gateway.';
-      if (Platform.OS === 'web') {
-        window.alert(errorMsg);
-      } else {
-        Alert.alert('Card Update Error', errorMsg);
-      }
+      await mayaAlert.error(errorMsg, 'Card Update Error');
     } finally {
       setIsUpdatingCard(false);
     }
