@@ -2995,6 +2995,10 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
 
   async analyzeSession(dto: AnalyzeSessionDto): Promise<{
     sessionId?: string;
+    scenarioId?: string;
+    scenarioTitle?: string;
+    conversationSummary?: string | null;
+    nextFollowupTopic?: string | null;
     userAudioUrl?: string | null;
     modelAudioUrl?: string | null;
     items: Array<{
@@ -3111,7 +3115,9 @@ CRITICAL RULES:
 
 5. Link each item to the exact "userTurnIndex" from the provided turns list.
 6. Keep all explanations concise and friendly (1-2 sentences). Do not write long paragraphs.
-7. Output structured JSON matching the schema.`;
+7. Provide "conversationSummary": A concise, natural 1-sentence recap of what the student and Maya talked about and what the conversation ended on (e.g. "Discussed weekend travel plans to Kandy and traditional Sri Lankan street food" or "Practiced answering 'Tell me about yourself' for an engineering job"). Maximum 16 words.
+8. Provide "nextFollowupTopic": A short natural suggestion for what to practice next when resuming this scenario (1 concise sentence).
+9. Output structured JSON matching the schema.`;
 
         const res = await ai.models.generateContent({
           model: 'gemini-3.5-flash-lite',
@@ -3121,6 +3127,8 @@ CRITICAL RULES:
             responseSchema: {
               type: Type.OBJECT,
               properties: {
+                conversationSummary: { type: Type.STRING },
+                nextFollowupTopic: { type: Type.STRING },
                 items: {
                   type: Type.ARRAY,
                   items: {
@@ -3160,7 +3168,7 @@ CRITICAL RULES:
               required: ['items'],
             },
             temperature: 0.2,
-            maxOutputTokens: 1500,
+            maxOutputTokens: 1800,
           },
         });
 
@@ -3182,18 +3190,46 @@ CRITICAL RULES:
         const jsonText = res.text?.trim() || '';
         if (jsonText) {
           const parsed = JSON.parse(jsonText);
-          if (Array.isArray(parsed.items) && parsed.items.length > 0) {
-            this.logger.log(`[SessionsService] ✅ AI generated ${parsed.items.length} feedback items for session ${validSessionId}`);
+          const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
+          this.logger.log(`[SessionsService] ✅ AI generated ${rawItems.length} feedback items for session ${validSessionId}`);
 
-            const turnUrlsMap = this.sessionTurnAudioMap.get(validSessionId) ||
-              (dto.sessionId ? this.sessionTurnAudioMap.get(dto.sessionId) : undefined) ||
-              (this.lastSavedSessionId ? this.sessionTurnAudioMap.get(this.lastSavedSessionId) : undefined);
+          const turnUrlsMap = this.sessionTurnAudioMap.get(validSessionId) ||
+            (dto.sessionId ? this.sessionTurnAudioMap.get(dto.sessionId) : undefined) ||
+            (this.lastSavedSessionId ? this.sessionTurnAudioMap.get(this.lastSavedSessionId) : undefined);
+
+          const conversationSummary = parsed.conversationSummary?.trim() || null;
+            const nextFollowupTopic = parsed.nextFollowupTopic?.trim() || null;
+            const scenarioId = dto.scenarioId || 'casual-chat';
+            const scenarioTitle = dto.scenarioTitle || dto.topic || 'Casual Chat';
+
+            // Persist conversation summary and scenario into database sessions record
+            if (this.supabase && validSessionId) {
+              const sessionUpdatePayload: any = {
+                topic: dto.topic || scenarioTitle,
+              };
+              if (conversationSummary) {
+                sessionUpdatePayload.user_feedback = conversationSummary;
+              }
+              this.supabase
+                .from('sessions')
+                .update(sessionUpdatePayload)
+                .eq('id', validSessionId)
+                .then(({ error }: any) => {
+                  if (error) {
+                    this.logger.warn(`Failed to update session summary in DB: ${error.message}`);
+                  }
+                });
+            }
 
             return {
               sessionId: dto.sessionId,
+              scenarioId,
+              scenarioTitle,
+              conversationSummary,
+              nextFollowupTopic,
               userAudioUrl: userAudioUrl || null,
               modelAudioUrl: modelAudioUrl || null,
-              items: parsed.items.slice(0, 5).map((it: any) => {
+              items: rawItems.slice(0, 5).map((it: any) => {
                 const turnIdx = it.userTurnIndex ?? 0;
                 let isolatedTurnAudio: string | undefined;
 
@@ -3244,7 +3280,6 @@ CRITICAL RULES:
                 };
               }),
             };
-          }
         }
       } catch (err: any) {
         this.logger.warn(`Gemini session analysis failed with gemini-3.5-flash-lite: ${err?.message}`);
@@ -3269,6 +3304,10 @@ CRITICAL RULES:
     // AI must return real feedback; return empty list if none generated rather than hardcoded mock data
     return {
       sessionId: dto.sessionId,
+      scenarioId: dto.scenarioId || 'casual-chat',
+      scenarioTitle: dto.scenarioTitle || dto.topic || 'Casual Chat',
+      conversationSummary: null,
+      nextFollowupTopic: null,
       userAudioUrl: userAudioUrl || null,
       modelAudioUrl: modelAudioUrl || null,
       items: [],

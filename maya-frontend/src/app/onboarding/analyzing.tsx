@@ -21,6 +21,7 @@ import {
 } from '@/services/sound/sound-service';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { getLatestSessionReport, setLatestFeedbackItems, getLatestFeedbackItems, FeedbackItem } from '@/utils/session-report-store';
+import { ActiveConversationStore } from '@/services/store/active-conversation-store';
 import { warmUpSpeechVoices } from '@/utils/maya-voice-fallback';
 
 interface AnalysisStep {
@@ -303,12 +304,26 @@ export default function AnalyzingScreen() {
             turns: report?.sessionTurns || [],
             activeHints: report?.activeHints || [],
             topic: report?.topic || report?.levelTitle,
+            scenarioId: (report as any)?.scenarioId || (report as any)?.callParams?.scenarioId || 'casual-chat',
+            scenarioTitle: (report as any)?.scenarioTitle || (report as any)?.callParams?.scenarioTitle || report?.topic || 'Casual Chat',
             level: report?.callParams?.level,
           }),
         });
 
         if (res.ok) {
           const data = await res.json();
+          if (data?.conversationSummary || data?.scenarioTitle) {
+            ActiveConversationStore.setActive({
+              sessionId: activeSessionId,
+              scenarioId: data.scenarioId || (report as any)?.scenarioId || 'casual-chat',
+              scenarioTitle: data.scenarioTitle || (report as any)?.scenarioTitle || report?.topic || 'Casual Chat',
+              topic: report?.topic || data.scenarioTitle || 'Everyday English',
+              summary: data.conversationSummary,
+              nextFollowup: data.nextFollowupTopic,
+              lastPracticedAt: new Date().toISOString(),
+              durationSeconds: report?.durationSeconds,
+            });
+          }
           if (data?.items && Array.isArray(data.items)) {
             const rawSupabaseUrl = data.userAudioUrl || '';
             const supabaseAudioUrl = rawSupabaseUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');

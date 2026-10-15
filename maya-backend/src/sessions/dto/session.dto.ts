@@ -318,6 +318,18 @@ export class AnalyzeSessionDto {
 
   @IsOptional()
   @IsString()
+  scenarioId?: string;
+
+  @IsOptional()
+  @IsString()
+  scenarioTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
+  @IsOptional()
+  @IsString()
   level?: string;
 }
 

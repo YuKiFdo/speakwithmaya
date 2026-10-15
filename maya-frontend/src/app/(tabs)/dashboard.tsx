@@ -25,12 +25,14 @@ import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-si
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { CreateSessionModal, CreateSessionConfig } from '@/components/call/create-session-modal';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
-import { Feather } from '@expo/vector-icons';
+import { Ionicons, Feather } from '@expo/vector-icons';
 import { useOnboardingStore, OnboardingStore } from '@/services/store/onboarding-store';
 import { CallSessionStore } from '@/services/store/call-session-store';
 import { authService } from '@/services/auth/auth-service';
 import { useUserStats } from '@/hooks/useUserStats';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
+import { useActiveConversation, ActiveConversationStore } from '@/services/store/active-conversation-store';
+import { fetchAllPracticeSessions } from '@/services/supabase';
 
 interface ScenarioItem {
   id: string;
@@ -90,6 +92,32 @@ const SOCIAL_AVATARS = [
   'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
   'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80',
 ];
+
+function resolveScenarioFromTopic(topic?: string) {
+  if (!topic) return { id: 'casual-chat', title: 'Casual Chat' };
+  const lower = topic.toLowerCase();
+  if (lower.includes('interview') || lower.includes('job')) {
+    return { id: 'job-interview', title: 'Job Interview' };
+  }
+  if (lower.includes('work') || lower.includes('office') || lower.includes('business')) {
+    return { id: 'workplace', title: 'Workplace' };
+  }
+  if (lower.includes('travel') || lower.includes('airport') || lower.includes('hotel') || lower.includes('vacation')) {
+    return { id: 'travel-english', title: 'Travel English' };
+  }
+  if (lower.includes('role') || lower.includes('play')) {
+    return { id: 'role-play', title: 'Role Play' };
+  }
+  if (lower.includes('ielts')) {
+    return { id: 'ielts-speaking', title: 'IELTS Speaking' };
+  }
+  return { id: 'casual-chat', title: 'Casual Chat' };
+}
+
+function getScenarioDetails(scenarioId?: string) {
+  const match = SCENARIOS.find((s) => s.id === scenarioId);
+  return match || SCENARIOS[0];
+}
 
 export default function DashboardScreen() {
   const params = useLocalSearchParams<{
@@ -161,10 +189,36 @@ export default function DashboardScreen() {
   const [createSessionVisible, setCreateSessionVisible] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<{ id: string; title: string } | null>(null);
 
+  const activeConversation = useActiveConversation();
+
   // When user reaches dashboard, ensure database and store record this as their last active step
   useEffect(() => {
     OnboardingStore.setOnboardingCompleted();
     authService.syncStep('/(tabs)/dashboard');
+  }, []);
+
+  // Load authoritative latest practice session from database on mount & reconcile with active conversation
+  useEffect(() => {
+    let mounted = true;
+    fetchAllPracticeSessions().then((sessions) => {
+      if (!mounted) return;
+      if (sessions && sessions.length > 0) {
+        const latest = sessions[0];
+        const scenario = resolveScenarioFromTopic(latest.topic);
+        ActiveConversationStore.setActive({
+          sessionId: latest.id,
+          scenarioId: scenario.id,
+          scenarioTitle: scenario.title,
+          topic: latest.topic || scenario.title,
+          summary: latest.user_feedback || null,
+          lastPracticedAt: latest.start_time || new Date().toISOString(),
+          durationSeconds: latest.duration_seconds,
+        });
+      }
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handleOpenCreateSession = (scenario?: { id: string; title: string }) => {
@@ -178,6 +232,14 @@ export default function DashboardScreen() {
     if (isTimeExpired) {
       setActivePopup('get-extra-time');
       return;
+    }
+
+    if (config.scenarioId && config.scenarioTitle) {
+      ActiveConversationStore.setActive({
+        scenarioId: config.scenarioId,
+        scenarioTitle: config.scenarioTitle,
+        topic: config.topic || config.scenarioTitle,
+      });
     }
 
     CallSessionStore.startCall({
@@ -199,6 +261,21 @@ export default function DashboardScreen() {
       return;
     }
     handleOpenCreateSession();
+  };
+
+  const handleResumeTalking = () => {
+    if (isTimeExpired) {
+      setActivePopup('get-extra-time');
+      return;
+    }
+    if (activeConversation) {
+      handleOpenCreateSession({
+        id: activeConversation.scenarioId,
+        title: activeConversation.scenarioTitle,
+      });
+    } else {
+      handleStartTalking();
+    }
   };
 
   const handleSelectTab = (tab: DashboardTab) => {
@@ -315,7 +392,7 @@ export default function DashboardScreen() {
               </View>
             )}
 
-            {/* HERO BANNER: "Start a conversation" */}
+            {/* HERO BANNER: "Start a conversation" OR "Resume Practice" */}
             <View style={[
               styles.heroCard,
               isDesktop && [
@@ -328,58 +405,127 @@ export default function DashboardScreen() {
               ],
             ]}>
             <View style={[styles.heroLeft, isDesktop && styles.heroLeftDesktop]}>
-              <Text style={[
-                styles.heroTitle,
-                isDesktop && styles.heroTitleDesktop,
-              ]}>
-                Start a{' '}
-                <Text style={styles.heroTitleHighlight}>conversation</Text>
-              </Text>
-              <Text style={[
-                styles.heroSubtitle,
-                isDesktop && styles.heroSubtitleDesktop,
-              ]}>
-                Jump into a real-time conversation with your AI English partner.
-              </Text>
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.startTalkingButton,
-                  isDesktop && styles.startTalkingButtonDesktop,
-                  pressed && styles.startTalkingPressed,
-                ]}
-                onPress={handleStartTalking}
-                accessibilityRole="button"
-                accessibilityLabel="Start Talking with Maya"
-              >
-                <Text style={[styles.startTalkingText, isDesktop && styles.startTalkingTextDesktop]}>
-                  Start Talking
-                </Text>
-              </Pressable>
-
-              {/* Social Proof */}
-              <View style={styles.heroSocialRow}>
-                <View style={styles.overlappingAvatars}>
-                  {SOCIAL_AVATARS.map((url, i) => (
-                    <View
-                      key={i}
-                      style={[
-                        styles.avatarCircle,
-                        { zIndex: 3 - i, marginLeft: i > 0 ? -7 : 0 },
-                      ]}
-                    >
-                      <Image
-                        source={{ uri: url }}
-                        style={styles.avatarPhoto}
-                        resizeMode="cover"
-                      />
+              {activeConversation ? (
+                <>
+                  <View style={styles.resumePillRow}>
+                    <View style={[styles.resumeScenarioPill, { backgroundColor: getScenarioDetails(activeConversation.scenarioId).iconBg }]}>
+                      <Text style={styles.resumeScenarioPillText}>
+                        {activeConversation.scenarioTitle}
+                      </Text>
                     </View>
-                  ))}
-                </View>
-                <Text style={[styles.heroSocialText, isDesktop && styles.heroSocialTextDesktop]}>
-                  2,458+ conversations today
-                </Text>
-              </View>
+                    <View style={styles.resumeLiveDot} />
+                    <Text style={styles.resumeLastActiveText}>Recent Conversation</Text>
+                  </View>
+
+                  <Text style={[
+                    styles.heroTitle,
+                    isDesktop && styles.heroTitleDesktop,
+                  ]}>
+                    Resume{' '}
+                    <Text style={styles.heroTitleHighlight}>{activeConversation.scenarioTitle}</Text>
+                  </Text>
+                  <Text
+                    style={[
+                      styles.heroSubtitle,
+                      styles.resumeSummarySubtitle,
+                      isDesktop && styles.heroSubtitleDesktop,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {activeConversation.summary
+                      ? `"${activeConversation.summary}"`
+                      : activeConversation.topic
+                      ? `Topic: ${activeConversation.topic}`
+                      : 'Pick up right where you left off with Maya.'}
+                  </Text>
+
+                  <View style={styles.resumeButtonRow}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.startTalkingButton,
+                        styles.resumeActionButton,
+                        isDesktop && styles.startTalkingButtonDesktop,
+                        pressed && styles.startTalkingPressed,
+                      ]}
+                      onPress={handleResumeTalking}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Resume ${activeConversation.scenarioTitle} with Maya`}
+                    >
+                      <Ionicons name="play" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={[styles.startTalkingText, isDesktop && styles.startTalkingTextDesktop]}>
+                        Resume Practice
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.resumeStartNewButton,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                      onPress={handleStartTalking}
+                      accessibilityRole="button"
+                      accessibilityLabel="Start fresh topic"
+                    >
+                      <Text style={styles.resumeStartNewText}>Start New Topic</Text>
+                    </Pressable>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <Text style={[
+                    styles.heroTitle,
+                    isDesktop && styles.heroTitleDesktop,
+                  ]}>
+                    Start a{' '}
+                    <Text style={styles.heroTitleHighlight}>conversation</Text>
+                  </Text>
+                  <Text style={[
+                    styles.heroSubtitle,
+                    isDesktop && styles.heroSubtitleDesktop,
+                  ]}>
+                    Jump into a real-time conversation with your AI English partner.
+                  </Text>
+
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.startTalkingButton,
+                      isDesktop && styles.startTalkingButtonDesktop,
+                      pressed && styles.startTalkingPressed,
+                    ]}
+                    onPress={handleStartTalking}
+                    accessibilityRole="button"
+                    accessibilityLabel="Start Talking with Maya"
+                  >
+                    <Text style={[styles.startTalkingText, isDesktop && styles.startTalkingTextDesktop]}>
+                      Start Talking
+                    </Text>
+                  </Pressable>
+
+                  {/* Social Proof */}
+                  <View style={styles.heroSocialRow}>
+                    <View style={styles.overlappingAvatars}>
+                      {SOCIAL_AVATARS.map((url, i) => (
+                        <View
+                          key={i}
+                          style={[
+                            styles.avatarCircle,
+                            { zIndex: 3 - i, marginLeft: i > 0 ? -7 : 0 },
+                          ]}
+                        >
+                          <Image
+                            source={{ uri: url }}
+                            style={styles.avatarPhoto}
+                            resizeMode="cover"
+                          />
+                        </View>
+                      ))}
+                    </View>
+                    <Text style={[styles.heroSocialText, isDesktop && styles.heroSocialTextDesktop]}>
+                      2,458+ conversations today
+                    </Text>
+                  </View>
+                </>
+              )}
             </View>
 
             {/* Maya Waving Avatar Illustration */}
@@ -442,6 +588,11 @@ export default function DashboardScreen() {
                         if (isLocked) {
                           setActivePopup('unlock-premium');
                         } else {
+                          ActiveConversationStore.setActive({
+                            scenarioId: item.id,
+                            scenarioTitle: item.title,
+                            topic: item.title,
+                          });
                           handleOpenCreateSession({ id: item.id, title: item.title });
                         }
                       }}
@@ -1313,5 +1464,58 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'medium'),
     fontSize: 12,
     color: '#0284C7',
+  },
+  resumePillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  resumeScenarioPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 3.5,
+    borderRadius: 999,
+  },
+  resumeScenarioPillText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 11.5,
+    color: '#0F172A',
+  },
+  resumeLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+  },
+  resumeLastActiveText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#64748B',
+  },
+  resumeSummarySubtitle: {
+    color: '#334155',
+  },
+  resumeButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 14,
+    flexWrap: 'wrap',
+  },
+  resumeActionButton: {
+    marginTop: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    gap: 6,
+  },
+  resumeStartNewButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+  },
+  resumeStartNewText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12.5,
+    color: '#0057FF',
   },
 });

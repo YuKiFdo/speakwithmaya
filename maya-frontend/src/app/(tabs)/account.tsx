@@ -683,14 +683,14 @@ function CurrentPlanCard({
         </View>
 
         {/* Row 2: Available Practice Time */}
-        <View style={styles.planInfoRow}>
+        {/* <View style={styles.planInfoRow}>
           <Text style={styles.planInfoLabel}>Practice Time</Text>
           <View style={styles.planInfoValueCol}>
             <Text style={[styles.planInfoValue, isTimeExpired ? { color: '#DC2626', ...fontStyle('inter', 'bold') } : { color: '#0057FF' }]}>
               {isTimeExpired ? '0m remaining (Expired)' : `${minutesBalance}m of ${monthlyAllowance}m remaining`}
             </Text>
           </View>
-        </View>
+        </View> */}
 
         {/* Row 3: Next Reset Date */}
         <View style={styles.planInfoRow}>

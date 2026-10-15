@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { ActiveConversationStore } from './active-conversation-store';
 
 export interface CallSessionConfig {
   topic?: string;
@@ -49,6 +50,16 @@ export const CallSessionStore = {
       ...config,
       isIntroCall: options?.isIntroCall ?? config.isIntroCall ?? false,
     };
+
+    if (config.scenarioId || config.scenarioTitle) {
+      try {
+        ActiveConversationStore.setActive({
+          scenarioId: config.scenarioId || 'casual-chat',
+          scenarioTitle: config.scenarioTitle || config.topic || 'Casual Chat',
+          topic: config.topic || config.scenarioTitle || 'Casual Chat',
+        });
+      } catch {}
+    }
 
     if (activeSessionConfig.isIntroCall) {
       router.replace('/onboarding/call' as any);
