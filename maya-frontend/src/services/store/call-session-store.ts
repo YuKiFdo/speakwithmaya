@@ -51,7 +51,10 @@ export const CallSessionStore = {
       isIntroCall: options?.isIntroCall ?? config.isIntroCall ?? false,
     };
 
-    if (config.scenarioId || config.scenarioTitle) {
+    if (activeSessionConfig.isIntroCall) {
+      // Intro calls are diagnostic onboarding assessments; do not create a resume card
+      ActiveConversationStore.clear();
+    } else if (config.scenarioId || config.scenarioTitle) {
       try {
         ActiveConversationStore.setActive({
           scenarioId: config.scenarioId || 'casual-chat',

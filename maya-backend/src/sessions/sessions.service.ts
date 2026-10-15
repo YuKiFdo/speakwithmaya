@@ -1405,7 +1405,7 @@ ${memoryPart}`;
         await this.supabase.from('sessions').insert({
           id: sessionId,
           user_id: resolvedUserId,
-          topic: dto.topic || 'Assessment & General Conversation',
+          topic: dto.isIntroCall ? 'Introductory Practice' : (dto.topic || 'Assessment & General Conversation'),
           status: 'active',
           duration_seconds: 0,
           start_time: new Date().toISOString(),
@@ -1534,7 +1534,7 @@ ${memoryPart}`;
             end_time: new Date().toISOString(),
             duration_seconds: durationSeconds,
             status: 'completed',
-            topic: dto.topic || 'English Speaking Practice',
+            topic: dto.isIntroCall ? 'Introductory Practice' : (dto.topic || 'English Speaking Practice'),
             overall_score: scores?.overall ?? 85,
             fluency_score: scores?.fluency ?? 84,
             grammar_score: scores?.grammar ?? 82,

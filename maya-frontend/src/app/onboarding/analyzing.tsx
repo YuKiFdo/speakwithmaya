@@ -310,9 +310,15 @@ export default function AnalyzingScreen() {
           }),
         });
 
+        const isIntro =
+          (report as any)?.isIntroCall === true ||
+          (report as any)?.callParams?.isIntroCall === 'true' ||
+          (report as any)?.callParams?.isIntroCall === true ||
+          params.isIntroCall === 'true';
+
         if (res.ok) {
           const data = await res.json();
-          if (data?.conversationSummary || data?.scenarioTitle) {
+          if (!isIntro && (data?.conversationSummary || data?.scenarioTitle)) {
             ActiveConversationStore.setActive({
               sessionId: activeSessionId,
               scenarioId: data.scenarioId || (report as any)?.scenarioId || 'casual-chat',

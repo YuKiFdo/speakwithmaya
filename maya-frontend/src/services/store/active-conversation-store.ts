@@ -23,12 +23,28 @@ function notify() {
   }
 }
 
+function isIntroTopic(topic?: string | null, scenarioTitle?: string | null, scenarioId?: string | null): boolean {
+  const t = ((topic || '') + ' ' + (scenarioTitle || '') + ' ' + (scenarioId || '')).toLowerCase();
+  return (
+    t.includes('intro') ||
+    t.includes('onboarding') ||
+    t.includes('assessment') ||
+    t.includes('placement') ||
+    t.includes('free trial')
+  );
+}
+
 function loadInitialState(): ActiveConversationState | null {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (isIntroTopic(parsed.topic, parsed.scenarioTitle, parsed.scenarioId)) {
+          window.localStorage.removeItem(STORAGE_KEY);
+          return null;
+        }
+        return parsed;
       }
     } catch {}
   }
@@ -55,6 +71,11 @@ export const ActiveConversationStore = {
   },
 
   setActive(conv: Partial<ActiveConversationState> & { scenarioId: string; scenarioTitle: string }) {
+    // Strictly do not create a resume card for intro calls or diagnostic onboarding calls
+    if (isIntroTopic(conv.topic, conv.scenarioTitle, conv.scenarioId)) {
+      return;
+    }
+
     const updated: ActiveConversationState = {
       sessionId: conv.sessionId || memoryState?.sessionId,
       scenarioId: conv.scenarioId,

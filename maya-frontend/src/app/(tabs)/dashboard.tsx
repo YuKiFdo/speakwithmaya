@@ -203,17 +203,37 @@ export default function DashboardScreen() {
     fetchAllPracticeSessions().then((sessions) => {
       if (!mounted) return;
       if (sessions && sessions.length > 0) {
-        const latest = sessions[0];
-        const scenario = resolveScenarioFromTopic(latest.topic);
-        ActiveConversationStore.setActive({
-          sessionId: latest.id,
-          scenarioId: scenario.id,
-          scenarioTitle: scenario.title,
-          topic: latest.topic || scenario.title,
-          summary: latest.user_feedback || null,
-          lastPracticedAt: latest.start_time || new Date().toISOString(),
-          durationSeconds: latest.duration_seconds,
-        });
+        // Strictly ignore intro calls, onboarding calls, or assessments so the resume banner is NEVER shown for intro calls
+        const isIntro = (topic?: string | null) => {
+          if (!topic) return false;
+          const t = topic.toLowerCase();
+          return (
+            t.includes('intro') ||
+            t.includes('onboarding') ||
+            t.includes('assessment') ||
+            t.includes('placement') ||
+            t.includes('free trial')
+          );
+        };
+
+        const latest = sessions.find((s) => !isIntro(s.topic));
+        if (latest) {
+          const scenario = resolveScenarioFromTopic(latest.topic);
+          ActiveConversationStore.setActive({
+            sessionId: latest.id,
+            scenarioId: scenario.id,
+            scenarioTitle: scenario.title,
+            topic: latest.topic || scenario.title,
+            summary: latest.user_feedback || null,
+            lastPracticedAt: latest.start_time || new Date().toISOString(),
+            durationSeconds: latest.duration_seconds,
+          });
+        } else {
+          // If the user only has an intro call or no regular sessions, keep clean "Start Talking" hero banner
+          ActiveConversationStore.clear();
+        }
+      } else {
+        ActiveConversationStore.clear();
       }
     });
     return () => {
