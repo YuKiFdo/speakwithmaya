@@ -23,10 +23,14 @@ export class SubscriptionReconciliationService {
     private readonly payhereService: PayHereService,
   ) {
     const supabaseUrl =
-      this.config.get<string>('SUPABASE_URL') || 'https://placeholder.supabase.co';
+      this.config.get<string>('SUPABASE_URL') ||
+      process.env.SUPABASE_URL ||
+      'https://placeholder.supabase.co';
     const supabaseKey =
       this.config.get<string>('SUPABASE_SECRET_KEY') ||
-      this.config.get<string>('SUPABASE_ANON_KEY') ||
+      this.config.get<string>('SUPABASE_SERVICE_ROLE_KEY') ||
+      process.env.SUPABASE_SECRET_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
       'placeholder-key';
     this.supabase = createClient(supabaseUrl, supabaseKey);
   }

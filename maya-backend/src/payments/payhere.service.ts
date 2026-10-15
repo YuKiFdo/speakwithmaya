@@ -33,10 +33,14 @@ export class PayHereService {
 
   constructor(private readonly config: ConfigService) {
     const supabaseUrl =
-      this.config.get<string>('SUPABASE_URL') || 'https://placeholder.supabase.co';
+      this.config.get<string>('SUPABASE_URL') ||
+      process.env.SUPABASE_URL ||
+      'https://placeholder.supabase.co';
     const supabaseKey =
       this.config.get<string>('SUPABASE_SECRET_KEY') ||
-      this.config.get<string>('SUPABASE_ANON_KEY') ||
+      this.config.get<string>('SUPABASE_SERVICE_ROLE_KEY') ||
+      process.env.SUPABASE_SECRET_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
       'placeholder-key';
     this.supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -282,10 +286,13 @@ export class PayHereService {
     // 2. Handle Success Events
     if (statusCode === 2) {
       if (messageType === 'AUTHORIZATION_SUCCESS' || !messageType) {
-        this.logger.log(`[PayHereWebhook] 🚀 Processing INITIAL AUTHORIZATION for subscription ${payload.subscription_id || payload.order_id}...`);
+        const parsedNext = payload.item_rec_date_next
+          ? new Date(payload.item_rec_date_next).getTime()
+          : 0;
         const nextBillingDate =
-          payload.item_rec_date_next ||
-          new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          payload.item_rec_date_next && parsedNext > Date.now()
+            ? payload.item_rec_date_next
+            : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
         // Upsert Subscriptions Table
         const { data: subData, error: subError } = await this.supabase
@@ -372,9 +379,13 @@ export class PayHereService {
         }
 
         const newInstallments = (sub?.installments_paid || 0) + 1;
+        const parsedNextRenewal = payload.item_rec_date_next
+          ? new Date(payload.item_rec_date_next).getTime()
+          : 0;
         const nextBillingDate =
-          payload.item_rec_date_next ||
-          new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          payload.item_rec_date_next && parsedNextRenewal > Date.now()
+            ? payload.item_rec_date_next
+            : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
         if (sub) {
           const { error: subUpdateErr } = await this.supabase
