@@ -51,8 +51,8 @@ export function UserLevelBadge({
         return {
           show: true,
           label: 'PREMIUM',
-          bgColor: '#7C3AED',
-          icon: <CrownSolidIcon color="#FDE047" size={9.5} />,
+          bgColor: '#D97706',
+          icon: <CrownSolidIcon color="#ffffff" size={9.5} />,
         };
       case 'pro':
         return {
@@ -65,8 +65,8 @@ export function UserLevelBadge({
         return {
           show: true,
           label: 'BASIC',
-          bgColor: '#0284C7',
-          icon: <Ionicons name="flash" size={8.5} color="#ffffff" />,
+          bgColor: '#D97706',
+          icon: <CrownSolidIcon color="#ffffff" size={9.5} />,
         };
       default:
         return {
