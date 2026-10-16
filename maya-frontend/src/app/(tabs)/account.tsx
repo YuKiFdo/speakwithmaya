@@ -190,27 +190,34 @@ export default function AccountScreen() {
       if (!paymentStatus) paymentStatus = q.get('payment') || undefined;
     }
 
-    if (cardUpdateStatus === 'success') {
-      stats.refreshStats();
-      fetchSubscription();
-      mayaAlert.success(
-        'Your payment card has been updated successfully! Future monthly renewals will now bill your new card.',
-        'Card Updated'
-      );
-    } else if (cardUpdateStatus === 'cancelled') {
-      mayaAlert.alert('Card update was cancelled.', 'Cancelled', 'info');
-    } else if (paymentStatus === 'success') {
-      stats.refreshStats();
-      fetchSubscription();
-      mayaAlert.success('Your subscription has been activated successfully!', 'Payment Successful');
-    } else if (paymentStatus === 'cancelled') {
-      mayaAlert.alert('Subscription payment was cancelled.', 'Cancelled', 'info');
-    }
+    if (!cardUpdateStatus && !paymentStatus) return;
 
-    // Clean URL query on web to avoid repeat triggers on page reload
-    if ((cardUpdateStatus || paymentStatus) && Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    // Small delay ensures screen animation, DOM layout, and AlertHost listener are fully settled
+    const timer = setTimeout(() => {
+      if (cardUpdateStatus === 'success') {
+        stats.refreshStats();
+        fetchSubscription();
+        mayaAlert.success(
+          'Your payment card has been updated successfully! Future monthly renewals will now bill your new card.',
+          'Card Updated'
+        );
+      } else if (cardUpdateStatus === 'cancelled') {
+        mayaAlert.alert('Card update was cancelled.', 'Cancelled', 'info');
+      } else if (paymentStatus === 'success') {
+        stats.refreshStats();
+        fetchSubscription();
+        mayaAlert.success('Your subscription has been activated successfully!', 'Payment Successful');
+      } else if (paymentStatus === 'cancelled') {
+        mayaAlert.alert('Subscription payment was cancelled.', 'Cancelled', 'info');
+      }
+
+      // Clean URL query on web to avoid repeat triggers on page reload
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
   }, [searchParams.card_update, searchParams.payment]);
 
   const handleChangePayment = async () => {

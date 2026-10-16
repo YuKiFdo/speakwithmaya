@@ -26,7 +26,7 @@ export interface AlertConfig {
 
 // Global alert controller listeners
 type AlertListener = (config: AlertConfig) => void;
-let globalListener: AlertListener | null = null;
+const alertListeners = new Set<AlertListener>();
 
 const DEFAULT_CONFIG: AlertConfig = {
   visible: false,
@@ -56,7 +56,7 @@ export const mayaAlert = {
         cancelText: '',
         resolve: () => resolve(),
       };
-      if (globalListener) globalListener(currentConfig);
+      alertListeners.forEach((l) => l(currentConfig));
     });
   },
 
@@ -92,7 +92,7 @@ export const mayaAlert = {
         isDestructive: options.isDestructive,
         resolve: (val: boolean) => resolve(val),
       };
-      if (globalListener) globalListener(currentConfig);
+      alertListeners.forEach((l) => l(currentConfig));
     });
   },
 };
@@ -105,11 +105,18 @@ export function AlertHost() {
   const [config, setConfig] = useState<AlertConfig>(currentConfig);
 
   useEffect(() => {
-    globalListener = (newConfig) => {
+    const listener: AlertListener = (newConfig) => {
       setConfig({ ...newConfig });
     };
+    alertListeners.add(listener);
+
+    // If an alert was requested before this component finished mounting, render it immediately
+    if (currentConfig.visible) {
+      setConfig({ ...currentConfig });
+    }
+
     return () => {
-      globalListener = null;
+      alertListeners.delete(listener);
     };
   }, []);
 

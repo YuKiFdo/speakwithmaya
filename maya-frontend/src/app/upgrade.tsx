@@ -260,17 +260,23 @@ export default function UpgradeScreen() {
       if (!paymentStatus) paymentStatus = q.get('payment') || undefined;
     }
 
-    if (paymentStatus === 'success') {
-      stats.refreshStats();
-      mayaAlert.success('Your subscription has been processed successfully! Enjoy your practice time.', 'Payment Successful');
-    } else if (paymentStatus === 'cancelled') {
-      mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
-    }
+    if (!paymentStatus) return;
 
-    // Clean URL query on web to avoid repeat triggers on page reload
-    if (paymentStatus && Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    const timer = setTimeout(() => {
+      if (paymentStatus === 'success') {
+        stats.refreshStats();
+        mayaAlert.success('Your subscription has been processed successfully! Enjoy your practice time.', 'Payment Successful');
+      } else if (paymentStatus === 'cancelled') {
+        mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
+      }
+
+      // Clean URL query on web to avoid repeat triggers on page reload
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
   }, [searchParams.payment]);
 
   // Dynamic scaling so the desktop upgrade page fills available height naturally
