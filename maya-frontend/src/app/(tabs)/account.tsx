@@ -223,10 +223,10 @@ export default function AccountScreen() {
     const planName = planId === 'premium' ? 'Premium' : 'Pro';
 
     const confirmed = await mayaAlert.confirm({
-      title: 'Update Saved Card',
+      title: 'Update Payment Card',
       message:
-        'Authorize your new card with zero charge. PayHere will verify your card (Rs. 1 test authorization, instantly refunded). Your active subscription, billing cycle, and remaining days will not be interrupted.',
-      confirmText: 'Authorize New Card',
+        'You can update your card today with zero subscription charge.\n\n• PayHere verifies your card with a temporary Rs. 1.00 test authorization that is refunded immediately.\n• Your current subscription, practice minutes, and billing cycle will not be interrupted.\n• Future renewals will automatically bill your new card.',
+      confirmText: 'Update Card',
       cancelText: 'Cancel',
       type: 'info',
     });
