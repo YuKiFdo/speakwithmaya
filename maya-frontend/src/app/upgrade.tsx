@@ -412,9 +412,13 @@ export default function UpgradeScreen() {
 
   const handleSelectTab = (tab: DashboardTab) => {
     if (tab === 'home') {
-      router.push('/dashboard');
+      router.replace('/(tabs)/dashboard');
     } else if (tab === 'roadmap') {
-      router.push('/roadmap');
+      router.replace('/(tabs)/roadmap');
+    } else if (tab === 'history') {
+      router.replace('/(tabs)/history');
+    } else if (tab === 'account') {
+      router.replace('/(tabs)/account');
     } else {
       setActiveTab(tab);
     }
