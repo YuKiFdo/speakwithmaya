@@ -252,11 +252,24 @@ export default function UpgradeScreen() {
 
   // Handle PayHere Preapproval redirect return
   useEffect(() => {
-    if (searchParams.payment === 'success') {
+    let paymentStatus = searchParams.payment;
+
+    // Web fallback: Read from window.location.search if external redirect didn't hydrate expo params yet
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search) {
+      const q = new URLSearchParams(window.location.search);
+      if (!paymentStatus) paymentStatus = q.get('payment') || undefined;
+    }
+
+    if (paymentStatus === 'success') {
       stats.refreshStats();
       mayaAlert.success('Your subscription has been processed successfully! Enjoy your practice time.', 'Payment Successful');
-    } else if (searchParams.payment === 'cancelled') {
+    } else if (paymentStatus === 'cancelled') {
       mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
+    }
+
+    // Clean URL query on web to avoid repeat triggers on page reload
+    if (paymentStatus && Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, [searchParams.payment]);
 

@@ -178,21 +178,38 @@ export default function AccountScreen() {
     fetchSubscription();
   }, []);
 
-  // Handle PayHere Preapproval redirect returns for card updates
+  // Handle PayHere Preapproval redirect returns for card updates & plan payments
   useEffect(() => {
-    if (searchParams.card_update === 'success') {
+    let cardUpdateStatus = searchParams.card_update;
+    let paymentStatus = searchParams.payment;
+
+    // Web fallback: Read from window.location.search if external redirect didn't hydrate expo params yet
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search) {
+      const q = new URLSearchParams(window.location.search);
+      if (!cardUpdateStatus) cardUpdateStatus = q.get('card_update') || undefined;
+      if (!paymentStatus) paymentStatus = q.get('payment') || undefined;
+    }
+
+    if (cardUpdateStatus === 'success') {
       stats.refreshStats();
       fetchSubscription();
       mayaAlert.success(
         'Your payment card has been updated successfully! Future monthly renewals will now bill your new card.',
         'Card Updated'
       );
-    } else if (searchParams.card_update === 'cancelled') {
+    } else if (cardUpdateStatus === 'cancelled') {
       mayaAlert.alert('Card update was cancelled.', 'Cancelled', 'info');
-    } else if (searchParams.payment === 'success') {
+    } else if (paymentStatus === 'success') {
       stats.refreshStats();
       fetchSubscription();
       mayaAlert.success('Your subscription has been activated successfully!', 'Payment Successful');
+    } else if (paymentStatus === 'cancelled') {
+      mayaAlert.alert('Subscription payment was cancelled.', 'Cancelled', 'info');
+    }
+
+    // Clean URL query on web to avoid repeat triggers on page reload
+    if ((cardUpdateStatus || paymentStatus) && Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, [searchParams.card_update, searchParams.payment]);
 
