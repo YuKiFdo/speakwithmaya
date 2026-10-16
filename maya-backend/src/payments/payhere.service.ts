@@ -574,6 +574,18 @@ export class PayHereService {
     if (isTopup) {
       this.logger.log(`[PayHereWebhook] ⚡ Processing Extra Talk Time Top-up payment: order=${payload.order_id}, tier=${planTierKey}`);
       if (statusCode === 2) {
+        // Idempotency: Check if this top-up order was already completed and credited
+        const { data: existingOrder } = await this.supabase
+          .from('orders')
+          .select('status')
+          .eq('gateway_payment_id', payload.order_id)
+          .maybeSingle();
+
+        if (existingOrder && existingOrder.status === 'completed') {
+          this.logger.log(`[PayHereWebhook] ⏩ Order ${payload.order_id} already completed. Skipping duplicate crediting.`);
+          return { received: true, status: 'ALREADY_COMPLETED' };
+        }
+
         const topupAllowance = planTierKey === '300-min' ? 300 : planTierKey === '120-min' ? 120 : 30;
 
         // Fetch current user balance
@@ -1135,16 +1147,16 @@ export class PayHereService {
     } else if (dto.planTier) {
       isTopup = false;
       if (dto.planTier === 'basic') {
-        amount = 750;
-        allowance = 60;
+        amount = 2700;
+        allowance = 450;
         itemName = 'Maya Basic Plan (Monthly)';
       } else if (dto.planTier === 'pro') {
-        amount = 1500;
-        allowance = 150;
+        amount = 3600;
+        allowance = 600;
         itemName = 'Maya Pro Plan (Monthly)';
       } else if (dto.planTier === 'premium') {
-        amount = 3500;
-        allowance = 300;
+        amount = 7200;
+        allowance = 1200;
         itemName = 'Maya Premium Plan (Monthly)';
       } else {
         throw new BadRequestException(`Invalid plan tier: ${dto.planTier}`);

@@ -87,8 +87,9 @@ export function useUserStats(): UserStats {
   const isPro = planTier === 'pro' || planTier === 'premium';
   const monthlyMinutesAllowance = user?.monthlyMinutesAllowance ?? (isPro ? 600 : 10);
   const minutesBalance = user?.minutesBalance ?? monthlyMinutesAllowance;
-  const usedMinutes = Math.max(0, monthlyMinutesAllowance - minutesBalance);
-  const totalMinutes = monthlyMinutesAllowance;
+  // If user purchased top-ups, total minutes includes the additional top-up balance
+  const totalMinutes = Math.max(monthlyMinutesAllowance, minutesBalance);
+  const usedMinutes = Math.max(0, totalMinutes - minutesBalance);
   const isTimeExpired = minutesBalance <= 0;
   const resetsInText = calculateResetsIn(user?.minutesResetAt);
 
