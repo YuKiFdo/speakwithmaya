@@ -161,6 +161,7 @@ export default function AccountScreen() {
     }
   };
 
+  const searchParams = useLocalSearchParams<{ card_update?: string; payment?: string }>();
   const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
   const [isUpdatingCard, setIsUpdatingCard] = useState(false);
 
@@ -176,6 +177,24 @@ export default function AccountScreen() {
   useEffect(() => {
     fetchSubscription();
   }, []);
+
+  // Handle PayHere Preapproval redirect returns for card updates
+  useEffect(() => {
+    if (searchParams.card_update === 'success') {
+      stats.refreshStats();
+      fetchSubscription();
+      mayaAlert.success(
+        'Your payment card has been updated successfully! Future monthly renewals will now bill your new card.',
+        'Card Updated'
+      );
+    } else if (searchParams.card_update === 'cancelled') {
+      mayaAlert.alert('Card update was cancelled.', 'Cancelled', 'info');
+    } else if (searchParams.payment === 'success') {
+      stats.refreshStats();
+      fetchSubscription();
+      mayaAlert.success('Your subscription has been activated successfully!', 'Payment Successful');
+    }
+  }, [searchParams.card_update, searchParams.payment]);
 
   const handleChangePayment = async () => {
     if (!isPro) {

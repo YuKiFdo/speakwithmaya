@@ -1,5 +1,6 @@
 export interface PayHereCheckoutParams {
   sandbox: boolean;
+  action_url?: string;
   merchant_id: string;
   return_url: string;
   cancel_url: string;
@@ -7,7 +8,7 @@ export interface PayHereCheckoutParams {
   order_id: string;
   items: string;
   currency: string;
-  amount: string;
+  amount?: string;
   recurrence?: string;
   duration?: string;
   startup_fee?: string;

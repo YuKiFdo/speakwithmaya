@@ -38,16 +38,31 @@ class PaymentApiService {
   }
 
   /**
-   * Request server-signed checkout parameters for a subscription plan.
+   * Request server-signed checkout parameters for a subscription plan or top-up.
    */
   async getCheckoutParams(
     planTier: 'basic' | 'pro' | 'premium' | '3-months-pro' | '30-min' | '120-min' | '300-min',
-    billingCycle: 'monthly' | '3-months' | 'yearly' = 'monthly'
+    billingCycle: 'monthly' | '3-months' | 'yearly' = 'monthly',
+    returnUrl?: string,
+    cancelUrl?: string
   ): Promise<PayHereCheckoutParams> {
+    const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+
+    const effectiveReturnUrl =
+      returnUrl || (currentOrigin ? `${currentOrigin}${currentPath}?payment=success` : undefined);
+    const effectiveCancelUrl =
+      cancelUrl || (currentOrigin ? `${currentOrigin}${currentPath}?payment=cancelled` : undefined);
+
     const res = await fetch(`${this.baseUrl}/v1/payments/payhere/checkout-params`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
-      body: JSON.stringify({ planTier, billingCycle }),
+      body: JSON.stringify({
+        planTier,
+        billingCycle,
+        returnUrl: effectiveReturnUrl,
+        cancelUrl: effectiveCancelUrl,
+      }),
     });
 
     const data = await res.json();
@@ -62,7 +77,10 @@ class PaymentApiService {
    * Generates server-signed PayHere Preapproval parameters for card update (zero charge).
    */
   async getCardUpdateParams(): Promise<PayHereCheckoutParams> {
-    return this.getCheckoutParams('card-update' as any);
+    const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+    const returnUrl = currentOrigin ? `${currentOrigin}/(tabs)/account?card_update=success` : undefined;
+    const cancelUrl = currentOrigin ? `${currentOrigin}/(tabs)/account?card_update=cancelled` : undefined;
+    return this.getCheckoutParams('card-update' as any, 'monthly', returnUrl, cancelUrl);
   }
 
   /**

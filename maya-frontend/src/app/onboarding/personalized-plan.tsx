@@ -133,7 +133,7 @@ const FAQS = [
 ];
 
 export default function PersonalizedPlanScreen() {
-  const params = useLocalSearchParams<{ name?: string }>();
+  const params = useLocalSearchParams<{ name?: string; payment?: string; order_id?: string }>();
   const { isPhone } = useBreakpoint();
   const onboardingState = useOnboardingStore();
 
@@ -142,9 +142,22 @@ export default function PersonalizedPlanScreen() {
     return raw || 'Learner';
   }, [onboardingState.name, onboardingState.user?.displayName, params.name]);
 
+  // Handle PayHere Preapproval redirect return
+  useEffect(() => {
+    if (params.payment === 'success') {
+      authService.fetchUserProfile();
+      router.replace({
+        pathname: '/onboarding/complete' as any,
+        params: { plan: '3-months-pro' },
+      });
+    } else if (params.payment === 'cancelled') {
+      mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
+    }
+  }, [params.payment]);
+
   // Ensure browser URL bar displays clean route with zero query leakage on Web
   useEffect(() => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search) {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search && !window.location.search.includes('payment=')) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);

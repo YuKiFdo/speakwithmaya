@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Fonts, fontStyle } from '@/theme/fonts';
@@ -244,10 +244,21 @@ const TRUST_ICON_MAP = {
 
 export default function UpgradeScreen() {
   const stats = useUserStats();
+  const searchParams = useLocalSearchParams<{ payment?: string; order_id?: string }>();
   const { isPhone } = useBreakpoint();
   const isDesktop = !isPhone;
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [activeTab, setActiveTab] = useState<DashboardTab>('upgrade');
+
+  // Handle PayHere Preapproval redirect return
+  useEffect(() => {
+    if (searchParams.payment === 'success') {
+      stats.refreshStats();
+      mayaAlert.success('Your subscription has been processed successfully! Enjoy your practice time.', 'Payment Successful');
+    } else if (searchParams.payment === 'cancelled') {
+      mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
+    }
+  }, [searchParams.payment]);
 
   // Dynamic scaling so the desktop upgrade page fills available height naturally
   // (pricing cards and trust badges expand to fill screen space without any vertical scrolling):

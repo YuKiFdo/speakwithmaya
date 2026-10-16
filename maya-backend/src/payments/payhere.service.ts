@@ -155,19 +155,21 @@ export class PayHereService {
       ? `MAYA-PREAUTH-${dto.planTier.toUpperCase()}-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`
       : `MAYA-TOPUP-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // For preapproval in LKR, PayHere checks 1.00 LKR (immediately refunded) to validate card
-    const formattedAmount = isPreapproval ? '1.00' : plan.amount.toFixed(2);
     const currency = 'LKR';
 
-    // MD5 Signature per PayHere specification:
-    // hash = strtoupper(md5(merchant_id + order_id + amount + currency + strtoupper(md5(merchant_secret))))
+    // MD5 Signature per PayHere specification (Preapproval API):
+    // If 'amount' is provided in payload, use that amount in hash.
+    // If 'amount' is omitted (zero-charge card update/tokenization), PayHere requires using '10.00' for LKR in hash.
+    const formattedAmount = plan.amount.toFixed(2);
+    const hashAmount = isCardUpdate ? '10.00' : formattedAmount;
+
     const hashedSecret = crypto
       .createHash('md5')
       .update(this.merchantSecret)
       .digest('hex')
       .toUpperCase();
 
-    const hashString = `${this.merchantId}${orderId}${formattedAmount}${currency}${hashedSecret}`;
+    const hashString = `${this.merchantId}${orderId}${hashAmount}${currency}${hashedSecret}`;
     const hash = crypto
       .createHash('md5')
       .update(hashString)
@@ -179,7 +181,7 @@ export class PayHereService {
       user_id: userId,
       order_type: plan.isTopup ? 'add_on_topup' : isCardUpdate ? 'subscription_renewal' : 'subscription_new',
       plan_tier: plan.tier,
-      amount_lkr: isPreapproval ? 0 : plan.amount,
+      amount_lkr: isCardUpdate ? 0 : plan.amount,
       minutes_credited: plan.allowance,
       payment_gateway: 'payhere',
       gateway_payment_id: orderId,
@@ -191,8 +193,13 @@ export class PayHereService {
     const firstName = nameParts[0] || 'Learner';
     const lastName = nameParts.slice(1).join(' ') || 'User';
 
+    const preapprovalUrl = this.isSandbox
+      ? 'https://sandbox.payhere.lk/pay/preapprove'
+      : 'https://www.payhere.lk/pay/preapprove';
+
     return {
       sandbox: this.isSandbox,
+      action_url: isPreapproval ? preapprovalUrl : undefined,
       merchant_id: this.merchantId,
       return_url: dto.returnUrl || '',
       cancel_url: dto.cancelUrl || '',
@@ -200,11 +207,9 @@ export class PayHereService {
       order_id: orderId,
       items: isCardUpdate
         ? 'Update Payment Card (Zero Charge Verification)'
-        : isPreapproval
-        ? `${plan.name} (Card Authorization)`
         : plan.name,
       currency,
-      amount: formattedAmount,
+      ...(isCardUpdate ? {} : { amount: formattedAmount }),
       ...(isPreapproval ? { preapprove: true } : {}),
       hash,
       first_name: firstName,
@@ -403,23 +408,45 @@ export class PayHereService {
         const allowance = planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
         const cycleDays = isQuarterly ? 90 : 30;
 
-        // Execute Month 1 Charge via Charging API using the new preapproved token
-        const firstChargeOrderId = `MAYA-SUB-FIRST-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-        this.logger.log(`[PayHereWebhook] Executing Month 1 charge for user ${userId}: amount=${amount} LKR, tier=${planTier}...`);
+        // Determine if PayHere captured Month 1 upfront in preapproval or if we charge via token
+        const receivedAmount = parseFloat(payload.payhere_amount || '0');
+        const alreadyChargedInPreapproval = receivedAmount >= amount;
 
-        const chargeResult = await this.executeTokenCharge({
-          userId,
-          customerToken,
-          amount,
-          itemName: `Maya AI ${planTier.toUpperCase()} Plan (Month 1)`,
-          orderId: firstChargeOrderId,
-          custom1: userId,
-          custom2: planTier,
-        });
+        let chargeSuccess = false;
+        let chargePaymentId = payload.payment_id;
+        let firstChargeOrderId = payload.order_id;
+        let chargeRawData: any = payload;
+        let chargeErrorMessage = '';
+
+        if (alreadyChargedInPreapproval) {
+          this.logger.log(
+            `[PayHereWebhook] 💳 Month 1 payment captured upfront by PayHere Preapproval (${receivedAmount} LKR). No secondary charge needed.`
+          );
+          chargeSuccess = true;
+        } else {
+          // Token preapproved without upfront capture; charge Month 1 via Charging API
+          firstChargeOrderId = `MAYA-SUB-FIRST-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+          this.logger.log(`[PayHereWebhook] Executing Month 1 charge for user ${userId}: amount=${amount} LKR, tier=${planTier}...`);
+
+          const chargeResult = await this.executeTokenCharge({
+            userId,
+            customerToken,
+            amount,
+            itemName: `Maya AI ${planTier.toUpperCase()} Plan (Month 1)`,
+            orderId: firstChargeOrderId,
+            custom1: userId,
+            custom2: planTier,
+          });
+
+          chargeSuccess = chargeResult.success;
+          chargePaymentId = chargeResult.data?.data?.payment_id || payload.payment_id;
+          chargeRawData = chargeResult.data || payload;
+          chargeErrorMessage = chargeResult.error || '';
+        }
 
         const nextBillingDate = new Date(Date.now() + cycleDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-        if (chargeResult.success) {
+        if (chargeSuccess) {
           // Check for existing subscription for this user
           const { data: existingSub } = await this.supabase
             .from('subscriptions')
@@ -446,7 +473,7 @@ export class PayHereService {
                 card_masked: payload.card_no,
                 card_expiry: payload.card_expiry,
                 payment_method: payload.method,
-                last_payment_id: chargeResult.data?.data?.payment_id || payload.payment_id,
+                last_payment_id: chargePaymentId,
                 updated_at: new Date().toISOString(),
               })
               .eq('id', subId);
@@ -466,7 +493,7 @@ export class PayHereService {
                 card_masked: payload.card_no,
                 card_expiry: payload.card_expiry,
                 payment_method: payload.method,
-                last_payment_id: chargeResult.data?.data?.payment_id || payload.payment_id,
+                last_payment_id: chargePaymentId,
               })
               .select()
               .single();
@@ -498,24 +525,26 @@ export class PayHereService {
             })
             .eq('gateway_payment_id', payload.order_id);
 
-          // Insert Completed First Month Order
-          await this.supabase.from('orders').insert({
-            user_id: userId,
-            subscription_id: subId,
-            order_type: 'subscription_new',
-            plan_tier: planTier,
-            amount_lkr: amount,
-            minutes_credited: allowance,
-            payment_gateway: 'payhere_token',
-            gateway_payment_id: firstChargeOrderId,
-            status: 'completed',
-            raw_payload: chargeResult.data,
-          });
+          // If charged separately via token, insert the completed order record
+          if (!alreadyChargedInPreapproval) {
+            await this.supabase.from('orders').insert({
+              user_id: userId,
+              subscription_id: subId,
+              order_type: 'subscription_new',
+              plan_tier: planTier,
+              amount_lkr: amount,
+              minutes_credited: allowance,
+              payment_gateway: 'payhere_token',
+              gateway_payment_id: firstChargeOrderId,
+              status: 'completed',
+              raw_payload: chargeRawData,
+            });
+          }
 
-          this.logger.log(`[PayHereWebhook] 🎉 Preapproval & First charge completed successfully for user ${userId}! Tier: ${planTier}`);
+          this.logger.log(`[PayHereWebhook] 🎉 Preapproval & Month 1 activation completed successfully for user ${userId}! Tier: ${planTier}`);
           return { received: true, status: 'ACTIVATION_COMPLETED' };
         } else {
-          this.logger.error(`[PayHereWebhook] First charge failed for user ${userId}: ${chargeResult.error}`);
+          this.logger.error(`[PayHereWebhook] First charge failed for user ${userId}`);
 
           // Save token anyway as PAST_DUE
           await this.supabase.from('subscriptions').insert({
@@ -534,7 +563,7 @@ export class PayHereService {
             last_payment_id: payload.payment_id,
           });
 
-          return { received: true, status: 'FIRST_CHARGE_FAILED', error: chargeResult.error };
+          return { received: true, status: 'FIRST_CHARGE_FAILED', error: chargeErrorMessage };
         }
       } else {
         this.logger.warn(`[PayHereWebhook] Preapproval failed: status=${statusCode}`);
