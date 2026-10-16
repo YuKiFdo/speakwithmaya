@@ -11,6 +11,7 @@ export interface PayHereCheckoutParams {
   recurrence?: string;
   duration?: string;
   startup_fee?: string;
+  preapprove?: boolean;
   hash: string;
   first_name: string;
   last_name: string;

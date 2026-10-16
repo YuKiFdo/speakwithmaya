@@ -148,7 +148,8 @@ export default function AdminSubscriptionsScreen() {
     setIsReconciling(true);
     try {
       const res = await paymentApi.reconcileSubscriptions();
-      const summaryMsg = `Reconciliation completed!\n• Checked Past Due: ${res.totalPastDueChecked}\n• Reinstated: ${res.pastDueReinstated}\n• Downgraded (>7d): ${res.pastDueDowngraded}\n• Quotas Refreshed: ${res.quotasReset}`;
+      const renewalInfo = res.renewalsAttempted ? `\n• Renewals Billed: ${res.renewalsSucceeded || 0} succeeded, ${res.renewalsFailed || 0} failed` : '';
+      const summaryMsg = `Reconciliation completed!\n• Checked Past Due: ${res.totalPastDueChecked}\n• Reinstated: ${res.pastDueReinstated}\n• Downgraded (>7d): ${res.pastDueDowngraded}\n• Quotas Refreshed: ${res.quotasReset}${renewalInfo}`;
       await mayaAlert.success(summaryMsg, 'Reconciliation Done');
       await loadData();
     } catch (err: any) {

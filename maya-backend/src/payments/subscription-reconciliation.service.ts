@@ -10,6 +10,9 @@ export interface ReconciliationReport {
   pastDueReinstated: number;
   pastDueDowngraded: number;
   quotasReset: number;
+  renewalsAttempted?: number;
+  renewalsSucceeded?: number;
+  renewalsFailed?: number;
   errors: string[];
 }
 
@@ -69,7 +72,6 @@ export class SubscriptionReconciliationService {
     };
 
     const now = new Date();
-    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
     // 1. Fetch all PAST_DUE subscriptions
     const { data: pastDueSubs, error: pastDueErr } = await this.supabase
@@ -209,6 +211,152 @@ export class SubscriptionReconciliationService {
       }
     }
 
+    // 3. Automated Renewal Charging for ACTIVE tokenized subscriptions due today
+    const renewalStats = await this.processAutomatedRenewals();
+    report.renewalsAttempted = renewalStats.renewalsAttempted;
+    report.renewalsSucceeded = renewalStats.renewalsSucceeded;
+    report.renewalsFailed = renewalStats.renewalsFailed;
+
     return report;
+  }
+
+  /**
+   * Automatically charges recurring renewals for subscriptions due today using PayHere preapproved tokens.
+   */
+  async processAutomatedRenewals(): Promise<{ renewalsAttempted: number; renewalsSucceeded: number; renewalsFailed: number }> {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const results = { renewalsAttempted: 0, renewalsSucceeded: 0, renewalsFailed: 0 };
+
+    this.logger.log(`[PayHereRenewals] 🔄 Checking for subscriptions due for renewal on or before ${todayStr}...`);
+
+    const { data: dueSubs, error: subErr } = await this.supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('status', 'ACTIVE')
+      .not('customer_token', 'is', null)
+      .lte('next_billing_date', todayStr);
+
+    if (subErr) {
+      this.logger.error(`[PayHereRenewals] Failed to query due subscriptions: ${subErr.message}`);
+      return results;
+    }
+
+    if (!dueSubs || dueSubs.length === 0) {
+      this.logger.log('[PayHereRenewals] No active tokenized subscriptions due for renewal today.');
+      return results;
+    }
+
+    this.logger.log(`[PayHereRenewals] Found ${dueSubs.length} subscription(s) due for renewal.`);
+
+    for (const sub of dueSubs) {
+      results.renewalsAttempted++;
+      try {
+        const userId = sub.user_id;
+        const planTier = sub.plan_tier;
+        const customerToken = sub.customer_token;
+        const amount = parseFloat(sub.amount_lkr || '3600');
+        const isQuarterly = sub.billing_cycle === '3 Month';
+        const cycleDays = isQuarterly ? 90 : 30;
+        const allowance = planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
+
+        const renewalOrderId = `MAYA-RENEW-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+        this.logger.log(`[PayHereRenewals] Processing renewal for user ${userId}, plan=${planTier}, amount=${amount} LKR, token=${customerToken.slice(0, 8)}...`);
+
+        const chargeResult = await this.payhereService.executeTokenCharge({
+          userId,
+          customerToken,
+          amount,
+          itemName: `Maya AI ${planTier.toUpperCase()} Plan Renewal`,
+          orderId: renewalOrderId,
+          custom1: userId,
+          custom2: planTier,
+        });
+
+        if (chargeResult.success) {
+          const nextBilling = new Date();
+          nextBilling.setDate(nextBilling.getDate() + cycleDays);
+          const nextBillingDateStr = nextBilling.toISOString().split('T')[0];
+
+          // Advance subscription billing date & increment installments
+          await this.supabase
+            .from('subscriptions')
+            .update({
+              next_billing_date: nextBillingDateStr,
+              installments_paid: (sub.installments_paid || 1) + 1,
+              last_payment_id: chargeResult.data?.data?.payment_id || renewalOrderId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', sub.id);
+
+          // Refresh user profile minutes allowance
+          await this.supabase
+            .from('profiles')
+            .update({
+              plan_status: 'active',
+              minutes_balance: allowance,
+              minutes_reset_at: nextBilling.toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', userId);
+
+          // Record renewal order entry
+          await this.supabase.from('orders').insert({
+            user_id: userId,
+            subscription_id: sub.id,
+            order_type: 'subscription_renewal',
+            plan_tier: planTier,
+            amount_lkr: amount,
+            minutes_credited: allowance,
+            payment_gateway: 'payhere_token',
+            gateway_payment_id: renewalOrderId,
+            status: 'completed',
+            raw_payload: chargeResult.data,
+          });
+
+          results.renewalsSucceeded++;
+          this.logger.log(`[PayHereRenewals] ✅ Renewal succeeded for user ${userId}. Next billing: ${nextBillingDateStr}`);
+        } else {
+          // Charge failed: mark subscription PAST_DUE
+          this.logger.warn(`[PayHereRenewals] ❌ Renewal charge failed for user ${userId}: ${chargeResult.error}`);
+
+          await this.supabase
+            .from('subscriptions')
+            .update({
+              status: 'PAST_DUE',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', sub.id);
+
+          await this.supabase
+            .from('profiles')
+            .update({
+              plan_status: 'past_due',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', userId);
+
+          await this.supabase.from('orders').insert({
+            user_id: userId,
+            subscription_id: sub.id,
+            order_type: 'subscription_renewal',
+            plan_tier: planTier,
+            amount_lkr: amount,
+            minutes_credited: 0,
+            payment_gateway: 'payhere_token',
+            gateway_payment_id: renewalOrderId,
+            status: 'failed',
+            raw_payload: chargeResult.data,
+          });
+
+          results.renewalsFailed++;
+        }
+      } catch (err: any) {
+        this.logger.error(`[PayHereRenewals] Error processing renewal for sub ${sub.id}: ${err.message}`);
+        results.renewalsFailed++;
+      }
+    }
+
+    return results;
   }
 }

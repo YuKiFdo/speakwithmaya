@@ -290,6 +290,7 @@ export default function PersonalizedPlanScreen() {
       const result = await payHereGateway.startPayment(params);
 
       if (result.status === 'completed') {
+        await new Promise((r) => setTimeout(r, 1200));
         await authService.fetchUserProfile();
         router.replace({
           pathname: '/onboarding/complete' as any,

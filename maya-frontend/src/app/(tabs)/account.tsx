@@ -187,9 +187,10 @@ export default function AccountScreen() {
     const planName = planId === 'premium' ? 'Premium' : 'Pro';
 
     const confirmed = await mayaAlert.confirm({
-      title: 'Update Payment Card',
-      message: `This will open PayHere's secure window to authorize your new card for your ${planName} plan. Future monthly renewals will bill your new card.`,
-      confirmText: 'Update Card',
+      title: 'Update Saved Card',
+      message:
+        'Authorize your new card with zero charge. PayHere will verify your card (Rs. 1 test authorization, instantly refunded). Your active subscription, billing cycle, and remaining days will not be interrupted.',
+      confirmText: 'Authorize New Card',
       cancelText: 'Cancel',
       type: 'info',
     });
@@ -197,14 +198,16 @@ export default function AccountScreen() {
 
     setIsUpdatingCard(true);
     try {
-      const params = await paymentApi.getCheckoutParams(planId);
+      const params = await paymentApi.getCardUpdateParams();
       const result = await payHereGateway.startPayment(params);
 
       if (result.status === 'completed') {
+        // Allow brief interval for webhook to persist new token and card details
+        await new Promise((r) => setTimeout(r, 1200));
         await stats.refreshStats();
         await fetchSubscription();
         await mayaAlert.success(
-          `Your card has been updated successfully! Your ${planName} subscription will now continue with your new card.`,
+          'Your payment card has been updated successfully! Future monthly renewals will now bill your new card.',
           'Card Updated'
         );
       } else if (result.status === 'error') {

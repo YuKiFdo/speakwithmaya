@@ -59,6 +59,13 @@ class PaymentApiService {
   }
 
   /**
+   * Generates server-signed PayHere Preapproval parameters for card update (zero charge).
+   */
+  async getCardUpdateParams(): Promise<PayHereCheckoutParams> {
+    return this.getCheckoutParams('card-update' as any);
+  }
+
+  /**
    * Fetches user's current subscription from database.
    */
   async getMySubscription(): Promise<SubscriptionRecord | null> {
@@ -199,6 +206,9 @@ class PaymentApiService {
     pastDueReinstated: number;
     pastDueDowngraded: number;
     quotasReset: number;
+    renewalsAttempted?: number;
+    renewalsSucceeded?: number;
+    renewalsFailed?: number;
     errors: string[];
   }> {
     const res = await fetch(`${this.baseUrl}/v1/admin/subscriptions/reconcile`, {

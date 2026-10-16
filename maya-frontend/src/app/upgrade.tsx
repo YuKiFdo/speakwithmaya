@@ -363,6 +363,7 @@ export default function UpgradeScreen() {
       const result = await payHereGateway.startPayment(params);
 
       if (result.status === 'completed') {
+        await new Promise((r) => setTimeout(r, 1200));
         await stats.refreshStats();
         await mayaAlert.success(`You are now subscribed to the ${planId.toUpperCase()} plan!`, 'Payment Successful');
         router.replace('/(tabs)/account');
