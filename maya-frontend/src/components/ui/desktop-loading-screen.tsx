@@ -26,15 +26,9 @@ export function DesktopLoadingScreen({
   const floatAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const barProgress = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Fade in
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 220,
-      useNativeDriver: Platform.OS !== 'web',
-    }).start();
 
     // Floating avatar levitation
     const floatLoop = Animated.loop(

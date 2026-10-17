@@ -386,8 +386,8 @@ export default function RootHtml({ children }: PropsWithChildren) {
                     }, 300);
                   }
                 }
-                // Safety escape hatch: never lock the user screen for more than 2.8s under slow network
-                var timer = setTimeout(dismissLoader, 2800);
+                // Safety escape hatch: only in the unlikely event JavaScript crashes, dismiss after 15s
+                var timer = setTimeout(dismissLoader, 15000);
                 window.__dismissAppLoader = function() {
                   clearTimeout(timer);
                   dismissLoader();

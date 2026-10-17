@@ -55,50 +55,62 @@ function RouteGuard() {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
-  const [fontsLoaded, fontError] = useFonts({
-    ...Ionicons.font,
-    ...Feather.font,
-    ...MaterialIcons.font,
-    ...MaterialCommunityIcons.font,
-    'Outfit-Regular': Outfit_400Regular,
-    'Outfit-Medium': Outfit_500Medium,
-    'Outfit-SemiBold': Outfit_600SemiBold,
-    'Outfit-Bold': Outfit_700Bold,
-    'Outfit-ExtraBold': Outfit_800ExtraBold,
-    'Inter-Regular': Inter_400Regular,
-    'Inter-Medium': Inter_500Medium,
-    'Inter-SemiBold': Inter_600SemiBold,
-    'Inter-Bold': Inter_700Bold,
-    'Inter-ExtraBold': Inter_800ExtraBold,
-  });
+  // On Web, Google Fonts (Outfit & Inter) are loaded via high-speed WOFF2 CDN in +html.tsx
+  // Only native platforms (iOS/Android) need the heavy bundled TTF files from @expo-google-fonts.
+  const [fontsLoaded, fontError] = useFonts(
+    Platform.OS === 'web'
+      ? {
+          ...Ionicons.font,
+          ...Feather.font,
+          ...MaterialIcons.font,
+          ...MaterialCommunityIcons.font,
+        }
+      : {
+          ...Ionicons.font,
+          ...Feather.font,
+          ...MaterialIcons.font,
+          ...MaterialCommunityIcons.font,
+          'Outfit-Regular': Outfit_400Regular,
+          'Outfit-Medium': Outfit_500Medium,
+          'Outfit-SemiBold': Outfit_600SemiBold,
+          'Outfit-Bold': Outfit_700Bold,
+          'Outfit-ExtraBold': Outfit_800ExtraBold,
+          'Inter-Regular': Inter_400Regular,
+          'Inter-Medium': Inter_500Medium,
+          'Inter-SemiBold': Inter_600SemiBold,
+          'Inter-Bold': Inter_700Bold,
+          'Inter-ExtraBold': Inter_800ExtraBold,
+        }
+  );
 
   const [isAppReady, setIsAppReady] = useState(false);
   const [fontTimeout, setFontTimeout] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(OnboardingStore.getState().isHydrated);
 
-  // Safety font timeout: if custom fonts take >1200ms over network, render immediately with system fallbacks
+  // Safety font timeout: if custom fonts take >400ms on web or >1000ms on native, proceed immediately
   useEffect(() => {
+    const timeoutMs = Platform.OS === 'web' ? 400 : 1000;
     const timer = setTimeout(() => {
       setFontTimeout(true);
-    }, 1200);
+    }, timeoutMs);
     return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
-    // Settle DOM layout and prevent any millisecond mobile flicker on web refresh
+    // Settle initial DOM layout quickly on web without artificial lag
     const timer = setTimeout(() => {
       setIsAppReady(true);
-    }, 280);
+    }, Platform.OS === 'web' ? 60 : 200);
     return () => clearTimeout(timer);
   }, []);
 
-  // Wait for encrypted storage hydration before rendering routes (capped at 1000ms safety timeout)
+  // Wait for encrypted storage hydration before rendering routes (capped at 800ms safety timeout)
   useEffect(() => {
     if (isStoreHydrated) return;
     let mounted = true;
     const safetyTimer = setTimeout(() => {
       if (mounted) setIsStoreHydrated(true);
-    }, 1000);
+    }, 800);
 
     OnboardingStore.waitForHydration().then(() => {
       if (mounted) setIsStoreHydrated(true);
@@ -114,9 +126,11 @@ export default function RootLayout() {
   }, [isStoreHydrated]);
 
   const isFontsReady = fontsLoaded || !!fontError || fontTimeout;
+  const isAppFullyReady = isFontsReady && isAppReady && isStoreHydrated;
 
+  // Seamless transition: ONLY dismiss the pre-bundle HTML loader once React is completely hydrated and ready to render
   useEffect(() => {
-    if (isFontsReady && isAppReady) {
+    if (isAppFullyReady) {
       SplashScreen.hideAsync().catch(() => {});
       if (Platform.OS === 'web' && typeof document !== 'undefined') {
         if ((window as any).__dismissAppLoader) {
@@ -131,9 +145,9 @@ export default function RootLayout() {
         }
       }
     }
-  }, [isFontsReady, isAppReady]);
+  }, [isAppFullyReady]);
 
-  if (!isFontsReady || !isAppReady || !isStoreHydrated) {
+  if (!isAppFullyReady) {
     return <DesktopLoadingScreen message="Loading SpeakwithMaya..." />;
   }
 
