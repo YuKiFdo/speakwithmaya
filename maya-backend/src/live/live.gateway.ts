@@ -866,11 +866,29 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           }
         }, 8000);
 
-        // Realtime input dispatch:
-        // In Gemini Live audio modality, sendRealtimeInput({ text: greetingPrompt }) injects
-        // the prompt into the active audio pipeline, reliably triggering native 24kHz audio synthesis.
-        session.sendRealtimeInput({ text: greetingPrompt });
-        this.logger.log(`[${state.sessionId}] 📤 [Greeting Dispatch] sendRealtimeInput delivered (awaiting native Gemini Live audio)`);
+        // Acoustic greeting dispatch:
+        // Because manual VAD (automaticActivityDetection: { disabled: true }) is configured,
+        // Gemini Live requires an acoustic turn boundary (activityStart -> audio frame -> activityEnd)
+        // to engage its server-side neural audio vocoder and synthesize 24kHz native audio frames.
+        session.sendRealtimeInput({ activityStart: {} });
+        session.sendClientContent({
+          turns: [
+            {
+              role: 'user',
+              parts: [{ text: `${greetingPrompt}\n[SYSTEM VOICE DIRECTIVE: Speak your response aloud using natural voice output.]` }],
+            },
+          ],
+          turnComplete: true,
+        });
+        const pcmFrame = Buffer.alloc(3200); // 100ms 16kHz 16-bit mono silence acoustic carrier
+        session.sendRealtimeInput({
+          audio: {
+            data: pcmFrame.toString('base64'),
+            mimeType: 'audio/pcm;rate=16000',
+          },
+        });
+        session.sendRealtimeInput({ activityEnd: {} });
+        this.logger.log(`[${state.sessionId}] 📤 [Greeting Dispatch] Acoustic turn delivered (activityStart + PCM + activityEnd) (awaiting native Gemini Live audio)`);
       } else if (!isFreshSession && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         state.isGreetingInProgress = false;
