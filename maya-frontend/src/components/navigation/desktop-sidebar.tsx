@@ -50,7 +50,9 @@ function SidebarNavItem({
     <Pressable
       style={({ pressed }) => [
         styles.navItem,
+        isUpgrade && styles.upgradeNavItem,
         isCompact && styles.navItemCompact,
+        isCompact && isUpgrade && styles.upgradeNavItemCompact,
         isActive && styles.navItemActive,
         isHovered && !isActive && (isUpgrade ? styles.upgradeItemHovered : styles.navItemHovered),
         pressed && styles.navItemPressed,
@@ -254,7 +256,7 @@ export function DesktopSidebar({
 
 const styles = StyleSheet.create({
   desktopSidebar: {
-    width: 268,
+    width: 280,
     backgroundColor: '#F6F7FC',
     borderRightWidth: 1,
     borderRightColor: '#ECEEF5',
@@ -334,6 +336,14 @@ const styles = StyleSheet.create({
         } as any)
       : {}),
   },
+  upgradeNavItem: {
+    gap: 8,
+    paddingRight: 12,
+  },
+  upgradeNavItemCompact: {
+    gap: 6,
+    paddingRight: 10,
+  },
   navItemActive: {
     backgroundColor: '#EDF3FF',
     transform: [{ translateX: 2 }],
@@ -389,32 +399,29 @@ const styles = StyleSheet.create({
   },
   upgradeLabel: {
     ...fontStyle('outfit', 'semiBold'),
-    fontSize: 16,
-    lineHeight: 20,
-    letterSpacing: 0,
+    fontSize: 14.5,
+    lineHeight: 18,
+    letterSpacing: -0.2,
     color: '#000036',
-    flexShrink: 0,
+    flexShrink: 1,
   },
   upgradeLabelActive: {
     ...fontStyle('outfit', 'bold'),
     color: '#2B5BFF',
   },
   discountBadge: {
-    minWidth: 60,
-    height: 19,
-    paddingTop: 2,
-    paddingRight: 6,
-    paddingBottom: 2,
-    paddingLeft: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
     borderRadius: Radii.pill,
     backgroundColor: '#D97706',
     alignItems: 'center',
     justifyContent: 'center',
+    marginLeft: 'auto',
   },
   discountBadgeText: {
     ...fontStyle('outfit', 'bold'),
     color: '#ffffff',
-    fontSize: 11,
+    fontSize: 10.5,
     lineHeight: 14,
   },
   /* Talk Time Card */
@@ -521,7 +528,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   upgradeLabelCompact: {
-    fontSize: 14.5,
+    fontSize: 13.5,
   },
   talkTimeCardCompact: {
     padding: 12,
