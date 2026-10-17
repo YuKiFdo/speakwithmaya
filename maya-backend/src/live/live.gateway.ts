@@ -866,22 +866,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           }
         }, 8000);
 
-        // Native Gemini Live clientContent dispatch.
-        // NOTE: We MUST NOT send sendRealtimeInput({ activityEnd: {} }) here!
-        // Sending activityEnd on an empty realtime stream with manual VAD tells Gemini that
-        // acoustic activity was empty, which causes Gemini's audio synthesizer to drop/skip
-        // inlineData audio frames while only returning text.
-        // turnComplete: true is fully sufficient and triggers native audio synthesis cleanly.
-        session.sendClientContent({
-          turns: [
-            {
-              role: 'user',
-              parts: [{ text: `${greetingPrompt}\n[SYSTEM VOICE DIRECTIVE: Speak your response aloud using natural voice output.]` }],
-            },
-          ],
-          turnComplete: true,
-        });
-        this.logger.log(`[${state.sessionId}] 📤 [Greeting Dispatch] sendClientContent delivered with turnComplete: true (awaiting native Gemini Live audio)`);
+        // Realtime input dispatch:
+        // In Gemini Live audio modality, sendRealtimeInput({ text: greetingPrompt }) injects
+        // the prompt into the active audio pipeline, reliably triggering native 24kHz audio synthesis.
+        session.sendRealtimeInput({ text: greetingPrompt });
+        this.logger.log(`[${state.sessionId}] 📤 [Greeting Dispatch] sendRealtimeInput delivered (awaiting native Gemini Live audio)`);
       } else if (!isFreshSession && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         state.isGreetingInProgress = false;
@@ -1123,29 +1112,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, modelTurnBuffer, 'model')
             .catch(() => {});
         } else if (modelText) {
-          // If Gemini sent a text turn without audio (e.g. initial greeting prompt),
-          // increment modelTurnCount and synthesize TTS so subsequent turns never shift!
-          const currentTurnIdx = state.modelTurnCount;
+          // Model turn completed with text only (no TTS per user constraint)
           state.modelTurnCount++;
-          this.sessionsService
-            .generateTtsAudio({ text: modelText, voice: 'Callirrhoe' })
-            .then((tts) => {
-              if (tts?.audioBase64) {
-                const wavBuf = Buffer.from(tts.audioBase64, 'base64');
-                const pcm24 = wavBuf.length > 44 ? wavBuf.subarray(44) : wavBuf;
-                state.modelTurnAudioMap.set(currentTurnIdx, pcm24);
-                state.chronologicalAudioTurns.push({
-                  speaker: 'model',
-                  turnIdx: currentTurnIdx,
-                  pcm: pcm24,
-                  sampleRate: 24000,
-                });
-                this.sessionsService
-                  .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, pcm24, 'model')
-                  .catch(() => {});
-              }
-            })
-            .catch(() => {});
         }
 
         // Turn fully complete: clear accumulators for the next conversational exchange
