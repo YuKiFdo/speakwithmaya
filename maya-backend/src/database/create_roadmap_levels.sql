@@ -21,7 +21,12 @@ CREATE TABLE IF NOT EXISTS public.roadmap_levels (
   xp_reward INTEGER DEFAULT 100,
   passing_score_percent INTEGER DEFAULT 75,
   guided_prompt JSONB DEFAULT '{}'::jsonb,
-  unlock_rule JSONB DEFAULT '{"type": "score", "minScore": 75}'::jsonb,
+  scenario_prompt TEXT DEFAULT '',
+  opening_mode TEXT DEFAULT 'maya_explains_first',
+  opening_line TEXT DEFAULT '',
+  scenario_briefing TEXT DEFAULT '',
+  emotion_tags TEXT[] DEFAULT '{"neutral"}',
+  is_scenario_mode BOOLEAN DEFAULT true,
   is_published BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -33,6 +38,12 @@ ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS canonical_content TEX
 ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS custom_svg TEXT DEFAULT '';
 ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS xp_reward INTEGER DEFAULT 100;
 ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS passing_score_percent INTEGER DEFAULT 75;
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS scenario_prompt TEXT DEFAULT '';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS opening_mode TEXT DEFAULT 'maya_explains_first';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS opening_line TEXT DEFAULT '';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS scenario_briefing TEXT DEFAULT '';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS emotion_tags TEXT[] DEFAULT '{"neutral"}';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS is_scenario_mode BOOLEAN DEFAULT true;
 
 -- Enable Row Level Security
 ALTER TABLE public.roadmap_levels ENABLE ROW LEVEL SECURITY;

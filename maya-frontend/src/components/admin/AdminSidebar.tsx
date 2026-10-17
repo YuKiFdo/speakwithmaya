@@ -21,7 +21,8 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
     group: 'AI CONFIGURATION',
     items: [
-      { id: 'roadmap-studio', label: 'Roadmap Studio', icon: 'sliders', route: '/admin/roadmap' },
+      { id: 'scenario-studio', label: 'Scenario Studio', icon: 'message-square', route: '/admin/scenarios' },
+      { id: 'roadmap-studio', label: 'Roadmap Studio (Legacy)', icon: 'sliders', route: '/admin/roadmap' },
       { id: 'ai-usage', label: 'AI Usage & Logs', icon: 'bar-chart-2', route: '/admin/usage' },
     ],
   },

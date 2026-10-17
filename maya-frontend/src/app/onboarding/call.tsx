@@ -65,6 +65,10 @@ export default function CallScreen() {
     levelNumber?: string;
     targetSpeakingShare?: string;
     dailyGoal?: string;
+    scenarioPrompt?: string;
+    openingMode?: string;
+    openingLine?: string;
+    scenarioBriefing?: string;
   }>();
 
   const storeConfig = CallSessionStore.getConfig();
@@ -101,6 +105,11 @@ export default function CallScreen() {
   const effectiveLevelTitle = storeConfig?.scenarioTitle || params.scenarioTitle || params.topic;
   const effectiveCanonicalContent = storeConfig?.canonicalContent || params.canonicalContent;
   const effectivePassingScorePercent = storeConfig?.passingScorePercent ?? (params.passingScorePercent ? parseInt(params.passingScorePercent, 10) : 75);
+  const effectiveScenarioPrompt = storeConfig?.scenarioPrompt || params.scenarioPrompt;
+  const effectiveOpeningMode = storeConfig?.openingMode || (params.openingMode as any);
+  const effectiveOpeningLine = storeConfig?.openingLine || params.openingLine;
+  const effectiveScenarioBriefing = storeConfig?.scenarioBriefing || params.scenarioBriefing;
+  const effectiveEmotionTags = storeConfig?.emotionTags;
   const effectiveTargetSpeakingShare = storeConfig?.targetSpeakingShare ?? (params.targetSpeakingShare ? parseInt(params.targetSpeakingShare, 10) : 40);
 
   // Core Gemini Live Audio & Call Engine
@@ -123,6 +132,11 @@ export default function CallScreen() {
     practicePoints: parsedPracticePoints,
     canonicalContent: effectiveCanonicalContent,
     passingScorePercent: effectivePassingScorePercent,
+    scenarioPrompt: effectiveScenarioPrompt,
+    openingMode: effectiveOpeningMode,
+    openingLine: effectiveOpeningLine,
+    scenarioBriefing: effectiveScenarioBriefing,
+    emotionTags: effectiveEmotionTags,
     targetSpeakingShare: effectiveTargetSpeakingShare,
     hintsUsedCount: () => hintsHistoryRef.current.length,
   });

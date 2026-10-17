@@ -104,6 +104,31 @@ export class CreateRoadmapLevelDto {
   xpReward?: number = 100;
 
   @IsOptional()
+  @IsString()
+  scenarioPrompt?: string;
+
+  @IsOptional()
+  @IsString()
+  openingMode?: 'maya_explains_first' | 'maya_in_character' | 'user_starts' = 'maya_explains_first';
+
+  @IsOptional()
+  @IsString()
+  openingLine?: string;
+
+  @IsOptional()
+  @IsString()
+  scenarioBriefing?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  emotionTags?: string[] = ['neutral'];
+
+  @IsOptional()
+  @IsBoolean()
+  isScenarioMode?: boolean = true;
+
+  @IsOptional()
   @IsBoolean()
   isPublished?: boolean = true;
 }
@@ -167,6 +192,31 @@ export class UpdateRoadmapLevelDto {
   customSvg?: string;
 
   @IsOptional()
+  @IsString()
+  scenarioPrompt?: string;
+
+  @IsOptional()
+  @IsString()
+  openingMode?: 'maya_explains_first' | 'maya_in_character' | 'user_starts';
+
+  @IsOptional()
+  @IsString()
+  openingLine?: string;
+
+  @IsOptional()
+  @IsString()
+  scenarioBriefing?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  emotionTags?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  isScenarioMode?: boolean;
+
+  @IsOptional()
   @IsBoolean()
   isPublished?: boolean;
 }
@@ -205,6 +255,16 @@ export class SimulateLevelTurnDto {
   practicePoints?: string[];
 
   @IsOptional()
+  @IsString()
+  scenarioPrompt?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  emotionTags?: string[];
+
+  @IsOptional()
   @IsArray()
   history?: Array<{ role: 'user' | 'model'; text: string }>;
 }
+

@@ -69,7 +69,14 @@ export interface MilestoneItem {
   practicePoints?: string[];
   canonicalContent?: string;
   passingScorePercent?: number;
+  scenarioPrompt?: string;
+  openingMode?: 'maya_explains_first' | 'maya_in_character' | 'user_starts';
+  openingLine?: string;
+  scenarioBriefing?: string;
+  emotionTags?: string[];
+  isScenarioMode?: boolean;
 }
+
 
 let cachedRoadmapMilestones: MilestoneItem[] | null = null;
 
@@ -219,7 +226,13 @@ export default function RoadmapScreen() {
           scenarioId: lvl.scenarioId,
           practicePoints,
           canonicalContent: lvl.canonicalContent || lvl.canonical_content || '',
-          passingScorePercent: lvl.passingScorePercent || lvl.passing_score_percent || 75,
+          passingScorePercent: lvl.passingScorePercent || lvl.passing_score_percent || 70,
+          scenarioPrompt: lvl.scenario_prompt || lvl.scenarioPrompt || '',
+          openingMode: lvl.opening_mode || lvl.openingMode || 'maya_explains_first',
+          openingLine: lvl.opening_line || lvl.openingLine || '',
+          scenarioBriefing: lvl.scenario_briefing || lvl.scenarioBriefing || lvl.description || '',
+          emotionTags: lvl.emotion_tags || lvl.emotionTags || ['neutral'],
+          isScenarioMode: lvl.is_scenario_mode ?? lvl.isScenarioMode ?? true,
         };
       });
 
@@ -501,12 +514,18 @@ export default function RoadmapScreen() {
       topic: item.topic || item.title,
       scenarioTitle: item.title,
       scenarioId: item.scenarioId || 'general-practice',
+      scenarioPrompt: item.scenarioPrompt,
+      openingMode: item.openingMode,
+      openingLine: item.openingLine,
+      scenarioBriefing: item.scenarioBriefing,
+      emotionTags: item.emotionTags,
       practicePoints: item.practicePoints || [],
       canonicalContent: item.canonicalContent || '',
-      passingScorePercent: item.passingScorePercent || 75,
+      passingScorePercent: item.passingScorePercent || 70,
       userName: onboardingState.user?.displayName || onboardingState.name || 'Learner',
     });
   };
+
 
   return (
     <SafeAreaView style={styles.safeArea}>

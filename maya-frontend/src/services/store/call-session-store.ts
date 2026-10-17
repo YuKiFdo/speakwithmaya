@@ -15,6 +15,11 @@ export interface CallSessionConfig {
   canonicalContent?: string;
   passingScorePercent?: number;
   levelNumber?: number;
+  scenarioPrompt?: string;
+  openingMode?: 'maya_explains_first' | 'maya_in_character' | 'user_starts';
+  openingLine?: string;
+  scenarioBriefing?: string;
+  emotionTags?: string[];
   targetSpeakingShare?: number;
   isIntroCall?: boolean;
   userName?: string;
@@ -25,6 +30,7 @@ export interface CallSessionConfig {
   employment?: string;
   phone?: string;
 }
+
 
 let activeSessionConfig: CallSessionConfig | null = null;
 

@@ -78,6 +78,31 @@ export class CreateSessionTokenDto {
   @IsOptional()
   @IsNumber()
   passingScorePercent?: number;
+
+  @IsOptional()
+  @IsString()
+  scenarioPrompt?: string;
+
+  @IsOptional()
+  @IsString()
+  openingMode?: 'maya_explains_first' | 'maya_in_character' | 'user_starts';
+
+  @IsOptional()
+  @IsString()
+  openingLine?: string;
+
+  @IsOptional()
+  @IsString()
+  scenarioTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  scenarioBriefing?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  emotionTags?: string[];
 }
 
 

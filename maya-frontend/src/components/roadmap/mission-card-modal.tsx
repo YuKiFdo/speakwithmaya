@@ -351,12 +351,14 @@ export function MissionCardModal({
               </View>
             </View>
 
-            {/* Practice Points Preview / What you'll practice */}
+            {/* Scenario Mission Briefing / Practice Points Preview */}
             {(() => {
               const points = (item.practicePoints && item.practicePoints.length > 0)
                 ? item.practicePoints
                 : (item.canonicalContent ? parseCanonicalLessonContent(item.canonicalContent).practicePoints : []);
-              if (points.length === 0) return null;
+              const briefing = item.scenarioBriefing || '';
+
+              if (!briefing && points.length === 0) return null;
 
               return (
                 <View
@@ -367,24 +369,33 @@ export function MissionCardModal({
                 >
                   <View style={styles.objectivesPreviewHeader}>
                     <Feather
-                      name={isCompleted ? 'check-circle' : 'target'}
-                      size={13}
+                      name={isCompleted ? 'check-circle' : (briefing ? 'compass' : 'target')}
+                      size={14}
                       color="#059669"
                       style={{ marginRight: 6 }}
                     />
                     <Text style={styles.objectivesPreviewTitle}>
-                      {isCompleted ? 'Points Mastered' : "What You'll Practice"}
+                      {isCompleted ? 'Mission Cleared' : (briefing ? 'Roleplay Mission Challenge' : "What You'll Practice")}
                     </Text>
                   </View>
-                  <View style={styles.objectivesPillsRow}>
-                    {points.map((pt: string, idx: number) => (
-                      <View key={`pt-${idx}`} style={styles.objectivePill}>
-                        <Text style={styles.objectivePillText} numberOfLines={2}>
-                          {isCompleted ? '✓ ' : '• '}{pt}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
+
+                  {briefing ? (
+                    <Text style={{ ...fontStyle('inter', 'regular'), fontSize: 13, color: '#334155', lineHeight: 19, marginVertical: 6 }}>
+                      {briefing}
+                    </Text>
+                  ) : null}
+
+                  {points.length > 0 ? (
+                    <View style={styles.objectivesPillsRow}>
+                      {points.map((pt: string, idx: number) => (
+                        <View key={`pt-${idx}`} style={styles.objectivePill}>
+                          <Text style={styles.objectivePillText} numberOfLines={2}>
+                            {isCompleted ? '✓ ' : '• '}{pt}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
               );
             })()}
@@ -404,12 +415,15 @@ export function MissionCardModal({
               <View style={styles.speechBubble}>
                 <Text style={styles.speechText}>
                   {isCompleted
-                    ? `"Awesome job mastering this lesson, ${userName}! You've already cleared this topic. Replay it anytime to sharpen your fluency, or keep your momentum going on the next level!"`
-                    : `Hi ${userName}! Let's practice speaking naturally together in English. I'll guide you step by step!`}
+                    ? `"Awesome job clearing this level, ${userName}! You've already mastered this scenario. Replay it anytime to polish your fluency, or keep your momentum going on the next level!"`
+                    : (item.openingLine && item.openingLine.trim()
+                        ? `Maya will open: "${item.openingLine}"`
+                        : `Hi ${userName}! In this session, we'll roleplay this scenario together. Speak naturally and let's have a great conversation!`)}
                 </Text>
               </View>
             </View>
           </ScrollView>
+
 
           {/* Pinned Action Buttons Footer */}
           <View style={styles.cardFooter}>

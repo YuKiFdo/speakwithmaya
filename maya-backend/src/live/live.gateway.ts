@@ -826,8 +826,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         voiceName,
       }));
 
-      // If roadmap curriculum session with practice points, proactively prime Task 0 on client
-      if (dto.practicePoints && dto.practicePoints.length > 0) {
+      // If roadmap curriculum session with practice points (and not in custom scenario mode), proactively prime Task 0 on client
+      if (!dto.scenarioPrompt && dto.practicePoints && dto.practicePoints.length > 0) {
         const firstPoint = dto.practicePoints[0];
         state.activePracticeTask = {
           pointIndex: 0,

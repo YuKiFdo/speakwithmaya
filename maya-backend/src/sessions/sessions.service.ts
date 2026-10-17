@@ -652,6 +652,35 @@ GUARDRAILS:
 - Student must do at least 70% of the talking.`;
   }
 
+  buildScenarioSystemPrompt(dto: CreateSessionTokenDto, userName: string, isSinhala: boolean): string {
+    const rawTopic = (dto.scenarioTitle || dto.topic || 'English Roleplay Scenario').trim();
+    const customPrompt = (dto.scenarioPrompt || '').trim();
+    const briefing = (dto.scenarioBriefing || '').trim();
+
+    return `You are Maya, an AI speaking partner & coach for Sri Lankan learners.
+
+### CURRENT SCENARIO & ROLEPLAY DIRECTIVE:
+${customPrompt}
+
+${briefing ? `SCENARIO CONTEXT FOR STUDENT: ${briefing}` : ''}
+
+### CORE CONVERSATION GUARDS (MANDATORY):
+1. USER NAME & INTERACTION:
+   - The student's name is ${userName}. Address them naturally when suitable in conversation.
+2. SPOKEN PACING:
+   - Keep your spoken responses strictly under 15-20 words per turn. Do not speak long paragraphs or monologues. Keep the dialogue snappy, interactive, and natural.
+3. LANGUAGE & SCRIPT PURITY:
+   - Practice language is Spoken English.
+   - If coaching or commenting in Sinhala, write and speak EXCLUSIVELY in standard Sinhala script (Unicode U+0D80-U+0DFF) and common Latin English loanwords.
+   - ABSOLUTELY ZERO TAMIL: Never speak or output Tamil words or Tamil script (தமிழ், Unicode U+0B80-U+0BFF). Sri Lankan students in this app speak Sinhala and English. Use "අවශ්‍ය" or "ඕන වෙන" instead of Tamil "தேவையான".
+   - ABSOLUTELY FORBIDDEN: Hindi/Devanagari (हिन्दी), Arabic, or any other script.
+4. ROLEPLAY AUTHENTICITY:
+   - Fully adopt the emotions, attitude, and character traits instructed in the scenario above (e.g. angry, crying, cheerful, professional, skeptical, demanding).
+   - React authentically to what the student says. If they communicate well, advance the story or situation. If they struggle, give brief natural reactions matching your character.
+5. ZERO TASK LOCKING:
+   - Do not halt the conversation or force robotic word-for-word repetitions. Let the conversation flow naturally from turn to turn.`;
+  }
+
   getSystemPrompt(dto: CreateSessionTokenDto): string {
     const isSinhala = dto.isIntroCall === true || dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
     const aiSuggestions = dto.aiSuggestions !== false;
@@ -665,6 +694,11 @@ GUARDRAILS:
 
     if (isIntroCall) {
       return this.getIntroCallSystemPrompt(dto, userName, isSinhala);
+    }
+
+    // 0. SCENARIO STUDIO: If this level has an admin scenario prompt, obey it directly!
+    if (dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0) {
+      return this.buildScenarioSystemPrompt(dto, userName, isSinhala);
     }
 
     // Pruned, high-density scenario context without duplicating wrap-up prohibitions
@@ -952,7 +986,28 @@ ${memoryPart}`;
       return this.generateIntroCallGreetingPrompt(dto, userName, isSinhala);
     }
 
-    // 0. Priority: Curriculum Roadmap Lesson
+    // 0. SCENARIO STUDIO: If this session has a custom scenarioPrompt, use its configured opening mode!
+    if (dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0) {
+      const scenarioTitle = dto.scenarioTitle || dto.topic || 'Roleplay Scenario';
+      const openingLine = (dto.openingLine || '').trim();
+
+      if (openingLine) {
+        return `Start the roleplay immediately by saying aloud in character: "${openingLine}"`;
+      }
+
+      if (dto.openingMode === 'maya_in_character') {
+        return `Hello Maya! This is ${userName}. Start the roleplay immediately in character as described in your scenario instructions!`;
+      }
+
+      if (dto.openingMode === 'user_starts') {
+        return ``; // Maya waits for user to speak
+      }
+
+      // Default: maya_explains_first
+      return `Hello Maya! This is ${userName}. In friendly everyday tone, briefly explain in one short sentence what scenario we are practicing today ("${scenarioTitle}"), and then immediately start the roleplay in character!`;
+    }
+
+    // 1. Priority: Curriculum Roadmap Lesson
     let practicePoints: string[] = dto.practicePoints || [];
     let lessonTitle = (dto.topic || '').trim();
 
@@ -1264,6 +1319,24 @@ ${memoryPart}`;
           }
           if (!dto.passingScorePercent && level.passingScorePercent) {
             dto.passingScorePercent = level.passingScorePercent;
+          }
+          if (!dto.scenarioPrompt && level.scenarioPrompt) {
+            dto.scenarioPrompt = level.scenarioPrompt;
+          }
+          if (!dto.openingMode && level.openingMode) {
+            dto.openingMode = level.openingMode;
+          }
+          if (!dto.openingLine && level.openingLine) {
+            dto.openingLine = level.openingLine;
+          }
+          if (!dto.scenarioBriefing && level.scenarioBriefing) {
+            dto.scenarioBriefing = level.scenarioBriefing;
+          }
+          if (!dto.scenarioTitle && (level.title || level.topic)) {
+            dto.scenarioTitle = level.title || level.topic;
+          }
+          if (!dto.emotionTags && level.emotionTags) {
+            dto.emotionTags = level.emotionTags;
           }
 
           // If this is a Week Review / Consolidation level, fetch actual past mistakes from Supabase DB
@@ -1608,15 +1681,23 @@ ${memoryPart}`;
         if (roadmapLevelId && this.roadmapService) {
           try {
             const overallScore = scores?.overall ?? 85;
-            const isPassed = overallScore >= 75;
+            let passingScorePercent = 70;
             let levelNumber = 1;
             try {
               const lvl = await this.roadmapService.getLevelById(roadmapLevelId);
-              if (lvl) levelNumber = lvl.levelNumber;
+              if (lvl) {
+                levelNumber = lvl.levelNumber;
+                if (lvl.passingScorePercent) passingScorePercent = lvl.passingScorePercent;
+              }
             } catch {
               const numMatch = String(roadmapLevelId).match(/\d+/);
               if (numMatch) levelNumber = parseInt(numMatch[0], 10);
             }
+
+            // Anti-exploit guard: verify meaningful engagement (at least 3 user turns or 45s duration)
+            const userTurnsCount = turns ? turns.filter((t) => t.role === 'user').length : 0;
+            const meetsTurnRequirement = userTurnsCount >= 3 || durationSeconds >= 45;
+            const isPassed = overallScore >= passingScorePercent && meetsTurnRequirement;
 
             await this.roadmapService.recordUserProgress(resolvedUserId, {
               roadmapLevelId,
@@ -1627,7 +1708,7 @@ ${memoryPart}`;
               status: isPassed ? 'completed' : 'in_progress',
               xpEarned: isPassed ? 100 : 25,
             });
-            this.logger.log(`[Roadmap Progress] Recorded completion for user ${resolvedUserId}, level ${roadmapLevelId}, session ${sessionId}, passed: ${isPassed}`);
+            this.logger.log(`[Roadmap Progress] Recorded completion for user ${resolvedUserId}, level ${roadmapLevelId}, session ${sessionId}, passed: ${isPassed} (score: ${overallScore}%, target: ${passingScorePercent}%, userTurns: ${userTurnsCount})`);
           } catch (progressErr: any) {
             this.logger.warn(`Failed to auto-record roadmap progress: ${progressErr?.message}`);
           }

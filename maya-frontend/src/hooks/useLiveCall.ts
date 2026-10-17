@@ -85,6 +85,11 @@ interface UseLiveCallOptions {
   practicePoints?: string[];
   canonicalContent?: string;
   passingScorePercent?: number;
+  scenarioPrompt?: string;
+  openingMode?: 'maya_explains_first' | 'maya_in_character' | 'user_starts';
+  openingLine?: string;
+  scenarioBriefing?: string;
+  emotionTags?: string[];
   targetSpeakingShare?: number;
   learningObjectives?: Array<{
     id: string;
@@ -553,6 +558,12 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             challenge: options.challenge,
             dailyGoal: options.dailyGoal,
             roadmapLevelId: options.roadmapLevelId,
+            scenarioPrompt: options.scenarioPrompt,
+            openingMode: options.openingMode,
+            openingLine: options.openingLine,
+            scenarioTitle: options.levelTitle || options.topic,
+            scenarioBriefing: options.scenarioBriefing,
+            emotionTags: options.emotionTags,
             practicePoints: options.practicePoints,
             canonicalContent: options.canonicalContent,
             passingScorePercent: options.passingScorePercent,
@@ -600,6 +611,12 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             challenge: options.challenge,
             dailyGoal: options.dailyGoal,
             roadmapLevelId: options.roadmapLevelId,
+            scenarioPrompt: options.scenarioPrompt,
+            openingMode: options.openingMode,
+            openingLine: options.openingLine,
+            scenarioTitle: options.levelTitle || options.topic,
+            scenarioBriefing: options.scenarioBriefing,
+            emotionTags: options.emotionTags,
             practicePoints: options.practicePoints,
             canonicalContent: options.canonicalContent,
             passingScorePercent: options.passingScorePercent,

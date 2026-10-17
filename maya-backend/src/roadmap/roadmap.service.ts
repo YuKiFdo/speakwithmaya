@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import {
   CreateRoadmapLevelDto,
@@ -31,6 +31,12 @@ export interface RoadmapLevelEntity {
   practicePoints: string[];
   canonicalContent: string;
   passingScorePercent?: number;
+  scenarioPrompt?: string;
+  openingMode?: 'maya_explains_first' | 'maya_in_character' | 'user_starts';
+  openingLine?: string;
+  scenarioBriefing?: string;
+  emotionTags?: string[];
+  isScenarioMode?: boolean;
   isPublished: boolean;
   createdAt: string;
   updatedAt: string;
@@ -99,6 +105,12 @@ export class RoadmapService {
       practicePoints,
       canonicalContent,
       passingScorePercent: d.passing_score_percent ?? d.passingScorePercent ?? 75,
+      scenarioPrompt: d.scenario_prompt || d.scenarioPrompt || '',
+      openingMode: d.opening_mode || d.openingMode || 'maya_explains_first',
+      openingLine: d.opening_line || d.openingLine || '',
+      scenarioBriefing: d.scenario_briefing || d.scenarioBriefing || d.description || '',
+      emotionTags: Array.isArray(d.emotion_tags || d.emotionTags) ? (d.emotion_tags || d.emotionTags) : ['neutral'],
+      isScenarioMode: d.is_scenario_mode ?? d.isScenarioMode ?? true,
       isPublished: d.is_published ?? d.isPublished ?? true,
       createdAt: d.created_at || d.createdAt || new Date().toISOString(),
       updatedAt: d.updated_at || d.updatedAt || new Date().toISOString(),
@@ -121,6 +133,12 @@ export class RoadmapService {
       practice_points: e.practicePoints,
       canonical_content: e.canonicalContent,
       passing_score_percent: e.passingScorePercent,
+      scenario_prompt: e.scenarioPrompt || '',
+      opening_mode: e.openingMode || 'maya_explains_first',
+      opening_line: e.openingLine || '',
+      scenario_briefing: e.scenarioBriefing || e.description || '',
+      emotion_tags: e.emotionTags || ['neutral'],
+      is_scenario_mode: e.isScenarioMode ?? true,
       is_published: e.isPublished,
       created_at: e.createdAt,
       updated_at: e.updatedAt,
@@ -134,6 +152,7 @@ export class RoadmapService {
 
     return row;
   }
+
 
   async getAllLevels(adminView: boolean = true): Promise<RoadmapLevelEntity[]> {
     if (!this.supabase) {
@@ -235,6 +254,12 @@ export class RoadmapService {
       practicePoints,
       canonicalContent,
       passingScorePercent: dto.passingScorePercent || 75,
+      scenarioPrompt: dto.scenarioPrompt || '',
+      openingMode: dto.openingMode || 'maya_explains_first',
+      openingLine: dto.openingLine || '',
+      scenarioBriefing: dto.scenarioBriefing || dto.description?.trim() || '',
+      emotionTags: dto.emotionTags || ['neutral'],
+      isScenarioMode: dto.isScenarioMode ?? true,
       isPublished: dto.isPublished ?? true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -243,6 +268,9 @@ export class RoadmapService {
     const dbRow = this.mapEntityToDbRow(newLevel);
     const { error } = await this.supabase.from('roadmap_levels').insert(dbRow);
     if (error) {
+      if (error.code === '23505') {
+        throw new ConflictException(`Level number ${newLevel.levelNumber} already exists in the roadmap. Please choose a different level number.`);
+      }
       this.logger.error(`Failed to insert level ${newLevel.id} into Supabase DB: ${error.message} (code: ${error.code})`);
       throw new Error(`Failed to create level in Supabase DB: ${error.message}`);
     }
@@ -285,6 +313,12 @@ export class RoadmapService {
       practicePoints,
       canonicalContent,
       passingScorePercent: dto.passingScorePercent !== undefined ? dto.passingScorePercent : existing.passingScorePercent,
+      scenarioPrompt: dto.scenarioPrompt !== undefined ? dto.scenarioPrompt : existing.scenarioPrompt,
+      openingMode: dto.openingMode !== undefined ? dto.openingMode : existing.openingMode,
+      openingLine: dto.openingLine !== undefined ? dto.openingLine : existing.openingLine,
+      scenarioBriefing: dto.scenarioBriefing !== undefined ? dto.scenarioBriefing : existing.scenarioBriefing,
+      emotionTags: dto.emotionTags !== undefined ? dto.emotionTags : existing.emotionTags,
+      isScenarioMode: dto.isScenarioMode !== undefined ? dto.isScenarioMode : existing.isScenarioMode,
       isPublished: dto.isPublished !== undefined ? dto.isPublished : existing.isPublished,
       updatedAt: new Date().toISOString(),
     };
@@ -296,6 +330,9 @@ export class RoadmapService {
       .eq('id', existing.id);
 
     if (error) {
+      if (error.code === '23505') {
+        throw new ConflictException(`Level number ${updated.levelNumber} already exists in the roadmap. Please choose a different level number.`);
+      }
       this.logger.error(`Failed to update level ${existing.id} in Supabase DB: ${error.message} (code: ${error.code})`);
       throw new Error(`Failed to update level in Supabase DB: ${error.message}`);
     }
@@ -339,7 +376,30 @@ export class RoadmapService {
     const title = dto.levelTitle || 'Speaking Practice';
     const points = (dto.practicePoints || []).map((p) => `- ${p}`).join('\n');
 
-    const systemPrompt = `You are Maya, a dynamic, encouraging AI English speaking coach for Sri Lankan learners.
+    let systemPrompt = '';
+    if (dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0) {
+      systemPrompt = `${dto.scenarioPrompt.trim()}
+
+INSTRUCTIONS:
+1. Student just said: "${dto.userMessage}".
+2. Fully commit to your roleplay character persona, emotional state, and scenario context.
+3. Respond dynamically as your character. Keep your spoken response strictly under 15 words.
+4. Check if the student made a noticeable phrasing or grammar mistake.
+5. Return ONLY a valid JSON object matching:
+{
+  "mayaSpoken": "Your spoken reply in character strictly under 15 words",
+  "wordCount": 10,
+  "hasMistake": boolean,
+  "correction": {
+    "studentSaid": "mistake phrase",
+    "moreNatural": "corrected natural phrase",
+    "explanation": "concise explanation in natural Sinhala/Singlish",
+    "highlightWords": ["words"]
+  } | null,
+  "focusEvaluation": "1 sentence on how the reply advances the roleplay scenario"
+}`;
+    } else {
+      systemPrompt = `You are Maya, a dynamic, encouraging AI English speaking coach for Sri Lankan learners.
 LESSON: "${title}"
 PRACTICE GOALS:
 ${points || '- General conversation'}
@@ -362,6 +422,8 @@ INSTRUCTIONS:
   } | null,
   "focusEvaluation": "1 sentence on how the reply addresses the lesson goals"
 }`;
+    }
+
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
