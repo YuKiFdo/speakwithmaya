@@ -83,12 +83,18 @@ export function useUserStats(): UserStats {
   const [completedLessonsCount, setCompletedLessonsCount] = useState<number>(0);
   const [earnedXp, setEarnedXp] = useState<number>(0);
 
-  const planTier = user?.planTier || 'starter';
+  const planTier = (user?.planTier || 'starter').toLowerCase() as 'starter' | 'basic' | 'pro' | 'premium';
   const isPro = planTier === 'pro' || planTier === 'premium';
-  const monthlyMinutesAllowance = user?.monthlyMinutesAllowance ?? (isPro ? 600 : 10);
-  const minutesBalance = user?.minutesBalance ?? monthlyMinutesAllowance;
-  // If user purchased top-ups, total minutes includes the additional top-up balance
-  const totalMinutes = Math.max(monthlyMinutesAllowance, minutesBalance);
+  const defaultMonthlyAllowance = planTier === 'premium' ? 1200 : planTier === 'pro' ? 600 : planTier === 'basic' ? 450 : 10;
+  const monthlyMinutesAllowance = user?.monthlyMinutesAllowance ?? defaultMonthlyAllowance;
+  const addOnMinutesBalance = user?.addOnMinutesBalance ?? 0;
+  const minutesBalance = user?.minutesBalance ?? (monthlyMinutesAllowance + addOnMinutesBalance);
+
+  // Total available talk time capacity for this billing cycle = monthly plan allowance + all add-on top-ups
+  const effectiveAddOn = addOnMinutesBalance > 0
+    ? addOnMinutesBalance
+    : Math.max(0, minutesBalance - monthlyMinutesAllowance);
+  const totalMinutes = monthlyMinutesAllowance + effectiveAddOn;
   const usedMinutes = Math.max(0, totalMinutes - minutesBalance);
   const isTimeExpired = minutesBalance <= 0;
   const resetsInText = calculateResetsIn(user?.minutesResetAt);

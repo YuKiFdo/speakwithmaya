@@ -33,6 +33,7 @@ export class ServerLiveTransport implements ILiveTransport {
   private backpressureWarningCount: number = 0;
   private opusDecoder: any = null;
   private pingInterval: any = null;
+  private inboundAudioChunksCount: number = 0;
 
   constructor(backendWsUrl?: string) {
     if (backendWsUrl) {
@@ -51,6 +52,7 @@ export class ServerLiveTransport implements ILiveTransport {
   ): void {
     this.config = config;
     this.callbacks = callbacks;
+    this.inboundAudioChunksCount = 0;
     this.clientSessionId = `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
     // Initialize Opus decoder (VOIP mode, 24kHz, mono) for low-bandwidth 3G streaming
@@ -353,6 +355,10 @@ export class ServerLiveTransport implements ILiveTransport {
       case 'audio_opus':
         if (msg.data && this.opusDecoder) {
           this.hasModelSpokenThisTurn = true;
+          this.inboundAudioChunksCount++;
+          if (this.inboundAudioChunksCount <= 3 || this.inboundAudioChunksCount % 15 === 0) {
+            console.log(`[${getLogTimestamp()}] 🔊 [ServerLiveTransport:${this.clientSessionId}] Received audio_opus packet #${this.inboundAudioChunksCount} (${msg.data.length} chars)`);
+          }
           try {
             const binaryString = atob(msg.data);
             const len = binaryString.length;
@@ -376,6 +382,10 @@ export class ServerLiveTransport implements ILiveTransport {
       case 'audio':
         if (msg.data) {
           this.hasModelSpokenThisTurn = true;
+          this.inboundAudioChunksCount++;
+          if (this.inboundAudioChunksCount <= 3 || this.inboundAudioChunksCount % 15 === 0) {
+            console.log(`[${getLogTimestamp()}] 🔊 [ServerLiveTransport:${this.clientSessionId}] Received raw audio chunk #${this.inboundAudioChunksCount} (${msg.data.length} chars)`);
+          }
           this.callbacks.onAudioChunk?.(msg.data);
         }
         break;
@@ -384,6 +394,7 @@ export class ServerLiveTransport implements ILiveTransport {
         if (msg.text) {
           this.hasModelSpokenThisTurn = true;
           this.modelTranscriptAccumulator += msg.text;
+          console.log(`[${getLogTimestamp()}] 💬 [ServerLiveTransport:${this.clientSessionId}] Output transcript chunk: "${msg.text}"`);
           this.callbacks.onOutputTranscript?.(msg.text);
         }
         break;

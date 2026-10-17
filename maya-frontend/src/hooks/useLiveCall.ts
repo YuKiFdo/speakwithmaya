@@ -137,6 +137,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     Array<{ type: 'samples'; data: Float32Array } | { type: 'chunk'; data: string }>
   >([]);
   const initialGreetingTranscriptRef = useRef<string>('');
+  const greetingAudioChunksCountRef = useRef<number>(0);
+  const greetingAudioBytesCountRef = useRef<number>(0);
 
   // Next-generation deliberate practice & testing states
   const [activePracticeTask, setActivePracticeTask] = useState<PracticeTaskPayload | null>(null);
@@ -362,6 +364,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         isFirstGreetingPendingRef.current = true;
         isInitialGreetingHeldRef.current = true;
         initialGreetingBufferRef.current = [];
+        greetingAudioChunksCountRef.current = 0;
+        greetingAudioBytesCountRef.current = 0;
         setIsConnected(false);
         setTimeout(() => {
           if (isFirstGreetingPendingRef.current && !isInitialGreetingHeldRef.current) {
@@ -636,6 +640,14 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           onAudioSamples: (samples: Float32Array) => {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
 
+            if (isFirstGreetingPendingRef.current) {
+              greetingAudioChunksCountRef.current++;
+              greetingAudioBytesCountRef.current += samples.length * 4;
+              console.log(
+                `[useLiveCall] 🔊 [Greeting Audio Chunk #${greetingAudioChunksCountRef.current}] Float32: ${samples.length} samples (held: ${isInitialGreetingHeldRef.current})`,
+              );
+            }
+
             // If greeting chime is still playing, buffer initial greeting audio
             if (isInitialGreetingHeldRef.current) {
               initialGreetingBufferRef.current.push({ type: 'samples', data: samples });
@@ -679,6 +691,14 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onAudioChunk: (base64) => {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
+
+            if (isFirstGreetingPendingRef.current) {
+              greetingAudioChunksCountRef.current++;
+              greetingAudioBytesCountRef.current += Math.floor((base64.length * 3) / 4);
+              console.log(
+                `[useLiveCall] 🔊 [Greeting Audio Chunk #${greetingAudioChunksCountRef.current}] Base64 PCM: ${base64.length} chars (held: ${isInitialGreetingHeldRef.current})`,
+              );
+            }
 
             // If greeting chime is still playing, buffer initial greeting audio
             if (isInitialGreetingHeldRef.current) {
@@ -724,6 +744,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           },
           onOutputTranscript: (text) => {
             if (hasFinishedRef.current || statusRef.current === 'ended') return;
+
+            if (isFirstGreetingPendingRef.current) {
+              console.log(`[useLiveCall] 📝 [Greeting Transcript Chunk] "${text}" (held: ${isInitialGreetingHeldRef.current})`);
+            }
 
             // If greeting is currently held (e.g. during intro tutorial), buffer transcript text
             if (isInitialGreetingHeldRef.current) {
@@ -810,7 +834,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             activeRoleRef.current = null;
 
             if (isFirstGreetingPendingRef.current) {
-              console.log('[useLiveCall] 🌟 Initial greeting turn complete');
+              console.log(
+                `[useLiveCall] 🏁 [Greeting Turn Complete] Total greeting audio received: ${greetingAudioChunksCountRef.current} chunks (${(greetingAudioBytesCountRef.current / 1024).toFixed(1)} KB), text: "${(currentModelTextRef.current || initialGreetingTranscriptRef.current).slice(0, 60)}"`,
+              );
               isFirstGreetingPendingRef.current = false;
             }
 
@@ -1478,7 +1504,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   // Release buffered greeting audio and transcript once connected chime or intro guide finishes
   const releaseGreeting = useCallback(() => {
     if (!isInitialGreetingHeldRef.current) return;
-    console.log('[useLiveCall] 🚀 Releasing initial greeting audio and transcript now that guide/chime finished');
+    console.log(
+      `[useLiveCall] 🚀 [Greeting Release] Unlocking initial greeting (${initialGreetingBufferRef.current.length} buffered audio chunks, transcript: "${initialGreetingTranscriptRef.current.slice(0, 60)}")`,
+    );
     isInitialGreetingHeldRef.current = false;
 
     // Release buffered transcript to subtitles

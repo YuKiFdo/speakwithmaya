@@ -13,6 +13,8 @@ export interface ReconciliationReport {
   renewalsAttempted?: number;
   renewalsSucceeded?: number;
   renewalsFailed?: number;
+  pendingOrdersSwept?: number;
+  pendingOrdersRecovered?: number;
   errors: string[];
 }
 
@@ -56,6 +58,53 @@ export class SubscriptionReconciliationService {
     } catch (err: any) {
       this.logger.error(`Daily subscription reconciliation failed: ${err.message}`, err.stack);
     }
+  }
+
+  /**
+   * Pending Orders Recovery Sweeper:
+   * Executes every 10 minutes.
+   * Sweeps orders that are pending, created between 5 minutes and 24 hours ago.
+   * Automatically queries PayHere Gateway Retrieval API to recover from server downtime or dropped webhooks.
+   */
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async handlePendingOrdersReconciliation(): Promise<{ swept: number; recovered: number }> {
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: pendingOrders, error } = await this.supabase
+      .from('orders')
+      .select('*')
+      .eq('status', 'pending')
+      .lte('created_at', fiveMinutesAgo)
+      .gte('created_at', twentyFourHoursAgo)
+      .limit(20);
+
+    if (error) {
+      this.logger.error(`[PayHereCronSweep] Error querying pending orders: ${error.message}`);
+      return { swept: 0, recovered: 0 };
+    }
+
+    if (!pendingOrders || pendingOrders.length === 0) {
+      return { swept: 0, recovered: 0 };
+    }
+
+    this.logger.log(`[PayHereCronSweep] 🧹 Found ${pendingOrders.length} pending order(s) to verify with gateway.`);
+    let recovered = 0;
+
+    for (const order of pendingOrders) {
+      try {
+        const orderIdentifier = order.gateway_payment_id || order.id;
+        const result = await this.payhereService.reconcilePendingOrder(orderIdentifier);
+        if (result.success && result.status === 'RECONCILED_SUCCESS') {
+          recovered++;
+        }
+        this.logger.log(`[PayHereCronSweep] Order ${orderIdentifier} result: ${result.status} (${result.message})`);
+      } catch (orderErr: any) {
+        this.logger.error(`[PayHereCronSweep] Failed to sweep order ${order.id}: ${orderErr.message}`);
+      }
+    }
+
+    return { swept: pendingOrders.length, recovered };
   }
 
   /**
@@ -216,6 +265,11 @@ export class SubscriptionReconciliationService {
     report.renewalsAttempted = renewalStats.renewalsAttempted;
     report.renewalsSucceeded = renewalStats.renewalsSucceeded;
     report.renewalsFailed = renewalStats.renewalsFailed;
+
+    // 4. Sweep pending orders between 5 mins and 24 hours old with PayHere Gateway
+    const sweepResult = await this.handlePendingOrdersReconciliation();
+    report.pendingOrdersSwept = sweepResult.swept;
+    report.pendingOrdersRecovered = sweepResult.recovered;
 
     return report;
   }

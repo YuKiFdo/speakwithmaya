@@ -13,6 +13,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  Query,
 } from '@nestjs/common';
 import { PayHereService } from './payhere.service.js';
 import { SubscriptionReconciliationService } from './subscription-reconciliation.service.js';
@@ -145,6 +146,18 @@ export class PayHereController {
   }
 
   /**
+   * Admin: List orders with filters (subscription renewals, talk-time top-ups, initial subscriptions).
+   */
+  @Get('admin/orders')
+  async getAdminOrders(
+    @Query('type') type?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const orders = await this.payHereService.getAdminOrders(type, limit ? parseInt(limit, 10) : 100);
+    return { success: true, orders };
+  }
+
+  /**
    * Admin: View payment history / installments for a subscription.
    */
   @Get('admin/subscriptions/:id/payments')
@@ -175,5 +188,29 @@ export class PayHereController {
   @Post('admin/subscriptions/reconcile')
   async triggerReconciliation() {
     return this.reconciliationService.reconcileSubscriptions();
+  }
+
+  /**
+   * Resilient Verification & Recovery:
+   * Client calls this endpoint upon return from PayHere checkout to ensure payment is activated
+   * immediately, even if server was restarted or webhook was delayed.
+   */
+  @Post('payments/payhere/verify-order/:orderId')
+  async verifyOrder(
+    @Param('orderId') orderId: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (authHeader) {
+      this.authService.validateAuthToken(authHeader);
+    }
+    return this.payHereService.reconcilePendingOrder(orderId);
+  }
+
+  /**
+   * Admin: Verify and sync a specific order with PayHere Gateway.
+   */
+  @Post('admin/orders/:id/verify')
+  async adminVerifyOrder(@Param('id') orderId: string) {
+    return this.payHereService.reconcilePendingOrder(orderId);
   }
 }

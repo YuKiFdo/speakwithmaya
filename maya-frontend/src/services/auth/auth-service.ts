@@ -21,6 +21,7 @@ export interface VerifyOtpResponse {
     planTier: 'starter' | 'basic' | 'pro' | 'premium';
     planStatus: string;
     monthlyMinutesAllowance: number;
+    addOnMinutesBalance?: number;
     minutesBalance: number;
     minutesResetAt?: string;
     level?: string;
@@ -177,6 +178,7 @@ class AuthService {
             planTier: data.profile.plan_tier,
             planStatus: data.profile.plan_status,
             monthlyMinutesAllowance: data.profile.monthly_minutes_allowance,
+            addOnMinutesBalance: data.profile.add_on_minutes_balance ?? 0,
             minutesBalance: data.profile.minutes_balance,
             minutesResetAt: data.profile.minutes_reset_at,
             level: data.profile.level,

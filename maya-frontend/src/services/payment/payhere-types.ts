@@ -60,6 +60,35 @@ export interface SubscriptionRecord {
   };
 }
 
+export interface TopUpPackageStats {
+  count: number;
+  revenue: number;
+  minutes: number;
+}
+
+export interface AdminOrderRecord {
+  id: string;
+  user_id: string;
+  order_type: 'subscription_new' | 'subscription_renewal' | 'add_on_topup';
+  plan_tier?: string | null;
+  add_on_package_id?: string | null;
+  amount_lkr: number;
+  minutes_credited?: number | null;
+  payment_gateway: string;
+  gateway_payment_id: string;
+  payhere_payment_id?: string | null;
+  status: 'completed' | 'pending' | 'failed';
+  created_at: string;
+  raw_payload?: any;
+  profile?: {
+    id: string;
+    display_name: string;
+    phone_number: string;
+    level?: string;
+    minutes_balance?: number;
+  };
+}
+
 export interface AdminSubscriptionsResponse {
   stats: {
     totalSubscribers: number;
@@ -67,6 +96,19 @@ export interface AdminSubscriptionsResponse {
     pastDueCount: number;
     cancelledCount: number;
     mrrLkr: number;
+    topUpRevenueLkr?: number;
+    topUpMinutesSold?: number;
+    topUpOrdersCount?: number;
+    topUpPackages?: {
+      '30-min': TopUpPackageStats;
+      '120-min': TopUpPackageStats;
+      '300-min': TopUpPackageStats;
+    };
+    renewalsCount?: number;
+    renewalsSucceeded?: number;
+    renewalsFailed?: number;
+    renewalsRevenueLkr?: number;
   };
   subscriptions: SubscriptionRecord[];
+  orders?: AdminOrderRecord[];
 }

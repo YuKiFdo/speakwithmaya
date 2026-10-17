@@ -306,6 +306,7 @@ export class AuthService {
         planTier: userProfile.plan_tier,
         planStatus: userProfile.plan_status,
         monthlyMinutesAllowance: userProfile.monthly_minutes_allowance,
+        addOnMinutesBalance: userProfile.add_on_minutes_balance || 0,
         minutesBalance: userProfile.minutes_balance,
         minutesResetAt: userProfile.minutes_reset_at,
         level: userProfile.level,
@@ -323,10 +324,12 @@ export class AuthService {
   /**
    * Ensures an auth.users record exists before creating public.profiles record,
    * satisfying the profiles_id_fkey foreign key constraint.
+   * Guarantees 1 phone number maps to exactly 1 auth.users record.
    */
   private async getOrCreateAuthUserId(phone: string): Promise<string> {
+    const rawDigits = phone.replace('+', '');
     try {
-      const { data: createData, error: createError } = await this.supabase.auth.admin.createUser({
+      const { data: createData } = await this.supabase.auth.admin.createUser({
         phone: phone,
         phone_confirm: true,
         user_metadata: { phone_number: phone },
@@ -335,50 +338,56 @@ export class AuthService {
       if (createData?.user?.id) {
         return createData.user.id;
       }
+    } catch (err: any) {
+      this.logger.warn(`auth.admin.createUser note: ${err?.message}`);
+    }
 
-      // If user with this phone already exists in auth.users, find their id
-      if (createError) {
-        const { data: listData } = await this.supabase.auth.admin.listUsers();
-        const existing = listData?.users?.find(
+    // If user already exists in auth.users, scan across pages to find their existing ID
+    try {
+      let page = 1;
+      let hasMore = true;
+      while (hasMore && page <= 5) {
+        const { data: listData } = await this.supabase.auth.admin.listUsers({ page, perPage: 100 });
+        const users = listData?.users || [];
+        const existing = users.find(
           (u) =>
             u.phone === phone ||
-            u.phone === phone.replace('+', '') ||
-            u.user_metadata?.phone_number === phone,
+            u.phone === rawDigits ||
+            u.user_metadata?.phone_number === phone ||
+            u.user_metadata?.phone_number === rawDigits,
         );
         if (existing?.id) {
           return existing.id;
         }
+        if (users.length < 100) {
+          hasMore = false;
+        } else {
+          page++;
+        }
       }
-    } catch (err: any) {
-      this.logger.warn(`auth.admin.createUser warning: ${err?.message}`);
+    } catch (listErr: any) {
+      this.logger.warn(`Error scanning auth users for existing phone: ${listErr?.message}`);
     }
-
-    try {
-      const { data: listData } = await this.supabase.auth.admin.listUsers();
-      const existing = listData?.users?.find(
-        (u) =>
-          u.phone === phone ||
-          u.phone === phone.replace('+', '') ||
-          u.user_metadata?.phone_number === phone,
-      );
-      if (existing?.id) {
-        return existing.id;
-      }
-    } catch {}
 
     return crypto.randomUUID();
   }
 
   /**
    * Internal helper: Finds existing user by phone or provisions new profile strictly in Supabase.
+   * Strictly enforces that 1 phone number maps to exactly 1 user profile in public.profiles.
    */
   private async findOrCreateProfileByPhone(phone: string): Promise<UserProfileData> {
     const nextMonthIso = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const cleanPhone = this.normalizePhoneNumber(phone);
+    const rawPhone = cleanPhone.replace('+', '');
 
+    // 1. Strictly look up existing profile by clean E.164 phone or un-prefixed digits
     const { data: existing, error: findError } = await this.supabase
       .from('profiles')
       .select('*')
-      .eq('phone_number', phone)
+      .or(`phone_number.eq.${cleanPhone},phone_number.eq.${rawPhone}`)
+      .order('created_at', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (findError) {
@@ -387,15 +396,40 @@ export class AuthService {
     }
 
     if (existing) {
-      // Check lazy monthly reset in database
+      // Ensure phone_number is standardized to clean E.164 format
+      if (existing.phone_number !== cleanPhone) {
+        await this.supabase
+          .from('profiles')
+          .update({ phone_number: cleanPhone, updated_at: new Date().toISOString() })
+          .eq('id', existing.id);
+        existing.phone_number = cleanPhone;
+      }
       return await this.checkAndResetMonthlyQuota(existing as UserProfileData);
     }
 
-    // Provision new user in auth.users first, satisfying profiles_id_fkey foreign key
-    const newId = await this.getOrCreateAuthUserId(phone);
+    // 2. Provision or retrieve matching user in auth.users
+    const userId = await this.getOrCreateAuthUserId(cleanPhone);
+
+    // 3. Check if a profile was already created under this userId (e.g. from Google or previous setup)
+    const { data: existingByUserId } = await this.supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (existingByUserId) {
+      await this.supabase
+        .from('profiles')
+        .update({ phone_number: cleanPhone, updated_at: new Date().toISOString() })
+        .eq('id', userId);
+      existingByUserId.phone_number = cleanPhone;
+      return await this.checkAndResetMonthlyQuota(existingByUserId as UserProfileData);
+    }
+
+    // 4. Provision fresh profile
     const newProfile = {
-      id: newId,
-      phone_number: phone,
+      id: userId,
+      phone_number: cleanPhone,
       display_name: null,
       level: 'Intermediate',
       goal: null,
@@ -426,6 +460,21 @@ export class AuthService {
       .single();
 
     if (insertErr || !created) {
+      // If error is unique constraint violation (another concurrent process already claimed this phone), fetch that profile
+      if (
+        insertErr?.code === '23505' ||
+        insertErr?.message?.includes('duplicate key') ||
+        insertErr?.message?.includes('unique')
+      ) {
+        const { data: duplicateProfile } = await this.supabase
+          .from('profiles')
+          .select('*')
+          .eq('phone_number', cleanPhone)
+          .maybeSingle();
+        if (duplicateProfile) {
+          return await this.checkAndResetMonthlyQuota(duplicateProfile as UserProfileData);
+        }
+      }
       this.logger.error(`Database error inserting new profile: ${insertErr?.message}`);
       throw new InternalServerErrorException('Failed to create user account in database.');
     }
@@ -646,6 +695,21 @@ export class AuthService {
         .then(() => {});
     }
 
+    // Auto-heal missing add_on_minutes_balance: If balance exceeds monthly allowance and add_on is 0
+    if (
+      data.monthly_minutes_allowance &&
+      data.minutes_balance > data.monthly_minutes_allowance &&
+      (!data.add_on_minutes_balance || data.add_on_minutes_balance === 0)
+    ) {
+      const extraMinutes = data.minutes_balance - data.monthly_minutes_allowance;
+      data.add_on_minutes_balance = extraMinutes;
+      this.supabase
+        .from('profiles')
+        .update({ add_on_minutes_balance: extraMinutes, updated_at: new Date().toISOString() })
+        .eq('id', userId)
+        .then(() => {});
+    }
+
     return await this.checkAndResetMonthlyQuota(data as UserProfileData);
   }
 
@@ -659,13 +723,15 @@ export class AuthService {
       premium: 1200,
     };
     const allowance = minutesMap[dto.planTier];
+    const profile = await this.getProfile(userId);
+    const existingAddOn = profile.add_on_minutes_balance || 0;
 
     const updates = {
       plan_tier: dto.planTier,
       plan_status: 'active',
       billing_cycle: dto.billingCycle || 'monthly',
       monthly_minutes_allowance: allowance,
-      minutes_balance: allowance, // Credit full new monthly tier allowance
+      minutes_balance: allowance + existingAddOn, // Credit new monthly tier allowance + retain existing add-on minutes
       updated_at: new Date().toISOString(),
     };
 

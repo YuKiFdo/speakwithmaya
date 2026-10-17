@@ -50,6 +50,11 @@ interface ClientSessionState {
   totalThoughtsTokens: number;
   rateMultiplier: number;
 
+  // Greeting audio diagnosis
+  greetingAudioChunksReceived: number;
+  greetingAudioBytesReceived: number;
+  greetingTranscriptReceived: string;
+
   // Latency tracking: measures time from activityEnd to first Gemini audio response
   turnEndTimestamp: number | null;
   awaitingGeminiResponse: boolean;
@@ -140,6 +145,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       totalTextOutTokens: 0,
       totalThoughtsTokens: 0,
       rateMultiplier: Number((0.37 + Math.random() * 0.03).toFixed(4)),
+
+      // Greeting audio diagnosis
+      greetingAudioChunksReceived: 0,
+      greetingAudioBytesReceived: 0,
+      greetingTranscriptReceived: '',
 
       // Latency tracking
       turnEndTimestamp: null,
@@ -835,40 +845,43 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (isFreshSession && greetingPrompt && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         state.isGreetingInProgress = true;
-        this.logger.log(`[${state.sessionId}] 🚀 Dispatching opening turn greeting prompt to Gemini Live (audio input shielded)`);
-        this.addSessionLog(state, 'greeting_dispatched');
+        state.greetingAudioChunksReceived = 0;
+        state.greetingAudioBytesReceived = 0;
+        state.greetingTranscriptReceived = '';
+
+        this.logger.log(`[${state.sessionId}] 🚀 [Greeting Dispatch] Sending opening greeting prompt to Gemini Live (Native Audio Mode)`);
+        this.logger.log(`[${state.sessionId}] 📜 [Greeting Prompt Preview]: "${greetingPrompt.slice(0, 150)}..."`);
+        this.addSessionLog(state, 'greeting_dispatched', greetingPrompt.slice(0, 100));
 
         // Start latency timer for greeting response
         state.turnEndTimestamp = Date.now();
         state.awaitingGeminiResponse = true;
 
-        // Safety watchdog: after 6s, unlock audio input even if Gemini drops the turn
+        // Safety watchdog: after 8s, unlock audio input even if Gemini drops the turn
         setTimeout(() => {
           if (state.isGreetingInProgress) {
-            this.logger.warn(`[${state.sessionId}] ⚠️ Greeting safety watchdog expired (6s) — unlocking user audio gate`);
+            this.logger.warn(`[${state.sessionId}] ⚠️ [Greeting Watchdog] Expired (8s) — unlocking user audio gate (Audio chunks received so far: ${state.greetingAudioChunksReceived})`);
             state.isGreetingInProgress = false;
             state.awaitingGeminiResponse = false;
           }
-        }, 6000);
+        }, 8000);
 
+        // Native Gemini Live clientContent dispatch.
+        // NOTE: We MUST NOT send sendRealtimeInput({ activityEnd: {} }) here!
+        // Sending activityEnd on an empty realtime stream with manual VAD tells Gemini that
+        // acoustic activity was empty, which causes Gemini's audio synthesizer to drop/skip
+        // inlineData audio frames while only returning text.
+        // turnComplete: true is fully sufficient and triggers native audio synthesis cleanly.
         session.sendClientContent({
           turns: [
             {
               role: 'user',
-              parts: [{ text: greetingPrompt }],
+              parts: [{ text: `${greetingPrompt}\n[SYSTEM VOICE DIRECTIVE: Speak your response aloud using natural voice output.]` }],
             },
           ],
           turnComplete: true,
         });
-
-        // Crucial for Manual VAD: since automaticActivityDetection is disabled,
-        // send activityEnd so Gemini's speech pipeline recognizes that the user turn is complete
-        // and begins audio output generation!
-        try {
-          session.sendRealtimeInput({ activityEnd: {} });
-        } catch (actErr: any) {
-          this.logger.warn(`[${state.sessionId}] Failed to send activityEnd after greeting: ${actErr?.message}`);
-        }
+        this.logger.log(`[${state.sessionId}] 📤 [Greeting Dispatch] sendClientContent delivered with turnComplete: true (awaiting native Gemini Live audio)`);
       } else if (!isFreshSession && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         state.isGreetingInProgress = false;
@@ -915,6 +928,16 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           if (chunkBuffer.length > 0) {
             state.modelAudioChunks.push(chunkBuffer);
             state.currentModelTurnAudioChunks.push(chunkBuffer);
+          }
+
+          if (state.isGreetingInProgress) {
+            state.greetingAudioChunksReceived++;
+            state.greetingAudioBytesReceived += chunkBuffer.length;
+            if (state.greetingAudioChunksReceived <= 3 || state.greetingAudioChunksReceived % 10 === 0) {
+              this.logger.log(
+                `[${state.sessionId}] 🔊 [Greeting Audio Chunk #${state.greetingAudioChunksReceived}] Received ${chunkBuffer.length} bytes (Total: ${(state.greetingAudioBytesReceived / 1024).toFixed(1)} KB, Opus: ${state.supportsOpus})`,
+              );
+            }
           }
 
           // Latency measurement: first audio chunk after activityEnd
@@ -978,6 +1001,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       state.modelTranscriptAccumulator += text;
       state.hasModelSpokenThisTurn = true;
 
+      if (state.isGreetingInProgress) {
+        state.greetingTranscriptReceived += text;
+        this.logger.log(`[${state.sessionId}] 📝 [Greeting Transcript Chunk]: "${text}"`);
+      }
+
       // Also count as first response if we were awaiting
       if (state.awaitingGeminiResponse && state.turnEndTimestamp) {
         const latencyMs = Date.now() - state.turnEndTimestamp;
@@ -1037,8 +1065,32 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Only print turn complete summary when the model actually responded or when user turn finished
       if (state.hasModelSpokenThisTurn || modelText) {
         if (state.isGreetingInProgress) {
-          this.logger.log(`[${state.sessionId}] 🌟 Opening greeting successfully completed — client audio gate unlocked`);
           state.isGreetingInProgress = false;
+          if (state.greetingAudioChunksReceived > 0) {
+            this.logger.log(
+              `[${state.sessionId}] 🌟 [Greeting Diagnosis: SUCCESS]\n` +
+              `   🔊 Native Audio: ${state.greetingAudioChunksReceived} chunks (${(state.greetingAudioBytesReceived / 1024).toFixed(1)} KB)\n` +
+              `   💬 Subtitles: "${modelText || state.greetingTranscriptReceived}"\n` +
+              `   ✅ Status: Greeting audio generated and streamed to client cleanly`,
+            );
+            this.addSessionLog(
+              state,
+              'greeting_diagnosis_success',
+              `${state.greetingAudioChunksReceived} chunks, ${(state.greetingAudioBytesReceived / 1024).toFixed(1)} KB`,
+            );
+          } else {
+            this.logger.error(
+              `[${state.sessionId}] 🚨 [Greeting Diagnosis: AUDIO MISSING ALERT]\n` +
+              `   ⚠️ Gemini Live returned 0 inlineData audio chunks for greeting!\n` +
+              `   💬 Returned Text: "${modelText || state.greetingTranscriptReceived}"\n` +
+              `   ❌ This indicates Gemini Live generated text without audio frames.`,
+            );
+            this.addSessionLog(
+              state,
+              'greeting_diagnosis_audio_missing',
+              `text="${(modelText || state.greetingTranscriptReceived).slice(0, 100)}"`,
+            );
+          }
         }
 
         this.logger.log(

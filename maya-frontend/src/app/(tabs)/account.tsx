@@ -161,7 +161,7 @@ export default function AccountScreen() {
     }
   };
 
-  const searchParams = useLocalSearchParams<{ card_update?: string; payment?: string }>();
+  const searchParams = useLocalSearchParams<{ card_update?: string; payment?: string; order_id?: string }>();
   const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
   const [isUpdatingCard, setIsUpdatingCard] = useState(false);
 
@@ -182,18 +182,28 @@ export default function AccountScreen() {
   useEffect(() => {
     let cardUpdateStatus = searchParams.card_update;
     let paymentStatus = searchParams.payment;
+    let orderId = searchParams.order_id;
 
     // Web fallback: Read from window.location.search if external redirect didn't hydrate expo params yet
     if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search) {
       const q = new URLSearchParams(window.location.search);
       if (!cardUpdateStatus) cardUpdateStatus = q.get('card_update') || undefined;
       if (!paymentStatus) paymentStatus = q.get('payment') || undefined;
+      if (!orderId) orderId = q.get('order_id') || undefined;
     }
 
     if (!cardUpdateStatus && !paymentStatus) return;
 
     // Small delay ensures screen animation, DOM layout, and AlertHost listener are fully settled
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
+      if (orderId && (cardUpdateStatus === 'success' || paymentStatus === 'success')) {
+        try {
+          await paymentApi.verifyOrder(orderId);
+        } catch (e) {
+          // fallback gracefully
+        }
+      }
+
       if (cardUpdateStatus === 'success') {
         stats.refreshStats();
         fetchSubscription();
@@ -218,7 +228,7 @@ export default function AccountScreen() {
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [searchParams.card_update, searchParams.payment]);
+  }, [searchParams.card_update, searchParams.payment, searchParams.order_id]);
 
   const handleChangePayment = async () => {
     if (!isPro) {

@@ -11,11 +11,15 @@ export class WebAudioPlayer implements IAudioPlayer {
 
     const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
     this.audioCtx = new AudioCtxClass();
+    console.log('[WebAudioPlayer] 🔊 AudioContext created, initial state:', this.audioCtx.state);
 
     if (this.audioCtx.state === 'suspended') {
       try {
         await this.audioCtx.resume();
-      } catch {}
+        console.log('[WebAudioPlayer] 🔊 AudioContext resumed during init, state:', this.audioCtx.state);
+      } catch (e: any) {
+        console.warn('[WebAudioPlayer] ⚠️ AudioContext suspended on init (waiting for user gesture):', e?.message);
+      }
     }
 
     // iOS Safari WebAudio unlock: play 1-sample silent buffer directly to destination
@@ -74,6 +78,7 @@ export class WebAudioPlayer implements IAudioPlayer {
     if (!this.playerNode || !base64Pcm) return;
 
     if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      console.warn('[WebAudioPlayer] ⚠️ AudioContext is suspended while playPcmChunk called! Auto-resuming...');
       this.audioCtx.resume().catch(() => {});
     }
 
@@ -114,6 +119,7 @@ export class WebAudioPlayer implements IAudioPlayer {
     if (!this.playerNode || !samples || samples.length === 0) return;
 
     if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      console.warn('[WebAudioPlayer] ⚠️ AudioContext is suspended while playFloat32Chunk called! Auto-resuming...');
       this.audioCtx.resume().catch(() => {});
     }
 

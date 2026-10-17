@@ -253,18 +253,28 @@ export default function UpgradeScreen() {
   // Handle PayHere Preapproval redirect return
   useEffect(() => {
     let paymentStatus = searchParams.payment;
+    let orderId = searchParams.order_id;
 
     // Web fallback: Read from window.location.search if external redirect didn't hydrate expo params yet
     if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search) {
       const q = new URLSearchParams(window.location.search);
       if (!paymentStatus) paymentStatus = q.get('payment') || undefined;
+      if (!orderId) orderId = q.get('order_id') || undefined;
     }
 
     if (!paymentStatus) return;
 
-    const timer = setTimeout(() => {
+    const handleReturn = async () => {
       if (paymentStatus === 'success') {
-        stats.refreshStats();
+        // Resilient gateway reconciliation: ensures instant credit even if server was restarted or webhook delayed
+        if (orderId) {
+          try {
+            await paymentApi.verifyOrder(orderId);
+          } catch (e) {
+            // fallback gracefully
+          }
+        }
+        await stats.refreshStats();
         mayaAlert.success('Your subscription has been processed successfully! Enjoy your practice time.', 'Payment Successful');
       } else if (paymentStatus === 'cancelled') {
         mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
@@ -274,10 +284,14 @@ export default function UpgradeScreen() {
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.history.replaceState({}, document.title, window.location.pathname);
       }
+    };
+
+    const timer = setTimeout(() => {
+      handleReturn();
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [searchParams.payment]);
+  }, [searchParams.payment, searchParams.order_id]);
 
   // Dynamic scaling so the desktop upgrade page fills available height naturally
   // (pricing cards and trust badges expand to fill screen space without any vertical scrolling):

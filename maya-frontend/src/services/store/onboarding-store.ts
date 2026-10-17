@@ -8,6 +8,7 @@ export interface UserSessionData {
   planTier: 'starter' | 'basic' | 'pro' | 'premium';
   planStatus: string;
   monthlyMinutesAllowance: number;
+  addOnMinutesBalance?: number;
   minutesBalance: number;
   minutesResetAt?: string;
   level?: string;

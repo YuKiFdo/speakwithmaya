@@ -165,6 +165,24 @@ class PaymentApiService {
   }
 
   /**
+   * Admin: List orders with filters (subscription renewals, talk-time top-ups, initial subscriptions).
+   */
+  async getAdminOrders(type: string = 'ALL', limit: number = 100): Promise<any[]> {
+    const query = new URLSearchParams({ type, limit: String(limit) });
+    const res = await fetch(`${this.baseUrl}/v1/admin/orders?${query.toString()}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to fetch admin orders');
+    }
+
+    return data.orders || [];
+  }
+
+  /**
    * Admin: View payment history for a subscription.
    */
   async getSubscriptionPayments(subscriptionId: string): Promise<any[]> {
@@ -227,6 +245,8 @@ class PaymentApiService {
     renewalsAttempted?: number;
     renewalsSucceeded?: number;
     renewalsFailed?: number;
+    pendingOrdersSwept?: number;
+    pendingOrdersRecovered?: number;
     errors: string[];
   }> {
     const res = await fetch(`${this.baseUrl}/v1/admin/subscriptions/reconcile`, {
@@ -240,6 +260,34 @@ class PaymentApiService {
     }
 
     return data;
+  }
+
+  /**
+   * Resilient Payment Verification:
+   * Direct verification against PayHere Gateway via backend recovery engine.
+   * Ensures instant plan activation even after server restart or missed webhook.
+   */
+  async verifyOrder(orderId: string): Promise<{
+    success: boolean;
+    status: string;
+    message: string;
+    order?: any;
+  }> {
+    try {
+      const res = await fetch(`${this.baseUrl}/v1/payments/payhere/verify-order/${encodeURIComponent(orderId)}`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+      });
+
+      const data = await res.json();
+      return data;
+    } catch (err: any) {
+      return {
+        success: false,
+        status: 'NETWORK_ERROR',
+        message: err.message || 'Network error verifying order',
+      };
+    }
   }
 }
 

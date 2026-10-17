@@ -480,9 +480,8 @@ export default function CallScreen() {
       //    - Release Maya's greeting right as the curtain opens (so voice & subtitles start as CallScreen appears)
       //    - Simultaneously dissolve + zoom-out ConnectingView AND spring-bloom CallScreen in!
       const handoffTimer = setTimeout(() => {
-        if (!isIntro) {
-          liveCallRef.current.releaseGreeting?.();
-        }
+        console.log(`[call.tsx] 🎙️ Releasing Maya greeting audio as CallScreen transitions into view (isIntro: ${isIntro})`);
+        liveCallRef.current.releaseGreeting?.();
 
         Animated.parallel([
           // ConnectingView dissolves & subtly expands outward

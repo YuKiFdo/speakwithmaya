@@ -144,16 +144,39 @@ export default function PersonalizedPlanScreen() {
 
   // Handle PayHere Preapproval redirect return
   useEffect(() => {
-    if (params.payment === 'success') {
-      authService.fetchUserProfile();
-      router.replace({
-        pathname: '/onboarding/complete' as any,
-        params: { plan: '3-months-pro' },
-      });
-    } else if (params.payment === 'cancelled') {
-      mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
+    let paymentStatus = params.payment;
+    let orderId = params.order_id;
+
+    // Web fallback
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search) {
+      const q = new URLSearchParams(window.location.search);
+      if (!paymentStatus) paymentStatus = q.get('payment') || undefined;
+      if (!orderId) orderId = q.get('order_id') || undefined;
     }
-  }, [params.payment]);
+
+    if (!paymentStatus) return;
+
+    const handleReturn = async () => {
+      if (paymentStatus === 'success') {
+        if (orderId) {
+          try {
+            await paymentApi.verifyOrder(orderId);
+          } catch (e) {
+            // fallback gracefully
+          }
+        }
+        await authService.fetchUserProfile();
+        router.replace({
+          pathname: '/onboarding/complete' as any,
+          params: { plan: '3-months-pro' },
+        });
+      } else if (paymentStatus === 'cancelled') {
+        mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
+      }
+    };
+
+    handleReturn();
+  }, [params.payment, params.order_id]);
 
   // Ensure browser URL bar displays clean route with zero query leakage on Web
   useEffect(() => {
