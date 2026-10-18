@@ -735,16 +735,17 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.sessionsService.enrichRoadmapDto(dto);
 
       const isSinhala = dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
+      const isScenarioRoleplay = Boolean(dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0);
       const systemInstruction = this.sessionsService.getSystemPrompt(dto);
       const toolsDeclaration = this.sessionsService.getToolsDeclaration(
-        dto.aiSuggestions !== false,
+        isScenarioRoleplay ? false : (dto.aiSuggestions !== false),
         isSinhala,
       );
       const greetingPrompt = this.sessionsService.generateGreetingPrompt(dto);
-      const voiceName = isSinhala ? 'Callirrhoe' : 'Aoede';
+      const voiceName = this.sessionsService.getVoiceForSession(dto);
 
-      this.logger.log(`[${state.sessionId}] Connecting to Gemini Live API (${this.liveModel})...`);
-      this.addSessionLog(state, 'gemini_connecting', `model=${this.liveModel}`);
+      this.logger.log(`[${state.sessionId}] Connecting to Gemini Live API (${this.liveModel}) [voice: ${voiceName}, scenario: ${isScenarioRoleplay}]...`);
+      this.addSessionLog(state, 'gemini_connecting', `model=${this.liveModel} voice=${voiceName}`);
 
       let session: any = null;
 
@@ -759,9 +760,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
               },
             },
           },
-          thinkingConfig: {
-            thinkingBudget: 0,
-          },
+          // thinkingConfig omitted: unsupported on gemini-3.8-live and suppresses interleaved reasoning
           systemInstruction: {
             parts: [{ text: systemInstruction }],
           },
@@ -889,13 +888,18 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // Because manual VAD (automaticActivityDetection: { disabled: true }) is configured,
         // Gemini Live requires an acoustic turn boundary (activityStart -> audio frame -> activityEnd)
         // to engage its server-side neural audio vocoder and synthesize 24kHz native audio frames.
+        const scenarioEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : '').trim();
+        const voiceDirective = isScenarioRoleplay
+          ? `[ACTING & PROSODY DIRECTIVE: Perform this opening line with 100% vocal emotion (${scenarioEmotion || 'Angry, impatient, sharp, fast pace'}). Do NOT sound like a polite AI assistant. Speak immediately in character!]`
+          : `[SYSTEM VOICE DIRECTIVE: Speak your response aloud using natural voice output.]`;
+
         const t0 = Date.now();
         session.sendRealtimeInput({ activityStart: {} });
         session.sendClientContent({
           turns: [
             {
               role: 'user',
-              parts: [{ text: `${greetingPrompt}\n[SYSTEM VOICE DIRECTIVE: Speak your response aloud using natural voice output.]` }],
+              parts: [{ text: `${greetingPrompt}\n${voiceDirective}` }],
             },
           ],
           turnComplete: true,

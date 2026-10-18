@@ -203,9 +203,7 @@ export class LiveTransport implements ILiveTransport {
           },
         },
       },
-      thinkingConfig: {
-        thinkingBudget: 0,
-      },
+      // thinkingConfig omitted: unsupported on gemini-3.8-live and breaks interleaved reasoning
       ...this.config.generationConfig,
     };
 

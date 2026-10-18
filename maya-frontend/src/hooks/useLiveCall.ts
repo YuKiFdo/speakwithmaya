@@ -594,6 +594,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           token: tokenData.token,
           voiceName: tokenData.voiceName || 'Callirrhoe',
           resumptionHandle: resumptionHandleRef.current,
+          greetingPrompt: tokenData.greetingPrompt,
           languageMode: tokenData.languageMode || options.languageMode,
           sinhalaStyle: (tokenData.sinhalaStyle as any) || options.sinhalaStyle || 'balanced',
           sessionOptions: {

@@ -652,21 +652,75 @@ GUARDRAILS:
 - Student must do at least 70% of the talking.`;
   }
 
+  getVoiceForSession(dto: CreateSessionTokenDto): string {
+    const isSinhala = dto.isIntroCall === true || dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
+
+    // In Scenario Studio mode (when custom scenarioPrompt is present)
+    if (dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0) {
+      const primaryEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : '').toLowerCase();
+      if (
+        primaryEmotion.includes('angry') ||
+        primaryEmotion.includes('strict') ||
+        primaryEmotion.includes('skeptical') ||
+        primaryEmotion.includes('frustrated')
+      ) {
+        return 'Kore'; // Firm, sharp, high-authority female voice
+      }
+      if (
+        primaryEmotion.includes('crying') ||
+        primaryEmotion.includes('sad') ||
+        primaryEmotion.includes('vulnerable') ||
+        primaryEmotion.includes('emotional')
+      ) {
+        return 'Aoede'; // Deep, dramatic, expressive female voice
+      }
+      if (
+        primaryEmotion.includes('cheerful') ||
+        primaryEmotion.includes('upbeat') ||
+        primaryEmotion.includes('playful') ||
+        primaryEmotion.includes('sarcastic')
+      ) {
+        return 'Puck'; // Snappy, lively, fast-paced voice
+      }
+      if (primaryEmotion.includes('professional') || primaryEmotion.includes('formal')) {
+        return 'Aoede';
+      }
+      return 'Kore'; // Default for scenarios
+    }
+
+    // Default for standard coaching / lessons / intro call:
+    return isSinhala ? 'Callirrhoe' : 'Callirrhoe';
+  }
+
   buildScenarioSystemPrompt(dto: CreateSessionTokenDto, userName: string, isSinhala: boolean): string {
     const rawTopic = (dto.scenarioTitle || dto.topic || 'English Roleplay Scenario').trim();
     const customPrompt = (dto.scenarioPrompt || '').trim();
     const briefing = (dto.scenarioBriefing || '').trim();
+    const primaryEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : 'Roleplay Character').trim();
+    const openingLine = (dto.openingLine || '').trim();
 
-    return `You are Maya, an AI speaking partner & coach for Sri Lankan learners.
+    return `You are an immersive method voice actor performing an authentic audio roleplay with ${userName}.
+CRITICAL: Do NOT act like a polite AI assistant, language coach, or customer service agent. You are 100% in character as described below.
 
-### CURRENT SCENARIO & ROLEPLAY DIRECTIVE:
+### CURRENT SCENARIO & CHARACTER DIRECTIVE:
 ${customPrompt}
 
 ${briefing ? `SCENARIO CONTEXT FOR STUDENT: ${briefing}` : ''}
 
+### AUDIO PROSODY & VOCAL PERFORMANCE (MANDATORY FOR GEMINI 3.8 LIVE):
+- Target Emotion: ${primaryEmotion.toUpperCase()}
+- DO NOT use your default polite, upbeat, or helpful assistant voice inflection.
+- DO NOT mirror the user's calm, polite, or hesitant voice tone. Even if ${userName} speaks softly, slowly, or politely, you MUST remain vocally ${primaryEmotion} until the scenario rules say otherwise.
+- ACOUSTIC ACTING RULES:
+  * If ANGRY / FRUSTRATED / STRICT: Speak with short, fast, clipped staccato sentences. Use exclamation marks ('!'), rhetorical questions ('What?!', 'Are you serious?!', 'Excuse me?!'), and audible exasperation ('Ugh', 'Listen to me!'). Never speak in calm, polite paragraphs.
+  * If CRYING / VULNERABLE: Speak with soft hesitations, trembling pauses, trailing ellipses ('...'), and sniffles/sighs ('I... I just don't know what to do... everything fell apart...').
+  * If STRICT / DEMANDING: Speak in a curt, direct, no-nonsense manner without warm greetings or pleasantries.
+  * If CHEERFUL / ENERGETIC: Speak with high energy, lively inflection, and enthusiastic pacing.
+${openingLine ? `- MANDATORY OPENING LINE: Start the conversation immediately by delivering this exact line in your character's voice: "${openingLine}"` : ''}
+
 ### CORE CONVERSATION GUARDS (MANDATORY):
 1. USER NAME & INTERACTION:
-   - The student's name is ${userName}. Address them naturally when suitable in conversation.
+   - The student's name is ${userName}. Address them naturally when suitable in character.
 2. SPOKEN PACING:
    - Keep your spoken responses strictly under 15-20 words per turn. Do not speak long paragraphs or monologues. Keep the dialogue snappy, interactive, and natural.
 3. LANGUAGE & SCRIPT PURITY:
@@ -675,10 +729,10 @@ ${briefing ? `SCENARIO CONTEXT FOR STUDENT: ${briefing}` : ''}
    - ABSOLUTELY ZERO TAMIL: Never speak or output Tamil words or Tamil script (தமிழ், Unicode U+0B80-U+0BFF). Sri Lankan students in this app speak Sinhala and English. Use "අවශ්‍ය" or "ඕන වෙන" instead of Tamil "தேவையான".
    - ABSOLUTELY FORBIDDEN: Hindi/Devanagari (हिन्दी), Arabic, or any other script.
 4. ROLEPLAY AUTHENTICITY:
-   - Fully adopt the emotions, attitude, and character traits instructed in the scenario above (e.g. angry, crying, cheerful, professional, skeptical, demanding).
-   - React authentically to what the student says. If they communicate well, advance the story or situation. If they struggle, give brief natural reactions matching your character.
+   - Fully adopt the emotions, attitude, and character traits instructed in the scenario above.
+   - React authentically to what the student says. If they de-escalate or solve the issue well, gradually soften your tone as allowed by your scenario rules. If they struggle or make excuses, react in character.
 5. ZERO TASK LOCKING:
-   - Do not halt the conversation or force robotic word-for-word repetitions. Let the conversation flow naturally from turn to turn.`;
+   - Do not halt the conversation or force robotic word-for-word repetitions. Let the conversation flow naturally in character.`;
   }
 
   getSystemPrompt(dto: CreateSessionTokenDto): string {
@@ -990,13 +1044,14 @@ ${memoryPart}`;
     if (dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0) {
       const scenarioTitle = dto.scenarioTitle || dto.topic || 'Roleplay Scenario';
       const openingLine = (dto.openingLine || '').trim();
+      const primaryEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : 'intense').trim();
 
       if (openingLine) {
-        return `Start the roleplay immediately by saying aloud in character: "${openingLine}"`;
+        return `[ACTING DIRECTION: You are completely immersed in your role. Do NOT greet politely as an AI assistant. Speak immediately in character with intense ${primaryEmotion} vocal delivery. Speak this exact opening line aloud right now: "${openingLine}"]`;
       }
 
       if (dto.openingMode === 'maya_in_character') {
-        return `Hello Maya! This is ${userName}. Start the roleplay immediately in character as described in your scenario instructions!`;
+        return `[ACTING DIRECTION: Begin the roleplay immediately in character as described in your scenario instructions. Do NOT introduce yourself as an AI assistant. Speak immediately with intense ${primaryEmotion} vocal inflection and ask your opening in-character question right now!]`;
       }
 
       if (dto.openingMode === 'user_starts') {
@@ -1004,7 +1059,7 @@ ${memoryPart}`;
       }
 
       // Default: maya_explains_first
-      return `Hello Maya! This is ${userName}. In friendly everyday tone, briefly explain in one short sentence what scenario we are practicing today ("${scenarioTitle}"), and then immediately start the roleplay in character!`;
+      return `Hello Maya! This is ${userName}. In a warm natural tone, briefly explain in one short sentence what scenario we are practicing today ("${scenarioTitle}"), and then immediately transition into character and start the roleplay!`;
     }
 
     // 1. Priority: Curriculum Roadmap Lesson
@@ -1434,6 +1489,8 @@ ${memoryPart}`;
     let ephemeralToken = '';
     let wsUrl = '';
 
+    const selectedVoice = this.getVoiceForSession(dto);
+
     if (apiKey) {
       try {
         // Mint short-lived, single-use, scoped ephemeral token via official Gemini Live AuthToken API
@@ -1455,13 +1512,11 @@ ${memoryPart}`;
                 speechConfig: {
                   voiceConfig: {
                     prebuiltVoiceConfig: {
-                      voiceName: 'Callirrhoe',
+                      voiceName: selectedVoice,
                     },
                   },
                 },
-                thinkingConfig: {
-                  thinkingBudget: 0,
-                },
+                // thinkingConfig omitted: unsupported on gemini-3.8-live and suppresses interleaved reasoning
               },
               systemInstruction: {
                 parts: [{ text: systemPrompt }],
@@ -1536,7 +1591,8 @@ ${memoryPart}`;
       wsUrl,
       sessionId,
       maxSessionSeconds: maxSeconds,
-      voiceName: 'Callirrhoe',
+      voiceName: selectedVoice,
+      greetingPrompt,
       languageMode: isSinhala ? 'sinhala' : 'english',
     };
   }
