@@ -1423,7 +1423,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             },
             turns: turnsRef.current,
             grammarCorrections: correctionsRef.current,
-            userName: options.userName || 'Tharindu Fernando',
+            userName: (options.userName || 'Learner').trim(),
             model: 'gemini-3.8-live',
             topic: options.topic || 'English Speaking Practice',
             languageMode: options.languageMode || 'sinhala',

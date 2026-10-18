@@ -40,6 +40,7 @@ import {
 } from '@/services/sound/sound-service';
 import { CallSessionStore } from '@/services/store/call-session-store';
 import { OnboardingStore } from '@/services/store/onboarding-store';
+import { useUserStats } from '@/hooks/useUserStats';
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{
@@ -89,8 +90,17 @@ export default function CallScreen() {
   const sinhalaStyle: 'balanced' | 'deep_guidance' = isIntro
     ? 'balanced'
     : (storeConfig?.sinhalaStyle || (params.sinhalaStyle === 'deep_guidance' ? 'deep_guidance' : 'balanced'));
+  const userStats = useUserStats();
   const effectiveTopic = storeConfig?.topic || params.topic || params.goal || onboardingState.goal || 'General Speaking Practice';
-  const effectiveUserName = (storeConfig?.userName || onboardingState.user?.displayName || onboardingState.name || params.name || params.userName || '').trim() || 'Learner';
+  const effectiveUserName = (
+    storeConfig?.userName ||
+    userStats.displayName ||
+    onboardingState.user?.displayName ||
+    onboardingState.name ||
+    params.name ||
+    params.userName ||
+    ''
+  ).trim() || 'Learner';
 
   let parsedPracticePoints: string[] = storeConfig?.practicePoints || [];
   if (parsedPracticePoints.length === 0 && params.practicePoints) {

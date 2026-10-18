@@ -122,8 +122,8 @@ export interface SessionDiagnosticsRecord {
   createdAt?: string;
 }
 
-const THARINDU_USER_ID = 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
-const THARINDU_NAME = 'Tharindu Fernando';
+const DEFAULT_DEV_USER_ID = 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
+const DEFAULT_LEARNER_NAME = 'Learner';
 
 const SRI_LANKA_TZ = 'Asia/Colombo';
 
@@ -467,7 +467,7 @@ export class SessionsService {
         .upsert(
           {
             id: validSessionId,
-            user_id: THARINDU_USER_ID,
+            user_id: DEFAULT_DEV_USER_ID,
             topic: topic || 'English Speaking Practice',
             status: 'active',
           },
@@ -694,10 +694,17 @@ GUARDRAILS:
 
   buildScenarioSystemPrompt(dto: CreateSessionTokenDto, userName: string, isSinhala: boolean): string {
     const rawTopic = (dto.scenarioTitle || dto.topic || 'English Roleplay Scenario').trim();
-    const customPrompt = (dto.scenarioPrompt || '').trim();
+    const effectiveName = userName && userName !== 'Learner' ? userName : 'Student';
+    const customPrompt = (dto.scenarioPrompt || '')
+      .replace(/\{\{userName\}\}/gi, effectiveName)
+      .replace(/\bTharindu\b/gi, effectiveName)
+      .trim();
     const briefing = (dto.scenarioBriefing || '').trim();
     const primaryEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : 'Roleplay Character').trim();
-    const openingLine = (dto.openingLine || '').trim();
+    const openingLine = (dto.openingLine || '')
+      .replace(/\{\{userName\}\}/gi, effectiveName)
+      .replace(/\bTharindu\b/gi, effectiveName)
+      .trim();
 
     return `You are an immersive method voice actor performing an authentic audio roleplay with ${userName}.
 CRITICAL: Do NOT act like a polite AI assistant, language coach, or customer service agent. You are 100% in character as described below.
@@ -743,7 +750,7 @@ ${openingLine ? `- MANDATORY OPENING LINE: Start the conversation immediately by
       !rawTopic ||
       rawTopic.toLowerCase() === 'general spoken english practice' ||
       rawTopic.toLowerCase() === 'job interview';
-    const userName = (dto.userName || '').trim() || 'Tharindu (තරිදු)';
+    const userName = (dto.userName || '').trim() || 'Learner';
     const isIntroCall = dto.isIntroCall === true;
 
     if (isIntroCall) {
@@ -1033,7 +1040,7 @@ ${memoryPart}`;
       !rawTopic ||
       rawTopic.toLowerCase() === 'general spoken english practice' ||
       rawTopic.toLowerCase() === 'job interview';
-    const userName = (dto.userName || '').trim() || 'Tharindu (තරිදු)';
+    const userName = (dto.userName || '').trim() || 'Learner';
     const isIntroCall = dto.isIntroCall === true;
 
     if (isIntroCall) {
@@ -1043,7 +1050,11 @@ ${memoryPart}`;
     // 0. SCENARIO STUDIO: If this session has a custom scenarioPrompt, use its configured opening mode!
     if (dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0) {
       const scenarioTitle = dto.scenarioTitle || dto.topic || 'Roleplay Scenario';
-      const openingLine = (dto.openingLine || '').trim();
+      const effectiveName = userName && userName !== 'Learner' ? userName : 'Student';
+      const openingLine = (dto.openingLine || '')
+        .replace(/\{\{userName\}\}/gi, effectiveName)
+        .replace(/\bTharindu\b/gi, effectiveName)
+        .trim();
       const primaryEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : 'intense').trim();
 
       if (openingLine) {
@@ -1102,7 +1113,7 @@ ${memoryPart}`;
       scenarioGuidance = `This is a general spoken English practice session with ${userName}. Warmly invite them into conversation and ask an open-ended question about their day, studies, or interests.`;
     }
 
-    // Recurring sessions: model already knows the user as Tharindu
+    // Recurring sessions: model greets the user by name
     if (isSinhala) {
       if (dto.sinhalaStyle === 'deep_guidance') {
         return `Hello Maya! This is ${userName}. Please greet me warmly by name in friendly everyday Sinhala (strictly Sinhala and English only — no Tamil or other languages), introduce today's focus on "${rawTopic}", and ask your opening practice question aloud!`;
@@ -1332,19 +1343,35 @@ ${memoryPart}`;
       clean.startsWith('sb_publishable_') ||
       clean.startsWith('ey')
     ) {
-      return THARINDU_USER_ID;
+      return DEFAULT_DEV_USER_ID;
     }
 
     // 6. Fallback for test / dev environment
     if (process.env.NODE_ENV === 'test' || clean === 'auth-user' || clean === 'test-token') {
-      return THARINDU_USER_ID;
+      return DEFAULT_DEV_USER_ID;
     }
 
     throw new UnauthorizedException('Invalid or expired authentication token');
   }
 
   async enrichRoadmapDto(dto: CreateSessionTokenDto, userId?: string): Promise<void> {
-    const targetUserId = userId || THARINDU_USER_ID;
+    const targetUserId = userId || DEFAULT_DEV_USER_ID;
+
+    // Resolve user display name from profiles if not already supplied
+    if (this.supabase && (!dto.userName || dto.userName.trim() === '' || dto.userName === 'Learner' || dto.userName === 'Student')) {
+      try {
+        const { data: prof } = await this.supabase
+          .from('profiles')
+          .select('display_name')
+          .eq('id', targetUserId)
+          .maybeSingle();
+        if (prof?.display_name && prof.display_name.trim().length > 0) {
+          dto.userName = prof.display_name.trim();
+        }
+      } catch (e: any) {
+        this.logger.debug(`Could not resolve profile display_name in enrichRoadmapDto: ${e?.message}`);
+      }
+    }
     if (dto.roadmapLevelId && this.roadmapService) {
       try {
         let level: any = null;
@@ -1446,13 +1473,13 @@ ${memoryPart}`;
   }
 
   async createSessionToken(userId: string = 'guest-user', dto: CreateSessionTokenDto) {
-    const resolvedUserId = userId !== 'guest-user' && userId !== 'auth-user' ? userId : THARINDU_USER_ID;
+    const resolvedUserId = userId !== 'guest-user' && userId !== 'auth-user' ? userId : DEFAULT_DEV_USER_ID;
 
     // Enterprise Security Guard: Verify user account exists & practice minutes balance
-    if (this.supabase && resolvedUserId && resolvedUserId !== THARINDU_USER_ID) {
+    if (this.supabase && resolvedUserId && resolvedUserId !== DEFAULT_DEV_USER_ID) {
       const { data: userProfile, error: profileErr } = await this.supabase
         .from('profiles')
-        .select('minutes_balance, plan_tier')
+        .select('minutes_balance, plan_tier, display_name')
         .eq('id', resolvedUserId)
         .maybeSingle();
 
@@ -1467,6 +1494,10 @@ ${memoryPart}`;
           'Your practice minutes have expired. Please recharge or upgrade your plan to continue practicing.',
           HttpStatus.PAYMENT_REQUIRED,
         );
+      }
+
+      if (userProfile?.display_name && (!dto.userName || dto.userName.trim() === '' || dto.userName === 'Learner' || dto.userName === 'Student')) {
+        dto.userName = userProfile.display_name.trim();
       }
     }
 
@@ -1556,7 +1587,7 @@ ${memoryPart}`;
       wsUrl = `ws://localhost:8080/ws`;
     }
 
-    // Persist new session record in Supabase assigned to Tharindu (only on new session, not reconnect)
+    // Persist new session record in Supabase assigned to resolved user (only on new session, not reconnect)
 
     if (this.supabase && !isReconnect) {
       try {
@@ -1575,7 +1606,7 @@ ${memoryPart}`;
     }
 
     this.activeSessions.set(sessionId, {
-      userName: THARINDU_NAME,
+      userName: (dto.userName || '').trim() || DEFAULT_LEARNER_NAME,
       model: this.liveModel,
       topic: dto.topic || 'General Practice',
       scenarioId: dto.scenarioId,
@@ -1639,7 +1670,7 @@ ${memoryPart}`;
       `[SessionsService] 💾 [finishSession] Saving session ${validSessionId} (input: ${sessionId}): duration=${durationSeconds}s, scores=${JSON.stringify(scores || {})}, corrections=${grammarCorrections?.length || 0}, turns=${turns?.length || 0}, tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`,
     );
 
-    const resolvedUserId = (userId && userId !== 'guest-user' && userId !== 'auth-user') ? userId : THARINDU_USER_ID;
+    const resolvedUserId = (userId && userId !== 'guest-user' && userId !== 'auth-user') ? userId : DEFAULT_DEV_USER_ID;
     let remainingMinutes: number = 10;
 
     const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
@@ -1950,7 +1981,7 @@ ${memoryPart}`;
           records = uniqueLedgerEntries.map((row: any, idx: number) => {
             const sess = row.sessions;
             const prof = sess?.profiles;
-            const userName = prof?.display_name || THARINDU_NAME;
+            const userName = prof?.display_name || sess?.user_name || DEFAULT_LEARNER_NAME;
             const sessionNum = 10480 + (uniqueLedgerEntries.length - idx);
             const sessionCode = `SM-${sessionNum}`;
             const durationSec = row.duration_seconds || sess?.duration_seconds || 0;
@@ -2220,7 +2251,7 @@ ${memoryPart}`;
       .order('created_at', { ascending: true });
 
     const prof = sess.profiles;
-    const userName = prof?.display_name || THARINDU_NAME;
+    const userName = prof?.display_name || sess?.user_name || DEFAULT_LEARNER_NAME;
     const durationSec = sess.duration_seconds || ledger?.duration_seconds || 0;
     const durationFormatted = `${(durationSec / 60).toFixed(1)}m`;
 

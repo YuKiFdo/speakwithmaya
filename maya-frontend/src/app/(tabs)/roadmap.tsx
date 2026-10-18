@@ -522,7 +522,7 @@ export default function RoadmapScreen() {
       practicePoints: item.practicePoints || [],
       canonicalContent: item.canonicalContent || '',
       passingScorePercent: item.passingScorePercent || 70,
-      userName: onboardingState.user?.displayName || onboardingState.name || 'Learner',
+      userName: (displayName || onboardingState.user?.displayName || onboardingState.name || 'Learner').trim(),
     });
   };
 

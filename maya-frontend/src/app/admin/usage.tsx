@@ -900,11 +900,11 @@ export default function AdminUsageScreen() {
                             ]}
                           >
                             <Text style={styles.userAvatarInitials}>
-                              {row.user?.initials || 'TF'}
+                              {row.user?.initials || (row.user?.name ? row.user.name.slice(0, 2).toUpperCase() : 'L')}
                             </Text>
                           </View>
                           <Text style={styles.userNameText} numberOfLines={1}>
-                            {row.user?.name || 'Tharindu Fernando'}
+                            {row.user?.name || 'Learner'}
                           </Text>
                         </View>
 

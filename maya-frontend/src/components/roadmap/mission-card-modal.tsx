@@ -42,7 +42,7 @@ interface MissionCardModalProps {
 export function MissionCardModal({
   visible,
   item,
-  userName = 'Tharindu',
+  userName = 'Learner',
   nextItem,
   onClose,
   onStartPractice,

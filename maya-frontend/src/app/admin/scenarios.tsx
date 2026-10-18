@@ -17,6 +17,8 @@ import { Feather, Ionicons } from '@expo/vector-icons';
 import { SvgXml } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
+import { useUserStats } from '@/hooks/useUserStats';
+import { CallSessionStore } from '@/services/store/call-session-store';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
@@ -113,9 +115,9 @@ Conversation Rules:
     category: 'Empathy & Relationships',
     briefing: 'Your close friend Sarah had her dream scholarship cancelled. Listen actively, offer comfort, and reassure her.',
     openingMode: 'maya_explains_first' as const,
-    openingLine: 'Tharindu... I just got the email. They cancelled my master scholarship... I don’t know what to do.',
-    prompt: `You are Maya playing the role of Tharindu's close friend, Sarah.
-Scenario Setting: You just received a rejection email stating your international scholarship funding was revoked. You called Tharindu in deep distress.
+    openingLine: 'Hey... I just got the email. They cancelled my master scholarship... I don’t know what to do.',
+    prompt: `You are Maya playing the role of {{userName}}'s close friend, Sarah.
+Scenario Setting: You just received a rejection email stating your international scholarship funding was revoked. You called {{userName}} in deep distress.
 Emotional State: Heartbroken, voice shaking, sniffling between sentences, feeling like giving up.
 Conversation Rules:
 1. Speak softly, sounding tearful, vulnerable, and overwhelmed.
@@ -177,6 +179,7 @@ Conversation Rules:
 
 export default function AdminScenariosScreen() {
   const { isPhone } = useBreakpoint();
+  const userStats = useUserStats();
   const { width: windowWidth } = useWindowDimensions();
 
   const [sidebarOpen, setSidebarOpen] = useState(!isPhone);
@@ -416,6 +419,24 @@ export default function AdminScenariosScreen() {
   };
 
   const handleLaunchVoiceCall = (lvl: ScenarioItem) => {
+    const studentName = (userStats.displayName || 'Learner').trim();
+    CallSessionStore.startCall({
+      roadmapLevelId: lvl.id,
+      levelNumber: lvl.levelNumber,
+      topic: lvl.topic || lvl.title,
+      scenarioTitle: lvl.title,
+      scenarioId: lvl.scenarioId || 'roleplay-scenario',
+      scenarioPrompt: lvl.scenarioPrompt,
+      openingMode: lvl.openingMode,
+      openingLine: lvl.openingLine,
+      scenarioBriefing: lvl.scenarioBriefing,
+      emotionTags: lvl.emotionTags,
+      practicePoints: lvl.practicePoints || [],
+      canonicalContent: lvl.canonicalContent || '',
+      passingScorePercent: lvl.passingScorePercent || 70,
+      userName: studentName,
+    });
+
     router.push({
       pathname: '/call' as any,
       params: {
@@ -430,6 +451,7 @@ export default function AdminScenariosScreen() {
         languageMode: 'english',
         sinhalaStyle: 'balanced',
         aiSuggestions: 'true',
+        userName: studentName,
       },
     });
   };
