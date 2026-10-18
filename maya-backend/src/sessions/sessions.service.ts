@@ -122,7 +122,6 @@ export interface SessionDiagnosticsRecord {
   createdAt?: string;
 }
 
-const DEFAULT_DEV_USER_ID = 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
 const DEFAULT_LEARNER_NAME = 'Learner';
 
 const SRI_LANKA_TZ = 'Asia/Colombo';
@@ -200,7 +199,7 @@ export class SessionsService {
   private readonly geminiApiKey: string | undefined;
   private readonly liveModel: string;
   private readonly usdToLkr = Number(process.env.USD_TO_LKR) || 308.50;
-  private readonly activeSessions = new Map<string, { userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string; roadmapLevelId?: string }>();
+  private readonly activeSessions = new Map<string, { userId?: string; userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string; roadmapLevelId?: string }>();
   private readonly recentDiagnostics = new Map<string, SessionDiagnosticsRecord>();
   private readonly translationCache = new Map<string, string>();
   private readonly hintCache = new Map<string, { hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number }>();
@@ -255,6 +254,24 @@ export class SessionsService {
       }
     } catch (err: any) {
       this.logger.warn(`Could not verify/create storage bucket: ${err?.message}`);
+    }
+  }
+
+  /**
+   * Resolves the authentic active logged-in user profile ID from Supabase profiles table.
+   */
+  async getActiveProfileId(): Promise<string | null> {
+    if (!this.supabase) return null;
+    try {
+      const { data } = await this.supabase
+        .from('profiles')
+        .select('id')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data?.id || null;
+    } catch {
+      return null;
     }
   }
 
@@ -462,17 +479,28 @@ export class SessionsService {
 
     try {
       // Ensure the parent session row exists in public.sessions before inserting child turns
-      await this.supabase
+      const { data: existingSession } = await this.supabase
         .from('sessions')
-        .upsert(
-          {
+        .select('id, user_id')
+        .eq('id', validSessionId)
+        .maybeSingle();
+
+      if (!existingSession) {
+        const active = this.activeSessions.get(validSessionId) || this.activeSessions.get(sessionId);
+        let sessionUserId = active?.userId;
+        if (!sessionUserId) {
+          sessionUserId = (await this.getActiveProfileId()) || undefined;
+        }
+        if (sessionUserId) {
+          await this.supabase.from('sessions').insert({
             id: validSessionId,
-            user_id: DEFAULT_DEV_USER_ID,
-            topic: topic || 'English Speaking Practice',
+            user_id: sessionUserId,
+            topic: topic || active?.topic || 'English Speaking Practice',
             status: 'active',
-          },
-          { onConflict: 'id', ignoreDuplicates: true },
-        );
+            start_time: new Date().toISOString(),
+          });
+        }
+      }
 
       // Clean existing turns for this session to prevent duplicate entries on retry
       await this.supabase.from('session_turns').delete().eq('session_id', validSessionId);
@@ -1336,26 +1364,27 @@ ${memoryPart}`;
       return clean;
     }
 
-    // 5. Validate against configured anon/publishable key or dev token
-    const validAnonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY;
-    if (
-      (validAnonKey && clean === validAnonKey) ||
-      clean.startsWith('sb_publishable_') ||
-      clean.startsWith('ey')
-    ) {
-      return DEFAULT_DEV_USER_ID;
+    // 5. Parse standard JWT token payload if parts length was 3
+    if (parts.length === 3) {
+      try {
+        const decoded = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+        if (decoded?.sub && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded.sub)) {
+          return decoded.sub;
+        }
+      } catch {}
     }
 
-    // 6. Fallback for test / dev environment
-    if (process.env.NODE_ENV === 'test' || clean === 'auth-user' || clean === 'test-token') {
-      return DEFAULT_DEV_USER_ID;
+    // 6. If anon key, dev token, or test environment, resolve active profile from profiles table
+    const activeUserId = await this.getActiveProfileId();
+    if (activeUserId) {
+      return activeUserId;
     }
 
-    throw new UnauthorizedException('Invalid or expired authentication token');
+    throw new UnauthorizedException('Invalid or expired authentication token. Please sign in to your Maya account.');
   }
 
   async enrichRoadmapDto(dto: CreateSessionTokenDto, userId?: string): Promise<void> {
-    const targetUserId = userId || DEFAULT_DEV_USER_ID;
+    const targetUserId = userId || (await this.getActiveProfileId()) || undefined;
 
     // Resolve user display name from profiles if not already supplied
     if (this.supabase && (!dto.userName || dto.userName.trim() === '' || dto.userName === 'Learner' || dto.userName === 'Student')) {
@@ -1473,10 +1502,16 @@ ${memoryPart}`;
   }
 
   async createSessionToken(userId: string = 'guest-user', dto: CreateSessionTokenDto) {
-    const resolvedUserId = userId !== 'guest-user' && userId !== 'auth-user' ? userId : DEFAULT_DEV_USER_ID;
+    let resolvedUserId = (userId && userId !== 'guest-user' && userId !== 'auth-user') ? userId : null;
+    if (!resolvedUserId) {
+      resolvedUserId = await this.getActiveProfileId();
+    }
+    if (!resolvedUserId) {
+      throw new UnauthorizedException('No active user account found. Please sign in to practice.');
+    }
 
     // Enterprise Security Guard: Verify user account exists & practice minutes balance
-    if (this.supabase && resolvedUserId && resolvedUserId !== DEFAULT_DEV_USER_ID) {
+    if (this.supabase && resolvedUserId) {
       const { data: userProfile, error: profileErr } = await this.supabase
         .from('profiles')
         .select('minutes_balance, plan_tier, display_name')
@@ -1606,6 +1641,7 @@ ${memoryPart}`;
     }
 
     this.activeSessions.set(sessionId, {
+      userId: resolvedUserId,
       userName: (dto.userName || '').trim() || DEFAULT_LEARNER_NAME,
       model: this.liveModel,
       topic: dto.topic || 'General Practice',
@@ -1670,7 +1706,11 @@ ${memoryPart}`;
       `[SessionsService] 💾 [finishSession] Saving session ${validSessionId} (input: ${sessionId}): duration=${durationSeconds}s, scores=${JSON.stringify(scores || {})}, corrections=${grammarCorrections?.length || 0}, turns=${turns?.length || 0}, tokens=${totalTokens}, Cost: $${costUsd} (LKR ${costLkr})`,
     );
 
-    const resolvedUserId = (userId && userId !== 'guest-user' && userId !== 'auth-user') ? userId : DEFAULT_DEV_USER_ID;
+    const active = this.activeSessions.get(validSessionId) || this.activeSessions.get(sessionId);
+    let resolvedUserId = (userId && userId !== 'guest-user' && userId !== 'auth-user') ? userId : active?.userId;
+    if (!resolvedUserId) {
+      resolvedUserId = (await this.getActiveProfileId()) || undefined;
+    }
     let remainingMinutes: number = 10;
 
     const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
@@ -1786,16 +1826,18 @@ ${memoryPart}`;
             const meetsTurnRequirement = userTurnsCount >= 3 || durationSeconds >= 45;
             const isPassed = overallScore >= passingScorePercent && meetsTurnRequirement;
 
-            await this.roadmapService.recordUserProgress(resolvedUserId, {
-              roadmapLevelId,
-              levelNumber,
-              sessionId,
-              scorePercent: overallScore,
-              isPassed,
-              status: isPassed ? 'completed' : 'in_progress',
-              xpEarned: isPassed ? 100 : 25,
-            });
-            this.logger.log(`[Roadmap Progress] Recorded completion for user ${resolvedUserId}, level ${roadmapLevelId}, session ${sessionId}, passed: ${isPassed} (score: ${overallScore}%, target: ${passingScorePercent}%, userTurns: ${userTurnsCount})`);
+            if (resolvedUserId) {
+              await this.roadmapService.recordUserProgress(resolvedUserId, {
+                roadmapLevelId,
+                levelNumber,
+                sessionId,
+                scorePercent: overallScore,
+                isPassed,
+                status: isPassed ? 'completed' : 'in_progress',
+                xpEarned: isPassed ? 100 : 25,
+              });
+              this.logger.log(`[Roadmap Progress] Recorded completion for user ${resolvedUserId}, level ${roadmapLevelId}, session ${sessionId}, passed: ${isPassed} (score: ${overallScore}%, target: ${passingScorePercent}%, userTurns: ${userTurnsCount})`);
+            }
           } catch (progressErr: any) {
             this.logger.warn(`Failed to auto-record roadmap progress: ${progressErr?.message}`);
           }

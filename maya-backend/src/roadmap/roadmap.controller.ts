@@ -10,6 +10,7 @@ import {
   Query,
   UsePipes,
   ValidationPipe,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { RoadmapService } from './roadmap.service.js';
 import {
@@ -104,7 +105,11 @@ export class RoadmapController {
       } catch {}
     }
     if (!userId) {
-      userId = 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
+      const activeProf = await this.authService.getActiveProfile();
+      userId = activeProf?.id;
+    }
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required to view roadmap progress');
     }
 
     const progress = await this.roadmapService.getUserProgress(userId);
@@ -133,7 +138,11 @@ export class RoadmapController {
       } catch {}
     }
     if (!userId) {
-      userId = 'fa5882b0-5fd3-4b95-95a7-977d2447b0b7';
+      const activeProf = await this.authService.getActiveProfile();
+      userId = activeProf?.id;
+    }
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required to record roadmap progress');
     }
 
     return this.roadmapService.recordUserProgress(userId, dto);

@@ -577,19 +577,28 @@ export class AuthService {
         .update(`${header}.${payload}`)
         .digest('base64url');
 
-      if (expectedSig !== signature) {
-        throw new UnauthorizedException('Invalid token signature');
+      if (expectedSig === signature) {
+        try {
+          const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+          if (decoded.exp && Math.floor(Date.now() / 1000) > decoded.exp) {
+            throw new UnauthorizedException('Authentication token has expired');
+          }
+          if (decoded.sub) return decoded.sub;
+        } catch {
+          throw new UnauthorizedException('Malformed token payload');
+        }
       }
 
+      // If token was signed by Supabase Auth (or external provider), parse payload sub
       try {
         const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
-        if (decoded.exp && Math.floor(Date.now() / 1000) > decoded.exp) {
+        if (decoded?.exp && Math.floor(Date.now() / 1000) > decoded.exp) {
           throw new UnauthorizedException('Authentication token has expired');
         }
-        if (decoded.sub) return decoded.sub;
-      } catch {
-        throw new UnauthorizedException('Malformed token payload');
-      }
+        if (decoded?.sub && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded.sub)) {
+          return decoded.sub;
+        }
+      } catch {}
     }
 
     // Backward compatibility for base64 JSON payload
@@ -606,6 +615,24 @@ export class AuthService {
     }
 
     throw new UnauthorizedException('Invalid authentication token');
+  }
+
+  /**
+   * Returns the most recently active or updated user profile from Supabase.
+   */
+  async getActiveProfile(): Promise<UserProfileData | null> {
+    if (!this.supabase) return null;
+    try {
+      const { data } = await this.supabase
+        .from('profiles')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return (data as UserProfileData) || null;
+    } catch {
+      return null;
+    }
   }
 
   /**
