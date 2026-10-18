@@ -706,21 +706,39 @@ Given the scenario details below, generate:
      * Maya must actively track whether the student achieves their goal: "${goalTitle}: ${goalDesc}".
      * As soon as the student demonstrates the required behavior / reaches agreement / calms Maya down / solves the problem, Maya must accept the outcome in character (e.g. "Alright, that works for me. Thank you for sorting this out."), deliver a natural concluding remark in character, and gracefully wrap up the roleplay session.
 
-5. "ttsScriptEnglish": A warm, lively, punchy English spoken briefing narration (approx 35-45 words) where Maya speaks directly to the student before the call to explain the scenario, roles, and goal.
-Use natural conversational expression tags: <short pause>, <sighs>, <chuckle>.
-Keep it punchy so TTS synthesizes quickly.
-Format:
-Welcome to your next scenario: ${dto.title}! <short pause> Picture this... <sighs> [1 sentence setting the scene based on: ${briefing}]. You are the ${userRole}, and Maya is the ${mayaRole}. Your goal: ${goalTitle}. <short pause> Ready? Let's start!
+5. "ttsScriptEnglish": A warm, encouraging English spoken briefing narration (approx 60-90 words) where Maya speaks directly to the student before the call to explain the scenario, roles, and goal.
+Use natural conversational expression tags: <short pause>, <sighs>, <chuckle>, <cheer>, <giggle>.
+Format EXACTLY like this structure:
+Welcome to your next scenario: ${dto.title}! <short pause>
 
-6. "ttsScriptSinhala": Spoken colloquial Sri Lankan Sinhala (කතා කරන සිංහල) warmly spoken by Maya, naturally blended with everyday English roleplay terms (Singlish conversational style).
+Picture this... <sighs> [1-2 sentences setting the scene based on: ${briefing}]
+
+In this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.
+
+Your goal here is simple: ${goalTitle}.
+
+[1-2 sentences explaining: ${goalDesc} with realistic advice]. <short pause>
+
+Ready? Let's start the roleplay!
+
+6. "ttsScriptSinhala": Spoken colloquial Sri Lankan Sinhala (කතා කරන සිංහල) warmly spoken by Maya, naturally blended with everyday English roleplay terms (Singlish conversational style, approx 60-90 words).
 CRITICAL RULES FOR SINHALA:
-- DO NOT explain in English!
+- DO NOT explain in English! The narration must be primarily in spoken colloquial Sinhala with English loanwords naturally blended in.
 - DO NOT use formal bookish Sinhala (no "කරනු ලැබේ", "ඔබට", "සඳහාය", "ලදිමි").
 - Use everyday spoken words ("ඔයා", "හිතන්නකෝ", "කලබල නොවී", "calm පිට", "issue එක explain කරලා", "හොඳ solution එකක් negotiate කරන්න", "Ready ද?").
 - Include conversational expression tags: <short pause>, <sighs>, <chuckle>.
-- Keep it punchy (approx 35-45 words) so it synthesizes quickly.
-Format:
-හිතන්නකෝ ඔයා [1 sentence setting the scene in spoken Sinhala with English loanwords, e.g. hotel එකට check-in වෙන්න ආවා කියලා]. <short pause> මම තමයි ${mayaRole}. [1 sentence scenario situation, e.g. ඔයා book කරපු ocean-view room එක වෙන කෙනෙක්ට දීලා!] <sighs> කලබල නොවී calm පිට issue එක explain කරලා, <short pause> හොඳ solution එකක් negotiate කරන්න. <chuckle> Ready ද?
+Format EXACTLY like this structure:
+හරි... ඔයාගේ ඊළඟ scenario එක: ${dto.title}! <short pause>
+
+මේක පොඩ්ඩක් හිතන්නකෝ... <sighs> [1-2 sentences setting the scene in spoken Sinhala with natural English loanwords based on: ${briefing}]. <short pause>
+
+මේ scenario එකේ ඔයා තමයි ${userRole}, <short pause> Maya තමයි ${mayaRole} විදිහට ඉන්නේ.
+
+ඔයාගේ goal එක හරිම simple: [Goal Title in spoken Sinhala].
+
+[1-2 sentences explaining the goal in spoken Sinhala with practical advice, e.g. කලබල නොවී calm පිට issue එක explain කරලා, Maya එක්ක කතා කරලා හොඳ solution එකක් negotiate කරන්න]. <short pause>
+
+Ready ද? <short pause> එහෙනම් අපි roleplay එක පටන් ගමු!
 
 SCENARIO DETAILS:
 - Title: ${dto.title}
@@ -757,8 +775,8 @@ Return strictly a JSON object with:
             openingMode: parsed.openingMode || 'maya_explains_first',
             openingLine: parsed.openingLine || '',
             scenarioPrompt: parsed.scenarioPrompt || '',
-            ttsScriptEnglish: parsed.ttsScriptEnglish || `Welcome to your next scenario: ${dto.title}! <short pause> Picture this... <sighs> ${briefing}. You are the ${userRole}, and Maya is the ${mayaRole}. Your goal: ${goalTitle}. <short pause> Ready? Let's start!`,
-            ttsScriptSinhala: parsed.ttsScriptSinhala || `හිතන්නකෝ ඔයා මේ scenario එකට ආවා කියලා: ${dto.title}. <short pause> මම තමයි ${mayaRole}. ${briefing} <sighs> කලබල නොවී calm පිට issue එක explain කරලා, <short pause> හොඳ solution එකක් negotiate කරන්න. <chuckle> Ready ද?`,
+            ttsScriptEnglish: parsed.ttsScriptEnglish || `Welcome to your next scenario: ${dto.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`,
+            ttsScriptSinhala: parsed.ttsScriptSinhala || `හරි... ඔයාගේ ඊළඟ scenario එක: ${dto.title}! <short pause>\n\nමේක පොඩ්ඩක් හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nමේ scenario එකේ ඔයා තමයි ${userRole}, <short pause> Maya තමයි ${mayaRole} විදිහට ඉන්නේ.\n\nඔයාගේ goal එක හරිම simple: ${goalTitle}.\n\n${goalDesc} කලබල නොවී calm පිට issue එක explain කරලා හොඳ solution එකක් negotiate කරන්න. <short pause>\n\nReady ද? <short pause> එහෙනම් අපි roleplay එක පටන් ගමු!`,
           };
         }
       } catch (err: any) {
@@ -795,8 +813,8 @@ Core Conversation Rules:
 3. GOAL COMPLETION & WRAP-UP DIRECTIVE:
    - Student's Target Goal: "${goalTitle} - ${goalDesc}".
    - As soon as the student achieves this goal or negotiates a fair resolution, accept it in character, give a closing sentence, and naturally conclude the roleplay.`,
-      ttsScriptEnglish: `Welcome to your next scenario: ${dto.title}! <short pause> Picture this... <sighs> ${briefing}. You are the ${userRole}, and Maya is the ${mayaRole}. Your goal: ${goalTitle}. <short pause> Ready? Let's start!`,
-      ttsScriptSinhala: `හිතන්නකෝ ඔයා මේ scenario එකට ආවා කියලා: ${dto.title}. <short pause> මම තමයි ${mayaRole}. ${briefing} <sighs> කලබල නොවී calm පිට issue එක explain කරලා, <short pause> හොඳ solution එකක් negotiate කරන්න. <chuckle> Ready ද?`,
+      ttsScriptEnglish: `Welcome to your next scenario: ${dto.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`,
+      ttsScriptSinhala: `හරි... ඔයාගේ ඊළඟ scenario එක: ${dto.title}! <short pause>\n\nමේක පොඩ්ඩක් හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nමේ scenario එකේ ඔයා තමයි ${userRole}, <short pause> Maya තමයි ${mayaRole} විදිහට ඉන්නේ.\n\nඔයාගේ goal එක හරිම simple: ${goalTitle}.\n\n${goalDesc} කලබල නොවී calm පිට issue එක explain කරලා හොඳ solution එකක් negotiate කරන්න. <short pause>\n\nReady ද? <short pause> එහෙනම් අපි roleplay එක පටන් ගමු!`,
     };
   }
 
@@ -899,10 +917,11 @@ Core Conversation Rules:
         const userRole = level.userRole || 'Learner';
         const mayaRole = level.mayaRole || 'Roleplay Partner';
         const goalTitle = level.goalTitle || 'Find a resolution';
+        const goalDesc = level.goalDescription || 'Negotiate politely and resolve the issue.';
         if (lang === 'si') {
-          script = `හිතන්නකෝ ඔයා මේ scenario එකට ආවා කියලා: ${level.title}. <short pause> මම තමයි ${mayaRole}. ${briefing} <sighs> කලබල නොවී calm පිට issue එක explain කරලා, <short pause> හොඳ solution එකක් negotiate කරන්න. <chuckle> Ready ද?`;
+          script = `හරි... ඔයාගේ ඊළඟ scenario එක: ${level.title}! <short pause>\n\nමේක පොඩ්ඩක් හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nමේ scenario එකේ ඔයා තමයි ${userRole}, <short pause> Maya තමයි ${mayaRole} විදිහට ඉන්නේ.\n\nඔයාගේ goal එක හරිම simple: ${goalTitle}.\n\n${goalDesc} කලබල නොවී calm පිට issue එක explain කරලා හොඳ solution එකක් negotiate කරන්න. <short pause>\n\nReady ද? <short pause> එහෙනම් අපි roleplay එක පටන් ගමු!`;
         } else {
-          script = `Welcome to your next scenario: ${level.title}! <short pause> Picture this... <sighs> ${briefing}. You are the ${userRole}, and Maya is the ${mayaRole}. Your goal: ${goalTitle}. <short pause> Ready? Let's start!`;
+          script = `Welcome to your next scenario: ${level.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`;
         }
       }
 
