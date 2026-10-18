@@ -83,7 +83,7 @@ export const RoadmapGlowParticles: React.FC<RoadmapGlowParticlesProps> = ({
       <Path
         d={svgPath}
         stroke="rgba(96, 165, 250, 0.28)"
-        strokeWidth="13"
+        strokeWidth="18"
         fill="none"
         strokeLinecap="round"
         opacity={glowPulse * 0.8}
@@ -92,8 +92,8 @@ export const RoadmapGlowParticles: React.FC<RoadmapGlowParticlesProps> = ({
       {/* 2. Mid vibrant radiant halo in place */}
       <Path
         d={svgPath}
-        stroke="rgba(59, 130, 246, 0.42)"
-        strokeWidth="7"
+        stroke="rgba(59, 130, 246, 0.40)"
+        strokeWidth="13"
         fill="none"
         strokeLinecap="round"
         opacity={glowPulse}

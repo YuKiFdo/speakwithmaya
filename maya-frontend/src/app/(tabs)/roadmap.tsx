@@ -445,21 +445,17 @@ export default function RoadmapScreen() {
     if (targetIdx <= 0 || milestones.length <= 1) return '';
     const clampedTarget = Math.min(targetIdx, milestones.length - 1);
 
-    let path = `M ${mobileIconLeftX} ${mobileYTrack1} L ${mobileIconRightX} ${mobileYTrack1}`;
-    for (let i = 0; i < clampedTarget - 1; i++) {
-      const yNext = mobileYTrack1 + (i + 1) * mobileTierHeight;
-      const isLastStep = i === clampedTarget - 2;
+    let path = `M ${mobileIconLeftX} ${mobileYTrack1}`;
+    for (let step = 0; step < clampedTarget; step++) {
+      const yCurrent = mobileYTrack1 + step * mobileTierHeight;
+      const yNext = mobileYTrack1 + (step + 1) * mobileTierHeight;
 
-      if (i % 2 === 0) {
-        path += ` A ${mobileR} ${mobileR} 0 0 1 ${mobileIconRightX} ${yNext}`;
-        if (!isLastStep) {
-          path += ` L ${mobileIconLeftX} ${yNext}`;
-        }
+      if (step % 2 === 0) {
+        // From left to right on tier 'step', then curve down right arc to tier 'step + 1'
+        path += ` L ${mobileIconRightX} ${yCurrent} A ${mobileR} ${mobileR} 0 0 1 ${mobileIconRightX} ${yNext}`;
       } else {
-        path += ` A ${mobileR} ${mobileR} 0 0 0 ${mobileIconLeftX} ${yNext}`;
-        if (!isLastStep) {
-          path += ` L ${mobileIconRightX} ${yNext}`;
-        }
+        // From right to left on tier 'step', then curve down left arc to tier 'step + 1'
+        path += ` L ${mobileIconLeftX} ${yCurrent} A ${mobileR} ${mobileR} 0 0 0 ${mobileIconLeftX} ${yNext}`;
       }
     }
     return path;
@@ -727,33 +723,31 @@ export default function RoadmapScreen() {
                       segments={desktopSegments}
                     />
 
-                    {/* Soft Translucent Blue Groove Bed Fill */}
+                    {/* Outer Blue Track Bevel Border */}
                     <Path
                       d={desktopCompletedSvgPath}
-                      stroke="rgba(59, 130, 246, 0.16)"
-                      strokeWidth="7"
+                      stroke="rgba(0, 87, 255, 0.25)"
+                      strokeWidth="13"
                       fill="none"
                       strokeLinecap="round"
                     />
 
-                    {/* Refined 3.5px Cyan-Blue Center Stream (fits snugly inside track groove) */}
+                    {/* Solid Primary Blue Progress Line - Fills Main Container Full Height */}
                     <Path
                       d={desktopCompletedSvgPath}
-                      stroke="#3B82F6"
-                      strokeWidth="3.5"
+                      stroke="#0057FF"
+                      strokeWidth="10"
                       fill="none"
                       strokeLinecap="round"
-                      opacity={0.9}
                     />
 
-                    {/* Delicate Inner Highlight Filament */}
+                    {/* Subtle Top Surface Highlight */}
                     <Path
                       d={desktopCompletedSvgPath}
-                      stroke="#E0F2FE"
-                      strokeWidth="1.2"
+                      stroke="rgba(255, 255, 255, 0.35)"
+                      strokeWidth="1.8"
                       fill="none"
                       strokeLinecap="round"
-                      opacity={0.95}
                     />
                   </>
                 ) : null}
@@ -919,33 +913,31 @@ export default function RoadmapScreen() {
                       segments={mobileSegments}
                     />
 
-                    {/* Soft Translucent Blue Groove Bed Fill */}
+                    {/* Outer Blue Track Bevel Border */}
                     <Path
                       d={mobileCompletedSvgPath}
-                      stroke="rgba(59, 130, 246, 0.16)"
-                      strokeWidth="7"
+                      stroke="rgba(0, 87, 255, 0.25)"
+                      strokeWidth="13"
                       fill="none"
                       strokeLinecap="round"
                     />
 
-                    {/* Refined 3.5px Cyan-Blue Center Stream (fits snugly inside track groove) */}
+                    {/* Solid Primary Blue Progress Line - Fills Main Container Full Height */}
                     <Path
                       d={mobileCompletedSvgPath}
-                      stroke="#3B82F6"
-                      strokeWidth="3.5"
+                      stroke="#0057FF"
+                      strokeWidth="10"
                       fill="none"
                       strokeLinecap="round"
-                      opacity={0.9}
                     />
 
-                    {/* Delicate Inner Highlight Filament */}
+                    {/* Subtle Top Surface Highlight */}
                     <Path
                       d={mobileCompletedSvgPath}
-                      stroke="#E0F2FE"
-                      strokeWidth="1.2"
+                      stroke="rgba(255, 255, 255, 0.35)"
+                      strokeWidth="1.8"
                       fill="none"
                       strokeLinecap="round"
-                      opacity={0.95}
                     />
                   </>
                 ) : null}
