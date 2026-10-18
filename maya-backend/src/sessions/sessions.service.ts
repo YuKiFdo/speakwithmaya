@@ -205,7 +205,7 @@ export class SessionsService {
   private readonly hintCache = new Map<string, { hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number }>();
   private readonly sessionHintUsage = new Map<string, { count: number; totalTokens: number; costUsd: number; costLkr: number; generatedKeys?: Set<string> }>();
 
-  private readonly sessionRecordingsMap = new Map<string, { userAudioUrl?: string; modelAudioUrl?: string }>();
+  private readonly sessionRecordingsMap = new Map<string, { userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string }>();
   private readonly sessionTurnAudioMap = new Map<string, Map<number, string>>();
   private lastSavedSessionId: string | null = null;
   private readonly inFlightHintPromises = new Map<string, Promise<{ hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number; tokens?: { promptTokens: number; outputTokens: number; totalTokens: number } }>>();
@@ -424,9 +424,9 @@ export class SessionsService {
         this.sessionTurnAudioMap.set(sessionId, turnUrls);
       }
       this.lastSavedSessionId = validSessionId;
-      this.sessionRecordingsMap.set(validSessionId, { userAudioUrl, modelAudioUrl });
+      this.sessionRecordingsMap.set(validSessionId, { userAudioUrl, modelAudioUrl, fullConversationAudioUrl });
       if (sessionId !== validSessionId) {
-        this.sessionRecordingsMap.set(sessionId, { userAudioUrl, modelAudioUrl });
+        this.sessionRecordingsMap.set(sessionId, { userAudioUrl, modelAudioUrl, fullConversationAudioUrl });
       }
 
       return { userAudioUrl, modelAudioUrl, fullConversationAudioUrl, turnAudioUrls: turnUrls };
@@ -1930,7 +1930,7 @@ ${memoryPart}`;
               await this.roadmapService.recordUserProgress(resolvedUserId, {
                 roadmapLevelId,
                 levelNumber,
-                sessionId,
+                sessionId: validSessionId,
                 scorePercent: overallScore,
                 isPassed,
                 status: isPassed ? 'completed' : 'in_progress',
@@ -2530,25 +2530,19 @@ ${memoryPart}`;
         return [];
       }
 
-      // Check which sessions actually have files in Supabase storage
-      const existingSessionFolders = new Set<string>();
-      try {
-        const { data: rootList } = await this.supabase.storage.from('session-recordings').list('');
-        if (rootList) {
-          rootList.forEach((f) => existingSessionFolders.add(f.name));
-        }
-      } catch {}
-
-      // Inspect storage files in parallel for sessions that have folders
+      // Inspect storage files directly for the queried sessions in parallel
       const sessionFilesMap = new Map<string, Set<string>>();
       const sbClient = this.supabase;
-      if (sbClient) {
+      if (sbClient && sessions && sessions.length > 0) {
         await Promise.all(
-          Array.from(existingSessionFolders).map(async (folderName) => {
+          sessions.map(async (sess: any) => {
+            const validSessionId = toValidUuid(sess.id);
             try {
-              const { data: files } = await sbClient.storage.from('session-recordings').list(folderName);
-              if (files) {
-                sessionFilesMap.set(folderName, new Set(files.map((f) => f.name)));
+              const { data: files } = await sbClient.storage.from('session-recordings').list(validSessionId);
+              if (files && files.length > 0) {
+                const fSet = new Set(files.map((f) => f.name));
+                sessionFilesMap.set(validSessionId, fSet);
+                sessionFilesMap.set(sess.id, fSet);
               }
             } catch {}
           }),
@@ -2568,10 +2562,10 @@ ${memoryPart}`;
         const validSessionId = toValidUuid(sess.id);
         const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sess.id);
 
-        const filesSet = sessionFilesMap.get(validSessionId);
-        const hasFullAudio = filesSet ? filesSet.has('full_conversation.wav') : false;
-        const hasUserAudio = filesSet ? filesSet.has('user_recording.wav') : false;
-        const hasModelAudio = filesSet ? filesSet.has('model_recording.wav') : false;
+        const filesSet = sessionFilesMap.get(validSessionId) || sessionFilesMap.get(sess.id);
+        const hasFullAudio = filesSet ? filesSet.has('full_conversation.wav') : Boolean(rec?.fullConversationAudioUrl);
+        const hasUserAudio = filesSet ? filesSet.has('user_recording.wav') : Boolean(rec?.userAudioUrl);
+        const hasModelAudio = filesSet ? filesSet.has('model_recording.wav') : Boolean(rec?.modelAudioUrl);
         const hasTurnsFolder = filesSet ? filesSet.has('turns') : false;
 
         let userTurnCounter = 0;

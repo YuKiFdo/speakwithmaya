@@ -179,9 +179,9 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
           grammar_score: s.grammar_score || 82,
           pronunciation_score: s.pronunciation_score || 86,
           status: s.status || 'completed',
-          fullConversationAudioUrl: s.full_conversation_audio_url || s.fullConversationAudioUrl || null,
-          userAudioUrl: s.user_audio_url || s.userAudioUrl || null,
-          modelAudioUrl: s.model_audio_url || s.modelAudioUrl || null,
+          fullConversationAudioUrl: s.full_conversation_audio_url || s.fullConversationAudioUrl || (s.id ? `https://clfjfhdsjwkzgxwoolgp.supabase.co/storage/v1/object/public/session-recordings/${s.id}/full_conversation.wav` : null),
+          userAudioUrl: s.user_audio_url || s.userAudioUrl || (s.id ? `https://clfjfhdsjwkzgxwoolgp.supabase.co/storage/v1/object/public/session-recordings/${s.id}/user_recording.wav` : null),
+          modelAudioUrl: s.model_audio_url || s.modelAudioUrl || (s.id ? `https://clfjfhdsjwkzgxwoolgp.supabase.co/storage/v1/object/public/session-recordings/${s.id}/model_recording.wav` : null),
           user_rating: s.user_rating ?? null,
           user_feedback: s.user_feedback ?? null,
           turns: (s.session_turns || [])
