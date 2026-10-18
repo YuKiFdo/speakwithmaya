@@ -1842,6 +1842,7 @@ ${memoryPart}`;
           fluency_score: resolvedScores.fluency,
           grammar_score: resolvedScores.grammar,
           pronunciation_score: resolvedScores.pronunciation,
+          hints_used_count: hintsUsed,
         };
         if (finalRoadmapLevelId) {
           sessionPayload.roadmap_level_id = finalRoadmapLevelId;
@@ -1852,9 +1853,18 @@ ${memoryPart}`;
           .upsert(sessionPayload, { onConflict: 'id' });
 
         if (upsertErr) {
+          let shouldRetry = false;
+          // If hints_used_count column does not exist in public.sessions table yet, retry without it
+          if (upsertErr.message?.includes('hints_used_count')) {
+            delete sessionPayload.hints_used_count;
+            shouldRetry = true;
+          }
           // If roadmap_level_id column does not exist in public.sessions table yet, retry without it
           if (upsertErr.message?.includes('roadmap_level_id')) {
             delete sessionPayload.roadmap_level_id;
+            shouldRetry = true;
+          }
+          if (shouldRetry) {
             await this.supabase.from('sessions').upsert(sessionPayload, { onConflict: 'id' });
           } else {
             this.logger.error(`Error saving session to Supabase: ${upsertErr.message}`);
@@ -2148,7 +2158,7 @@ ${memoryPart}`;
               costLkr: Number(Number(row.cost_lkr || 0).toFixed(2)),
               costPerMinLkr: durationSec > 0 ? Number(((row.cost_lkr || 0) / (durationSec / 60)).toFixed(2)) : 0,
               costPerMinUsd: durationSec > 0 ? Number(((row.cost_usd || 0) / (durationSec / 60)).toFixed(4)) : 0,
-              hintsUsedCount: (this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.count || 0,
+              hintsUsedCount: sess?.hints_used_count ?? ((this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.count || 0),
               hintTokens: (this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.totalTokens || 0,
               hintCostUsd: Number(Number((this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.costUsd || 0).toFixed(6)),
               hintCostLkr: Number(Number((this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.costLkr || 0).toFixed(2)),
@@ -2463,7 +2473,7 @@ ${memoryPart}`;
       costLkr: Number(Number(ledger?.cost_lkr || 0).toFixed(2)),
       costPerMinLkr: durationSec > 0 ? Number(((ledger?.cost_lkr || 0) / (durationSec / 60)).toFixed(2)) : 0,
       costPerMinUsd: durationSec > 0 ? Number(((ledger?.cost_usd || 0) / (durationSec / 60)).toFixed(4)) : 0,
-      hintsUsedCount: (this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.count || 0,
+      hintsUsedCount: sess.hints_used_count ?? ((this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.count || 0),
       hintTokens: (this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.totalTokens || 0,
       hintCostUsd: Number(Number((this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.costUsd || 0).toFixed(6)),
       hintCostLkr: Number(Number((this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.costLkr || 0).toFixed(2)),

@@ -41,6 +41,7 @@ export interface MissionReportData {
   feedbackEnglish?: string;
   userSentencesCount?: number;
   talkTimeSeconds?: number;
+  hintsUsedCount?: number;
   xpEarned?: number;
   isGeneralChat?: boolean;
   objectives: MissionObjectiveResult[];

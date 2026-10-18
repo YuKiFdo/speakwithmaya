@@ -1305,6 +1305,17 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       } else {
         // Scenario Roleplay mode (or active practice): calculate score from fluency, grammar, and turns completed
         const turnBonus = Math.min(8, userSentencesCount >= 6 ? 6 : userSentencesCount);
+        const hintsUsed = typeof options.hintsUsedCount === 'function' ? options.hintsUsedCount() : (options.hintsUsedCount || 0);
+        const hintRatio = userSentencesCount > 0 ? hintsUsed / userSentencesCount : 0;
+        let hintAdjustment = 0;
+        if (hintRatio === 0 && userSentencesCount >= 3) {
+          hintAdjustment = 4; // Independent speech bonus!
+        } else if (hintRatio > 0.5) {
+          hintAdjustment = -8; // Heavy hint reliance
+        } else if (hintRatio > 0.25) {
+          hintAdjustment = -4;
+        }
+
         const calculatedRoleplayScore = Math.min(
           98,
           Math.max(
@@ -1313,7 +1324,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               fluencyScore * 0.45 +
               grammarScore * 0.40 +
               pronunciationScore * 0.15 +
-              turnBonus
+              turnBonus +
+              hintAdjustment
             )
           )
         );
@@ -1395,6 +1407,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       feedbackEnglish,
       userSentencesCount,
       talkTimeSeconds: talkTimeSecs,
+      hintsUsedCount: typeof options.hintsUsedCount === 'function' ? options.hintsUsedCount() : (options.hintsUsedCount || 0),
       xpEarned,
       isGeneralChat: isGeneral,
       objectives: finalObjectives,
@@ -1426,6 +1439,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       turns: [...turnsRef.current],
       corrections: [...correctionsRef.current],
       roadmap_level_id: options.roadmapLevelId,
+      hints_used_count: typeof options.hintsUsedCount === 'function' ? options.hintsUsedCount() : (options.hintsUsedCount || 0),
+      hintsUsedCount: typeof options.hintsUsedCount === 'function' ? options.hintsUsedCount() : (options.hintsUsedCount || 0),
     };
 
     persistSessionRecord(finalRecord).catch((err) =>

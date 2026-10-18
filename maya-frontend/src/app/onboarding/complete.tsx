@@ -195,6 +195,7 @@ export default function SessionCompleteScreen() {
     feedbackSinhala?: string;
     feedbackEnglish?: string;
     userSentencesCount?: string;
+    hintsUsedCount?: string;
     xpEarned?: string;
     isGeneralChat?: string;
     callParams?: string;
@@ -226,6 +227,7 @@ export default function SessionCompleteScreen() {
     const isPassedVal = params.passed !== undefined ? params.passed === 'true' : true;
     const isGeneralVal = params.isGeneralChat === 'true' || !params.roadmapLevelId;
     const sentencesVal = params.userSentencesCount ? parseInt(params.userSentencesCount, 10) : 0;
+    const hintsVal = params.hintsUsedCount ? parseInt(params.hintsUsedCount, 10) : 0;
     const scoreVal = (rawScoreParam === 0 && (sentencesVal >= 2 || durationSecs >= 30))
       ? (isPassedVal ? 85 : 70)
       : rawScoreParam;
@@ -237,6 +239,7 @@ export default function SessionCompleteScreen() {
       levelTitle: params.levelTitle || 'Practice Session',
       durationSeconds: durationSecs,
       talkTimeSeconds: talkSecs,
+      hintsUsedCount: hintsVal,
       overallScore: scoreVal,
       passed: isPassedVal,
       passReason: '',
@@ -264,6 +267,7 @@ export default function SessionCompleteScreen() {
     params.overallScore,
     params.passed,
     params.userSentencesCount,
+    params.hintsUsedCount,
     params.xpEarned,
     params.isGeneralChat,
     params.callParams,
@@ -286,6 +290,7 @@ export default function SessionCompleteScreen() {
   // XP & Sentences
   const xpEarned = report?.xpEarned ?? (isGeneral ? (isPassed ? 50 : 0) : (isPassed ? 100 : 0));
   const sentencesCount = report?.userSentencesCount ?? 0;
+  const hintsCount = report?.hintsUsedCount ?? (report?.activeHints?.length || (params.hintsUsedCount ? parseInt(params.hintsUsedCount, 10) : 0));
   const rawScore = report?.overallScore ?? (isGeneral ? 85 : 75);
   const overallScore = (rawScore === 0 && (sentencesCount >= 2 || totalSecs >= 30))
     ? (isPassed ? 85 : 70)
@@ -602,6 +607,20 @@ export default function SessionCompleteScreen() {
                   </Text>
                 </View>
               </View>
+
+              {/* Hint Usage Pill Badge */}
+              <View style={styles.hintBadgeRow}>
+                <View style={[styles.hintPill, hintsCount === 0 ? styles.hintPillZero : styles.hintPillUsed]}>
+                  <Ionicons
+                    name={hintsCount === 0 ? 'sparkles' : 'bulb-outline'}
+                    size={13}
+                    color={hintsCount === 0 ? '#059669' : '#D97706'}
+                  />
+                  <Text style={[styles.hintPillText, hintsCount === 0 ? styles.hintPillTextZero : styles.hintPillTextUsed]}>
+                    {hintsCount === 0 ? '0 Hints Used · Fully Independent! 🌟' : `${hintsCount} ${hintsCount === 1 ? 'Hint' : 'Hints'} Used`}
+                  </Text>
+                </View>
+              </View>
             </Animated.View>
           </View>
 
@@ -873,6 +892,39 @@ const styles = StyleSheet.create({
     width: 1,
     height: 44,
     backgroundColor: '#E2E8F0',
+  },
+  hintBadgeRow: {
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  hintPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  hintPillZero: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  hintPillUsed: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  hintPillText: {
+    fontSize: 12,
+  },
+  hintPillTextZero: {
+    ...fontStyle('inter', 'semiBold'),
+    color: '#065F46',
+  },
+  hintPillTextUsed: {
+    ...fontStyle('inter', 'medium'),
+    color: '#92400E',
   },
 
   /* Action Buttons */

@@ -767,6 +767,7 @@ export default function CallScreen() {
           feedbackSinhala: liveCall.missionReport.feedbackSinhala || '',
           feedbackEnglish: liveCall.missionReport.feedbackEnglish || '',
           userSentencesCount: String(liveCall.missionReport.userSentencesCount || ''),
+          hintsUsedCount: String(liveCall.missionReport.hintsUsedCount ?? hintsHistoryRef.current.length),
           xpEarned: String(liveCall.missionReport.xpEarned || ''),
           isGeneralChat: String(Boolean(liveCall.missionReport.isGeneralChat)),
         },

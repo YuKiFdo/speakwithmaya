@@ -54,6 +54,8 @@ export interface SessionHistoryRecord {
   scenarioTitle?: string;
   is_roadmap?: boolean;
   isRoadmap?: boolean;
+  hints_used_count?: number;
+  hintsUsedCount?: number;
 }
 
 const getBackendBaseUrl = (): string => {
@@ -83,7 +85,7 @@ export async function persistSessionRecord(record: SessionHistoryRecord): Promis
 
   try {
     // 1. Upsert session row
-    await supabase.from('sessions').upsert({
+    const payload: any = {
       id: record.id,
       duration_seconds: record.duration_seconds,
       topic: record.topic,
@@ -93,7 +95,11 @@ export async function persistSessionRecord(record: SessionHistoryRecord): Promis
       pronunciation_score: record.pronunciation_score,
       status: record.status,
       end_time: record.end_time || new Date().toISOString(),
-    });
+    };
+    if (record.hints_used_count !== undefined || record.hintsUsedCount !== undefined) {
+      payload.hints_used_count = record.hints_used_count ?? record.hintsUsedCount ?? 0;
+    }
+    await supabase.from('sessions').upsert(payload);
 
     // 2. Insert turns if present
     if (record.turns && record.turns.length > 0) {
