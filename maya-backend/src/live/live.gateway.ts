@@ -36,6 +36,7 @@ interface ClientSessionState {
   modelTurnAudioMap: Map<number, Buffer>;
   modelTurnCount: number;
   chronologicalAudioTurns: Array<{ speaker: 'user' | 'model'; turnIdx: number; pcm: Buffer; sampleRate: number }>;
+  authoritativeTurns: Array<{ role: 'user' | 'model'; text: string; timestamp: string }>;
   userSpeechActive: boolean;
   hasDispatchedGreeting: boolean;
   isGreetingInProgress: boolean;
@@ -136,6 +137,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       modelTurnAudioMap: new Map(),
       modelTurnCount: 0,
       chronologicalAudioTurns: [],
+      authoritativeTurns: [],
       userSpeechActive: false,
       hasDispatchedGreeting: false,
       isGreetingInProgress: false,
@@ -312,6 +314,14 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           .catch((e: any) => {
             this.logger.warn(`[${sid}] Failed saving session audio recordings: ${e?.message}`);
           });
+      }
+
+      // Persist server-authoritative conversation turns directly to DB and conversation.json
+      if (state.authoritativeTurns && state.authoritativeTurns.length > 0) {
+        this.sessionsService.setAuthoritativeTurns(state.sessionId, state.authoritativeTurns);
+        this.sessionsService.saveSessionTurns(state.sessionId, state.authoritativeTurns, state.dto?.topic).catch((e: any) => {
+          this.logger.warn(`[${sid}] Failed saving authoritative turns on disconnect: ${e?.message}`);
+        });
       }
 
       if (state.geminiSession) {
@@ -703,8 +713,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const turnBuffer = Buffer.concat(state.currentUserTurnAudioChunks);
     state.currentUserTurnAudioChunks = [];
 
-    // Filter out sub-250ms mic pops/coughs
-    if (turnBuffer.length >= 8000) {
+    // If student text was recognized, commit audio if buffer has data
+    if (turnBuffer.length > 0) {
       const currentTurnIdx = state.userTurnCount;
       state.userTurnAudioMap.set(currentTurnIdx, turnBuffer);
       state.chronologicalAudioTurns.push({
@@ -1235,6 +1245,23 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           state.modelTurnCount++;
         }
 
+        // Record authoritative server-verified conversation turns
+        if (userText && !isGreetingTurn) {
+          state.authoritativeTurns.push({
+            role: 'user',
+            text: userText,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        if (modelText) {
+          state.authoritativeTurns.push({
+            role: 'model',
+            text: modelText,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        this.sessionsService.setAuthoritativeTurns(state.sessionId, state.authoritativeTurns);
+
         // Turn fully complete: clear accumulators for the next conversational exchange
         state.userTranscriptAccumulator = '';
         state.lastStudentTranscript = '';
@@ -1244,6 +1271,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         state.practiceTaskToolCalledThisTurn = false;
         this.safeSendToClient(state, JSON.stringify({
           type: 'turn_complete',
+          userText: userText || undefined,
+          modelText: modelText || undefined,
         }));
       } else {
         // Intermediate turn completion (e.g. handshake/tool call/user acoustic closure)

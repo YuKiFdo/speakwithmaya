@@ -795,7 +795,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               if (currentModelTextRef.current.trim()) {
                 setPreviousSubtitles(sanitizeModelText(currentModelTextRef.current.trim()));
               }
-              if (currentUserTextRef.current.trim() && userChunksSentRef.current > 0) {
+              if (currentUserTextRef.current.trim()) {
                 const textToPush = currentUserTextRef.current.trim();
                 const lastTurn = turnsRef.current[turnsRef.current.length - 1];
                 if (!lastTurn || lastTurn.role !== 'user' || lastTurn.text !== textToPush) {
@@ -824,8 +824,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             setSubtitles(sanitizeModelText(currentModelTextRef.current));
           },
           onInputTranscript: (text) => {
-            // Guard against phantom transcripts (e.g. ASR carrier noise before student speaks or during opening greeting)
-            if (isFirstGreetingPendingRef.current || userChunksSentRef.current === 0) {
+            // Guard against phantom transcripts during opening greeting
+            if (isFirstGreetingPendingRef.current) {
               return;
             }
             if (activeRoleRef.current !== 'user') {
@@ -845,14 +845,43 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               currentUserTextRef.current = '';
             }
 
-            currentUserTextRef.current = text;
+            // Smoothly accumulate incoming student speech chunks
+            currentUserTextRef.current = currentUserTextRef.current
+              ? (text.startsWith(' ') || currentUserTextRef.current.endsWith(' ')
+                  ? currentUserTextRef.current + text
+                  : currentUserTextRef.current + ' ' + text)
+              : text;
           },
-          onTurnComplete: () => {
+          onTurnComplete: (data?: { userText?: string; modelText?: string }) => {
             playerRef.current.flush();
-            if (currentModelTextRef.current.trim()) {
-              const textToPush = currentModelTextRef.current.trim();
+
+            // Commit any verified student turn text from this exchange
+            const userTurnText = (data?.userText || currentUserTextRef.current).trim();
+            if (userTurnText) {
               const lastTurn = turnsRef.current[turnsRef.current.length - 1];
-              if (!lastTurn || lastTurn.role !== 'model' || lastTurn.text !== textToPush) {
+              if (lastTurn && lastTurn.role === 'user') {
+                lastTurn.text = userTurnText;
+              } else {
+                turnsRef.current.push({
+                  role: 'user',
+                  text: userTurnText,
+                  timestamp: new Date().toISOString(),
+                  turnIndex: turnsRef.current.length,
+                  audioUrl: lastUserTurnAudioUrlRef.current,
+                });
+                lastUserTurnAudioUrlRef.current = '';
+              }
+              currentUserTextRef.current = '';
+            }
+
+            // Commit any verified Maya model turn text
+            const modelTurnText = (data?.modelText || currentModelTextRef.current).trim();
+            if (modelTurnText) {
+              const textToPush = sanitizeModelText(modelTurnText);
+              const lastTurn = turnsRef.current[turnsRef.current.length - 1];
+              if (lastTurn && lastTurn.role === 'model') {
+                lastTurn.text = textToPush;
+              } else {
                 turnsRef.current.push({
                   role: 'model',
                   text: textToPush,
@@ -1195,7 +1224,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     if (currentUserTextRef.current.trim()) {
       const textToPush = currentUserTextRef.current.trim();
       const lastTurn = turnsRef.current[turnsRef.current.length - 1];
-      if (!lastTurn || lastTurn.role !== 'user' || lastTurn.text !== textToPush) {
+      if (lastTurn && lastTurn.role === 'user') {
+        lastTurn.text = textToPush;
+      } else {
         turnsRef.current.push({
           role: 'user',
           text: textToPush,
@@ -1210,7 +1241,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     if (currentModelTextRef.current.trim()) {
       const textToPush = sanitizeModelText(currentModelTextRef.current.trim());
       const lastTurn = turnsRef.current[turnsRef.current.length - 1];
-      if (!lastTurn || lastTurn.role !== 'model' || lastTurn.text !== textToPush) {
+      if (lastTurn && lastTurn.role === 'model') {
+        lastTurn.text = textToPush;
+      } else {
         turnsRef.current.push({
           role: 'model',
           text: textToPush,

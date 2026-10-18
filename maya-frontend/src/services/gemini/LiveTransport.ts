@@ -60,7 +60,7 @@ export interface LiveTransportCallbacks {
   onAudioSamples?: (samples: Float32Array) => void;
   onOutputTranscript?: (text: string) => void;
   onInputTranscript?: (text: string) => void;
-  onTurnComplete?: () => void;
+  onTurnComplete?: (data?: { userText?: string; modelText?: string }) => void;
   onInterrupted?: () => void;
   onGrammarCorrection?: (correction: GrammarCorrectionPayload) => void;
   onRephraseSuggestion?: (suggestion: RephraseSuggestionPayload) => void;

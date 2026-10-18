@@ -426,7 +426,10 @@ export class ServerLiveTransport implements ILiveTransport {
           );
         }
 
-        this.callbacks.onTurnComplete?.();
+        this.callbacks.onTurnComplete?.({
+          userText: msg.userText || studentSaid || undefined,
+          modelText: msg.modelText || modelReplied || undefined,
+        });
         break;
       }
 

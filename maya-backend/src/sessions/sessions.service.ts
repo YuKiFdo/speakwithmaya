@@ -207,7 +207,21 @@ export class SessionsService {
 
   private readonly sessionRecordingsMap = new Map<string, { userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string }>();
   private readonly sessionTurnAudioMap = new Map<string, Map<number, string>>();
+  private readonly authoritativeTurnsMap = new Map<string, Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>();
   private lastSavedSessionId: string | null = null;
+
+  setAuthoritativeTurns(sessionId: string, turns: Array<{ role: 'user' | 'model'; text: string; timestamp: string }>) {
+    const validId = toValidUuid(sessionId);
+    this.authoritativeTurnsMap.set(validId, turns);
+    if (validId !== sessionId) {
+      this.authoritativeTurnsMap.set(sessionId, turns);
+    }
+  }
+
+  getAuthoritativeTurns(sessionId: string): Array<{ role: 'user' | 'model'; text: string; timestamp: string }> | undefined {
+    const validId = toValidUuid(sessionId);
+    return this.authoritativeTurnsMap.get(validId) || this.authoritativeTurnsMap.get(sessionId);
+  }
   private readonly inFlightHintPromises = new Map<string, Promise<{ hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number; tokens?: { promptTokens: number; outputTokens: number; totalTokens: number } }>>();
   private readonly ttsAudioCache = new Map<string, { audioBase64: string; mimeType: string }>();
   private piperSession: any = null;
@@ -475,7 +489,17 @@ export class SessionsService {
 
   async saveSessionTurns(sessionId: string, turns: any[], topic?: string): Promise<void> {
     const validSessionId = toValidUuid(sessionId);
-    if (!this.supabase || !turns || turns.length === 0) return;
+    if (!this.supabase) return;
+
+    // Defend against incomplete client turns: if server authoritative turns has more user turns, use it
+    const serverTurns = this.getAuthoritativeTurns(validSessionId);
+    const serverUserCount = (serverTurns || []).filter((t) => t.role === 'user').length;
+    const inputUserCount = (turns || []).filter((t: any) => t.role === 'user').length;
+    const turnsToUse = (serverTurns && serverUserCount > inputUserCount)
+      ? serverTurns
+      : (turns && turns.length > 0 ? turns : serverTurns || []);
+
+    if (!turnsToUse || turnsToUse.length === 0) return;
 
     try {
       // Ensure the parent session row exists in public.sessions before inserting child turns
@@ -505,11 +529,11 @@ export class SessionsService {
       // Clean existing turns for this session to prevent duplicate entries on retry
       await this.supabase.from('session_turns').delete().eq('session_id', validSessionId);
 
-      const turnsToInsert = turns.map((t, idx) => ({
+      const turnsToInsert = turnsToUse.map((t, idx) => ({
         session_id: validSessionId,
         turn_order: idx + 1,
         role: t.role === 'model' ? 'model' : 'user',
-        text_transcript: (t.text || '').trim() || '...',
+        text_transcript: (t.text || t.text_transcript || '').trim() || '...',
         timestamp: t.timestamp || new Date().toISOString(),
       }));
 
@@ -1872,8 +1896,17 @@ ${memoryPart}`;
         }
 
         // 2. Persist full conversation turns in session_turns table & Supabase Storage conversation.json
-        if (turns && turns.length > 0) {
-          await this.saveSessionTurns(validSessionId, turns, dto.topic);
+        const serverTurns = this.getAuthoritativeTurns(validSessionId);
+        const serverUserCount = (serverTurns || []).filter((t) => t.role === 'user').length;
+        const clientUserCount = (turns || []).filter((t: any) => t.role === 'user').length;
+
+        // If server recorded more user turns than the client, use server authoritative turns as single source of truth
+        const turnsToUse = (serverTurns && serverUserCount > clientUserCount)
+          ? serverTurns
+          : (turns && turns.length > 0 ? turns : serverTurns || []);
+
+        if (turnsToUse && turnsToUse.length > 0) {
+          await this.saveSessionTurns(validSessionId, turnsToUse, dto.topic);
         }
 
         // 3. Insert grammar corrections
@@ -1922,7 +1955,7 @@ ${memoryPart}`;
             }
 
             // Anti-exploit guard: verify meaningful engagement (at least 3 user turns or 45s duration)
-            const userTurnsCount = turns ? turns.filter((t) => t.role === 'user').length : 0;
+            const userTurnsCount = turnsToUse ? turnsToUse.filter((t: any) => t.role === 'user').length : 0;
             const meetsTurnRequirement = userTurnsCount >= 3 || durationSeconds >= 45;
             const isPassed = overallScore >= passingScorePercent && meetsTurnRequirement;
 
@@ -2378,12 +2411,29 @@ ${memoryPart}`;
       .eq('session_id', sessionId)
       .maybeSingle();
 
+    const validSessionId = toValidUuid(sessionId);
+
     // 3. Fetch turns
-    const { data: turns } = await this.supabase
+    let { data: turns } = await this.supabase
       .from('session_turns')
       .select('*')
       .eq('session_id', sessionId)
       .order('turn_order', { ascending: true });
+
+    // Fallback/enrich with in-memory authoritative turns if DB turns are missing or incomplete
+    const serverTurns = this.getAuthoritativeTurns(validSessionId);
+    const serverUserCount = (serverTurns || []).filter((t) => t.role === 'user').length;
+    const dbUserCount = (turns || []).filter((t: any) => t.role === 'user').length;
+    if (serverTurns && serverUserCount > dbUserCount) {
+      turns = serverTurns.map((t, idx) => ({
+        id: `authoritative-${idx}`,
+        session_id: validSessionId,
+        turn_order: idx + 1,
+        role: t.role,
+        text_transcript: t.text,
+        timestamp: t.timestamp,
+      })) as any;
+    }
 
     // 4. Fetch grammar corrections
     const { data: corrections } = await this.supabase
@@ -2400,7 +2450,6 @@ ${memoryPart}`;
     const dateObj = new Date(sess.created_at || Date.now());
     const displayDate = formatSriLankaDisplayDate(dateObj);
 
-    const validSessionId = toValidUuid(sessionId);
     const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
 
     // Check which audio files actually exist in Supabase storage for this session
@@ -3465,23 +3514,30 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
       userAudioUrl?: string | null;
     }>;
   }> {
-    const turns = dto.turns || [];
+    const serverTurns = dto.sessionId ? this.getAuthoritativeTurns(dto.sessionId) : undefined;
+    const serverUserCount = (serverTurns || []).filter((t) => t.role === 'user').length;
+    const clientUserCount = (dto.turns || []).filter((t: any) => t.role === 'user').length;
+    const turnsToUse = (serverTurns && serverUserCount > clientUserCount)
+      ? serverTurns
+      : (dto.turns && dto.turns.length > 0 ? dto.turns : serverTurns || []);
+
+    const turns = turnsToUse;
     if (dto.sessionId && turns.length > 0) {
       this.saveSessionTurns(dto.sessionId, turns, dto.topic).catch((e) => {
         this.logger.warn(`Failed saving session turns during analysis: ${e?.message}`);
       });
     }
     const activeHints = (dto.activeHints || []).map((h) => h.toLowerCase().trim());
-    const userTurns = turns
-      .map((t, idx) => ({ ...t, turnIndex: t.turnIndex ?? idx }))
-      .filter((t) => t.role === 'user' && t.text && t.text.trim().length > 0);
+    const userTurns = (turns as any[])
+      .map((t: any, idx: number) => ({ ...t, turnIndex: t.turnIndex ?? idx }))
+      .filter((t: any) => t.role === 'user' && t.text && t.text.trim().length > 0);
 
     if (userTurns.length === 0) {
       return { sessionId: dto.sessionId, items: [] };
     }
 
     // Filter out any user speech that was prompted or matches active hints
-    const nonHintUserTurns = userTurns.filter((ut) => {
+    const nonHintUserTurns = userTurns.filter((ut: any) => {
       const textLower = ut.text.toLowerCase().trim();
       for (const hint of activeHints) {
         if (!hint) continue;
@@ -3491,7 +3547,7 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
         const uWords = textLower.split(/\s+/).filter(Boolean);
         const hWords = hint.split(/\s+/).filter(Boolean);
         if (uWords.length >= 3 && hWords.length >= 3) {
-          const common = uWords.filter((w) => hWords.includes(w));
+          const common = uWords.filter((w: string) => hWords.includes(w));
           if (common.length / Math.max(uWords.length, hWords.length) >= 0.7) {
             return false;
           }
@@ -3506,8 +3562,8 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
     if (apiKey) {
       try {
         const ai = new GoogleGenAI({ apiKey });
-        const dialogueSummary = turns
-          .map((t, idx) => `Turn ${t.turnIndex ?? idx} [${t.role.toUpperCase()}]: ${t.text}`)
+        const dialogueSummary = (turns as any[])
+          .map((t: any, idx: number) => `Turn ${t.turnIndex ?? idx} [${t.role.toUpperCase()}]: ${t.text}`)
           .join('\n');
 
         const userUtterancesList = turnsToAnalyze
