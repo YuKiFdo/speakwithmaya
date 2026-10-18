@@ -130,6 +130,42 @@ export default function CallScreen() {
   const effectiveGoalDescription = storeConfig?.goalDescription || params.goalDescription;
   const effectiveTargetSpeakingShare = storeConfig?.targetSpeakingShare ?? (params.targetSpeakingShare ? parseInt(params.targetSpeakingShare, 10) : 40);
 
+  // Format & resolve roles for scenario display (e.g. Scenario 1 Hotel mix-up)
+  const formatRoleTitle = (role?: string) => {
+    if (!role) return '';
+    return role
+      .trim()
+      .split(/\s+/)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+  };
+
+  let resolvedMayaRole = (effectiveMayaRole || '').trim();
+  let resolvedUserRole = (effectiveUserRole || '').trim();
+
+  if (!resolvedMayaRole || !resolvedUserRole) {
+    const textToCheck = `${effectiveLevelTitle || ''} ${effectiveTopic || ''} ${effectiveScenarioPrompt || ''} ${effectiveScenarioBriefing || ''}`.toLowerCase();
+    if (textToCheck.includes('hotel') || textToCheck.includes('room') || effectiveLevelNumber === 1) {
+      if (!resolvedMayaRole) resolvedMayaRole = 'Hotel Receptionist';
+      if (!resolvedUserRole) resolvedUserRole = 'Hotel Guest';
+    } else if (textToCheck.includes('interview') || textToCheck.includes('candidate')) {
+      if (!resolvedMayaRole) resolvedMayaRole = 'Hiring Manager';
+      if (!resolvedUserRole) resolvedUserRole = 'Job Candidate';
+    } else if (textToCheck.includes('flight') || textToCheck.includes('airport')) {
+      if (!resolvedMayaRole) resolvedMayaRole = 'Airline Service Agent';
+      if (!resolvedUserRole) resolvedUserRole = 'Airline Passenger';
+    } else if (textToCheck.includes('cafe') || textToCheck.includes('coffee')) {
+      if (!resolvedMayaRole) resolvedMayaRole = 'Barista';
+      if (!resolvedUserRole) resolvedUserRole = 'Cafe Customer';
+    } else if (textToCheck.includes('friend')) {
+      if (!resolvedMayaRole) resolvedMayaRole = 'Close Friend';
+      if (!resolvedUserRole) resolvedUserRole = 'Supportive Friend';
+    }
+  }
+
+  const displayMayaRole = formatRoleTitle(resolvedMayaRole);
+  const displayUserRole = formatRoleTitle(resolvedUserRole);
+
   // Core Gemini Live Audio & Call Engine
   const liveCall = useLiveCall({
     topic: effectiveTopic,
@@ -155,8 +191,8 @@ export default function CallScreen() {
     openingLine: effectiveOpeningLine,
     scenarioBriefing: effectiveScenarioBriefing,
     emotionTags: effectiveEmotionTags,
-    userRole: effectiveUserRole,
-    mayaRole: effectiveMayaRole,
+    userRole: resolvedUserRole || effectiveUserRole,
+    mayaRole: resolvedMayaRole || effectiveMayaRole,
     goalTitle: effectiveGoalTitle,
     goalDescription: effectiveGoalDescription,
     targetSpeakingShare: effectiveTargetSpeakingShare,
@@ -849,6 +885,9 @@ export default function CallScreen() {
 
                   <View style={styles.headerTexts}>
                     <Text style={styles.mayaNameMobile}>Maya</Text>
+                    {displayMayaRole ? (
+                      <Text style={styles.mayaRoleMobile}>{displayMayaRole}</Text>
+                    ) : null}
                     <View style={styles.timerRow}>
                       <View
                         style={[
@@ -922,6 +961,9 @@ export default function CallScreen() {
 
                   <View style={styles.desktopInfoTexts}>
                     <Text style={styles.mayaNameDesktop}>Maya</Text>
+                    {displayMayaRole ? (
+                      <Text style={styles.mayaRoleDesktop}>{displayMayaRole}</Text>
+                    ) : null}
                     <View style={styles.timerRow}>
                       <View
                         style={[
@@ -1000,6 +1042,18 @@ export default function CallScreen() {
                   </View>
                 </View>
               )}
+
+              {/* Scenario User Role Header Divider (e.g. "Your Role : Hotel Guest") */}
+              {displayUserRole ? (
+                <View style={styles.roleDividerContainer}>
+                  <View style={styles.roleDividerLine} />
+                  <View style={styles.roleBadge}>
+                    <Text style={styles.rolePrefix}>Your Role : </Text>
+                    <Text style={styles.roleValue}>{displayUserRole}</Text>
+                  </View>
+                  <View style={styles.roleDividerLine} />
+                </View>
+              ) : null}
 
               {/* Conversation Display with Multi-Turn History */}
               <ConversationDisplay
@@ -1353,6 +1407,13 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     letterSpacing: -0.3,
   },
+  mayaRoleMobile: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 12.5,
+    color: '#64748b',
+    marginTop: 1,
+    marginBottom: 2,
+  },
   /* Desktop Centered Avatar Card */
   desktopAvatarCard: {
     flexDirection: 'row',
@@ -1385,6 +1446,13 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: '#0f172a',
     letterSpacing: -0.4,
+  },
+  mayaRoleDesktop: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 14,
+    color: '#64748b',
+    marginTop: 2,
+    marginBottom: 4,
   },
   timerTextDesktop: {
     ...fontStyle('outfit', 'bold'),
@@ -1459,6 +1527,37 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     width: '100%',
     paddingTop: 36,
+  },
+  roleDividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    maxWidth: 380,
+    paddingHorizontal: 8,
+    marginBottom: 24,
+    marginTop: 4,
+  },
+  roleDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#cbd5e1',
+    opacity: 0.65,
+  },
+  roleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+  rolePrefix: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13.5,
+    color: '#64748b',
+  },
+  roleValue: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13.5,
+    color: '#334155',
   },
   noticeWrapper: {
     minHeight: 40,

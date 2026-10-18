@@ -40,7 +40,7 @@ import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { RoadmapTrackSkeleton } from '@/components/ui/skeleton';
 import { MissionCardModal } from '@/components/roadmap/mission-card-modal';
-import { ScenarioBriefingModal } from '@/components/roadmap/scenario-briefing-modal';
+import { ScenarioBriefingModal, resolveScenarioBriefingData } from '@/components/roadmap/scenario-briefing-modal';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { CallSessionStore } from '@/services/store/call-session-store';
 import { useUserStats } from '@/hooks/useUserStats';
@@ -527,6 +527,8 @@ export default function RoadmapScreen() {
       return;
     }
 
+    const briefingData = resolveScenarioBriefingData(item);
+
     CallSessionStore.startCall({
       roadmapLevelId: item.id,
       levelNumber: item.levelNumber,
@@ -538,10 +540,10 @@ export default function RoadmapScreen() {
       openingLine: item.openingLine,
       scenarioBriefing: item.scenarioBriefing,
       emotionTags: item.emotionTags,
-      userRole: item.userRole,
-      mayaRole: item.mayaRole,
-      goalTitle: item.goalTitle,
-      goalDescription: item.goalDescription,
+      userRole: item.userRole || briefingData.userRole,
+      mayaRole: item.mayaRole || briefingData.mayaRole,
+      goalTitle: item.goalTitle || briefingData.goalTitle,
+      goalDescription: item.goalDescription || briefingData.goalDescription,
       practicePoints: item.practicePoints || [],
       canonicalContent: item.canonicalContent || '',
       passingScorePercent: item.passingScorePercent || 70,

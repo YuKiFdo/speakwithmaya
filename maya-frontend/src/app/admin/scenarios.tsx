@@ -653,6 +653,8 @@ export default function AdminScenariosScreen() {
         languageMode: 'english',
         sinhalaStyle: 'balanced',
         aiSuggestions: 'true',
+        userRole: lvl.userRole || '',
+        mayaRole: lvl.mayaRole || '',
         userName: studentName,
       },
     });
