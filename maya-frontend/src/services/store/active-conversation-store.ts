@@ -38,25 +38,70 @@ export function isRoadmapOrIntroTopic(
   scenarioTitle?: string | null,
   scenarioId?: string | null,
   roadmapLevelId?: string | null,
+  summary?: string | null,
 ): boolean {
   if (roadmapLevelId) return true;
-  const t = ((topic || '') + ' ' + (scenarioTitle || '') + ' ' + (scenarioId || '')).toLowerCase();
+  if (
+    scenarioId &&
+    (scenarioId.startsWith('lvl-') ||
+      scenarioId === 'general-practice' ||
+      scenarioId.includes('roadmap') ||
+      scenarioId.includes('mission'))
+  ) {
+    return true;
+  }
+
+  const t = [topic, scenarioTitle, scenarioId, summary]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (!t) return false;
+
   return (
+    // Intro & onboarding
     t.includes('intro') ||
     t.includes('onboarding') ||
     t.includes('assessment') ||
     t.includes('placement') ||
     t.includes('free trial') ||
+    t.includes('diagnostic') ||
+    // Roadmap metadata
     t.includes('roadmap') ||
     t.includes('level') ||
     t.includes('milestone') ||
     t.includes('lvl-') ||
+    t.includes('mission') ||
     t.includes('lesson') ||
+    // Curriculum topics & scenarios (e.g. Level 1: Room Mix-Up at the Hotel)
+    t.includes('hospitality') ||
+    t.includes('conflict') ||
+    t.includes('mix-up') ||
+    t.includes('mix up') ||
+    t.includes('room mix') ||
+    t.includes('hotel') ||
+    t.includes('suite') ||
+    t.includes('ocean-view') ||
+    t.includes('ocean view') ||
+    t.includes('receptionist') ||
+    t.includes('front desk') ||
     t.includes('hotel guest') ||
+    t.includes('spa credit') ||
+    t.includes('garden room') ||
+    t.includes('garden suite') ||
+    t.includes('reservation') ||
+    // Other known curriculum roleplays
     t.includes('crying friend') ||
     t.includes('scholarship') ||
     t.includes('strict interview') ||
-    t.includes('engineering director')
+    t.includes('engineering director') ||
+    t.includes('bank account balance') ||
+    t.includes('customer service') ||
+    // Roleplay markers from scenario engine
+    t.includes('roleplay scenario') ||
+    t.includes('role play scenario') ||
+    t.includes('role play practice') ||
+    t.includes('roleplay practice')
   );
 }
 
@@ -71,7 +116,15 @@ function loadInitialState(): ActiveConversationState | null {
         if (currentUserId && parsed.userId && parsed.userId !== currentUserId) {
           return null;
         }
-        if (isRoadmapOrIntroTopic(parsed.topic, parsed.scenarioTitle, parsed.scenarioId, parsed.roadmapLevelId)) {
+        if (
+          isRoadmapOrIntroTopic(
+            parsed.topic,
+            parsed.scenarioTitle,
+            parsed.scenarioId,
+            parsed.roadmapLevelId,
+            parsed.summary
+          )
+        ) {
           window.localStorage.removeItem(userKey);
           window.localStorage.removeItem(STORAGE_KEY);
           return null;
@@ -108,12 +161,27 @@ export const ActiveConversationStore = {
       memoryState = null;
       return null;
     }
+    if (
+      memoryState &&
+      isRoadmapOrIntroTopic(
+        memoryState.topic,
+        memoryState.scenarioTitle,
+        memoryState.scenarioId,
+        (memoryState as any).roadmapLevelId,
+        memoryState.summary
+      )
+    ) {
+      memoryState = null;
+      persistState(null);
+      return null;
+    }
     return memoryState;
   },
 
   setActive(conv: Partial<ActiveConversationState> & { scenarioId: string; scenarioTitle: string; roadmapLevelId?: string }) {
     // Strictly do not create a resume card for intro calls, assessments, or ANY roadmap curriculum sessions
-    if (isRoadmapOrIntroTopic(conv.topic, conv.scenarioTitle, conv.scenarioId, conv.roadmapLevelId)) {
+    if (isRoadmapOrIntroTopic(conv.topic, conv.scenarioTitle, conv.scenarioId, conv.roadmapLevelId, conv.summary)) {
+      persistState(null);
       return;
     }
 

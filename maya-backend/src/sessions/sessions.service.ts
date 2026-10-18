@@ -1823,22 +1823,36 @@ ${memoryPart}`;
 
         const finalRoadmapLevelId = dto.roadmapLevelId || active?.roadmapLevelId;
         // 1. Ensure/update session status in sessions table
-        await this.supabase
+        const sessionPayload: any = {
+          id: validSessionId,
+          user_id: resolvedUserId,
+          start_time: new Date(Date.now() - durationSeconds * 1000).toISOString(),
+          end_time: new Date().toISOString(),
+          duration_seconds: durationSeconds,
+          status: 'completed',
+          topic: dto.isIntroCall ? 'Introductory Practice' : (dto.topic || 'English Speaking Practice'),
+          overall_score: resolvedScores.overall,
+          fluency_score: resolvedScores.fluency,
+          grammar_score: resolvedScores.grammar,
+          pronunciation_score: resolvedScores.pronunciation,
+        };
+        if (finalRoadmapLevelId) {
+          sessionPayload.roadmap_level_id = finalRoadmapLevelId;
+        }
+
+        const { error: upsertErr } = await this.supabase
           .from('sessions')
-          .upsert({
-            id: validSessionId,
-            user_id: resolvedUserId,
-            start_time: new Date(Date.now() - durationSeconds * 1000).toISOString(),
-            end_time: new Date().toISOString(),
-            duration_seconds: durationSeconds,
-            status: 'completed',
-            topic: dto.isIntroCall ? 'Introductory Practice' : (dto.topic || 'English Speaking Practice'),
-            overall_score: resolvedScores.overall,
-            fluency_score: resolvedScores.fluency,
-            grammar_score: resolvedScores.grammar,
-            pronunciation_score: resolvedScores.pronunciation,
-            ...(finalRoadmapLevelId ? { roadmap_level_id: finalRoadmapLevelId } : {}),
-          }, { onConflict: 'id' });
+          .upsert(sessionPayload, { onConflict: 'id' });
+
+        if (upsertErr) {
+          // If roadmap_level_id column does not exist in public.sessions table yet, retry without it
+          if (upsertErr.message?.includes('roadmap_level_id')) {
+            delete sessionPayload.roadmap_level_id;
+            await this.supabase.from('sessions').upsert(sessionPayload, { onConflict: 'id' });
+          } else {
+            this.logger.error(`Error saving session to Supabase: ${upsertErr.message}`);
+          }
+        }
 
         // 2. Persist full conversation turns in session_turns table & Supabase Storage conversation.json
         if (turns && turns.length > 0) {
@@ -2524,6 +2538,15 @@ ${memoryPart}`;
         );
       }
 
+      // Tag roadmap sessions by checking roadmap levels
+      const roadmapLevels = this.roadmapService ? await this.roadmapService.getAllLevels(true).catch(() => []) : [];
+      const roadmapTopicMap = new Map<string, string>();
+      for (const lvl of roadmapLevels || []) {
+        if (lvl.id) roadmapTopicMap.set(lvl.id.toLowerCase().trim(), lvl.id);
+        if (lvl.title) roadmapTopicMap.set(lvl.title.toLowerCase().trim(), lvl.id);
+        if (lvl.topic) roadmapTopicMap.set(lvl.topic.toLowerCase().trim(), lvl.id);
+      }
+
       return (sessions || []).map((sess: any) => {
         const validSessionId = toValidUuid(sess.id);
         const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sess.id);
@@ -2583,6 +2606,28 @@ ${memoryPart}`;
           ? (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/full_conversation.wav`).data.publicUrl : undefined)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
           : null;
 
+        const sessTopic = (sess.topic || '').toLowerCase().trim();
+        const sessFeedback = (sess.user_feedback || '').toLowerCase().trim();
+        let matchedRoadmapLevelId = sess.roadmap_level_id || null;
+        if (!matchedRoadmapLevelId && roadmapTopicMap.has(sessTopic)) {
+          matchedRoadmapLevelId = roadmapTopicMap.get(sessTopic) || null;
+        }
+
+        const isRoadmapSession = Boolean(
+          matchedRoadmapLevelId ||
+          sess.level_number ||
+          sessTopic.includes('hospitality') ||
+          sessTopic.includes('conflict') ||
+          sessTopic.includes('hotel') ||
+          sessTopic.includes('mix-up') ||
+          sessTopic.includes('mix up') ||
+          sessTopic.includes('room mix') ||
+          sessTopic.includes('roadmap') ||
+          sessTopic.includes('lvl-') ||
+          sessFeedback.includes('hotel room mix') ||
+          sessFeedback.includes('room mix-up')
+        );
+
         return {
           id: sess.id,
           user_id: sess.user_id,
@@ -2602,8 +2647,9 @@ ${memoryPart}`;
           user_feedback: sess.user_feedback ?? null,
           turns: mappedTurns,
           corrections: mappedCorrections,
-          roadmap_level_id: sess.roadmap_level_id || null,
+          roadmap_level_id: matchedRoadmapLevelId,
           level_number: sess.level_number || null,
+          is_roadmap: isRoadmapSession,
         };
       });
     } catch (e: unknown) {

@@ -93,25 +93,40 @@ const SOCIAL_AVATARS = [
   'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80',
 ];
 
-function resolveScenarioFromTopic(topic?: string) {
-  if (!topic) return { id: 'casual-chat', title: 'Casual Chat' };
-  const lower = topic.toLowerCase();
-  if (lower.includes('interview') || lower.includes('job')) {
+function resolveScenarioFromTopic(topic?: string, scenarioId?: string): { id: string; title: string } | null {
+  if (scenarioId) {
+    const match = SCENARIOS.find((s) => s.id === scenarioId);
+    if (match) return { id: match.id, title: match.title };
+  }
+  if (!topic) return null;
+  if (isRoadmapOrIntroTopic(topic)) return null;
+
+  const lower = topic.toLowerCase().trim();
+  if (lower.includes('interview') || lower.includes('job interview')) {
     return { id: 'job-interview', title: 'Job Interview' };
   }
   if (lower.includes('work') || lower.includes('office') || lower.includes('business')) {
     return { id: 'workplace', title: 'Workplace' };
   }
-  if (lower.includes('travel') || lower.includes('airport') || lower.includes('hotel') || lower.includes('vacation')) {
+  if (lower.includes('travel english') || lower.includes('travel communication') || lower.includes('flight') || lower.includes('vacation')) {
     return { id: 'travel-english', title: 'Travel English' };
-  }
-  if (lower.includes('role') || lower.includes('play')) {
-    return { id: 'role-play', title: 'Role Play' };
   }
   if (lower.includes('ielts')) {
     return { id: 'ielts-speaking', title: 'IELTS Speaking' };
   }
-  return { id: 'casual-chat', title: 'Casual Chat' };
+  if (
+    lower === 'casual chat' ||
+    lower === 'casual-chat' ||
+    lower.includes('casual chat') ||
+    lower.includes('everyday english') ||
+    lower.includes('chat practice')
+  ) {
+    return { id: 'casual-chat', title: 'Casual Chat' };
+  }
+  if (lower === 'role play' || lower === 'role-play') {
+    return { id: 'role-play', title: 'Role Play' };
+  }
+  return null;
 }
 
 function getScenarioDetails(scenarioId?: string) {
@@ -198,7 +213,9 @@ export default function DashboardScreen() {
       isRoadmapOrIntroTopic(
         activeConversation.topic,
         activeConversation.scenarioTitle,
-        activeConversation.scenarioId
+        activeConversation.scenarioId,
+        (activeConversation as any).roadmapLevelId,
+        activeConversation.summary
       )
     ) {
       ActiveConversationStore.clear();
@@ -220,31 +237,40 @@ export default function DashboardScreen() {
         // Strictly ignore intro calls, onboarding calls, or ANY roadmap curriculum sessions so the resume banner is NEVER shown for them
         const isRoadmapOrIntroSession = (s: any) => {
           if (!s) return false;
-          if (s.roadmap_level_id || s.roadmapLevelId || s.level_number || s.levelNumber) return true;
+          if (s.roadmap_level_id || s.roadmapLevelId || s.level_number || s.levelNumber || s.is_roadmap) return true;
           return isRoadmapOrIntroTopic(
             s.topic,
             s.scenario_title || s.scenarioTitle,
             s.scenario_id || s.scenarioId,
-            s.roadmap_level_id || s.roadmapLevelId
+            s.roadmap_level_id || s.roadmapLevelId,
+            s.user_feedback || s.summary
           );
         };
 
-        const latest = sessions.find((s) => !isRoadmapOrIntroSession(s));
+        const latest = sessions.find((s) => {
+          if (!s) return false;
+          if (isRoadmapOrIntroSession(s)) return false;
+          const resolved = resolveScenarioFromTopic(s.topic, s.scenario_id || s.scenarioId);
+          return resolved !== null;
+        });
+
         if (latest) {
-          const scenario = resolveScenarioFromTopic(latest.topic);
-          ActiveConversationStore.setActive({
-            sessionId: latest.id,
-            scenarioId: scenario.id,
-            scenarioTitle: scenario.title,
-            topic: latest.topic || scenario.title,
-            summary: latest.user_feedback || null,
-            lastPracticedAt: latest.start_time || new Date().toISOString(),
-            durationSeconds: latest.duration_seconds,
-          });
-        } else {
-          // If the user only has roadmap milestones or intro calls, keep clean "Start Talking" hero banner
-          ActiveConversationStore.clear();
+          const scenario = resolveScenarioFromTopic(latest.topic, latest.scenario_id || latest.scenarioId);
+          if (scenario && !isRoadmapOrIntroTopic(latest.topic, scenario.title, scenario.id, null, latest.user_feedback)) {
+            ActiveConversationStore.setActive({
+              sessionId: latest.id,
+              scenarioId: scenario.id,
+              scenarioTitle: scenario.title,
+              topic: latest.topic || scenario.title,
+              summary: latest.user_feedback || null,
+              lastPracticedAt: latest.start_time || new Date().toISOString(),
+              durationSeconds: latest.duration_seconds,
+            });
+            return;
+          }
         }
+        // If the user only has roadmap milestones, intro calls, or no recent dashboard sessions, keep clean "Start a conversation" hero banner
+        ActiveConversationStore.clear();
       } else {
         ActiveConversationStore.clear();
       }
@@ -440,8 +466,15 @@ export default function DashboardScreen() {
                 },
               ],
             ]}>
-            <View style={[styles.heroLeft, isDesktop && styles.heroLeftDesktop]}>
-              {activeConversation && !isRoadmapOrIntroTopic(activeConversation.topic, activeConversation.scenarioTitle, activeConversation.scenarioId) ? (
+              <View style={[styles.heroLeft, isDesktop && styles.heroLeftDesktop]}>
+                {activeConversation &&
+              !isRoadmapOrIntroTopic(
+                activeConversation.topic,
+                activeConversation.scenarioTitle,
+                activeConversation.scenarioId,
+                (activeConversation as any).roadmapLevelId,
+                activeConversation.summary
+              ) ? (
                 <>
                   <View style={styles.resumePillRow}>
                     <View style={[styles.resumeScenarioPill, { backgroundColor: getScenarioDetails(activeConversation.scenarioId).iconBg }]}>

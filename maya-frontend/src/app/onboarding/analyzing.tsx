@@ -322,16 +322,30 @@ export default function AnalyzingScreen() {
           Boolean((report as any)?.levelNumber) ||
           Boolean((report as any)?.callParams?.levelNumber) ||
           Boolean(params.roadmapLevelId) ||
+          Boolean(params.levelNumber) ||
+          Boolean((report as any)?.levelTitle) ||
+          Boolean(params.levelTitle) ||
+          Boolean((report as any)?.isScenarioMode) ||
+          Boolean((report as any)?.callParams?.isScenarioMode) ||
           isRoadmapOrIntroTopic(
-            report?.topic || (report as any)?.levelTitle,
+            report?.topic || (report as any)?.levelTitle || (params.levelTitle as string),
             (report as any)?.scenarioTitle,
             (report as any)?.scenarioId,
-            (report as any)?.roadmapLevelId || (report as any)?.callParams?.roadmapLevelId
+            (report as any)?.roadmapLevelId || (report as any)?.callParams?.roadmapLevelId || (params.roadmapLevelId as string),
+            (report as any)?.feedbackEnglish || (report as any)?.passReason
           );
 
         if (res.ok) {
           const data = await res.json();
-          if (!isIntro && !isRoadmap && (data?.conversationSummary || data?.scenarioTitle)) {
+          const summaryIsRoadmap = isRoadmapOrIntroTopic(
+            data?.scenarioTitle || report?.topic,
+            data?.scenarioTitle,
+            data?.scenarioId,
+            null,
+            data?.conversationSummary
+          );
+
+          if (!isIntro && !isRoadmap && !summaryIsRoadmap && (data?.conversationSummary || data?.scenarioTitle)) {
             ActiveConversationStore.setActive({
               sessionId: activeSessionId,
               scenarioId: data.scenarioId || (report as any)?.scenarioId || 'casual-chat',
@@ -342,7 +356,7 @@ export default function AnalyzingScreen() {
               lastPracticedAt: new Date().toISOString(),
               durationSeconds: report?.durationSeconds,
             });
-          } else if (isIntro || isRoadmap) {
+          } else if (isIntro || isRoadmap || summaryIsRoadmap) {
             ActiveConversationStore.clear();
           }
           if (data?.items && Array.isArray(data.items)) {

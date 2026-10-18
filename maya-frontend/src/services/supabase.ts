@@ -49,7 +49,11 @@ export interface SessionHistoryRecord {
   roadmapLevelId?: string;
   level_number?: number;
   scenario_id?: string;
+  scenarioId?: string;
   scenario_title?: string;
+  scenarioTitle?: string;
+  is_roadmap?: boolean;
+  isRoadmap?: boolean;
 }
 
 const getBackendBaseUrl = (): string => {
@@ -193,6 +197,8 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
           roadmap_level_id: s.roadmap_level_id || s.roadmapLevelId,
           roadmapLevelId: s.roadmap_level_id || s.roadmapLevelId,
           level_number: s.level_number || s.levelNumber,
+          is_roadmap: Boolean(s.is_roadmap || s.roadmap_level_id || s.roadmapLevelId),
+          isRoadmap: Boolean(s.is_roadmap || s.roadmap_level_id || s.roadmapLevelId),
           scenario_id: s.scenario_id || s.scenarioId,
           scenario_title: s.scenario_title || s.scenarioTitle,
         }));
