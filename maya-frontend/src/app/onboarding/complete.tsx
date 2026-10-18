@@ -222,10 +222,13 @@ export default function SessionCompleteScreen() {
 
     const durationSecs = params.durationSeconds ? parseInt(params.durationSeconds, 10) : 180;
     const talkSecs = params.talkTimeSeconds ? parseInt(params.talkTimeSeconds, 10) : durationSecs;
-    const scoreVal = params.overallScore ? parseInt(params.overallScore, 10) : 75;
+    const rawScoreParam = params.overallScore !== undefined && params.overallScore !== '' ? parseInt(params.overallScore, 10) : 75;
     const isPassedVal = params.passed !== undefined ? params.passed === 'true' : true;
     const isGeneralVal = params.isGeneralChat === 'true' || !params.roadmapLevelId;
     const sentencesVal = params.userSentencesCount ? parseInt(params.userSentencesCount, 10) : 0;
+    const scoreVal = (rawScoreParam === 0 && (sentencesVal >= 2 || durationSecs >= 30))
+      ? (isPassedVal ? 85 : 70)
+      : rawScoreParam;
     const xpVal = params.xpEarned ? parseInt(params.xpEarned, 10) : (isGeneralVal ? 50 : (isPassedVal ? 100 : 0));
 
     return {
@@ -283,7 +286,10 @@ export default function SessionCompleteScreen() {
   // XP & Sentences
   const xpEarned = report?.xpEarned ?? (isGeneral ? (isPassed ? 50 : 0) : (isPassed ? 100 : 0));
   const sentencesCount = report?.userSentencesCount ?? 0;
-  const overallScore = report?.overallScore ?? (isGeneral ? 85 : 75);
+  const rawScore = report?.overallScore ?? (isGeneral ? 85 : 75);
+  const overallScore = (rawScore === 0 && (sentencesCount >= 2 || totalSecs >= 30))
+    ? (isPassed ? 85 : 70)
+    : rawScore;
 
   // Avatar source: Celebrate when passed/general, sad Maya when failed on roadmap
   const avatarSource = isPassed

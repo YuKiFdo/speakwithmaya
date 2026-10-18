@@ -1295,13 +1295,39 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         passed = Boolean(evalRes.isPassed);
         overallScore = evalRes.scorePercent;
         passReason = evalRes.feedbackEnglish || evalRes.feedbackSinhala || (passed ? 'Level mastered!' : 'Review practice points and retry.');
-      } else {
-        // User exited early without completing the lesson and test
+      } else if (isVeryShortSession) {
+        // User exited early without speaking sufficiently
         passed = false;
         overallScore = 0;
-        passReason = 'Session ended early before completing the practice tasks and test.';
-        feedbackSinhala = feedbackSinhala || 'ඔයා session එක අතරමගදී අවසන් කළා. Level එක complete කරන්න මුල ඉඳන් test එක සම්පූර්ණ කරන්න.';
-        feedbackEnglish = feedbackEnglish || 'Session ended early before completing the tasks and evaluation. Try again to pass this level.';
+        passReason = 'Session ended early before sufficient practice.';
+        feedbackSinhala = feedbackSinhala || 'ඔයා session එක අතරමගදී අවසන් කළා. Roleplay එක සම්පූර්ණ කරන්න ආපසු ඇවිත් practice කරන්න.';
+        feedbackEnglish = feedbackEnglish || 'Session ended early before completing the scenario roleplay. Try again to pass this level.';
+      } else {
+        // Scenario Roleplay mode (or active practice): calculate score from fluency, grammar, and turns completed
+        const turnBonus = Math.min(8, userSentencesCount >= 6 ? 6 : userSentencesCount);
+        const calculatedRoleplayScore = Math.min(
+          98,
+          Math.max(
+            50,
+            Math.round(
+              fluencyScore * 0.45 +
+              grammarScore * 0.40 +
+              pronunciationScore * 0.15 +
+              turnBonus
+            )
+          )
+        );
+        overallScore = calculatedRoleplayScore;
+        passed = calculatedRoleplayScore >= minPassingScore;
+        if (passed) {
+          passReason = 'Scenario goal achieved with great roleplay flow!';
+          feedbackSinhala = feedbackSinhala || 'නියමයි! ඔයා roleplay එක සාර්ථකව අවසන් කළා. ඔයාගේ English communication එක ගොඩක් ස්වභාවිකයි.';
+          feedbackEnglish = feedbackEnglish || 'Excellent roleplay performance! You communicated naturally and achieved the scenario goal.';
+        } else {
+          passReason = `Needs a bit more practice to reach the passing score of ${minPassingScore}%.`;
+          feedbackSinhala = feedbackSinhala || 'හොඳ උත්සාහයක්! Grammar suggestions බලලා තව ටිකක් practice කරලා score එක වැඩි කරගමු.';
+          feedbackEnglish = feedbackEnglish || 'Good effort! Review your grammar suggestions and try the roleplay again to boost your score.';
+        }
       }
     } else {
       // General Chat / Free Practice
@@ -1331,6 +1357,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           status = testScore.passed ? 'mastered' : 'assisted';
         } else if (evalRes) {
           status = evalRes.isPassed ? 'mastered' : 'assisted';
+        } else if (passed) {
+          status = 'mastered';
+        } else if (!isVeryShortSession) {
+          status = 'assisted';
         }
         return {
           id: `task-${idx}`,
@@ -1346,7 +1376,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     // 3. Assemble Post-Call Session & Mission Report
     const isGeneral = !options.roadmapLevelId;
     const xpEarned = isRoadmap
-      ? (passed ? 100 : (evalRes ? 25 : 0))
+      ? (passed ? 100 : (!isVeryShortSession ? 25 : 0))
       : (passed ? 50 : 0);
 
     const report: MissionReportData = {
@@ -1428,6 +1458,12 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               totalTokens: total,
               promptTokens: textIn + audioIn,
               responseTokens: textOut + audioOut + thoughtsTokens,
+            },
+            scores: {
+              overall: overallScore,
+              fluency: fluencyScore,
+              grammar: grammarScore,
+              pronunciation: pronunciationScore,
             },
             turns: turnsRef.current,
             grammarCorrections: correctionsRef.current,

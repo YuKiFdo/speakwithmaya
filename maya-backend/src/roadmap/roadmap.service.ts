@@ -832,9 +832,13 @@ Given the scenario details below, generate:
      * Keep every spoken response strictly under 15-20 words per turn. No long monologues.
      * React authentically to what the student says.
      * Speak natural, conversational English.
-   - MANDATORY GOAL COMPLETION & WRAP-UP DIRECTIVE:
-     * Maya must actively track whether the student achieves their goal: "${goalTitle}: ${goalDesc}".
-     * As soon as the student demonstrates the required behavior / reaches agreement / calms Maya down / solves the problem, Maya must accept the outcome in character (e.g. "Alright, that works for me. Thank you for sorting this out."), deliver a natural concluding remark in character, and gracefully wrap up the roleplay session.
+    - MANDATORY 8-10 TURNS INTERACTION DEPTH & PACING DIRECTIVE:
+      * Maya must sustain the roleplay dialogue for AT LEAST 8 to 10 natural, dynamic back-and-forth turns before reaching any final agreement, resolving the dilemma, or concluding the conversation.
+      * NEVER accept a resolution, fold, or concede to the student's demands in the first 1 to 5 turns! Doing so cuts the user's practice short and ruins the exercise.
+      * Realistic 3-Stage Pacing:
+        - Stage A (Turns 1-3): In character, explore the dilemma, ask clarifying questions, explain constraints.
+        - Stage B (Turns 4-7): Make an initial partial offer, negotiate, counter-offer with perks or alternatives, discuss preferences.
+        - Stage C (Turns 8-10+): Reach mutual consensus, finalize agreement, deliver a natural concluding sentence in character, and wrap up.
 
 5. "ttsScriptEnglish": A warm, encouraging English spoken briefing narration (approx 60-90 words) where Maya speaks directly to the student before the call to explain the scenario, roles, and goal.
 Use natural conversational expression tags: <short pause>, <sighs>, <chuckle>, <cheer>, <giggle>.
@@ -940,9 +944,12 @@ Emotional State & Tone: ${detectedEmotion.toUpperCase()}. Speak authentically in
 Core Conversation Rules:
 1. Keep spoken responses snappy, conversational, and strictly under 15-20 words per turn.
 2. React genuinely to the student's words. If they are polite, empathetic, or structured, acknowledge it.
-3. GOAL COMPLETION & WRAP-UP DIRECTIVE:
+3. MANDATORY 8-10 TURNS PACING & GOAL WRAP-UP DIRECTIVE:
    - Student's Target Goal: "${goalTitle} - ${goalDesc}".
-   - As soon as the student achieves this goal or negotiates a fair resolution, accept it in character, give a closing sentence, and naturally conclude the roleplay.`,
+   - You MUST sustain the roleplay dialogue for AT LEAST 8 to 10 back-and-forth conversational turns before reaching a final resolution or agreement.
+   - Turns 1-3: Ask questions and explore the problem.
+   - Turns 4-7: Discuss options and counter-offers.
+   - Turns 8-10+: Only after at least 8 turns, agree on the resolution, give a natural closing sentence in character, and wrap up.`,
       ttsScriptEnglish: `Welcome to your next scenario: ${dto.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`,
       ttsScriptSinhala: `හරි... ඔයාගේ ඊළඟ scenario එක: ${dto.title}! <short pause>\n\nමේක පොඩ්ඩක් හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nමේ scenario එකේ ඔයා තමයි ${userRole}, <short pause> Maya තමයි ${mayaRole} විදිහට ඉන්නේ.\n\nඔයාගේ goal එක හරිම simple: ${goalTitle}.\n\n${goalDesc} කලබල නොවී calm පිට issue එක explain කරලා හොඳ solution එකක් negotiate කරන්න. <short pause>\n\nReady ද? <short pause> එහෙනම් අපි roleplay එක පටන් ගමු!`,
     };

@@ -1278,15 +1278,34 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.logger.log(`[${state.sessionId}] 🛠️ Tool Call invoked: ${fc.name}`);
         this.addSessionLog(state, 'tool_call', fc.name);
 
-        // Forward to client so UI displays grammar card or farewell
-        this.safeSendToClient(state, JSON.stringify({
-          type: 'tool_call',
-          name: fc.name,
-          args: fc.args,
-        }));
-
         if (fc.name === 'conclude_call') {
           const isIntro = state.dto?.isIntroCall === true;
+          const isScenario = Boolean(state.dto?.scenarioPrompt && state.dto?.scenarioPrompt.trim().length > 0);
+          const turnsCompleted = state.userTurnCount || 0;
+
+          // If this is a scenario roleplay session and user has spoken less than 8 turns, block premature conclusion!
+          if (isScenario && turnsCompleted < 8 && !isIntro) {
+            this.logger.warn(
+              `[${state.sessionId}] ⏳ Blocked premature conclude_call in scenario mode: only ${turnsCompleted}/8 turns completed. Instructing model to continue dialogue.`,
+            );
+            functionResponses.push({
+              name: fc.name,
+              id: fc.id,
+              response: {
+                result: 'continue_roleplay',
+                instruction: `DO NOT conclude the call yet! The scenario requires at least 8 to 10 back-and-forth turns of speaking practice. The student has only spoken ${turnsCompleted} turns so far. In character, continue the dialogue: ask for clarification, counter-offer with alternatives/perks, explore their preferences, or present realistic challenges. Keep the negotiation going naturally!`,
+              },
+            });
+            continue;
+          }
+
+          // Forward to client so UI displays farewell and wraps up gracefully
+          this.safeSendToClient(state, JSON.stringify({
+            type: 'tool_call',
+            name: fc.name,
+            args: fc.args,
+          }));
+
           functionResponses.push({
             name: fc.name,
             id: fc.id,

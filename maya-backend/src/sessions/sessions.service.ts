@@ -775,9 +775,14 @@ ${openingLine ? `- MANDATORY OPENING LINE: Start the conversation immediately by
    - React authentically to what the student says. If they de-escalate or solve the issue well, gradually soften your tone as allowed by your scenario rules. If they struggle or make excuses, react in character.
 5. ZERO TASK LOCKING:
    - Do not halt the conversation or force robotic word-for-word repetitions. Let the conversation flow naturally in character.
-6. GOAL COMPLETION & CONCLUSION DIRECTIVE:
-   - Actively listen for whether ${userName} achieves their stated goal${goalTitle || goalDesc ? ` ("${goalTitle ? goalTitle + (goalDesc ? ' — ' + goalDesc : '') : goalDesc}")` : ''}.
-   - As soon as ${userName} satisfies the goal criteria or negotiates an agreeable resolution, accept it warmly in character (e.g. "Alright, that sounds fair. Thank you for working with me on this."), deliver a natural concluding sentence in character, and gracefully wrap up the roleplay dialogue. Do not invent new artificial hurdles once the goal is achieved.`;
+6. MINIMUM 8-10 TURNS INTERACTION DEPTH & PACING DIRECTIVE (MANDATORY):
+   - You MUST sustain the roleplay for AT LEAST 8 to 10 natural, dynamic back-and-forth turns before reaching any final agreement, resolving the issue, or concluding the conversation.
+   - NEVER accept a resolution, fold, or concede to the student's demands in the first 1 to 5 turns! Doing so cuts the user's practice short and ruins the exercise.
+   - REALISTIC 3-STAGE PACING:
+     * Stage A: Investigation & Details (Turns 1–3): In character, explore the dilemma, ask clarifying questions (e.g. reservation details, party size, travel context), and explain your character's constraints.
+     * Stage B: Counter-Offers & Negotiation (Turns 4–7): Make an initial partial offer, listen to their reactions, counter-offer with perks or alternatives, and ask for their preferences.
+     * Stage C: Mutual Agreement & Wrap-Up (Turns 8–10+): Only after AT LEAST 8 to 10 meaningful back-and-forth dialogue exchanges, agree on the final package, deliver a natural concluding sentence in character, and ONLY THEN call tool 'conclude_call'.
+   - STRICTLY FORBIDDEN: Concluding the roleplay or calling 'conclude_call' before at least 8 user turns have occurred is strictly prohibited.`;
   }
 
   getSystemPrompt(dto: CreateSessionTokenDto): string {
@@ -1814,11 +1819,13 @@ ${memoryPart}`;
           calculatedFluency * 0.45 + calculatedGrammar * 0.40 + calculatedPronunciation * 0.15 + hintAdjustment
         )));
 
-        const resolvedScores = scores || {
-          overall: calculatedOverall,
-          fluency: Math.min(98, Math.max(50, calculatedFluency + (hintRatio === 0 ? 3 : 0))),
-          grammar: calculatedGrammar,
-          pronunciation: calculatedPronunciation,
+        const clientOverall = Number(scores?.overall) || 0;
+        const effectiveOverall = clientOverall > 0 ? clientOverall : calculatedOverall;
+        const resolvedScores = {
+          overall: effectiveOverall,
+          fluency: scores?.fluency || Math.min(98, Math.max(50, calculatedFluency + (hintRatio === 0 ? 3 : 0))),
+          grammar: scores?.grammar || calculatedGrammar,
+          pronunciation: scores?.pronunciation || calculatedPronunciation,
         };
 
         const finalRoadmapLevelId = dto.roadmapLevelId || active?.roadmapLevelId;
