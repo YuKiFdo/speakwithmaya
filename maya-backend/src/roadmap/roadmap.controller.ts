@@ -107,8 +107,36 @@ export class RoadmapController {
   // 8c. Admin: Synthesize Expressive Scenario TTS Preview
   @Post('admin/roadmap/synthesize-tts')
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
-  async synthesizeScenarioTts(@Body() dto: SynthesizeScenarioTtsDto) {
-    return this.roadmapService.synthesizeScenarioTts(dto.text, dto.language, dto.voice);
+  async synthesizeScenarioTts(
+    @Body() dto: SynthesizeScenarioTtsDto,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    try {
+      const { audioBase64, mimeType } = await this.roadmapService.synthesizeScenarioTts(
+        dto.text,
+        dto.language,
+        dto.voice,
+      );
+
+      // If client explicitly requests JSON without audio, return JSON object
+      const acceptHeader = req.headers.accept || '';
+      if (acceptHeader.includes('application/json') && !acceptHeader.includes('audio/')) {
+        return res.status(200).json({ audioBase64, mimeType });
+      }
+
+      // Default: Stream binary audio buffer for direct browser audio playback
+      const audioBuffer = Buffer.from(audioBase64, 'base64');
+      res.set({
+        'Content-Type': mimeType || 'audio/wav',
+        'Content-Length': String(audioBuffer.length),
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=3600',
+      });
+      res.end(audioBuffer);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'TTS synthesis failed' });
+    }
   }
 
   // 8d. Public / Student: Stream Scenario Briefing Audio (with HTTP Range Streaming support)

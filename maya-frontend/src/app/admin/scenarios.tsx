@@ -329,28 +329,51 @@ export default function AdminScenariosScreen() {
       const baseUrl = getBackendBaseUrl();
       const res = await fetch(`${baseUrl}/v1/admin/roadmap/synthesize-tts`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'audio/wav, application/json;q=0.9',
+        },
         body: JSON.stringify({ text, language: lang }),
       });
-      if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      if (!res.ok) {
+        let errMessage = 'Failed to synthesize TTS';
+        try {
+          const errJson = await res.json();
+          errMessage = errJson.error || errJson.message || errMessage;
+        } catch {
+          errMessage = await res.text();
+        }
+        throw new Error(errMessage);
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+      let audioUrl = '';
+      if (contentType.includes('application/json')) {
+        const json = await res.json();
+        if (!json.audioBase64) throw new Error('No audio returned in response');
+        audioUrl = `data:${json.mimeType || 'audio/wav'};base64,${json.audioBase64}`;
+      } else {
+        const blob = await res.blob();
+        audioUrl = URL.createObjectURL(blob);
+      }
 
       if (previewAudioRef.current) {
         previewAudioRef.current.pause();
+        previewAudioRef.current = null;
       }
       if (typeof Audio !== 'undefined') {
-        const audio = new Audio(url);
+        const audio = new Audio(audioUrl);
         previewAudioRef.current = audio;
         setTtsAudioPlaying(lang);
-        audio.onended = () => {
+        const cleanup = () => {
           setTtsAudioPlaying(null);
           previewAudioRef.current = null;
+          if (audioUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(audioUrl);
+          }
         };
-        audio.onerror = () => {
-          setTtsAudioPlaying(null);
-          previewAudioRef.current = null;
-        };
+        audio.onended = cleanup;
+        audio.onerror = cleanup;
         await audio.play();
       }
     } catch (err: any) {

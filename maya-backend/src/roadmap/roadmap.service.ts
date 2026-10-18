@@ -15,7 +15,7 @@ import {
   UserRoadmapProgressEntity,
   RecordUserRoadmapProgressDto,
 } from './dto/user-roadmap-progress.dto.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 
 export interface RoadmapLevelEntity {
@@ -828,11 +828,40 @@ Core Conversation Rules:
       return { audioBase64: '', mimeType: 'audio/wav' };
     }
 
+    // Check content hash cache first (0ms if already generated or warmed up)
+    const contentHash = createHash('sha256')
+      .update(`${language}_${voice}_${cleanText}`)
+      .digest('hex')
+      .slice(0, 24);
+    const diskPath = path.join(this.audioCacheDir, `tts_${contentHash}.wav`);
+
+    if (this.briefingAudioCache.has(contentHash)) {
+      const buffer = this.briefingAudioCache.get(contentHash)!;
+      return {
+        audioBase64: buffer.toString('base64'),
+        mimeType: 'audio/wav',
+      };
+    }
+
+    if (fs.existsSync(diskPath)) {
+      try {
+        const buffer = fs.readFileSync(diskPath);
+        this.briefingAudioCache.set(contentHash, buffer);
+        return {
+          audioBase64: buffer.toString('base64'),
+          mimeType: 'audio/wav',
+        };
+      } catch (err: any) {
+        this.logger.debug(`Could not read disk cache for hash ${contentHash}: ${err?.message}`);
+      }
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error('GEMINI_API_KEY is not configured for TTS generation');
     }
 
+    this.logger.log(`[TTS Synthesis] Requesting Gemini TTS for voice=${voice}, lang=${language}...`);
     const ai = new GoogleGenAI({ apiKey });
     const interaction: any = await (ai as any).interactions.create({
       model: 'gemini-3.8-flash-lite-tts',
@@ -863,6 +892,17 @@ Core Conversation Rules:
     });
 
     const audioBase64 = interaction.output_audio?.data || '';
+    if (audioBase64) {
+      const audioBuffer = Buffer.from(audioBase64, 'base64');
+      this.briefingAudioCache.set(contentHash, audioBuffer);
+      try {
+        fs.writeFileSync(diskPath, audioBuffer);
+        this.logger.log(`[Disk Cache] Saved hash TTS audio: ${diskPath} (${audioBuffer.length} bytes)`);
+      } catch (err: any) {
+        this.logger.debug(`Could not write disk cache for hash ${contentHash}: ${err?.message}`);
+      }
+    }
+
     return {
       audioBase64,
       mimeType: 'audio/wav',
