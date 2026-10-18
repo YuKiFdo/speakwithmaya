@@ -110,33 +110,38 @@ interface UsageResponse {
   };
 }
 
-const SRI_LANKA_TZ = 'Asia/Colombo';
-
-function formatSriLankaDateTime(displayDate?: string, isoTimestamp?: string): string {
-  if (displayDate) return displayDate;
-  if (!isoTimestamp) return '—';
-  try {
-    const d = new Date(isoTimestamp);
-    if (isNaN(d.getTime())) return isoTimestamp.slice(0, 16);
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: SRI_LANKA_TZ,
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hourCycle: 'h23',
-    });
-    const parts = formatter.formatToParts(d);
-    const month = parts.find((p) => p.type === 'month')?.value || '';
-    const day = parts.find((p) => p.type === 'day')?.value || '';
-    const hour = parts.find((p) => p.type === 'hour')?.value || '00';
-    const minute = parts.find((p) => p.type === 'minute')?.value || '00';
-    const second = parts.find((p) => p.type === 'second')?.value || '00';
-    return `${month} ${day}, ${hour}:${minute}:${second}`;
-  } catch (e) {
-    return isoTimestamp.slice(0, 16);
+function formatClientDateTime(isoTimestamp?: string, fallbackDisplayDate?: string): string {
+  if (isoTimestamp) {
+    try {
+      let cleanIso = isoTimestamp.trim();
+      if (!cleanIso.endsWith('Z') && !cleanIso.match(/[+-]\d{2}(:?\d{2})?$/)) {
+        cleanIso = cleanIso.includes('T') ? `${cleanIso}Z` : `${cleanIso.replace(' ', 'T')}Z`;
+      }
+      const d = new Date(cleanIso);
+      if (!isNaN(d.getTime())) {
+        const formatter = new Intl.DateTimeFormat(undefined, {
+          month: 'short',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hourCycle: 'h23',
+        });
+        const parts = formatter.formatToParts(d);
+        const month = parts.find((p) => p.type === 'month')?.value || '';
+        const day = parts.find((p) => p.type === 'day')?.value || '';
+        const hour = parts.find((p) => p.type === 'hour')?.value || '00';
+        const minute = parts.find((p) => p.type === 'minute')?.value || '00';
+        const second = parts.find((p) => p.type === 'second')?.value || '00';
+        return `${month} ${day}, ${hour}:${minute}:${second}`;
+      }
+    } catch {
+      // Fall through to fallback below
+    }
   }
+  if (fallbackDisplayDate) return fallbackDisplayDate;
+  if (isoTimestamp) return isoTimestamp.slice(0, 16);
+  return '—';
 }
 
 // Sidebar Navigation Structure
@@ -852,7 +857,7 @@ export default function AdminUsageScreen() {
                 <View style={styles.tableInner}>
                   {/* Header Row */}
                   <View style={styles.tableHeaderRow}>
-                    <Text style={[styles.th, { width: 140 }]}>Time (SLST)</Text>
+                    <Text style={[styles.th, { width: 140 }]}>Date & Time (Local)</Text>
                     <Text style={[styles.th, { width: 150 }]}>User</Text>
                     <Text style={[styles.th, { width: 105 }]}>Session</Text>
                     <Text style={[styles.th, { width: 140 }]}>Language Mode</Text>
@@ -886,9 +891,8 @@ export default function AdminUsageScreen() {
                         key={row.id || idx}
                         style={[styles.tableDataRow, idx % 2 === 1 && styles.tableDataRowAlt]}
                       >
-                        {/* Timestamp */}
                         <Text style={[styles.td, { width: 140, color: '#64748b' }]}>
-                          {formatSriLankaDateTime(row.displayDate, row.timestamp)}
+                          {formatClientDateTime(row.timestamp, row.displayDate)}
                         </Text>
 
                         {/* User */}
@@ -1198,7 +1202,7 @@ export default function AdminUsageScreen() {
                     <Text style={styles.statusBadgeText}>Success</Text>
                   </View>
                 </View>
-                <Text style={styles.modalSub}>{formatSriLankaDateTime(activeSession?.displayDate, activeSession?.timestamp)} • {activeSession?.model}</Text>
+                <Text style={styles.modalSub}>{formatClientDateTime(activeSession?.timestamp, activeSession?.displayDate)} • {activeSession?.model}</Text>
               </View>
 
               <Pressable onPress={() => setActiveSession(null)} style={styles.modalCloseBtn}>
@@ -1370,7 +1374,7 @@ export default function AdminUsageScreen() {
                   </View>
                 </View>
                 <Text style={styles.modalSub}>
-                  ID: {activeLogsSession?.id} • {formatSriLankaDateTime(activeLogsSession?.displayDate, activeLogsSession?.timestamp)}
+                  ID: {activeLogsSession?.id} • {formatClientDateTime(activeLogsSession?.timestamp, activeLogsSession?.displayDate)}
                 </Text>
               </View>
 

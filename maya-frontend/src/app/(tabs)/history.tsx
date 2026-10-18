@@ -96,6 +96,17 @@ export interface HistorySession {
 }
 
 
+function parseIsoDateSafe(dateInput?: string | null): Date {
+  if (!dateInput) return new Date();
+  let clean = dateInput.trim();
+  if (!clean.endsWith('Z') && !clean.match(/[+-]\d{2}(:?\d{2})?$/)) {
+    if (clean.includes('T')) clean = `${clean}Z`;
+    else if (clean.includes(' ')) clean = `${clean.replace(' ', 'T')}Z`;
+  }
+  const d = new Date(clean);
+  return isNaN(d.getTime()) ? new Date(dateInput) : d;
+}
+
 // Helper to generate dynamic conversational speech amplitude envelope
 function generateSpeechEnvelopeBars(count = 42): number[] {
   const result: number[] = [];
@@ -513,7 +524,7 @@ export default function HistoryScreen() {
     fetchAllPracticeSessions().then((records) => {
       if (records && records.length > 0) {
         const converted: HistorySession[] = records.map((r, idx) => {
-          const d = new Date(r.start_time);
+          const d = parseIsoDateSafe(r.start_time);
           const durationMin = Math.max(1, Math.ceil((r.duration_seconds || 60) / 60));
           const durSecs = (r.duration_seconds || 0) % 60;
           const recordingLengthString = `${Math.floor((r.duration_seconds || 0) / 60)}:${durSecs < 10 ? '0' : ''}${durSecs}`;
@@ -533,7 +544,7 @@ export default function HistoryScreen() {
             } else if (isSameDay(d, yesterday)) {
               dateGroup = 'Yesterday';
             } else {
-              dateGroup = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+              dateGroup = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
             }
           }
 
@@ -636,9 +647,9 @@ export default function HistoryScreen() {
           const transcript: TranscriptTurn[] = turnsList.map((t, i) => {
             let turnTimeString = '';
             if (t.timestamp) {
-              const tDate = new Date(t.timestamp);
+              const tDate = parseIsoDateSafe(t.timestamp);
               if (!isNaN(tDate.getTime())) {
-                turnTimeString = tDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                turnTimeString = tDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
               }
             }
             if (!turnTimeString) {
@@ -664,7 +675,7 @@ export default function HistoryScreen() {
               transcript.push({
                 id: `turn-${r.id}-user-${idx}`,
                 speaker: 'user',
-                time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
+                time: !isNaN(d.getTime()) ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
                 message: c.originalText,
                 audioUrl: null,
                 correction: {
@@ -680,7 +691,7 @@ export default function HistoryScreen() {
               transcript.push({
                 id: `turn-${r.id}-ai-${idx}`,
                 speaker: 'ai',
-                time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
+                time: !isNaN(d.getTime()) ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
                 message: `Great speaking! Remember: ${c.whyExplanation}`,
                 audioUrl: null,
               });
@@ -692,7 +703,7 @@ export default function HistoryScreen() {
             transcript.push({
               id: `turn-${r.id}-0`,
               speaker: 'ai',
-              time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
+              time: !isNaN(d.getTime()) ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
               message: 'Practice session completed successfully.',
               audioUrl: null,
             });
@@ -712,10 +723,10 @@ export default function HistoryScreen() {
             dateGroup,
             dateString: isNaN(d.getTime())
               ? 'Today'
-              : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+              : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
             timeString: isNaN(d.getTime())
               ? 'Just now'
-              : d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+              : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
             durationString: `${durationMin} mins`,
             recordingLengthString,
             durationSeconds: r.duration_seconds || 60,
