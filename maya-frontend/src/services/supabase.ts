@@ -101,8 +101,9 @@ export async function persistSessionRecord(record: SessionHistoryRecord): Promis
     }
     await supabase.from('sessions').upsert(payload);
 
-    // 2. Insert turns if present
+    // 2. Insert turns if present (clean existing first to prevent duplicate entries)
     if (record.turns && record.turns.length > 0) {
+      await supabase.from('session_turns').delete().eq('session_id', record.id);
       const turnsData = record.turns.map((t, idx) => ({
         session_id: record.id,
         turn_order: idx + 1,
@@ -114,6 +115,7 @@ export async function persistSessionRecord(record: SessionHistoryRecord): Promis
 
     // 3. Insert grammar corrections if present
     if (record.corrections && record.corrections.length > 0) {
+      await supabase.from('grammar_corrections').delete().eq('session_id', record.id);
       const correctionsData = record.corrections.map((c) => ({
         session_id: record.id,
         student_said: c.studentSaid,

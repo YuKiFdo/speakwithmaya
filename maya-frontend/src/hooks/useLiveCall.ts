@@ -795,7 +795,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               if (currentModelTextRef.current.trim()) {
                 setPreviousSubtitles(sanitizeModelText(currentModelTextRef.current.trim()));
               }
-              if (currentUserTextRef.current.trim()) {
+              if (currentUserTextRef.current.trim() && userChunksSentRef.current > 0) {
                 const textToPush = currentUserTextRef.current.trim();
                 const lastTurn = turnsRef.current[turnsRef.current.length - 1];
                 if (!lastTurn || lastTurn.role !== 'user' || lastTurn.text !== textToPush) {
@@ -824,6 +824,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             setSubtitles(sanitizeModelText(currentModelTextRef.current));
           },
           onInputTranscript: (text) => {
+            // Guard against phantom transcripts (e.g. ASR carrier noise before student speaks or during opening greeting)
+            if (isFirstGreetingPendingRef.current || userChunksSentRef.current === 0) {
+              return;
+            }
             if (activeRoleRef.current !== 'user') {
               if (currentModelTextRef.current.trim()) {
                 const textToPush = sanitizeModelText(currentModelTextRef.current.trim());

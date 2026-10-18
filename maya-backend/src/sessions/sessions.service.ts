@@ -2419,12 +2419,27 @@ ${memoryPart}`;
     const hasModelAudio = filesSet.has('model_recording.wav');
     const hasTurnsFolder = filesSet.has('turns');
 
+    // Deduplicate consecutive identical turns (if historical duplicates exist in db)
+    const rawTurns = turns || [];
+    const dedupedTurns: any[] = [];
+    for (const t of (rawTurns as any[]).sort((a: any, b: any) => (a.turn_order || 0) - (b.turn_order || 0))) {
+      const prev = dedupedTurns[dedupedTurns.length - 1];
+      if (!prev || prev.role !== t.role || (prev.text_transcript || '').trim() !== (t.text_transcript || '').trim()) {
+        dedupedTurns.push(t);
+      }
+    }
+
     let userTurnCounter = 0;
     let modelTurnCounter = 0;
-    const mappedTurns = (turns || [])
-      .filter((t: any) => {
+    const mappedTurns = dedupedTurns
+      .filter((t: any, idx: number, arr: any[]) => {
         const txt = (t.text_transcript || '').trim();
-        return txt.length > 0 && txt !== '...' && txt !== '(untranscribed / audio speech)';
+        if (!txt || txt === '...' || txt === '(untranscribed / audio speech)') return false;
+        // Suppress phantom opening user turn artifact if it preceded model opening greeting
+        if (idx === 0 && t.role === 'user' && (txt === 'ඔව්.' || txt === 'ඔව්') && arr.length > 1 && arr[1]?.role === 'model') {
+          return false;
+        }
+        return true;
       })
       .map((t: any) => {
       let turnAudioUrl: string | null = null;
@@ -2568,13 +2583,27 @@ ${memoryPart}`;
         const hasModelAudio = filesSet ? filesSet.has('model_recording.wav') : Boolean(rec?.modelAudioUrl);
         const hasTurnsFolder = filesSet ? filesSet.has('turns') : false;
 
+        // Deduplicate consecutive identical turns (if historical duplicates exist in db)
+        const rawTurns = sess.session_turns || [];
+        const dedupedTurns: any[] = [];
+        for (const t of (rawTurns as any[]).sort((a: any, b: any) => (a.turn_order || 0) - (b.turn_order || 0))) {
+          const prev = dedupedTurns[dedupedTurns.length - 1];
+          if (!prev || prev.role !== t.role || (prev.text_transcript || '').trim() !== (t.text_transcript || '').trim()) {
+            dedupedTurns.push(t);
+          }
+        }
+
         let userTurnCounter = 0;
         let modelTurnCounter = 0;
-        const mappedTurns = (sess.session_turns || [])
-          .sort((a: any, b: any) => (a.turn_order || 0) - (b.turn_order || 0))
-          .filter((t: any) => {
+        const mappedTurns = dedupedTurns
+          .filter((t: any, idx: number, arr: any[]) => {
             const txt = (t.text_transcript || '').trim();
-            return txt.length > 0 && txt !== '...' && txt !== '(untranscribed / audio speech)';
+            if (!txt || txt === '...' || txt === '(untranscribed / audio speech)') return false;
+            // Suppress phantom opening user turn artifact if it preceded model opening greeting
+            if (idx === 0 && t.role === 'user' && (txt === 'ඔව්.' || txt === 'ඔව්') && arr.length > 1 && arr[1]?.role === 'model') {
+              return false;
+            }
+            return true;
           })
           .map((t: any) => {
             let turnAudioUrl: string | null = null;

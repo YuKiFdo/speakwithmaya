@@ -570,12 +570,22 @@ export default function HistoryScreen() {
 
           // Deduplicate consecutive identical turns (e.g. from historical duplicate events)
           const rawTurns = r.turns && r.turns.length > 0 ? r.turns : [];
-          const turnsList: Array<{ role: 'user' | 'model'; text: string; audioUrl?: string | null; timestamp?: string }> = [];
+          let turnsList: Array<{ role: 'user' | 'model'; text: string; audioUrl?: string | null; timestamp?: string }> = [];
           for (const t of rawTurns) {
             const prev = turnsList[turnsList.length - 1];
             if (!prev || prev.role !== t.role || prev.text.trim() !== t.text.trim()) {
               turnsList.push(t);
             }
+          }
+
+          // Filter out phantom opening Sinhala affirmative carrier artifact ("ඔව්.") before model greeting
+          if (
+            turnsList.length > 1 &&
+            turnsList[0].role === 'user' &&
+            (turnsList[0].text.trim() === 'ඔව්.' || turnsList[0].text.trim() === 'ඔව්') &&
+            (turnsList[1].role === 'model' || (turnsList[1] as any).role === 'ai')
+          ) {
+            turnsList = turnsList.slice(1);
           }
 
           // Pre-assign corrections using multi-pass matching

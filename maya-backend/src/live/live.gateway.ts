@@ -1118,14 +1118,20 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (serverContent?.inputTranscription?.text) {
-      const text = serverContent.inputTranscription.text;
-      state.userTranscriptAccumulator += text;
-      state.lastStudentTranscript += text;
-      this.logger.log(`[${state.sessionId}] 📝 [Student Said Chunk]: "${text}"`);
-      this.safeSendToClient(state, JSON.stringify({
-        type: 'input_transcript',
-        text,
-      }));
+      if (state.isGreetingInProgress) {
+        this.logger.debug(
+          `[${state.sessionId}] 🔇 Suppressing ASR artifact during opening greeting generation: "${serverContent.inputTranscription.text}"`
+        );
+      } else {
+        const text = serverContent.inputTranscription.text;
+        state.userTranscriptAccumulator += text;
+        state.lastStudentTranscript += text;
+        this.logger.log(`[${state.sessionId}] 📝 [Student Said Chunk]: "${text}"`);
+        this.safeSendToClient(state, JSON.stringify({
+          type: 'input_transcript',
+          text,
+        }));
+      }
     }
 
     // 3. Turn Complete
@@ -1147,12 +1153,13 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         } catch {}
       }
 
-      const userText = (state.userTranscriptAccumulator || state.lastStudentTranscript).trim();
       const modelText = this.cleanLiveTranscriptText(state.modelTranscriptAccumulator.trim());
-
-      // Diagnostic assessment specifically for the opening greeting turn
+      const isGreetingTurn = state.isGreetingInProgress;
       if (state.isGreetingInProgress) {
         state.isGreetingInProgress = false;
+        state.userTranscriptAccumulator = '';
+        state.lastStudentTranscript = '';
+        state.currentUserTurnAudioChunks = [];
         const totalGreetingDuration = state.greetingDispatchedAt ? Date.now() - state.greetingDispatchedAt : 0;
 
         if (state.greetingAudioChunksReceived > 0) {
@@ -1188,18 +1195,21 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
       }
 
+      const userText = isGreetingTurn ? '' : (state.userTranscriptAccumulator || state.lastStudentTranscript).trim();
+
       // Only print turn complete summary when the model actually responded or when user turn finished
       if (state.hasModelSpokenThisTurn || modelText) {
-
         this.logger.log(
           `[${state.sessionId}] 🤖 [Model Turn Complete]\n` +
-          `   🗣️ User Said: "${userText || '(untranscribed / audio speech)'}"\n` +
+          `   🗣️ User Said: "${userText || (isGreetingTurn ? '(opening greeting / model first)' : '(untranscribed / audio speech)')}"\n` +
           `   💬 Maya Replied: "${modelText || '(audio only)'}"`
         );
         this.addSessionLog(state, 'model_turn_complete', `user="${userText?.slice(0, 80)}" maya="${modelText?.slice(0, 80)}"`);
 
-        // Commit verified user turn audio for this exchange (only if student actually spoke words)
-        this.commitPendingUserTurnAudio(state);
+        // Commit verified user turn audio for this exchange (only if student actually spoke words and not greeting)
+        if (!isGreetingTurn) {
+          this.commitPendingUserTurnAudio(state);
+        }
         state.currentUserTurnAudioChunks = [];
 
         // Commit isolated model turn audio
