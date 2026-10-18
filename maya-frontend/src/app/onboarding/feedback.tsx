@@ -224,8 +224,23 @@ export default function SessionFeedbackScreen() {
     };
   }, []);
 
+  // Preload user turn audio elements in the background for instant 0ms playback
+  useEffect(() => {
+    if (items && items.length > 0 && typeof window !== 'undefined') {
+      items.forEach((item) => {
+        if (item.userAudioUrl && (item.userAudioUrl.startsWith('http://') || item.userAudioUrl.startsWith('https://'))) {
+          try {
+            const pre = new Audio();
+            pre.preload = 'auto';
+            pre.src = item.userAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+          } catch {}
+        }
+      });
+    }
+  }, [items]);
+
   // Helper promise to speak text using Callirrhoe voice with safety timeout
-  const speakAsCallirrhoePromise = (text: string, rate: number = 1.08): Promise<void> => {
+  const speakAsCallirrhoePromise = (text: string, rate: number = 1.0): Promise<void> => {
     return new Promise((resolve) => {
       let resolved = false;
       const safeResolve = () => {
@@ -237,7 +252,7 @@ export default function SessionFeedbackScreen() {
       };
 
       const wordCount = (text || '').split(/\s+/).filter(Boolean).length;
-      const maxWaitMs = Math.max(5000, wordCount * 650);
+      const maxWaitMs = Math.max(6000, wordCount * 800);
       const timeoutId = setTimeout(safeResolve, maxWaitMs);
 
       const ok = speakAsCallirrhoe(text, {
@@ -251,7 +266,7 @@ export default function SessionFeedbackScreen() {
     });
   };
 
-  // Helper promise to play user's recording or speech
+  // Helper promise to play user's recording or speech progressively with zero download freeze
   const playUserVoiceAudioPromise = (item: FeedbackItem): Promise<void> => {
     return new Promise((resolve) => {
       let resolved = false;
@@ -264,7 +279,7 @@ export default function SessionFeedbackScreen() {
       };
 
       const wordCount = (item.youSaid || '').split(/\s+/).filter(Boolean).length;
-      const maxWaitMs = Math.max(6000, wordCount * 900);
+      const maxWaitMs = Math.max(8000, wordCount * 1000);
       const timeoutId = setTimeout(safeResolve, maxWaitMs);
 
       const rawUrl = item.userAudioUrl || '';
@@ -276,53 +291,35 @@ export default function SessionFeedbackScreen() {
         (userAudioUrl.startsWith('http://') || userAudioUrl.startsWith('https://'));
 
       if (isPersistentRemoteAudio) {
-        (async () => {
-          let objectUrl = '';
-          try {
-            // Fetch audio with retry and cache-busting to ensure fresh audio
-            let res: Response | null = null;
-            const fetchUrl = `${userAudioUrl}${userAudioUrl.includes('?') ? '&' : '?'}_cb=${Date.now()}`;
-            for (let i = 0; i < 3; i++) {
-              try {
-                res = await fetch(fetchUrl);
-                if (res.ok) break;
-              } catch {}
-              await new Promise((r) => setTimeout(r, 350));
-            }
+        try {
+          const audio = new Audio(userAudioUrl);
+          audio.preload = 'auto';
+          activeAudioElementRef.current = audio;
 
-            if (!res || !res.ok) {
-              console.warn('[SessionFeedback] Could not load audio from Supabase:', userAudioUrl, res?.status);
-              safeResolve();
-              return;
-            }
-
-            const blob = await res.blob();
-            objectUrl = URL.createObjectURL(blob);
-            const audio = new Audio(objectUrl);
-            audio.preload = 'auto';
-            activeAudioElementRef.current = audio;
-
-            audio.onended = () => {
-              activeAudioElementRef.current = null;
-              if (objectUrl) URL.revokeObjectURL(objectUrl);
-              safeResolve();
-            };
-
-            audio.onerror = (e) => {
-              console.warn('[SessionFeedback] Audio playback error:', e);
-              activeAudioElementRef.current = null;
-              if (objectUrl) URL.revokeObjectURL(objectUrl);
-              safeResolve();
-            };
-
-            await audio.play();
-          } catch (err) {
-            console.warn('[SessionFeedback] Audio play error:', err);
+          audio.onended = () => {
             activeAudioElementRef.current = null;
-            if (objectUrl) URL.revokeObjectURL(objectUrl);
             safeResolve();
+          };
+
+          audio.onerror = (e) => {
+            console.warn('[SessionFeedback] Progressive audio stream error:', e);
+            activeAudioElementRef.current = null;
+            safeResolve();
+          };
+
+          const playPromise = audio.play();
+          if (playPromise !== undefined) {
+            playPromise.catch((err) => {
+              console.warn('[SessionFeedback] audio.play() rejected:', err);
+              activeAudioElementRef.current = null;
+              safeResolve();
+            });
           }
-        })();
+        } catch (err) {
+          console.warn('[SessionFeedback] Audio playback error:', err);
+          activeAudioElementRef.current = null;
+          safeResolve();
+        }
         return;
       }
 
@@ -352,7 +349,7 @@ export default function SessionFeedbackScreen() {
       : `${cleanTitle}. ${cleanSubtitle}`;
 
     setCurrentSpeakingCard('intro');
-    await speakAsCallirrhoePromise(introText, 1.08);
+    await speakAsCallirrhoePromise(introText, 1.0);
     if (isCancelled()) return;
 
     await new Promise((r) => setTimeout(r, 200));
@@ -360,7 +357,7 @@ export default function SessionFeedbackScreen() {
 
     // Step 2: Auto play user audio with spoken lead-in ("You said")
     setCurrentSpeakingCard('youSaid');
-    await speakAsCallirrhoePromise('You said', 1.08);
+    await speakAsCallirrhoePromise('You said', 1.0);
     if (isCancelled()) return;
 
     await new Promise((r) => setTimeout(r, 150));
@@ -379,7 +376,7 @@ export default function SessionFeedbackScreen() {
       ? 'A better way to say this is:'
       : 'A more natural way to say this is:';
     const betterWayNarration = `${leadInText} ${item.betterWay}`;
-    await speakAsCallirrhoePromise(betterWayNarration, 1.08);
+    await speakAsCallirrhoePromise(betterWayNarration, 1.0);
     if (isCancelled()) return;
 
     await new Promise((r) => setTimeout(r, 200));
@@ -387,7 +384,7 @@ export default function SessionFeedbackScreen() {
 
     // Step 4: Auto play explanation ("Why this is correct")
     setCurrentSpeakingCard('explanation');
-    await speakAsCallirrhoePromise(item.whyExplanation, 1.08);
+    await speakAsCallirrhoePromise(item.whyExplanation, 1.0);
     if (isCancelled()) return;
 
     setCurrentSpeakingCard(null);
@@ -408,7 +405,7 @@ export default function SessionFeedbackScreen() {
       ? `${cleanTitle} ${cleanSubtitle}`
       : `${cleanTitle}. ${cleanSubtitle}`;
 
-    speakAsCallirrhoePromise(introText, 1.08).finally(() => {
+    speakAsCallirrhoePromise(introText, 1.0).finally(() => {
       if (sequenceIdRef.current === seqId) {
         setCurrentSpeakingCard(null);
       }
@@ -423,12 +420,10 @@ export default function SessionFeedbackScreen() {
     stopActiveAudio();
     const seqId = ++sequenceIdRef.current;
     setCurrentSpeakingCard('youSaid');
-    speakAsCallirrhoePromise('You said', 1.08).then(async () => {
+    // Instantly play user audio without waiting for TTS lead-in on manual tap
+    playUserVoiceAudioPromise(currentItem).finally(() => {
       if (sequenceIdRef.current === seqId) {
-        await playUserVoiceAudioPromise(currentItem);
-        if (sequenceIdRef.current === seqId) {
-          setCurrentSpeakingCard(null);
-        }
+        setCurrentSpeakingCard(null);
       }
     });
   };
@@ -446,7 +441,7 @@ export default function SessionFeedbackScreen() {
       ? 'A better way to say this is:'
       : 'A more natural way to say this is:';
     const betterWayNarration = `${leadInText} ${currentItem.betterWay}`;
-    speakAsCallirrhoePromise(betterWayNarration, 1.08).finally(() => {
+    speakAsCallirrhoePromise(betterWayNarration, 1.0).finally(() => {
       if (sequenceIdRef.current === seqId) {
         setCurrentSpeakingCard(null);
       }
@@ -461,7 +456,7 @@ export default function SessionFeedbackScreen() {
     stopActiveAudio();
     const seqId = ++sequenceIdRef.current;
     setCurrentSpeakingCard('explanation');
-    speakAsCallirrhoePromise(currentItem.whyExplanation, 1.08).finally(() => {
+    speakAsCallirrhoePromise(currentItem.whyExplanation, 1.0).finally(() => {
       if (sequenceIdRef.current === seqId) {
         setCurrentSpeakingCard(null);
       }

@@ -3138,6 +3138,30 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
     return ids;
   }
 
+  private splitSpeechIntoSegments(text: string): Array<{ text: string; pauseMs: number }> {
+    const segments: Array<{ text: string; pauseMs: number }> = [];
+    // Split on sentence and major clause boundaries: . ! ? : ;
+    const re = /([^.!?:]+)([.!?:]+)?/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(text)) !== null) {
+      const content = (match[1] || '').trim();
+      const punct = (match[2] || '').trim();
+      if (content) {
+        let pauseMs = 0;
+        if (punct.includes('.') || punct.includes('!') || punct.includes('?')) {
+          pauseMs = 420; // 420ms natural breathing pause at full stop / exclamation / question
+        } else if (punct.includes(':') || punct.includes(';')) {
+          pauseMs = 320; // 320ms pause at colon / semicolon
+        }
+        segments.push({
+          text: punct ? `${content} ${punct}` : content,
+          pauseMs,
+        });
+      }
+    }
+    return segments.length > 0 ? segments : [{ text, pauseMs: 0 }];
+  }
+
   async generateTtsAudio(dto: SessionTtsDto): Promise<{ audioBase64: string; mimeType: string }> {
     const text = (dto.text || '').trim();
     if (!text) {
@@ -3153,42 +3177,63 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
       const ready = await this.initPiper();
       if (ready && this.piperSession && this.piperConfig) {
         const ortModule = await this.getOrtModule();
-        let phonemeIds: number[];
+        const sampleRate = this.piperConfig.audio?.sample_rate || 22050;
+        const segments = this.splitSpeechIntoSegments(text);
+        const floatSegments: Float32Array[] = [];
 
-        if (this.piperG2p === 'espeak-ng') {
-          // Use espeak-ng for proper phonemization (production path)
-          const espeakVoice = this.piperConfig.espeak?.voice || 'en-us';
-          const ipa = this.espeakTextToIpa(text, espeakVoice);
-          if (!ipa) {
-            this.logger.warn(`[PiperTTS] espeak-ng returned empty IPA for "${text}"`);
-            return { audioBase64: '', mimeType: 'audio/wav' };
+        for (let i = 0; i < segments.length; i++) {
+          const seg = segments[i];
+          let phonemeIds: number[] = [];
+
+          if (this.piperG2p === 'espeak-ng') {
+            const espeakVoice = this.piperConfig.espeak?.voice || 'en-us';
+            const ipa = this.espeakTextToIpa(seg.text, espeakVoice);
+            if (ipa) {
+              phonemeIds = this.ipaToPhonemeIds(ipa, this.piperConfig.phoneme_id_map);
+            }
+          } else if (this.piperG2p && typeof this.piperG2p === 'object') {
+            const encoded = this.piperG2p.encode(seg.text, this.piperConfig.phoneme_id_map, { language: 'en' });
+            phonemeIds = encoded.phonemeIds;
           }
-          phonemeIds = this.ipaToPhonemeIds(ipa, this.piperConfig.phoneme_id_map);
-        } else if (this.piperG2p && typeof this.piperG2p === 'object') {
-          // Fallback: @piper-plus/g2p (dev environment without espeak-ng)
-          const encoded = this.piperG2p.encode(text, this.piperConfig.phoneme_id_map, { language: 'en' });
-          phonemeIds = encoded.phonemeIds;
-        } else {
-          this.logger.warn(`[PiperTTS] No phonemizer available`);
-          return { audioBase64: '', mimeType: 'audio/wav' };
+
+          if (phonemeIds.length > 0) {
+            const feeds = {
+              input: new ortModule.Tensor('int64', new BigInt64Array(phonemeIds.map((id: number) => BigInt(id))), [1, phonemeIds.length]),
+              input_lengths: new ortModule.Tensor('int64', new BigInt64Array([BigInt(phonemeIds.length)]), [1]),
+              scales: new ortModule.Tensor('float32', new Float32Array([0.667, 1.0, 0.8]), [3]),
+            };
+
+            const result = await this.piperSession.run(feeds);
+            if (result?.output?.data) {
+              floatSegments.push(result.output.data);
+            }
+          }
+
+          // Insert natural acoustic silence pause after sentence full-stop or colon (skip after final segment)
+          if (i < segments.length - 1 && seg.pauseMs > 0) {
+            const silenceSamples = Math.round((sampleRate * seg.pauseMs) / 1000);
+            floatSegments.push(new Float32Array(silenceSamples));
+          }
         }
 
-        const feeds = {
-          input: new ortModule.Tensor('int64', new BigInt64Array(phonemeIds.map((id: number) => BigInt(id))), [1, phonemeIds.length]),
-          input_lengths: new ortModule.Tensor('int64', new BigInt64Array([BigInt(phonemeIds.length)]), [1]),
-          scales: new ortModule.Tensor('float32', new Float32Array([0.667, 0.95, 0.8]), [3]),
-        };
+        if (floatSegments.length > 0) {
+          const totalSamples = floatSegments.reduce((acc, arr) => acc + arr.length, 0);
+          const combinedFloat = new Float32Array(totalSamples);
+          let offset = 0;
+          for (const arr of floatSegments) {
+            combinedFloat.set(arr, offset);
+            offset += arr.length;
+          }
 
-        const result = await this.piperSession.run(feeds);
-        const sampleRate = this.piperConfig.audio?.sample_rate || 22050;
-        const pcmBuffer = this.float32ToPcm16Buffer(result.output.data);
-        const wavBase64 = this.pcmToWavBase64(pcmBuffer, sampleRate, 1);
-        const resObj = {
-          audioBase64: wavBase64,
-          mimeType: 'audio/wav',
-        };
-        this.ttsAudioCache.set(cacheKey, resObj);
-        return resObj;
+          const pcmBuffer = this.float32ToPcm16Buffer(combinedFloat);
+          const wavBase64 = this.pcmToWavBase64(pcmBuffer, sampleRate, 1);
+          const resObj = {
+            audioBase64: wavBase64,
+            mimeType: 'audio/wav',
+          };
+          this.ttsAudioCache.set(cacheKey, resObj);
+          return resObj;
+        }
       }
     } catch (piperErr: any) {
       this.logger.warn(`[PiperTTS] Synthesis failed for "${text}": ${piperErr?.message}`);

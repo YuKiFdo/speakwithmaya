@@ -12,6 +12,8 @@
  * - Zero external Google/Gemini API rate limits or quota consumption.
  */
 
+import { getBackendBaseUrl } from '@/hooks/useLiveCall';
+
 let activeAudioElement: HTMLAudioElement | null = null;
 const audioBlobCache = new Map<string, string>();
 
@@ -111,7 +113,7 @@ export function speakAsCallirrhoe(
   }
 
   // 2. Synthesize via self-hosted Backend Piper TTS
-  const backendBaseUrl = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+  const backendBaseUrl = getBackendBaseUrl();
   if (typeof window !== 'undefined') {
     fetch(`${backendBaseUrl}/v1/sessions/tts`, {
       method: 'POST',
