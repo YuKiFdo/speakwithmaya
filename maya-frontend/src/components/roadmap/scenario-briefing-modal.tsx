@@ -174,14 +174,16 @@ export function ScenarioBriefingModal({
     }
 
     const baseUrl = getBackendBaseUrl();
-    const streamUrl = `${baseUrl}/v1/roadmap/levels/${lvlId}/briefing-audio?lang=${lang}`;
+    const streamFallbackUrl = `${baseUrl}/v1/roadmap/levels/${lvlId}/briefing-audio?lang=${lang}`;
+    const directCdnUrl = lang === 'si' ? item?.audioUrlSinhala : item?.audioUrlEnglish;
+    const initialUrl = directCdnUrl && directCdnUrl.startsWith('http') ? directCdnUrl : streamFallbackUrl;
 
     setAudioLoading(true);
     setIsAudioPlaying(true);
     setHasAudioFinished(false);
 
     try {
-      const audio = new Audio(streamUrl);
+      const audio = new Audio(initialUrl);
       audioRef.current = audio;
 
       audio.oncanplay = () => {
@@ -195,6 +197,18 @@ export function ScenarioBriefingModal({
       };
 
       audio.onerror = (e) => {
+        // If direct CDN had an issue, fallback to backend streaming endpoint
+        if (audio.src === directCdnUrl && directCdnUrl !== streamFallbackUrl) {
+          console.log('[BriefingModal] CDN audio error, falling back to backend stream...');
+          audio.src = streamFallbackUrl;
+          audio.load();
+          audio.play().catch(() => {
+            setIsAudioPlaying(false);
+            setHasAudioFinished(true);
+            setAudioLoading(false);
+          });
+          return;
+        }
         console.warn('[BriefingModal] Audio streaming error, enabling roleplay button:', e);
         setIsAudioPlaying(false);
         setHasAudioFinished(true);

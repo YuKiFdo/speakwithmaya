@@ -89,12 +89,97 @@ export class RoadmapService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    await this.ensureStorageBucket();
     // Eagerly prewarm roadmap audio in background on server start
     setTimeout(() => {
       this.warmupAllLevelsAudio().catch((err) => {
         this.logger.warn(`[Audio Warmup] Failed during initial warmup: ${err?.message}`);
       });
     }, 2500);
+  }
+
+  private async ensureStorageBucket(): Promise<void> {
+    if (!this.supabase) return;
+    try {
+      const { data: buckets } = await this.supabase.storage.listBuckets();
+      if (!buckets?.find((b) => b.name === 'roadmap-audio')) {
+        await this.supabase.storage.createBucket('roadmap-audio', { public: true });
+        this.logger.log('Created Supabase storage bucket "roadmap-audio"');
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not verify/create roadmap-audio storage bucket: ${err?.message}`);
+    }
+  }
+
+  private async restoreAudioFromSupabase(
+    levelId: string,
+    lang: 'en' | 'si',
+    diskPath: string,
+  ): Promise<Buffer | null> {
+    if (!this.supabase) return null;
+    const cacheKey = `${levelId}_${lang}`;
+    try {
+      const { data, error } = await this.supabase.storage
+        .from('roadmap-audio')
+        .download(`${cacheKey}.wav`);
+      if (error || !data) return null;
+
+      const arrayBuffer = await data.arrayBuffer();
+      const audioBuffer = Buffer.from(arrayBuffer);
+      this.briefingAudioCache.set(cacheKey, audioBuffer);
+      try {
+        fs.writeFileSync(diskPath, audioBuffer);
+        this.logger.log(`[Supabase CDN Cache] Restored ${cacheKey}.wav from Supabase Storage (${audioBuffer.length} bytes)`);
+      } catch (err: any) {
+        this.logger.debug(`Could not write restored disk cache for ${cacheKey}: ${err?.message}`);
+      }
+      return audioBuffer;
+    } catch {
+      return null;
+    }
+  }
+
+  private async uploadAudioToSupabase(
+    levelId: string,
+    lang: 'en' | 'si',
+    audioBuffer: Buffer,
+  ): Promise<string | null> {
+    if (!this.supabase) return null;
+    const cacheKey = `${levelId}_${lang}`;
+    try {
+      const { error: uploadErr } = await this.supabase.storage
+        .from('roadmap-audio')
+        .upload(`${cacheKey}.wav`, audioBuffer, {
+          contentType: 'audio/wav',
+          upsert: true,
+        });
+
+      if (uploadErr) {
+        this.logger.warn(`[Supabase Storage] Upload error for ${cacheKey}: ${uploadErr.message}`);
+        return null;
+      }
+
+      const { data: pubData } = this.supabase.storage
+        .from('roadmap-audio')
+        .getPublicUrl(`${cacheKey}.wav`);
+      const publicUrl = pubData?.publicUrl || '';
+      this.logger.log(`[Supabase Storage] Uploaded ${cacheKey}.wav -> ${publicUrl}`);
+
+      // Update roadmap_levels row in Supabase
+      const updatePayload: Record<string, any> = {
+        [lang === 'si' ? 'audio_url_sinhala' : 'audio_url_english']: publicUrl,
+        updated_at: new Date().toISOString(),
+      };
+      await this.supabase
+        .from('roadmap_levels')
+        .update(updatePayload)
+        .eq('id', levelId);
+
+      return publicUrl;
+    } catch (err: any) {
+      this.logger.warn(`[Supabase Storage] Failed to upload ${cacheKey}: ${err?.message}`);
+      return null;
+    }
   }
 
   async warmupAllLevelsAudio(): Promise<void> {
@@ -105,7 +190,31 @@ export class RoadmapService implements OnModuleInit {
         for (const lang of ['en', 'si'] as const) {
           const cacheKey = `${lvl.id}_${lang}`;
           const diskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
-          if (!fs.existsSync(diskPath) && !this.inFlightSyntheses.has(cacheKey)) {
+          const existingUrl = lang === 'si' ? lvl.audioUrlSinhala : lvl.audioUrlEnglish;
+
+          // 1. If local disk has it, ensure it's synced to Supabase Storage
+          if (fs.existsSync(diskPath)) {
+            if (this.supabase && (!existingUrl || !existingUrl.trim())) {
+              try {
+                const audioBuffer = fs.readFileSync(diskPath);
+                await this.uploadAudioToSupabase(lvl.id, lang, audioBuffer);
+              } catch (e: any) {
+                this.logger.debug(`Could not sync existing disk audio to Supabase for ${cacheKey}: ${e?.message}`);
+              }
+            }
+            continue;
+          }
+
+          // 2. If not on disk, check if Supabase Storage already has it (zero cost restore)
+          if (this.supabase) {
+            const restored = await this.restoreAudioFromSupabase(lvl.id, lang, diskPath);
+            if (restored) {
+              continue;
+            }
+          }
+
+          // 3. Otherwise synthesize fresh
+          if (!this.inFlightSyntheses.has(cacheKey)) {
             this.logger.log(`[Audio Warmup] Pre-synthesizing ${lvl.title} (${lang})...`);
             await this.getBriefingAudio(lvl.id, lang).catch((e) => {
               this.logger.warn(`[Audio Warmup] Error pre-synthesizing ${lvl.id} (${lang}): ${e?.message}`);
@@ -119,15 +228,17 @@ export class RoadmapService implements OnModuleInit {
   }
 
   prewarmLevelAudio(levelId: string): void {
-    // Fire-and-forget background pre-warm for both English & Sinhala
+    // Fire-and-forget background pre-warm and upload to Supabase Storage
     for (const lang of ['en', 'si'] as const) {
       const cacheKey = `${levelId}_${lang}`;
+      this.briefingAudioCache.delete(cacheKey);
       const diskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
-      if (!fs.existsSync(diskPath) && !this.inFlightSyntheses.has(cacheKey)) {
-        this.getBriefingAudio(levelId, lang).catch((err) => {
-          this.logger.warn(`[Prewarm] Background audio synthesis failed for ${cacheKey}: ${err?.message}`);
-        });
-      }
+      try {
+        if (fs.existsSync(diskPath)) fs.unlinkSync(diskPath);
+      } catch {}
+      this.getBriefingAudio(levelId, lang).catch((err) => {
+        this.logger.warn(`[Prewarm] Background audio synthesis failed for ${cacheKey}: ${err?.message}`);
+      });
     }
   }
 
@@ -938,7 +1049,18 @@ Core Conversation Rules:
       }
     }
 
-    // 3. Deduplicate in-flight requests (share same Promise across concurrent calls)
+    // 3. Supabase Storage CDN Cache (restores across backend restarts / fresh containers)
+    if (this.supabase) {
+      const restoredBuffer = await this.restoreAudioFromSupabase(levelId, lang, diskPath);
+      if (restoredBuffer) {
+        return {
+          audioBuffer: restoredBuffer,
+          mimeType: 'audio/wav',
+        };
+      }
+    }
+
+    // 4. Deduplicate in-flight requests (share same Promise across concurrent calls)
     if (this.inFlightSyntheses.has(cacheKey)) {
       const audioBuffer = await this.inFlightSyntheses.get(cacheKey)!;
       return {
@@ -947,7 +1069,7 @@ Core Conversation Rules:
       };
     }
 
-    // 4. Synthesize with Gemini TTS and persist
+    // 5. Synthesize with Gemini TTS and persist
     const synthesisPromise = (async (): Promise<Buffer> => {
       const level = await this.getLevelById(levelId);
       let script = lang === 'si' ? level.ttsScriptSinhala : level.ttsScriptEnglish;
@@ -979,6 +1101,10 @@ Core Conversation Rules:
 
       // Save to memory
       this.briefingAudioCache.set(cacheKey, audioBuffer);
+
+      // Upload to Supabase Storage and update database row
+      await this.uploadAudioToSupabase(levelId, lang, audioBuffer);
+
       return audioBuffer;
     })();
 
