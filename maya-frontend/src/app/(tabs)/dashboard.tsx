@@ -31,7 +31,7 @@ import { CallSessionStore } from '@/services/store/call-session-store';
 import { authService } from '@/services/auth/auth-service';
 import { useUserStats } from '@/hooks/useUserStats';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
-import { useActiveConversation, ActiveConversationStore } from '@/services/store/active-conversation-store';
+import { useActiveConversation, ActiveConversationStore, isRoadmapOrIntroTopic } from '@/services/store/active-conversation-store';
 import { fetchAllPracticeSessions } from '@/services/supabase';
 
 interface ScenarioItem {
@@ -191,6 +191,20 @@ export default function DashboardScreen() {
 
   const activeConversation = useActiveConversation();
 
+  // Proactively clear any roadmap sessions if activeConversation happens to hold one
+  useEffect(() => {
+    if (
+      activeConversation &&
+      isRoadmapOrIntroTopic(
+        activeConversation.topic,
+        activeConversation.scenarioTitle,
+        activeConversation.scenarioId
+      )
+    ) {
+      ActiveConversationStore.clear();
+    }
+  }, [activeConversation]);
+
   // When user reaches dashboard, ensure database and store record this as their last active step
   useEffect(() => {
     OnboardingStore.setOnboardingCompleted();
@@ -203,20 +217,19 @@ export default function DashboardScreen() {
     fetchAllPracticeSessions().then((sessions) => {
       if (!mounted) return;
       if (sessions && sessions.length > 0) {
-        // Strictly ignore intro calls, onboarding calls, or assessments so the resume banner is NEVER shown for intro calls
-        const isIntro = (topic?: string | null) => {
-          if (!topic) return false;
-          const t = topic.toLowerCase();
-          return (
-            t.includes('intro') ||
-            t.includes('onboarding') ||
-            t.includes('assessment') ||
-            t.includes('placement') ||
-            t.includes('free trial')
+        // Strictly ignore intro calls, onboarding calls, or ANY roadmap curriculum sessions so the resume banner is NEVER shown for them
+        const isRoadmapOrIntroSession = (s: any) => {
+          if (!s) return false;
+          if (s.roadmap_level_id || s.roadmapLevelId || s.level_number || s.levelNumber) return true;
+          return isRoadmapOrIntroTopic(
+            s.topic,
+            s.scenario_title || s.scenarioTitle,
+            s.scenario_id || s.scenarioId,
+            s.roadmap_level_id || s.roadmapLevelId
           );
         };
 
-        const latest = sessions.find((s) => !isIntro(s.topic));
+        const latest = sessions.find((s) => !isRoadmapOrIntroSession(s));
         if (latest) {
           const scenario = resolveScenarioFromTopic(latest.topic);
           ActiveConversationStore.setActive({
@@ -229,7 +242,7 @@ export default function DashboardScreen() {
             durationSeconds: latest.duration_seconds,
           });
         } else {
-          // If the user only has an intro call or no regular sessions, keep clean "Start Talking" hero banner
+          // If the user only has roadmap milestones or intro calls, keep clean "Start Talking" hero banner
           ActiveConversationStore.clear();
         }
       } else {
@@ -428,7 +441,7 @@ export default function DashboardScreen() {
               ],
             ]}>
             <View style={[styles.heroLeft, isDesktop && styles.heroLeftDesktop]}>
-              {activeConversation ? (
+              {activeConversation && !isRoadmapOrIntroTopic(activeConversation.topic, activeConversation.scenarioTitle, activeConversation.scenarioId) ? (
                 <>
                   <View style={styles.resumePillRow}>
                     <View style={[styles.resumeScenarioPill, { backgroundColor: getScenarioDetails(activeConversation.scenarioId).iconBg }]}>

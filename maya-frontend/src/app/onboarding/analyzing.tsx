@@ -21,7 +21,7 @@ import {
 } from '@/services/sound/sound-service';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { getLatestSessionReport, setLatestFeedbackItems, getLatestFeedbackItems, FeedbackItem } from '@/utils/session-report-store';
-import { ActiveConversationStore } from '@/services/store/active-conversation-store';
+import { ActiveConversationStore, isRoadmapOrIntroTopic } from '@/services/store/active-conversation-store';
 import { warmUpSpeechVoices } from '@/utils/maya-voice-fallback';
 
 interface AnalysisStep {
@@ -316,9 +316,22 @@ export default function AnalyzingScreen() {
           (report as any)?.callParams?.isIntroCall === true ||
           params.isIntroCall === 'true';
 
+        const isRoadmap =
+          Boolean((report as any)?.roadmapLevelId) ||
+          Boolean((report as any)?.callParams?.roadmapLevelId) ||
+          Boolean((report as any)?.levelNumber) ||
+          Boolean((report as any)?.callParams?.levelNumber) ||
+          Boolean(params.roadmapLevelId) ||
+          isRoadmapOrIntroTopic(
+            report?.topic || (report as any)?.levelTitle,
+            (report as any)?.scenarioTitle,
+            (report as any)?.scenarioId,
+            (report as any)?.roadmapLevelId || (report as any)?.callParams?.roadmapLevelId
+          );
+
         if (res.ok) {
           const data = await res.json();
-          if (!isIntro && (data?.conversationSummary || data?.scenarioTitle)) {
+          if (!isIntro && !isRoadmap && (data?.conversationSummary || data?.scenarioTitle)) {
             ActiveConversationStore.setActive({
               sessionId: activeSessionId,
               scenarioId: data.scenarioId || (report as any)?.scenarioId || 'casual-chat',
@@ -329,6 +342,8 @@ export default function AnalyzingScreen() {
               lastPracticedAt: new Date().toISOString(),
               durationSeconds: report?.durationSeconds,
             });
+          } else if (isIntro || isRoadmap) {
+            ActiveConversationStore.clear();
           }
           if (data?.items && Array.isArray(data.items)) {
             const rawSupabaseUrl = data.userAudioUrl || '';

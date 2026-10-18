@@ -1626,6 +1626,7 @@ ${memoryPart}`;
 
     if (this.supabase && !isReconnect) {
       try {
+        const initialRoadmapLevelId = dto.roadmapLevelId;
         await this.supabase.from('sessions').insert({
           id: sessionId,
           user_id: resolvedUserId,
@@ -1633,6 +1634,7 @@ ${memoryPart}`;
           status: 'active',
           duration_seconds: 0,
           start_time: new Date().toISOString(),
+          ...(initialRoadmapLevelId ? { roadmap_level_id: initialRoadmapLevelId } : {}),
         });
         this.logger.log(`Created session ${sessionId} assigned to user ${resolvedUserId} in Supabase`);
       } catch (e: unknown) {
@@ -1754,6 +1756,7 @@ ${memoryPart}`;
           };
         }
 
+        const finalRoadmapLevelId = dto.roadmapLevelId || active?.roadmapLevelId;
         // 1. Ensure/update session status in sessions table
         await this.supabase
           .from('sessions')
@@ -1769,6 +1772,7 @@ ${memoryPart}`;
             fluency_score: scores?.fluency ?? 84,
             grammar_score: scores?.grammar ?? 82,
             pronunciation_score: scores?.pronunciation ?? 86,
+            ...(finalRoadmapLevelId ? { roadmap_level_id: finalRoadmapLevelId } : {}),
           }, { onConflict: 'id' });
 
         // 2. Persist full conversation turns in session_turns table & Supabase Storage conversation.json
@@ -2533,6 +2537,8 @@ ${memoryPart}`;
           user_feedback: sess.user_feedback ?? null,
           turns: mappedTurns,
           corrections: mappedCorrections,
+          roadmap_level_id: sess.roadmap_level_id || null,
+          level_number: sess.level_number || null,
         };
       });
     } catch (e: unknown) {

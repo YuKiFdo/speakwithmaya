@@ -46,6 +46,10 @@ export interface SessionHistoryRecord {
     timestamp?: string;
   }>;
   roadmap_level_id?: string;
+  roadmapLevelId?: string;
+  level_number?: number;
+  scenario_id?: string;
+  scenario_title?: string;
 }
 
 const getBackendBaseUrl = (): string => {
@@ -186,7 +190,11 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
             highlightWords: c.highlight_words || [],
             timestamp: c.created_at,
           })),
-          roadmap_level_id: s.roadmap_level_id,
+          roadmap_level_id: s.roadmap_level_id || s.roadmapLevelId,
+          roadmapLevelId: s.roadmap_level_id || s.roadmapLevelId,
+          level_number: s.level_number || s.levelNumber,
+          scenario_id: s.scenario_id || s.scenarioId,
+          scenario_title: s.scenario_title || s.scenarioTitle,
         }));
       }
     } catch (err) {

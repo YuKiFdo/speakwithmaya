@@ -33,14 +33,30 @@ function notify() {
   }
 }
 
-function isIntroTopic(topic?: string | null, scenarioTitle?: string | null, scenarioId?: string | null): boolean {
+export function isRoadmapOrIntroTopic(
+  topic?: string | null,
+  scenarioTitle?: string | null,
+  scenarioId?: string | null,
+  roadmapLevelId?: string | null,
+): boolean {
+  if (roadmapLevelId) return true;
   const t = ((topic || '') + ' ' + (scenarioTitle || '') + ' ' + (scenarioId || '')).toLowerCase();
   return (
     t.includes('intro') ||
     t.includes('onboarding') ||
     t.includes('assessment') ||
     t.includes('placement') ||
-    t.includes('free trial')
+    t.includes('free trial') ||
+    t.includes('roadmap') ||
+    t.includes('level') ||
+    t.includes('milestone') ||
+    t.includes('lvl-') ||
+    t.includes('lesson') ||
+    t.includes('hotel guest') ||
+    t.includes('crying friend') ||
+    t.includes('scholarship') ||
+    t.includes('strict interview') ||
+    t.includes('engineering director')
   );
 }
 
@@ -55,7 +71,7 @@ function loadInitialState(): ActiveConversationState | null {
         if (currentUserId && parsed.userId && parsed.userId !== currentUserId) {
           return null;
         }
-        if (isIntroTopic(parsed.topic, parsed.scenarioTitle, parsed.scenarioId)) {
+        if (isRoadmapOrIntroTopic(parsed.topic, parsed.scenarioTitle, parsed.scenarioId, parsed.roadmapLevelId)) {
           window.localStorage.removeItem(userKey);
           window.localStorage.removeItem(STORAGE_KEY);
           return null;
@@ -95,9 +111,9 @@ export const ActiveConversationStore = {
     return memoryState;
   },
 
-  setActive(conv: Partial<ActiveConversationState> & { scenarioId: string; scenarioTitle: string }) {
-    // Strictly do not create a resume card for intro calls or diagnostic onboarding calls
-    if (isIntroTopic(conv.topic, conv.scenarioTitle, conv.scenarioId)) {
+  setActive(conv: Partial<ActiveConversationState> & { scenarioId: string; scenarioTitle: string; roadmapLevelId?: string }) {
+    // Strictly do not create a resume card for intro calls, assessments, or ANY roadmap curriculum sessions
+    if (isRoadmapOrIntroTopic(conv.topic, conv.scenarioTitle, conv.scenarioId, conv.roadmapLevelId)) {
       return;
     }
 

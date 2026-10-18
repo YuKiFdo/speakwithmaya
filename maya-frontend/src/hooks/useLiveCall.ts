@@ -1430,6 +1430,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             sinhalaStyle: options.sinhalaStyle || 'balanced',
             hintsUsedCount: typeof options.hintsUsedCount === 'function' ? options.hintsUsedCount() : (options.hintsUsedCount ?? 0),
             isIntroCall: Boolean(options.isIntroCall),
+            roadmapLevelId: options.roadmapLevelId,
+            levelNumber: options.levelNumber,
           }),
         });
 

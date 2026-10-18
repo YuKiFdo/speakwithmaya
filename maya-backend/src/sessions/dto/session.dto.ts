@@ -245,6 +245,22 @@ export class FinishSessionDto {
 
   @IsOptional()
   isIntroCall?: boolean;
+
+  @IsOptional()
+  @IsString()
+  roadmapLevelId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  levelNumber?: number;
+
+  @IsOptional()
+  @IsString()
+  scenarioId?: string;
+
+  @IsOptional()
+  @IsString()
+  scenarioTitle?: string;
 }
 
 export class QueryUsageDto {

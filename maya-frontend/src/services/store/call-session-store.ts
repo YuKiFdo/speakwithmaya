@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { ActiveConversationStore } from './active-conversation-store';
+import { ActiveConversationStore, isRoadmapOrIntroTopic } from './active-conversation-store';
 
 export interface CallSessionConfig {
   topic?: string;
@@ -57,8 +57,13 @@ export const CallSessionStore = {
       isIntroCall: options?.isIntroCall ?? config.isIntroCall ?? false,
     };
 
-    if (activeSessionConfig.isIntroCall) {
-      // Intro calls are diagnostic onboarding assessments; do not create a resume card
+    if (
+      activeSessionConfig.isIntroCall ||
+      config.roadmapLevelId ||
+      config.levelNumber ||
+      isRoadmapOrIntroTopic(config.topic, config.scenarioTitle, config.scenarioId, config.roadmapLevelId)
+    ) {
+      // Intro calls and roadmap curriculum sessions must NEVER create or update a resume card in dashboard
       ActiveConversationStore.clear();
     } else if (config.scenarioId || config.scenarioTitle) {
       try {
@@ -66,6 +71,7 @@ export const CallSessionStore = {
           scenarioId: config.scenarioId || 'casual-chat',
           scenarioTitle: config.scenarioTitle || config.topic || 'Casual Chat',
           topic: config.topic || config.scenarioTitle || 'Casual Chat',
+          roadmapLevelId: config.roadmapLevelId,
         });
       } catch {}
     }
