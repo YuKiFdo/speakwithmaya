@@ -23,6 +23,7 @@ import {
   SimulateLevelTurnDto,
   GenerateScenarioPromptDto,
   SynthesizeScenarioTtsDto,
+  UploadScenarioAudioDto,
 } from './dto/roadmap.dto.js';
 import { RecordUserRoadmapProgressDto } from './dto/user-roadmap-progress.dto.js';
 import { AuthService } from '../auth/auth.service.js';
@@ -137,6 +138,13 @@ export class RoadmapController {
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'TTS synthesis failed' });
     }
+  }
+
+  // 8e. Admin: Upload Custom Pre-Recorded Audio WAV File
+  @Post('admin/roadmap/upload-audio')
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  async uploadScenarioAudio(@Body() dto: UploadScenarioAudioDto) {
+    return this.roadmapService.uploadScenarioAudio(dto);
   }
 
   // 8d. Public / Student: Stream Scenario Briefing Audio (with HTTP Range Streaming support)

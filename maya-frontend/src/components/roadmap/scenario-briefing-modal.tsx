@@ -371,7 +371,7 @@ export function ScenarioBriefingModal({
             {/* Header with Category Tag and Close Button */}
             <View style={styles.headerRow}>
               <Text style={styles.categoryTag} numberOfLines={1}>
-                {data.category}
+                {/* {data.category} */}
               </Text>
               
               <Pressable
@@ -414,15 +414,15 @@ export function ScenarioBriefingModal({
                   accessibilityLabel="Toggle voice briefing language"
                 >
                   <Ionicons
-                    name={audioLang === 'si' ? 'volume-high' : 'chatbubble-ellipses-outline'}
+                    name={'volume-high'}
                     size={17}
-                    color={audioLang === 'si' ? '#0057FF' : '#D97706'}
+                    color={'#0057FF'}
                     style={{ marginRight: 8 }}
                   />
                   <Text style={[styles.centerVoiceBtnText, audioLang === 'si' && styles.centerVoiceBtnTextSinhala]}>
                     {audioLang === 'en'
-                      ? '🇱🇰 සිංහලෙන් අහන්න (Listen in Sinhala)'
-                      : '🇬🇧 Listen in English (ඉංග්‍රීසියෙන් අහන්න)'}
+                      ? 'Listen in Sinhala'
+                      : 'Listen in English'}
                   </Text>
                 </Pressable>
               </View>
@@ -463,7 +463,7 @@ export function ScenarioBriefingModal({
                 <View style={styles.ctaButtonDisabled}>
                   <ActivityIndicator size="small" color="#94A3B8" style={{ marginRight: 10 }} />
                   <Text style={styles.ctaButtonTextDisabled}>
-                    {audioLoading ? '🔊 Preparing Maya’s voice...' : '🔊 Maya is briefing you...'}
+                    {audioLoading ? 'Preparing Maya’s voice...' : 'Maya is briefing you...'}
                   </Text>
                 </View>
               ) : (

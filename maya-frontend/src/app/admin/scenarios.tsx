@@ -138,6 +138,9 @@ export default function AdminScenariosScreen() {
   const [formPrompt, setFormPrompt] = useState('');
   const [formTtsEnglish, setFormTtsEnglish] = useState('');
   const [formTtsSinhala, setFormTtsSinhala] = useState('');
+  const [formAudioUrlEnglish, setFormAudioUrlEnglish] = useState('');
+  const [formAudioUrlSinhala, setFormAudioUrlSinhala] = useState('');
+  const [isUploadingAudio, setIsUploadingAudio] = useState<'en' | 'si' | null>(null);
   const [ttsAudioPlaying, setTtsAudioPlaying] = useState<'en' | 'si' | null>(null);
   const [isSynthesizingPreview, setIsSynthesizingPreview] = useState<'en' | 'si' | null>(null);
   const previewAudioRef = React.useRef<any>(null);
@@ -212,6 +215,8 @@ export default function AdminScenariosScreen() {
     setFormPrompt('');
     setFormTtsEnglish('');
     setFormTtsSinhala('');
+    setFormAudioUrlEnglish('');
+    setFormAudioUrlSinhala('');
 
     setIsEditorOpen(true);
   };
@@ -249,6 +254,8 @@ export default function AdminScenariosScreen() {
     setFormPrompt(item.scenarioPrompt || '');
     setFormTtsEnglish(item.ttsScriptEnglish || '');
     setFormTtsSinhala(item.ttsScriptSinhala || '');
+    setFormAudioUrlEnglish(item.audioUrlEnglish || '');
+    setFormAudioUrlSinhala(item.audioUrlSinhala || '');
 
     setIsEditorOpen(true);
   };
@@ -308,19 +315,139 @@ export default function AdminScenariosScreen() {
     }
   };
 
-  const handlePreviewTts = async (lang: 'en' | 'si') => {
-    const text = lang === 'en' ? formTtsEnglish.trim() : formTtsSinhala.trim();
-    if (!text) {
-      alert(`Please enter or generate the ${lang === 'en' ? 'English' : 'Sinhala'} speech script first.`);
-      return;
-    }
-
+  const handlePlayCustomAudio = async (url: string, lang: 'en' | 'si') => {
     if (ttsAudioPlaying === lang) {
       if (previewAudioRef.current) {
         previewAudioRef.current.pause();
         previewAudioRef.current = null;
       }
       setTtsAudioPlaying(null);
+      return;
+    }
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    if (typeof Audio !== 'undefined') {
+      const audio = new Audio(url);
+      previewAudioRef.current = audio;
+      setTtsAudioPlaying(lang);
+      const cleanup = () => {
+        setTtsAudioPlaying(null);
+        previewAudioRef.current = null;
+      };
+      audio.onended = cleanup;
+      audio.onerror = cleanup;
+      await audio.play();
+    }
+  };
+
+  const triggerUploadWav = (lang: 'en' | 'si') => {
+    if (typeof document === 'undefined') {
+      alert('Audio file upload is supported on web browsers.');
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.wav,audio/wav,audio/x-wav';
+    input.onchange = async (e: any) => {
+      const file = e.target?.files?.[0];
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.wav') && !file.type.includes('wav')) {
+        alert('Please select a valid .wav audio file.');
+        return;
+      }
+      await uploadWavFile(file, lang);
+    };
+    input.click();
+  };
+
+  const uploadWavFile = async (file: File, lang: 'en' | 'si') => {
+    setIsUploadingAudio(lang);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Data = (reader.result as string) || '';
+          const baseUrl = getBackendBaseUrl();
+          const res = await fetch(`${baseUrl}/v1/admin/roadmap/upload-audio`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              levelId: editingScenario?.id,
+              language: lang,
+              audioBase64: base64Data,
+              fileName: file.name,
+            }),
+          });
+          if (!res.ok) {
+            let errText = 'Upload failed';
+            try {
+              const errJson = await res.json();
+              errText = errJson.message || errJson.error || errText;
+            } catch {
+              errText = await res.text();
+            }
+            throw new Error(errText);
+          }
+          const data = await res.json();
+          if (lang === 'en') {
+            setFormAudioUrlEnglish(data.publicUrl);
+          } else {
+            setFormAudioUrlSinhala(data.publicUrl);
+          }
+          alert(`Successfully uploaded custom .wav file for ${lang === 'en' ? 'English' : 'Sinhala'}!`);
+        } catch (err: any) {
+          alert(`Upload error: ${err?.message || 'Failed to upload audio'}`);
+        } finally {
+          setIsUploadingAudio(null);
+        }
+      };
+      reader.onerror = () => {
+        alert('Failed to read the selected file.');
+        setIsUploadingAudio(null);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      alert(`File selection error: ${err?.message}`);
+      setIsUploadingAudio(null);
+    }
+  };
+
+  const handleRemoveCustomAudio = (lang: 'en' | 'si') => {
+    if (
+      confirm(
+        `Remove custom uploaded audio for ${lang === 'en' ? 'English' : 'Sinhala'} and revert back to auto-generated TTS?`
+      )
+    ) {
+      if (lang === 'en') {
+        setFormAudioUrlEnglish('');
+      } else {
+        setFormAudioUrlSinhala('');
+      }
+    }
+  };
+
+  const handlePreviewTts = async (lang: 'en' | 'si') => {
+    if (ttsAudioPlaying === lang) {
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+      setTtsAudioPlaying(null);
+      return;
+    }
+
+    // 1. If custom uploaded audio exists, play it directly
+    const customUrl = lang === 'si' ? formAudioUrlSinhala : formAudioUrlEnglish;
+    if (customUrl && customUrl.startsWith('http')) {
+      await handlePlayCustomAudio(customUrl, lang);
+      return;
+    }
+
+    const text = lang === 'en' ? formTtsEnglish.trim() : formTtsSinhala.trim();
+    if (!text) {
+      alert(`Please enter or generate the ${lang === 'en' ? 'English' : 'Sinhala'} speech script first.`);
       return;
     }
     // If editing existing scenario with unchanged script, play direct from Supabase Edge CDN instantly (0ms)
@@ -429,6 +556,8 @@ export default function AdminScenariosScreen() {
       openingLine: formOpeningLine.trim(),
       ttsScriptEnglish: formTtsEnglish.trim(),
       ttsScriptSinhala: formTtsSinhala.trim(),
+      audioUrlEnglish: formAudioUrlEnglish.trim(),
+      audioUrlSinhala: formAudioUrlSinhala.trim(),
       emotionTags: [formEmotion],
       isScenarioMode: true,
       passingScorePercent: Number(formPassingScore) || 70,
@@ -671,6 +800,18 @@ export default function AdminScenariosScreen() {
                             <Feather name="check-circle" size={12} color="#16a34a" style={{ marginRight: 4 }} />
                             <Text style={styles.tagText}>Pass: ≥{item.passingScorePercent || 70}%</Text>
                           </View>
+                          {(item.audioUrlEnglish || item.audioUrlSinhala) && (
+                            <View style={[styles.tagBadge, { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }]}>
+                              <Feather name="volume-2" size={12} color="#16a34a" style={{ marginRight: 4 }} />
+                              <Text style={[styles.tagText, { color: '#16a34a' }]}>
+                                {item.audioUrlEnglish && item.audioUrlSinhala
+                                  ? 'Custom WAV (EN+SI)'
+                                  : item.audioUrlEnglish
+                                  ? 'Custom WAV (EN)'
+                                  : 'Custom WAV (SI)'}
+                              </Text>
+                            </View>
+                          )}
                         </View>
 
                         <View style={styles.cardActions}>
@@ -1125,6 +1266,88 @@ export default function AdminScenariosScreen() {
                       multiline
                       numberOfLines={4}
                     />
+
+                    {/* Custom WAV Audio Option (if not using auto-generated TTS) */}
+                    {formAudioUrlEnglish ? (
+                      <View style={styles.customAudioCard}>
+                        <View style={styles.customAudioBadgeRow}>
+                          <View style={styles.customAudioBadge}>
+                            <Feather name="check-circle" size={13} color="#16a34a" />
+                            <Text style={styles.customAudioBadgeText}>Custom WAV Active</Text>
+                          </View>
+                          <Text style={styles.customAudioUrlText} numberOfLines={1}>
+                            {formAudioUrlEnglish.split('/').pop() || formAudioUrlEnglish}
+                          </Text>
+                        </View>
+                        <View style={styles.customAudioActionRow}>
+                          <Pressable
+                            onPress={() => handlePlayCustomAudio(formAudioUrlEnglish, 'en')}
+                            style={[
+                              styles.customAudioPlayBtn,
+                              ttsAudioPlaying === 'en' && styles.customAudioPlayBtnActive,
+                            ]}
+                          >
+                            <Feather
+                              name={ttsAudioPlaying === 'en' ? 'square' : 'play'}
+                              size={13}
+                              color={ttsAudioPlaying === 'en' ? '#ef4444' : '#0057FF'}
+                            />
+                            <Text
+                              style={[
+                                styles.customAudioPlayBtnText,
+                                ttsAudioPlaying === 'en' && { color: '#ef4444' },
+                              ]}
+                            >
+                              {ttsAudioPlaying === 'en' ? 'Stop' : 'Play Custom WAV'}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => triggerUploadWav('en')}
+                            disabled={isUploadingAudio === 'en'}
+                            style={styles.customAudioReplaceBtn}
+                          >
+                            {isUploadingAudio === 'en' ? (
+                              <ActivityIndicator size="small" color="#475569" />
+                            ) : (
+                              <Feather name="upload" size={13} color="#475569" />
+                            )}
+                            <Text style={styles.customAudioReplaceBtnText}>
+                              {isUploadingAudio === 'en' ? 'Uploading...' : 'Replace WAV'}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => handleRemoveCustomAudio('en')}
+                            style={styles.customAudioRemoveBtn}
+                          >
+                            <Feather name="trash-2" size={13} color="#ef4444" />
+                            <Text style={styles.customAudioRemoveBtnText}>Revert to Auto TTS</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={styles.uploadWavPromptRow}>
+                        <View style={{ flex: 1, minWidth: 200 }}>
+                          <Text style={styles.uploadWavTitle}>Prefer human pre-recorded voice?</Text>
+                          <Text style={styles.uploadWavHint}>
+                            Upload a custom English .wav audio file if you don't want auto-generated TTS.
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={() => triggerUploadWav('en')}
+                          disabled={isUploadingAudio === 'en'}
+                          style={styles.uploadWavBtn}
+                        >
+                          {isUploadingAudio === 'en' ? (
+                            <ActivityIndicator size="small" color="#0057FF" />
+                          ) : (
+                            <Feather name="upload-cloud" size={14} color="#0057FF" />
+                          )}
+                          <Text style={styles.uploadWavBtnText}>
+                            {isUploadingAudio === 'en' ? 'Uploading...' : 'Upload English .WAV'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    )}
                   </View>
 
                   {/* Sinhala Voice Briefing (සිංහල හඬ විස්තරය) */}
@@ -1176,6 +1399,88 @@ export default function AdminScenariosScreen() {
                       multiline
                       numberOfLines={4}
                     />
+
+                    {/* Custom WAV Audio Option (if not using auto-generated TTS) */}
+                    {formAudioUrlSinhala ? (
+                      <View style={styles.customAudioCard}>
+                        <View style={styles.customAudioBadgeRow}>
+                          <View style={styles.customAudioBadge}>
+                            <Feather name="check-circle" size={13} color="#16a34a" />
+                            <Text style={styles.customAudioBadgeText}>Custom Sinhala WAV Active</Text>
+                          </View>
+                          <Text style={styles.customAudioUrlText} numberOfLines={1}>
+                            {formAudioUrlSinhala.split('/').pop() || formAudioUrlSinhala}
+                          </Text>
+                        </View>
+                        <View style={styles.customAudioActionRow}>
+                          <Pressable
+                            onPress={() => handlePlayCustomAudio(formAudioUrlSinhala, 'si')}
+                            style={[
+                              styles.customAudioPlayBtn,
+                              ttsAudioPlaying === 'si' && styles.customAudioPlayBtnActive,
+                            ]}
+                          >
+                            <Feather
+                              name={ttsAudioPlaying === 'si' ? 'square' : 'play'}
+                              size={13}
+                              color={ttsAudioPlaying === 'si' ? '#ef4444' : '#0057FF'}
+                            />
+                            <Text
+                              style={[
+                                styles.customAudioPlayBtnText,
+                                ttsAudioPlaying === 'si' && { color: '#ef4444' },
+                              ]}
+                            >
+                              {ttsAudioPlaying === 'si' ? 'Stop' : 'Play Sinhala WAV'}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => triggerUploadWav('si')}
+                            disabled={isUploadingAudio === 'si'}
+                            style={styles.customAudioReplaceBtn}
+                          >
+                            {isUploadingAudio === 'si' ? (
+                              <ActivityIndicator size="small" color="#475569" />
+                            ) : (
+                              <Feather name="upload" size={13} color="#475569" />
+                            )}
+                            <Text style={styles.customAudioReplaceBtnText}>
+                              {isUploadingAudio === 'si' ? 'Uploading...' : 'Replace WAV'}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => handleRemoveCustomAudio('si')}
+                            style={styles.customAudioRemoveBtn}
+                          >
+                            <Feather name="trash-2" size={13} color="#ef4444" />
+                            <Text style={styles.customAudioRemoveBtnText}>Revert to Auto TTS</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={styles.uploadWavPromptRow}>
+                        <View style={{ flex: 1, minWidth: 200 }}>
+                          <Text style={styles.uploadWavTitle}>කලින් record කළ සිංහල හඬක් තිබේද?</Text>
+                          <Text style={styles.uploadWavHint}>
+                            Auto TTS වෙනුවට pre-recorded Sinhala .wav audio file එකක් upload කරන්න.
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={() => triggerUploadWav('si')}
+                          disabled={isUploadingAudio === 'si'}
+                          style={styles.uploadWavBtn}
+                        >
+                          {isUploadingAudio === 'si' ? (
+                            <ActivityIndicator size="small" color="#0057FF" />
+                          ) : (
+                            <Feather name="upload-cloud" size={14} color="#0057FF" />
+                          )}
+                          <Text style={styles.uploadWavBtnText}>
+                            {isUploadingAudio === 'si' ? 'Uploading...' : 'Upload Sinhala .WAV'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    )}
                   </View>
                 </View>
               )}
@@ -1937,5 +2242,142 @@ const styles = StyleSheet.create({
     fontSize: 13,
     ...fontStyle('inter', 'regular'),
     backgroundColor: '#ffffff',
+  },
+  uploadWavPromptRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderStyle: 'dashed',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  uploadWavTitle: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#334155',
+  },
+  uploadWavHint: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  uploadWavBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    gap: 6,
+  },
+  uploadWavBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#0057FF',
+  },
+  customAudioCard: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    gap: 8,
+  },
+  customAudioBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  customAudioBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0fdf4',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    gap: 4,
+  },
+  customAudioBadgeText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 11,
+    color: '#16a34a',
+  },
+  customAudioUrlText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#64748b',
+    flex: 1,
+    minWidth: 150,
+  },
+  customAudioActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  customAudioPlayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 6,
+  },
+  customAudioPlayBtnActive: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+  },
+  customAudioPlayBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 11,
+    color: '#0057FF',
+  },
+  customAudioReplaceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 4,
+  },
+  customAudioReplaceBtnText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#475569',
+  },
+  customAudioRemoveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff1f2',
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 4,
+  },
+  customAudioRemoveBtnText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#e11d48',
   },
 });

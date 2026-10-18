@@ -384,4 +384,22 @@ export class SynthesizeScenarioTtsDto {
   voice?: string = 'Callirrhoe';
 }
 
+export class UploadScenarioAudioDto {
+  @IsOptional()
+  @IsString()
+  levelId?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  language: 'en' | 'si';
+
+  @IsString()
+  @IsNotEmpty()
+  audioBase64: string;
+
+  @IsOptional()
+  @IsString()
+  fileName?: string;
+}
+
 

@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -8,6 +8,7 @@ import {
   ReorderItemDto,
   SimulateLevelTurnDto,
   GenerateScenarioPromptDto,
+  UploadScenarioAudioDto,
   parseCanonicalLessonContent,
   formatCanonicalLessonContent,
 } from './dto/roadmap.dto.js';
@@ -1193,5 +1194,81 @@ Core Conversation Rules:
     } finally {
       this.inFlightSyntheses.delete(cacheKey);
     }
+  }
+
+  async uploadScenarioAudio(
+    dto: UploadScenarioAudioDto,
+  ): Promise<{ publicUrl: string; fileName: string; sizeBytes: number }> {
+    const rawBase64 = (dto.audioBase64 || '').replace(/^data:audio\/[^;]+;base64,/, '').trim();
+    if (!rawBase64) {
+      throw new BadRequestException('No audio data provided');
+    }
+
+    const audioBuffer = Buffer.from(rawBase64, 'base64');
+    if (audioBuffer.length < 100) {
+      throw new BadRequestException('Audio file is empty or corrupted');
+    }
+
+    const lang = dto.language === 'si' ? 'si' : 'en';
+    const cleanLevelId = (dto.levelId || '').trim();
+    const storageFileName = cleanLevelId
+      ? `${cleanLevelId}_${lang}.wav`
+      : `custom_${Date.now()}_${lang}.wav`;
+
+    // 1. Save to local disk cache and memory cache if levelId is specified
+    if (cleanLevelId) {
+      const cacheKey = `${cleanLevelId}_${lang}`;
+      this.briefingAudioCache.set(cacheKey, audioBuffer);
+      const diskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
+      try {
+        fs.writeFileSync(diskPath, audioBuffer);
+        this.logger.log(`[Disk Cache] Saved custom uploaded audio: ${diskPath} (${audioBuffer.length} bytes)`);
+      } catch (err: any) {
+        this.logger.warn(`Could not save disk cache for custom audio: ${err?.message}`);
+      }
+    }
+
+    // 2. Upload to Supabase Storage bucket roadmap-audio
+    let publicUrl = '';
+    if (this.supabase) {
+      await this.ensureStorageBucket();
+      const { error: uploadErr } = await this.supabase.storage
+        .from('roadmap-audio')
+        .upload(storageFileName, audioBuffer, {
+          contentType: 'audio/wav',
+          upsert: true,
+        });
+
+      if (uploadErr) {
+        this.logger.warn(`[Supabase Storage] Custom audio upload error: ${uploadErr.message}`);
+        throw new Error(`Supabase Storage upload failed: ${uploadErr.message}`);
+      }
+
+      const { data: pubData } = this.supabase.storage
+        .from('roadmap-audio')
+        .getPublicUrl(storageFileName);
+      publicUrl = pubData?.publicUrl || '';
+      this.logger.log(`[Supabase Storage] Custom audio uploaded successfully -> ${publicUrl}`);
+
+      // If levelId exists in database, also update the row
+      if (cleanLevelId) {
+        const updatePayload: Record<string, any> = {
+          [lang === 'si' ? 'audio_url_sinhala' : 'audio_url_english']: publicUrl,
+          updated_at: new Date().toISOString(),
+        };
+        await this.supabase
+          .from('roadmap_levels')
+          .update(updatePayload)
+          .eq('id', cleanLevelId);
+      }
+    } else {
+      publicUrl = `/v1/roadmap/levels/${cleanLevelId || 'custom'}/briefing-audio?lang=${lang}`;
+    }
+
+    return {
+      publicUrl,
+      fileName: storageFileName,
+      sizeBytes: audioBuffer.length,
+    };
   }
 }

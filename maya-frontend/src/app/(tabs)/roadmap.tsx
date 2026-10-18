@@ -644,7 +644,11 @@ export default function RoadmapScreen() {
           {/* ROADMAP TRACK & MILESTONES */}
           {/* ==================================================================== */}
           {isLoadingLevels ? (
-            <RoadmapTrackSkeleton isDesktop={isDesktop} />
+            <RoadmapTrackSkeleton
+              isDesktop={isDesktop}
+              trackWidth={trackWidth}
+              mobileWidth={mobileWidth}
+            />
           ) : milestones.length === 0 ? (
             <View style={styles.roadmapStatusCard}>
               <View style={styles.roadmapEmptyIconWrapper}>
