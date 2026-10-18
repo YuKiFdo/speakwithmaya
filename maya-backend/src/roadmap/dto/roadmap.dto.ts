@@ -104,6 +104,10 @@ export class CreateRoadmapLevelDto {
   xpReward?: number = 100;
 
   @IsOptional()
+  @IsNumber()
+  targetDurationMinutes?: number = 6;
+
+  @IsOptional()
   @IsString()
   scenarioPrompt?: string;
 
@@ -127,6 +131,22 @@ export class CreateRoadmapLevelDto {
   @IsOptional()
   @IsBoolean()
   isScenarioMode?: boolean = true;
+
+  @IsOptional()
+  @IsString()
+  userRole?: string = '';
+
+  @IsOptional()
+  @IsString()
+  mayaRole?: string = '';
+
+  @IsOptional()
+  @IsString()
+  goalTitle?: string = '';
+
+  @IsOptional()
+  @IsString()
+  goalDescription?: string = '';
 
   @IsOptional()
   @IsBoolean()
@@ -166,6 +186,10 @@ export class UpdateRoadmapLevelDto {
   @IsOptional()
   @IsNumber()
   xpReward?: number;
+
+  @IsOptional()
+  @IsNumber()
+  targetDurationMinutes?: number;
 
   @IsOptional()
   @IsString()
@@ -215,6 +239,22 @@ export class UpdateRoadmapLevelDto {
   @IsOptional()
   @IsBoolean()
   isScenarioMode?: boolean;
+
+  @IsOptional()
+  @IsString()
+  userRole?: string;
+
+  @IsOptional()
+  @IsString()
+  mayaRole?: string;
+
+  @IsOptional()
+  @IsString()
+  goalTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  goalDescription?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -267,4 +307,35 @@ export class SimulateLevelTurnDto {
   @IsArray()
   history?: Array<{ role: 'user' | 'model'; text: string }>;
 }
+
+export class GenerateScenarioPromptDto {
+  @IsString()
+  @IsNotEmpty()
+  title: string;
+
+  @IsOptional()
+  @IsString()
+  topic?: string;
+
+  @IsOptional()
+  @IsString()
+  briefing?: string;
+
+  @IsOptional()
+  @IsString()
+  userRole?: string;
+
+  @IsOptional()
+  @IsString()
+  mayaRole?: string;
+
+  @IsOptional()
+  @IsString()
+  goalTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  goalDescription?: string;
+}
+
 

@@ -40,6 +40,7 @@ import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { RoadmapTrackSkeleton } from '@/components/ui/skeleton';
 import { MissionCardModal } from '@/components/roadmap/mission-card-modal';
+import { ScenarioBriefingModal } from '@/components/roadmap/scenario-briefing-modal';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { CallSessionStore } from '@/services/store/call-session-store';
 import { useUserStats } from '@/hooks/useUserStats';
@@ -54,6 +55,7 @@ export interface MilestoneItem {
   levelNumber: number;
   number: string;
   title: string;
+  description?: string;
   sessionTime: string;
   xpReward: number;
   status: 'completed' | 'in-progress' | 'locked';
@@ -74,6 +76,10 @@ export interface MilestoneItem {
   openingLine?: string;
   scenarioBriefing?: string;
   emotionTags?: string[];
+  userRole?: string;
+  mayaRole?: string;
+  goalTitle?: string;
+  goalDescription?: string;
   isScenarioMode?: boolean;
 }
 
@@ -213,6 +219,7 @@ export default function RoadmapScreen() {
           levelNumber: levelNum,
           number: String(levelNum).padStart(2, '0'),
           title: lvl.title,
+          description: lvl.description || lvl.scenario_briefing || '',
           sessionTime: `Session time · ${durationMins} min`,
           xpReward: lvl.xpReward || 50 + idx * 25,
           status,
@@ -232,6 +239,10 @@ export default function RoadmapScreen() {
           openingLine: lvl.opening_line || lvl.openingLine || '',
           scenarioBriefing: lvl.scenario_briefing || lvl.scenarioBriefing || lvl.description || '',
           emotionTags: lvl.emotion_tags || lvl.emotionTags || ['neutral'],
+          userRole: lvl.user_role || lvl.userRole || '',
+          mayaRole: lvl.maya_role || lvl.mayaRole || '',
+          goalTitle: lvl.goal_title || lvl.goalTitle || '',
+          goalDescription: lvl.goal_description || lvl.goalDescription || '',
           isScenarioMode: lvl.is_scenario_mode ?? lvl.isScenarioMode ?? true,
         };
       });
@@ -519,6 +530,10 @@ export default function RoadmapScreen() {
       openingLine: item.openingLine,
       scenarioBriefing: item.scenarioBriefing,
       emotionTags: item.emotionTags,
+      userRole: item.userRole,
+      mayaRole: item.mayaRole,
+      goalTitle: item.goalTitle,
+      goalDescription: item.goalDescription,
       practicePoints: item.practicePoints || [],
       canonicalContent: item.canonicalContent || '',
       passingScorePercent: item.passingScorePercent || 70,
@@ -1081,33 +1096,13 @@ export default function RoadmapScreen() {
         />
 
         {/* ==================================================================== */}
-        {/* MISSION CARD PREVIEW MODAL */}
+        {/* ROLEPLAY BRIEFING PREVIEW MODAL (ROADMAP POPUP BEFORE FULLSCREEN) */}
         {/* ==================================================================== */}
-        <MissionCardModal
+        <ScenarioBriefingModal
           visible={selectedMission !== null}
           item={selectedMission}
-          userName={displayName}
-          nextItem={
-            selectedMission
-              ? milestones.find(
-                  (m) =>
-                    (m.levelNumber ?? 0) === (selectedMission.levelNumber ?? 0) + 1 &&
-                    m.status !== 'locked',
-                ) || null
-              : null
-          }
           onClose={() => setSelectedMission(null)}
-          onStartPractice={handleStartMission}
-          onNextLevel={(next) => {
-            setSelectedMission(null);
-            setTimeout(() => {
-              setSelectedMission(next);
-            }, 100);
-          }}
-          onViewHistory={() => {
-            setSelectedMission(null);
-            router.push({ pathname: '/history', params });
-          }}
+          onStartRoleplay={handleStartMission}
         />
       </View>
     </SafeAreaView>

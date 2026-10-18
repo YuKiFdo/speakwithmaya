@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS public.roadmap_levels (
   scenario_briefing TEXT DEFAULT '',
   emotion_tags TEXT[] DEFAULT '{"neutral"}',
   is_scenario_mode BOOLEAN DEFAULT true,
+  user_role TEXT DEFAULT '',
+  maya_role TEXT DEFAULT '',
+  goal_title TEXT DEFAULT '',
+  goal_description TEXT DEFAULT '',
   is_published BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -44,6 +48,10 @@ ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS opening_line TEXT DEF
 ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS scenario_briefing TEXT DEFAULT '';
 ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS emotion_tags TEXT[] DEFAULT '{"neutral"}';
 ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS is_scenario_mode BOOLEAN DEFAULT true;
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS user_role TEXT DEFAULT '';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS maya_role TEXT DEFAULT '';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS goal_title TEXT DEFAULT '';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS goal_description TEXT DEFAULT '';
 
 -- Enable Row Level Security
 ALTER TABLE public.roadmap_levels ENABLE ROW LEVEL SECURITY;

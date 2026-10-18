@@ -70,6 +70,10 @@ export default function CallScreen() {
     openingMode?: string;
     openingLine?: string;
     scenarioBriefing?: string;
+    userRole?: string;
+    mayaRole?: string;
+    goalTitle?: string;
+    goalDescription?: string;
   }>();
 
   const storeConfig = CallSessionStore.getConfig();
@@ -120,6 +124,10 @@ export default function CallScreen() {
   const effectiveOpeningLine = storeConfig?.openingLine || params.openingLine;
   const effectiveScenarioBriefing = storeConfig?.scenarioBriefing || params.scenarioBriefing;
   const effectiveEmotionTags = storeConfig?.emotionTags;
+  const effectiveUserRole = storeConfig?.userRole || params.userRole;
+  const effectiveMayaRole = storeConfig?.mayaRole || params.mayaRole;
+  const effectiveGoalTitle = storeConfig?.goalTitle || params.goalTitle;
+  const effectiveGoalDescription = storeConfig?.goalDescription || params.goalDescription;
   const effectiveTargetSpeakingShare = storeConfig?.targetSpeakingShare ?? (params.targetSpeakingShare ? parseInt(params.targetSpeakingShare, 10) : 40);
 
   // Core Gemini Live Audio & Call Engine
@@ -147,6 +155,10 @@ export default function CallScreen() {
     openingLine: effectiveOpeningLine,
     scenarioBriefing: effectiveScenarioBriefing,
     emotionTags: effectiveEmotionTags,
+    userRole: effectiveUserRole,
+    mayaRole: effectiveMayaRole,
+    goalTitle: effectiveGoalTitle,
+    goalDescription: effectiveGoalDescription,
     targetSpeakingShare: effectiveTargetSpeakingShare,
     hintsUsedCount: () => hintsHistoryRef.current.length,
   });

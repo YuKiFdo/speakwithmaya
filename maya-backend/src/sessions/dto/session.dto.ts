@@ -103,6 +103,22 @@ export class CreateSessionTokenDto {
   @IsArray()
   @IsString({ each: true })
   emotionTags?: string[];
+
+  @IsOptional()
+  @IsString()
+  userRole?: string;
+
+  @IsOptional()
+  @IsString()
+  mayaRole?: string;
+
+  @IsOptional()
+  @IsString()
+  goalTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  goalDescription?: string;
 }
 
 

@@ -9,12 +9,10 @@ import {
   Modal,
   ActivityIndicator,
   useWindowDimensions,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Feather, Ionicons } from '@expo/vector-icons';
-import { SvgXml } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { useUserStats } from '@/hooks/useUserStats';
@@ -23,15 +21,6 @@ import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
-import { adaptSvgColor } from '@/app/admin/roadmap';
-import {
-  RoadmapRobotIcon,
-  RoadmapChatIcon,
-  RoadmapFamilyIcon,
-  RoadmapHomeIcon,
-  RoadmapWaveIcon,
-  RoadmapDirectionsIcon,
-} from '@/components/icons/roadmap-icons';
 
 export interface ScenarioItem {
   id: string;
@@ -40,6 +29,7 @@ export interface ScenarioItem {
   description: string;
   topic: string;
   xpReward: number;
+  targetDurationMinutes?: number;
   iconType: 'robot' | 'chat' | 'family' | 'home' | 'wave' | 'directions';
   numberColor: string;
   haloColor: string;
@@ -55,21 +45,13 @@ export interface ScenarioItem {
   scenarioBriefing?: string;
   emotionTags?: string[];
   isScenarioMode?: boolean;
+  userRole?: string;
+  mayaRole?: string;
+  goalTitle?: string;
+  goalDescription?: string;
   isPublished: boolean;
   createdAt?: string;
   updatedAt?: string;
-}
-
-interface SimulatorMessage {
-  id: string;
-  sender: 'maya' | 'user';
-  text: string;
-  wordCount?: number;
-  correction?: {
-    studentSaid?: string;
-    moreNatural?: string;
-    explanation?: string;
-  };
 }
 
 const COLOR_THEMES = [
@@ -81,6 +63,8 @@ const COLOR_THEMES = [
   { name: 'Indigo', numberColor: '#4F46E5', haloColor: '#EEF2FF', haloBorderColor: '#C7D2FE' },
 ];
 
+const PLACEHOLDER_COLOR = 'rgba(148, 163, 184, 0.45)';
+
 const EMOTION_BADGES: Record<string, { label: string; bg: string; text: string; icon: string }> = {
   angry: { label: 'Angry / Frustrated', bg: '#fef2f2', text: '#ef4444', icon: 'zap' },
   crying: { label: 'Crying / Emotional', bg: '#eff6ff', text: '#3b82f6', icon: 'cloud-rain' },
@@ -90,120 +74,52 @@ const EMOTION_BADGES: Record<string, { label: string; bg: string; text: string; 
   neutral: { label: 'Balanced / Coaching', bg: '#f1f5f9', text: '#64748b', icon: 'message-circle' },
 };
 
-const SCENARIO_PRESETS = [
+const OPENING_MODES = [
   {
-    id: 'angry-customer',
-    title: 'Angry Hotel Guest',
-    emotion: 'angry',
-    category: 'Hospitality & Conflict',
-    briefing: 'A guest booked an ocean-view suite, but their room was given away. Calm them down without getting defensive.',
-    openingMode: 'maya_explains_first' as const,
-    openingLine: 'Excuse me! I have been standing at this reception desk for 30 minutes and no one is helping me!',
-    prompt: `You are Maya playing the role of Mrs. Perera, an angry and impatient customer at a luxury hotel.
-Scenario Setting: You reserved an ocean-view suite two months ago for your anniversary. The front desk just told you the room is occupied and offered a standard room without refund.
-Emotional State: Highly irritated, sharp tone, speaking quickly, easily offended by excuses.
-Conversation Rules:
-1. Speak strictly in character in natural English.
-2. If the student makes defensive excuses or blames "the system", get more frustrated and demand to speak to the general manager.
-3. If the student listens with genuine empathy, apologizes sincerely, and offers a tangible solution (e.g. complimentary executive upgrade, dinner voucher, or partial refund), gradually soften your tone and accept.
-4. Keep each spoken turn strictly under 15-20 words.`,
+    id: 'maya_explains_first' as const,
+    title: '🎙️ Maya explains setup, then starts roleplay',
+    desc: 'Maya welcomes user, states the scenario in 1 sentence, then speaks in character.',
   },
   {
-    id: 'crying-friend',
-    title: 'Comforting a Crying Friend',
-    emotion: 'crying',
-    category: 'Empathy & Relationships',
-    briefing: 'Your close friend Sarah had her dream scholarship cancelled. Listen actively, offer comfort, and reassure her.',
-    openingMode: 'maya_explains_first' as const,
-    openingLine: 'Hey... I just got the email. They cancelled my master scholarship... I don’t know what to do.',
-    prompt: `You are Maya playing the role of {{userName}}'s close friend, Sarah.
-Scenario Setting: You just received a rejection email stating your international scholarship funding was revoked. You called {{userName}} in deep distress.
-Emotional State: Heartbroken, voice shaking, sniffling between sentences, feeling like giving up.
-Conversation Rules:
-1. Speak softly, sounding tearful, vulnerable, and overwhelmed.
-2. If the student gives cold or dismissive advice, sound hurt and close off.
-3. If the student speaks with warm empathy, validates your feelings, and offers to help you explore alternative options, feel comforted and thank them.
-4. Keep each spoken turn under 15-20 words.`,
+    id: 'maya_in_character' as const,
+    title: '⚡ Maya starts straight in character',
+    desc: 'Maya immediately begins in role with zero introduction (immersive).',
   },
   {
-    id: 'strict-interview',
-    title: 'Tough Job Interview',
-    emotion: 'strict',
-    category: 'Career & Professional',
-    briefing: 'A skeptical engineering director doubts your background. Defend your experience with concrete, structured examples.',
-    openingMode: 'maya_in_character' as const,
-    openingLine: 'Welcome. I reviewed your resume, but frankly, your leadership background seems quite thin for this role. Convince me otherwise.',
-    prompt: `You are Maya playing the role of Mr. David, a demanding, skeptical Senior Engineering Director.
-Scenario Setting: You are conducting a final-round behavioral interview. You want to see if the candidate handles pressure well.
-Emotional State: Direct, no-nonsense, probing, skeptical, highly analytical.
-Conversation Rules:
-1. Ask tough, direct follow-up questions. Push back if their answers are vague or buzzword-heavy: say "Can you give me a specific real-world example of that?"
-2. If the candidate answers with the STAR method (Situation, Task, Action, Result) confidently, acknowledge their competence.
-3. Keep spoken replies crisp and under 15-20 words.`,
-  },
-  {
-    id: 'flight-delay',
-    title: 'Airport Flight Delay Dispute',
-    emotion: 'angry',
-    category: 'Travel & Emergency',
-    briefing: 'Your connecting flight in Doha was cancelled without notice. Negotiate meal and hotel vouchers with a stressed airline agent.',
-    openingMode: 'maya_explains_first' as const,
-    openingLine: 'Excuse me agent, the departure board says my flight is cancelled, but no one made an announcement!',
-    prompt: `You are Maya playing the role of a stressed international passenger whose connecting flight was cancelled.
-Scenario Setting: Midnight at a crowded transit hub. You have an urgent business meeting in London tomorrow morning.
-Emotional State: Stressed, worried, speaking with urgency, demanding quick solutions.
-Conversation Rules:
-1. Insist on clear answers: what happened to the aircraft and when is the next available flight?
-2. Ask for accommodation and meal vouchers as required by international aviation policy.
-3. Respond warmly if the airline representative communicates clearly and acts quickly to rebook you.
-4. Keep each spoken turn under 15-20 words.`,
-  },
-  {
-    id: 'cafe-chat',
-    title: 'Friendly Neighborhood Cafe',
-    emotion: 'cheerful',
-    category: 'Casual & Daily Life',
-    briefing: 'Order drinks and chat with a cheerful barista about local weekend events and your favorite hobbies.',
-    openingMode: 'maya_in_character' as const,
-    openingLine: 'Good morning! Welcome to Bean & Brew! What can I get started for you today?',
-    prompt: `You are Maya playing the role of Maya, a warm, cheerful, and chatty barista at a cozy specialty coffee shop.
-Scenario Setting: A sunny morning at a neighborhood cafe.
-Emotional State: Upbeat, energetic, enthusiastic, welcoming.
-Conversation Rules:
-1. Greet the customer with a big smile and ask what they feel like drinking.
-2. Ask friendly small-talk questions: how is their day going, any fun weekend plans?
-3. Share enthusiastic remarks about their choices.
-4. Keep each spoken response under 15-20 words.`,
+    id: 'user_starts' as const,
+    title: '👤 Student speaks first',
+    desc: 'Maya waits for the student to start the conversation.',
   },
 ];
 
 export default function AdminScenariosScreen() {
   const { isPhone } = useBreakpoint();
   const userStats = useUserStats();
-  const { width: windowWidth } = useWindowDimensions();
 
   const [sidebarOpen, setSidebarOpen] = useState(!isPhone);
   const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [filterEmotion, setFilterEmotion] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Editor Modal
+  // 2-Step Wizard State
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingScenario, setEditingScenario] = useState<ScenarioItem | null>(null);
-  const [activeTab, setActiveTab] = useState<'prompt' | 'basics' | 'playground'>('prompt');
+  const [wizardStep, setWizardStep] = useState<'details' | 'prompt'>('details');
 
-  // Form Fields
+  // Form Fields - Step 1: Details & Level Settings
   const [formLevelNumber, setFormLevelNumber] = useState<number>(1);
   const [formTitle, setFormTitle] = useState('');
   const [formTopic, setFormTopic] = useState('');
   const [formBriefing, setFormBriefing] = useState('');
-  const [formPrompt, setFormPrompt] = useState('');
-  const [formOpeningMode, setFormOpeningMode] = useState<'maya_explains_first' | 'maya_in_character' | 'user_starts'>('maya_explains_first');
-  const [formOpeningLine, setFormOpeningLine] = useState('');
-  const [formEmotion, setFormEmotion] = useState<string>('neutral');
+  const [formUserRole, setFormUserRole] = useState('');
+  const [formMayaRole, setFormMayaRole] = useState('');
+  const [formGoalTitle, setFormGoalTitle] = useState('');
+  const [formGoalDescription, setFormGoalDescription] = useState('');
+  const [formTargetDurationMinutes, setFormTargetDurationMinutes] = useState<number>(6);
   const [formPassingScore, setFormPassingScore] = useState<number>(70);
   const [formXpReward, setFormXpReward] = useState<number>(100);
   const [formColorIdx, setFormColorIdx] = useState(0);
@@ -211,10 +127,11 @@ export default function AdminScenariosScreen() {
   const [formCustomSvg, setFormCustomSvg] = useState('');
   const [formIsPublished, setFormIsPublished] = useState(true);
 
-  // Playground / Simulator
-  const [simMessages, setSimMessages] = useState<SimulatorMessage[]>([]);
-  const [simInput, setSimInput] = useState('');
-  const [isSimulating, setIsSimulating] = useState(false);
+  // Form Fields - Step 2: AI Prompt & Persona Directive
+  const [formEmotion, setFormEmotion] = useState<string>('neutral');
+  const [formOpeningMode, setFormOpeningMode] = useState<'maya_explains_first' | 'maya_in_character' | 'user_starts'>('maya_explains_first');
+  const [formOpeningLine, setFormOpeningLine] = useState('');
+  const [formPrompt, setFormPrompt] = useState('');
 
   // Fetch scenarios from backend
   const fetchScenarios = async () => {
@@ -242,36 +159,48 @@ export default function AdminScenariosScreen() {
 
   const openNewScenarioModal = () => {
     const nextNumber = scenarios.length > 0 ? Math.max(...scenarios.map((s) => s.levelNumber)) + 1 : 1;
+    // Session duration cap randomly assigned between 5-8 minutes
+    const randomDuration = Math.floor(Math.random() * 4) + 5;
+
     setEditingScenario(null);
+    setWizardStep('details');
     setFormLevelNumber(nextNumber);
     setFormTitle('');
-    setFormTopic('Roleplay Scenario');
+    setFormTopic('Role Play Practice');
     setFormBriefing('');
-    setFormPrompt('');
-    setFormOpeningMode('maya_explains_first');
-    setFormOpeningLine('');
-    setFormEmotion('neutral');
+    setFormUserRole('');
+    setFormMayaRole('');
+    setFormGoalTitle('');
+    setFormGoalDescription('');
+    setFormTargetDurationMinutes(randomDuration);
     setFormPassingScore(70);
     setFormXpReward(100);
     setFormColorIdx((nextNumber - 1) % COLOR_THEMES.length);
     setFormIcon('chat');
     setFormCustomSvg('');
     setFormIsPublished(true);
-    setSimMessages([]);
-    setActiveTab('prompt');
+
+    // Prompt fields
+    setFormEmotion('neutral');
+    setFormOpeningMode('maya_explains_first');
+    setFormOpeningLine('');
+    setFormPrompt('');
+
     setIsEditorOpen(true);
   };
 
   const openEditModal = (item: ScenarioItem) => {
     setEditingScenario(item);
+    setWizardStep('details');
     setFormLevelNumber(item.levelNumber);
     setFormTitle(item.title);
-    setFormTopic(item.topic || 'Roleplay Scenario');
+    setFormTopic(item.topic || 'Role Play Practice');
     setFormBriefing(item.scenarioBriefing || item.description || '');
-    setFormPrompt(item.scenarioPrompt || '');
-    setFormOpeningMode(item.openingMode || 'maya_explains_first');
-    setFormOpeningLine(item.openingLine || '');
-    setFormEmotion(item.emotionTags && item.emotionTags[0] ? item.emotionTags[0] : 'neutral');
+    setFormUserRole(item.userRole || '');
+    setFormMayaRole(item.mayaRole || '');
+    setFormGoalTitle(item.goalTitle || '');
+    setFormGoalDescription(item.goalDescription || '');
+    setFormTargetDurationMinutes(item.targetDurationMinutes || 6);
     setFormPassingScore(item.passingScorePercent ?? 70);
     setFormXpReward(item.xpReward || 100);
     setFormIcon(item.iconType || 'chat');
@@ -279,19 +208,67 @@ export default function AdminScenariosScreen() {
     const colorIdx = COLOR_THEMES.findIndex((c) => c.numberColor === item.numberColor);
     setFormColorIdx(colorIdx !== -1 ? colorIdx : 0);
     setFormIsPublished(item.isPublished);
-    setSimMessages([]);
-    setActiveTab('prompt');
+
+    // Prompt fields
+    setFormEmotion(item.emotionTags && item.emotionTags[0] ? item.emotionTags[0] : 'neutral');
+    setFormOpeningMode(item.openingMode || 'maya_explains_first');
+    setFormOpeningLine(item.openingLine || '');
+    setFormPrompt(item.scenarioPrompt || '');
+
     setIsEditorOpen(true);
   };
 
-  const handleApplyPreset = (preset: (typeof SCENARIO_PRESETS)[0]) => {
-    setFormTitle(preset.title);
-    setFormTopic(preset.category);
-    setFormBriefing(preset.briefing);
-    setFormPrompt(preset.prompt);
-    setFormOpeningMode(preset.openingMode);
-    setFormOpeningLine(preset.openingLine);
-    setFormEmotion(preset.emotion);
+  const handleGeneratePromptWithAI = async () => {
+    if (!formTitle.trim()) {
+      alert('Please enter a Scenario Title before generating the prompt.');
+      return;
+    }
+    if (!formBriefing.trim()) {
+      alert('Please enter the Mission Briefing / Situation premise.');
+      return;
+    }
+    if (!formUserRole.trim() || !formMayaRole.trim()) {
+      alert("Please specify both Student's Role and Maya's Role.");
+      return;
+    }
+    if (!formGoalTitle.trim()) {
+      alert("Please specify the Student's Goal Title.");
+      return;
+    }
+
+    setIsGeneratingPrompt(true);
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/admin/roadmap/generate-prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: formTitle.trim(),
+          topic: formTopic.trim() || 'Role Play Practice',
+          briefing: formBriefing.trim(),
+          userRole: formUserRole.trim(),
+          mayaRole: formMayaRole.trim(),
+          goalTitle: formGoalTitle.trim(),
+          goalDescription: formGoalDescription.trim(),
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      const data = await res.json();
+      if (data.emotion) setFormEmotion(data.emotion);
+      if (data.openingMode) setFormOpeningMode(data.openingMode);
+      if (data.openingLine !== undefined) setFormOpeningLine(data.openingLine);
+      if (data.scenarioPrompt) setFormPrompt(data.scenarioPrompt);
+
+      setWizardStep('prompt');
+    } catch (err: any) {
+      alert(`Could not generate prompt with AI: ${err?.message || 'Server error'}`);
+    } finally {
+      setIsGeneratingPrompt(false);
+    }
   };
 
   const handleSaveScenario = async () => {
@@ -307,7 +284,12 @@ export default function AdminScenariosScreen() {
       title: formTitle.trim(),
       description: formBriefing.trim(),
       scenarioBriefing: formBriefing.trim(),
+      userRole: formUserRole.trim(),
+      mayaRole: formMayaRole.trim(),
+      goalTitle: formGoalTitle.trim(),
+      goalDescription: formGoalDescription.trim(),
       topic: formTopic.trim() || 'Roleplay Scenario',
+      targetDurationMinutes: Number(formTargetDurationMinutes) || 6,
       scenarioPrompt: formPrompt.trim(),
       openingMode: formOpeningMode,
       openingLine: formOpeningLine.trim(),
@@ -364,60 +346,6 @@ export default function AdminScenariosScreen() {
     }
   };
 
-  const handleRunSimulation = async (customMsg?: string) => {
-    const text = (customMsg || simInput).trim();
-    if (!text) return;
-    if (!customMsg) setSimInput('');
-
-    const userEntry: SimulatorMessage = {
-      id: `u-${Date.now()}`,
-      sender: 'user',
-      text,
-    };
-    setSimMessages((prev) => [...prev, userEntry]);
-    setIsSimulating(true);
-
-    try {
-      const baseUrl = getBackendBaseUrl();
-      const res = await fetch(`${baseUrl}/v1/admin/roadmap/simulate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userMessage: text,
-          levelTitle: formTitle || 'Roleplay Scenario',
-          scenarioPrompt: formPrompt,
-          emotionTags: [formEmotion],
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const replyText = data.mayaSpoken || data.reply || "That's a good response. Let's continue.";
-        const mayaReply: SimulatorMessage = {
-          id: `m-${Date.now()}`,
-          sender: 'maya',
-          text: replyText,
-          wordCount: data.wordCount ?? replyText.split(/\s+/).filter(Boolean).length,
-          correction: data.correction
-            ? {
-                studentSaid: data.correction.studentSaid,
-                moreNatural: data.correction.moreNatural,
-                explanation: data.correction.explanation,
-              }
-            : undefined,
-        };
-        setSimMessages((prev) => [...prev, mayaReply]);
-      }
-    } catch (err: any) {
-      setSimMessages((prev) => [
-        ...prev,
-        { id: `err-${Date.now()}`, sender: 'maya', text: `Simulation error: ${err?.message}` },
-      ]);
-    } finally {
-      setIsSimulating(false);
-    }
-  };
-
   const handleLaunchVoiceCall = (lvl: ScenarioItem) => {
     const studentName = (userStats.displayName || 'Learner').trim();
     CallSessionStore.startCall({
@@ -434,6 +362,10 @@ export default function AdminScenariosScreen() {
       practicePoints: lvl.practicePoints || [],
       canonicalContent: lvl.canonicalContent || '',
       passingScorePercent: lvl.passingScorePercent || 70,
+      userRole: lvl.userRole,
+      mayaRole: lvl.mayaRole,
+      goalTitle: lvl.goalTitle,
+      goalDescription: lvl.goalDescription,
       userName: studentName,
     });
 
@@ -447,7 +379,7 @@ export default function AdminScenariosScreen() {
         scenarioPrompt: lvl.scenarioPrompt || '',
         openingMode: lvl.openingMode || 'maya_explains_first',
         openingLine: lvl.openingLine || '',
-        duration: '300',
+        duration: String((lvl.targetDurationMinutes || 6) * 60),
         languageMode: 'english',
         sinhalaStyle: 'balanced',
         aiSuggestions: 'true',
@@ -478,7 +410,7 @@ export default function AdminScenariosScreen() {
         <View style={styles.mainContent}>
           <AdminTopBar
             title="Scenario Studio"
-            subtitle="Design roleplay scenarios with custom prompts, emotional states (angry, crying, happy), and automated unlocking."
+            subtitle="Design real-world roleplay scenarios with AI-generated character personas, emotions, and automated unlocking."
             badgeText="Direct Prompt Mode"
             sidebarOpen={sidebarOpen}
             onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
@@ -506,9 +438,9 @@ export default function AdminScenariosScreen() {
                 <Text style={styles.metricSub}>Visible to students</Text>
               </View>
               <View style={styles.metricCard}>
-                <Text style={styles.metricLabel}>Emotional Range</Text>
-                <Text style={[styles.metricVal, { color: '#0057FF' }]}>6 Roles</Text>
-                <Text style={styles.metricSub}>Angry, crying, strict, etc.</Text>
+                <Text style={styles.metricLabel}>Session Duration</Text>
+                <Text style={[styles.metricVal, { color: '#0057FF' }]}>5–8 Min</Text>
+                <Text style={styles.metricSub}>Adaptive time cap per level</Text>
               </View>
             </View>
 
@@ -521,7 +453,7 @@ export default function AdminScenariosScreen() {
                   placeholder="Search scenarios by title, setting, or role..."
                   value={searchQuery}
                   onChangeText={setSearchQuery}
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor={PLACEHOLDER_COLOR}
                 />
               </View>
 
@@ -591,6 +523,10 @@ export default function AdminScenariosScreen() {
                             <Text style={styles.tagText}>+{item.xpReward || 100} XP</Text>
                           </View>
                           <View style={styles.tagBadge}>
+                            <Feather name="clock" size={12} color="#f59e0b" style={{ marginRight: 4 }} />
+                            <Text style={styles.tagText}>{item.targetDurationMinutes || 6}m cap</Text>
+                          </View>
+                          <View style={styles.tagBadge}>
                             <Feather name="check-circle" size={12} color="#16a34a" style={{ marginRight: 4 }} />
                             <Text style={styles.tagText}>Pass: ≥{item.passingScorePercent || 70}%</Text>
                           </View>
@@ -618,11 +554,12 @@ export default function AdminScenariosScreen() {
       </View>
 
       {/* ============================================================ */}
-      {/* SCENARIO EDITOR & PROMPT CONFIGURATION MODAL                 */}
+      {/* 2-STEP SCENARIO CREATION / EDITING WIZARD MODAL              */}
       {/* ============================================================ */}
       <Modal visible={isEditorOpen} animationType="fade" transparent onRequestClose={() => setIsEditorOpen(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, isPhone && styles.modalCardMobile]}>
+            {/* Modal Header */}
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderTitleRow}>
                 <View style={styles.modalBadge}>
@@ -630,10 +567,12 @@ export default function AdminScenariosScreen() {
                 </View>
                 <View>
                   <Text style={styles.modalTitle}>
-                    {editingScenario ? `Edit Scenario: ${formTitle}` : 'Create New Scenario'}
+                    {editingScenario ? `Edit: ${formTitle || 'Scenario'}` : 'Create New Scenario'}
                   </Text>
                   <Text style={styles.modalSubtitle}>
-                    Configure Maya's exact character persona, emotions, opening mode, and prompt rules.
+                    {wizardStep === 'details'
+                      ? 'Step 1 of 2: Details, Roles & Level Unlocking'
+                      : 'Step 2 of 2: AI Directive, Emotion & Opening Protocol'}
                   </Text>
                 </View>
               </View>
@@ -642,59 +581,278 @@ export default function AdminScenariosScreen() {
               </Pressable>
             </View>
 
-            {/* Modal Tabs */}
-            <View style={styles.modalTabsRow}>
+            {/* Stepper Bar */}
+            <View style={styles.stepperBar}>
               <Pressable
-                onPress={() => setActiveTab('prompt')}
-                style={[styles.tabBtn, activeTab === 'prompt' && styles.tabBtnActive]}
+                onPress={() => setWizardStep('details')}
+                style={[styles.stepItem, wizardStep === 'details' && styles.stepItemActive]}
               >
-                <Feather name="cpu" size={15} color={activeTab === 'prompt' ? '#0d9488' : '#64748b'} style={{ marginRight: 6 }} />
-                <Text style={[styles.tabBtnText, activeTab === 'prompt' && styles.tabBtnTextActive]}>
-                  1. Roleplay Prompt & Emotion
+                <View style={[styles.stepNumberBadge, wizardStep === 'details' && styles.stepNumberBadgeActive]}>
+                  <Text style={[styles.stepNumberText, wizardStep === 'details' && styles.stepNumberTextActive]}>1</Text>
+                </View>
+                <Text style={[styles.stepLabel, wizardStep === 'details' && styles.stepLabelActive]}>
+                  Details & Goal Setup
                 </Text>
               </Pressable>
 
-              <Pressable
-                onPress={() => setActiveTab('basics')}
-                style={[styles.tabBtn, activeTab === 'basics' && styles.tabBtnActive]}
-              >
-                <Feather name="layers" size={15} color={activeTab === 'basics' ? '#0d9488' : '#64748b'} style={{ marginRight: 6 }} />
-                <Text style={[styles.tabBtnText, activeTab === 'basics' && styles.tabBtnTextActive]}>
-                  2. Details & Level Unlocking
-                </Text>
-              </Pressable>
+              <View style={styles.stepperDivider} />
 
               <Pressable
-                onPress={() => setActiveTab('playground')}
-                style={[styles.tabBtn, activeTab === 'playground' && styles.tabBtnActive]}
+                onPress={() => {
+                  if (formPrompt.trim()) setWizardStep('prompt');
+                  else handleGeneratePromptWithAI();
+                }}
+                style={[styles.stepItem, wizardStep === 'prompt' && styles.stepItemActive]}
               >
-                <Feather name="play-circle" size={15} color={activeTab === 'playground' ? '#0d9488' : '#64748b'} style={{ marginRight: 6 }} />
-                <Text style={[styles.tabBtnText, activeTab === 'playground' && styles.tabBtnTextActive]}>
-                  3. Test Playground
+                <View style={[styles.stepNumberBadge, wizardStep === 'prompt' && styles.stepNumberBadgeActive]}>
+                  <Text style={[styles.stepNumberText, wizardStep === 'prompt' && styles.stepNumberTextActive]}>2</Text>
+                </View>
+                <Text style={[styles.stepLabel, wizardStep === 'prompt' && styles.stepLabelActive]}>
+                  AI Prompt & Emotion
                 </Text>
               </Pressable>
             </View>
 
             <ScrollView style={styles.modalBodyScroll} showsVerticalScrollIndicator={false}>
-              {/* TAB 1: PROMPT & EMOTION */}
-              {activeTab === 'prompt' && (
+              {/* STEP 1: DETAILS & LEVEL UNLOCKING */}
+              {wizardStep === 'details' ? (
                 <View style={styles.tabSection}>
-                  {/* Presets Library Banner */}
-                  <View style={styles.presetSection}>
-                    <Text style={styles.fieldLabel}>Load Pre-Built Roleplay Preset (1-Click)</Text>
-                    <Text style={styles.fieldHelper}>Instantly pre-populate scenario setting, emotion, opening line, and prompt.</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                      {SCENARIO_PRESETS.map((p) => (
-                        <Pressable
-                          key={p.id}
-                          onPress={() => handleApplyPreset(p)}
-                          style={styles.presetChip}
-                        >
-                          <Text style={styles.presetChipTitle}>{p.title}</Text>
-                          <Text style={styles.presetChipCategory}>● {p.category}</Text>
-                        </Pressable>
-                      ))}
-                    </ScrollView>
+                  <View style={styles.infoBanner}>
+                    <Feather name="info" size={16} color="#0d9488" style={{ marginRight: 8, marginTop: 2 }} />
+                    <Text style={styles.infoBannerText}>
+                      Fill in the scenario situation and roles below. When you click <Text style={{ ...fontStyle('inter', 'bold') }}>"Next: Generate Prompt with AI"</Text>, Gemini will automatically craft Maya's personality, emotion, opening line, and prompt directive.
+                    </Text>
+                  </View>
+
+                  {/* Level & Title */}
+                  <View style={styles.twoColRow}>
+                    <View style={[styles.formCol, { flex: 1 }]}>
+                      <Text style={styles.fieldLabel}>Level / Milestone # *</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        value={String(formLevelNumber)}
+                        onChangeText={(txt) => setFormLevelNumber(parseInt(txt, 10) || 1)}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    <View style={[styles.formCol, { flex: 3 }]}>
+                      <Text style={styles.fieldLabel}>Scenario Title *</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        value={formTitle}
+                        onChangeText={setFormTitle}
+                        placeholder="e.g. Angry Hotel Guest"
+                        placeholderTextColor={PLACEHOLDER_COLOR}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.formGroup}>
+                    <Text style={styles.fieldLabel}>Topic / Category</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      value={formTopic}
+                      onChangeText={setFormTopic}
+                      placeholder="e.g. Hospitality & Conflict Resolution"
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                    />
+                  </View>
+
+                  {/* Mission Briefing */}
+                  <View style={styles.formGroup}>
+                    <Text style={styles.fieldLabel}>Situation Premise / Briefing *</Text>
+                    <Text style={styles.fieldHelper}>The background story shown to the student before starting the call.</Text>
+                    <TextInput
+                      style={[styles.textInput, styles.textArea]}
+                      value={formBriefing}
+                      onChangeText={setFormBriefing}
+                      placeholder="e.g. You booked an ocean-view suite, but the hotel gave your room to another guest. Negotiate a satisfactory solution."
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                      multiline
+                      numberOfLines={3}
+                    />
+                  </View>
+
+                  {/* Character Roles */}
+                  <View style={styles.twoColRow}>
+                    <View style={styles.formCol}>
+                      <Text style={styles.fieldLabel}>Student's Role *</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        value={formUserRole}
+                        onChangeText={setFormUserRole}
+                        placeholder="e.g. Hotel guest"
+                        placeholderTextColor={PLACEHOLDER_COLOR}
+                      />
+                    </View>
+                    <View style={styles.formCol}>
+                      <Text style={styles.fieldLabel}>Maya's Role (AI Actor) *</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        value={formMayaRole}
+                        onChangeText={setFormMayaRole}
+                        placeholder="e.g. Hotel receptionist"
+                        placeholderTextColor={PLACEHOLDER_COLOR}
+                      />
+                    </View>
+                  </View>
+
+                  {/* Goal Cards */}
+                  <View style={styles.formGroup}>
+                    <Text style={styles.fieldLabel}>Student's Goal Title *</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      value={formGoalTitle}
+                      onChangeText={setFormGoalTitle}
+                      placeholder="e.g. Stay calm and find a solution"
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                    />
+                  </View>
+
+                  <View style={styles.formGroup}>
+                    <Text style={styles.fieldLabel}>Student's Goal Description *</Text>
+                    <Text style={styles.fieldHelper}>Maya tracks this goal and will conclude the roleplay once the student achieves it.</Text>
+                    <TextInput
+                      style={[styles.textInput, styles.textArea]}
+                      value={formGoalDescription}
+                      onChangeText={setFormGoalDescription}
+                      placeholder="e.g. Express your disappointment politely, explain your concern clearly, and negotiate a good solution (such as another room or compensation)."
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                      multiline
+                      numberOfLines={3}
+                    />
+                  </View>
+
+                  {/* Unlocking & Duration Controls */}
+                  <View style={styles.twoColRow}>
+                    <View style={styles.formCol}>
+                      <Text style={styles.fieldLabel}>Session Duration Cap (5–8 Min)</Text>
+                      <View style={styles.durationBtnRow}>
+                        {[5, 6, 7, 8].map((min) => (
+                          <Pressable
+                            key={min}
+                            onPress={() => setFormTargetDurationMinutes(min)}
+                            style={[
+                              styles.durPill,
+                              formTargetDurationMinutes === min && styles.durPillActive,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.durPillText,
+                                formTargetDurationMinutes === min && styles.durPillTextActive,
+                              ]}
+                            >
+                              {min} min
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <Text style={styles.fieldHelper}>Auto-assigned randomly to maintain dynamic call lengths.</Text>
+                    </View>
+
+                    <View style={styles.formCol}>
+                      <Text style={styles.fieldLabel}>Passing Score to Unlock Level</Text>
+                      <View style={styles.durationBtnRow}>
+                        {[60, 65, 70, 75, 80].map((sc) => (
+                          <Pressable
+                            key={sc}
+                            onPress={() => setFormPassingScore(sc)}
+                            style={[
+                              styles.durPill,
+                              formPassingScore === sc && styles.durPillActive,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.durPillText,
+                                formPassingScore === sc && styles.durPillTextActive,
+                              ]}
+                            >
+                              ≥ {sc}%
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <Text style={styles.fieldHelper}>Calculated from fluency, grammar & hint usage.</Text>
+                    </View>
+                  </View>
+
+                  {/* Accent Color Theme */}
+                  <View style={styles.twoColRow}>
+                    <View style={styles.formCol}>
+                      <Text style={styles.fieldLabel}>Accent Color Theme</Text>
+                      <View style={styles.colorPaletteRow}>
+                        {COLOR_THEMES.map((th, idx) => (
+                          <Pressable
+                            key={th.name}
+                            onPress={() => setFormColorIdx(idx)}
+                            style={[
+                              styles.colorDotBtn,
+                              { backgroundColor: th.numberColor },
+                              formColorIdx === idx && styles.colorDotBtnSelected,
+                            ]}
+                          />
+                        ))}
+                      </View>
+                    </View>
+
+                    <View style={styles.formCol}>
+                      <Text style={styles.fieldLabel}>XP Points Awarded</Text>
+                      <View style={styles.durationBtnRow}>
+                        {[50, 75, 100, 150].map((xp) => (
+                          <Pressable
+                            key={xp}
+                            onPress={() => setFormXpReward(xp)}
+                            style={[
+                              styles.durPill,
+                              formXpReward === xp && styles.xpPillActive,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.durPillText,
+                                formXpReward === xp && styles.xpPillTextActive,
+                              ]}
+                            >
+                              +{xp}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Publishing Toggle */}
+                  <View style={styles.publishToggleRow}>
+                    <View>
+                      <Text style={styles.fieldLabel}>Publish Live on Student Roadmap</Text>
+                      <Text style={styles.fieldHelper}>When enabled, this scenario appears in student roadmaps.</Text>
+                    </View>
+                    <Pressable
+                      onPress={() => setFormIsPublished(!formIsPublished)}
+                      style={[
+                        styles.toggleSwitch,
+                        formIsPublished ? styles.toggleSwitchOn : styles.toggleSwitchOff,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.toggleDot,
+                          formIsPublished ? styles.toggleDotOn : styles.toggleDotOff,
+                        ]}
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                /* STEP 2: AI PROMPT DIRECTIVE & EMOTION */
+                <View style={styles.tabSection}>
+                  <View style={styles.aiSuccessBanner}>
+                    <Feather name="check-circle" size={16} color="#059669" style={{ marginRight: 8, marginTop: 2 }} />
+                    <Text style={styles.aiSuccessBannerText}>
+                      Gemini API auto-generated the emotional state, opening protocol, and conversation directive tailored to your scenario. You can review or tweak any setting below!
+                    </Text>
                   </View>
 
                   {/* Emotion Tag Picker */}
@@ -713,7 +871,7 @@ export default function AdminScenariosScreen() {
                               isSelected && { borderColor: b.text, backgroundColor: b.bg },
                             ]}
                           >
-                            <Text style={[styles.emotionChoiceText, isSelected && { color: b.text, fontWeight: '700' }]}>
+                            <Text style={[styles.emotionChoiceText, isSelected && { color: b.text, ...fontStyle('inter', 'bold') }]}>
                               {b.label}
                             </Text>
                           </Pressable>
@@ -726,23 +884,7 @@ export default function AdminScenariosScreen() {
                   <View style={styles.formGroup}>
                     <Text style={styles.fieldLabel}>How The Conversation Starts (Opening Protocol) *</Text>
                     <View style={styles.openingModeRow}>
-                      {[
-                        {
-                          id: 'maya_explains_first' as const,
-                          title: '🎙️ Maya explains setup, then starts roleplay',
-                          desc: 'Maya welcomes user, states the scenario in 1 sentence, then speaks in character.',
-                        },
-                        {
-                          id: 'maya_in_character' as const,
-                          title: '⚡ Maya starts straight in character',
-                          desc: 'Maya immediately begins in role with zero introduction (immersive).',
-                        },
-                        {
-                          id: 'user_starts' as const,
-                          title: '👤 Student speaks first',
-                          desc: 'Maya waits for the student to start the conversation.',
-                        },
-                      ].map((m) => (
+                      {OPENING_MODES.map((m) => (
                         <Pressable
                           key={m.id}
                           onPress={() => setFormOpeningMode(m.id)}
@@ -768,7 +910,8 @@ export default function AdminScenariosScreen() {
                       style={styles.textInput}
                       value={formOpeningLine}
                       onChangeText={setFormOpeningLine}
-                      placeholder='e.g. "Excuse me! Are you the manager here? I have a serious complaint!"'
+                      placeholder='Good evening! Welcome to our hotel. How may I assist you today?'
+                      placeholderTextColor={PLACEHOLDER_COLOR}
                     />
                   </View>
 
@@ -786,255 +929,85 @@ export default function AdminScenariosScreen() {
                       value={formPrompt}
                       onChangeText={setFormPrompt}
                       placeholder="You are Maya playing the role of..."
-                      placeholderTextColor="#94a3b8"
+                      placeholderTextColor={PLACEHOLDER_COLOR}
                       multiline
                       numberOfLines={10}
                     />
                   </View>
                 </View>
               )}
-
-              {/* TAB 2: BASICS & UNLOCKING */}
-              {activeTab === 'basics' && (
-                <View style={styles.tabSection}>
-                  <View style={styles.twoColRow}>
-                    <View style={styles.formCol}>
-                      <Text style={styles.fieldLabel}>Level / Milestone # *</Text>
-                      <TextInput
-                        style={styles.textInput}
-                        value={String(formLevelNumber)}
-                        onChangeText={(txt) => setFormLevelNumber(parseInt(txt, 10) || 1)}
-                        keyboardType="numeric"
-                      />
-                    </View>
-                    <View style={[styles.formCol, { flex: 2 }]}>
-                      <Text style={styles.fieldLabel}>Scenario Title *</Text>
-                      <TextInput
-                        style={styles.textInput}
-                        value={formTitle}
-                        onChangeText={setFormTitle}
-                        placeholder="e.g. Angry Hotel Guest"
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.formGroup}>
-                    <Text style={styles.fieldLabel}>Topic / Category</Text>
-                    <TextInput
-                      style={styles.textInput}
-                      value={formTopic}
-                      onChangeText={setFormTopic}
-                      placeholder="e.g. Hospitality & Conflict Resolution"
-                    />
-                  </View>
-
-                  <View style={styles.formGroup}>
-                    <Text style={styles.fieldLabel}>Student Mission Briefing *</Text>
-                    <Text style={styles.fieldHelper}>Shown on the student roadmap modal before starting the call.</Text>
-                    <TextInput
-                      style={[styles.textInput, styles.textArea]}
-                      value={formBriefing}
-                      onChangeText={setFormBriefing}
-                      placeholder="Explain the communicative challenge for the student..."
-                      multiline
-                      numberOfLines={3}
-                    />
-                  </View>
-
-                  {/* Automated Unlocking Threshold */}
-                  <View style={styles.twoColRow}>
-                    <View style={styles.formCol}>
-                      <Text style={styles.fieldLabel}>Passing Score to Unlock Next Level</Text>
-                      <View style={styles.durationBtnRow}>
-                        {[60, 65, 70, 75, 80].map((sc) => (
-                          <Pressable
-                            key={sc}
-                            onPress={() => setFormPassingScore(sc)}
-                            style={[
-                              styles.durPill,
-                              formPassingScore === sc && styles.durPillActive,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.durPillText,
-                                formPassingScore === sc && styles.durPillTextActive,
-                              ]}
-                            >
-                              ≥ {sc}%
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    </View>
-
-                    <View style={styles.formCol}>
-                      <Text style={styles.fieldLabel}>XP Points Awarded</Text>
-                      <View style={styles.durationBtnRow}>
-                        {[50, 75, 100, 150, 200].map((xp) => (
-                          <Pressable
-                            key={xp}
-                            onPress={() => setFormXpReward(xp)}
-                            style={[
-                              styles.durPill,
-                              formXpReward === xp && styles.xpPillActive,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.durPillText,
-                                formXpReward === xp && styles.xpPillTextActive,
-                              ]}
-                            >
-                              +{xp}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Accent Color */}
-                  <View style={styles.formGroup}>
-                    <Text style={styles.fieldLabel}>Accent Color Theme</Text>
-                    <View style={styles.colorPaletteRow}>
-                      {COLOR_THEMES.map((th, idx) => (
-                        <Pressable
-                          key={th.name}
-                          onPress={() => setFormColorIdx(idx)}
-                          style={[
-                            styles.colorDotBtn,
-                            { backgroundColor: th.numberColor },
-                            formColorIdx === idx && styles.colorDotBtnSelected,
-                          ]}
-                        />
-                      ))}
-                    </View>
-                  </View>
-
-                  {/* Publishing Toggle */}
-                  <View style={styles.publishToggleRow}>
-                    <View>
-                      <Text style={styles.fieldLabel}>Publish Live on Student Roadmap</Text>
-                      <Text style={styles.fieldHelper}>Draft scenarios remain hidden until enabled.</Text>
-                    </View>
-                    <Pressable
-                      onPress={() => setFormIsPublished(!formIsPublished)}
-                      style={[
-                        styles.toggleSwitch,
-                        formIsPublished ? styles.toggleSwitchOn : styles.toggleSwitchOff,
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.toggleDot,
-                          formIsPublished ? styles.toggleDotOn : styles.toggleDotOff,
-                        ]}
-                      />
-                    </Pressable>
-                  </View>
-                </View>
-              )}
-
-              {/* TAB 3: PLAYGROUND */}
-              {activeTab === 'playground' && (
-                <View style={styles.tabSection}>
-                  <View style={styles.playgroundHeader}>
-                    <Text style={styles.fieldLabel}>Interactive Simulator</Text>
-                    <Text style={styles.fieldHelper}>
-                      Test how Maya responds to your input under this scenario's prompt and emotional state.
-                    </Text>
-                  </View>
-
-                  {/* Quick test prompt chips */}
-                  <View style={styles.quickChipsRow}>
-                    {[
-                      'I want to speak with your manager immediately!',
-                      'Please calm down, let me see how I can help you.',
-                      'I am so sorry to hear that. Are you okay?',
-                    ].map((chip) => (
-                      <Pressable
-                        key={chip}
-                        onPress={() => handleRunSimulation(chip)}
-                        style={styles.quickChip}
-                      >
-                        <Text style={styles.quickChipText}>{chip}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  {/* Simulator Messages List */}
-                  <View style={styles.simConsole}>
-                    {simMessages.length === 0 ? (
-                      <View style={styles.emptySim}>
-                        <Feather name="terminal" size={24} color="#94a3b8" />
-                        <Text style={styles.emptySimText}>Type a message below or tap a quick chip to test Maya's response.</Text>
-                      </View>
-                    ) : (
-                      simMessages.map((m) => (
-                        <View
-                          key={m.id}
-                          style={[
-                            styles.simMsgBubble,
-                            m.sender === 'maya' ? styles.simMsgMaya : styles.simMsgUser,
-                          ]}
-                        >
-                          <Text style={styles.simMsgSender}>{m.sender === 'maya' ? 'Maya (In Character)' : 'You (Student)'}</Text>
-                          <Text style={styles.simMsgText}>{m.text}</Text>
-                          {m.correction && (
-                            <View style={styles.simCorrectionBox}>
-                              <Text style={styles.simCorrectionLabel}>Correction:</Text>
-                              <Text style={styles.simCorrectionText}>
-                                "{m.correction.studentSaid}" → "{m.correction.moreNatural}"
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                      ))
-                    )}
-                  </View>
-
-                  <View style={styles.simInputRow}>
-                    <TextInput
-                      style={[styles.textInput, { flex: 1, marginRight: 8 }]}
-                      placeholder="Type what you would say to Maya..."
-                      value={simInput}
-                      onChangeText={setSimInput}
-                      onSubmitEditing={() => handleRunSimulation()}
-                    />
-                    <Pressable
-                      onPress={() => handleRunSimulation()}
-                      style={[styles.newBtn, isSimulating && { opacity: 0.6 }]}
-                      disabled={isSimulating}
-                    >
-                      {isSimulating ? (
-                        <ActivityIndicator size="small" color="#ffffff" />
-                      ) : (
-                        <Feather name="send" size={16} color="#ffffff" />
-                      )}
-                    </Pressable>
-                  </View>
-                </View>
-              )}
             </ScrollView>
 
-            {/* Modal Actions */}
+            {/* Modal Actions Footer */}
             <View style={styles.modalFooter}>
-              <Pressable onPress={() => setIsEditorOpen(false)} style={styles.cancelBtn}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleSaveScenario}
-                style={[styles.saveBtn, isSaving && { opacity: 0.7 }]}
-                disabled={isSaving}
-              >
-                {isSaving ? (
-                  <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 6 }} />
-                ) : (
-                  <Feather name="check" size={16} color="#ffffff" style={{ marginRight: 6 }} />
-                )}
-                <Text style={styles.saveBtnText}>{isSaving ? 'Saving...' : 'Save Scenario'}</Text>
-              </Pressable>
+              {wizardStep === 'details' ? (
+                <>
+                  <Pressable onPress={() => setIsEditorOpen(false)} style={styles.cancelBtn}>
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </Pressable>
+
+                  {formPrompt ? (
+                    <Pressable
+                      onPress={() => setWizardStep('prompt')}
+                      style={styles.reviewStepBtn}
+                    >
+                      <Text style={styles.reviewStepBtnText}>Review Existing Prompt →</Text>
+                    </Pressable>
+                  ) : null}
+
+                  <Pressable
+                    onPress={handleGeneratePromptWithAI}
+                    style={[styles.saveBtn, isGeneratingPrompt && { opacity: 0.7 }]}
+                    disabled={isGeneratingPrompt}
+                  >
+                    {isGeneratingPrompt ? (
+                      <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+                    ) : (
+                      <Feather name="zap" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                    )}
+                    <Text style={styles.saveBtnText}>
+                      {isGeneratingPrompt ? 'Generating Prompt...' : 'Next: Generate Prompt with AI ✨'}
+                    </Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Pressable
+                    onPress={() => setWizardStep('details')}
+                    style={styles.cancelBtn}
+                  >
+                    <Text style={styles.cancelBtnText}>← Back to Details</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={handleGeneratePromptWithAI}
+                    style={[styles.regenerateBtn, isGeneratingPrompt && { opacity: 0.7 }]}
+                    disabled={isGeneratingPrompt}
+                  >
+                    {isGeneratingPrompt ? (
+                      <ActivityIndicator size="small" color="#0d9488" style={{ marginRight: 6 }} />
+                    ) : (
+                      <Feather name="refresh-cw" size={14} color="#0d9488" style={{ marginRight: 6 }} />
+                    )}
+                    <Text style={styles.regenerateBtnText}>
+                      {isGeneratingPrompt ? 'Re-generating...' : 'Re-generate with AI'}
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={handleSaveScenario}
+                    style={[styles.saveBtn, isSaving && { opacity: 0.7 }]}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? (
+                      <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 6 }} />
+                    ) : (
+                      <Feather name="check" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                    )}
+                    <Text style={styles.saveBtnText}>{isSaving ? 'Saving...' : 'Save Scenario'}</Text>
+                  </Pressable>
+                </>
+              )}
             </View>
           </View>
         </View>
@@ -1286,8 +1259,8 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: '100%',
-    maxWidth: 820,
-    maxHeight: '90%',
+    maxWidth: 760,
+    maxHeight: '92%',
     backgroundColor: '#ffffff',
     borderRadius: 16,
     overflow: 'hidden',
@@ -1298,7 +1271,7 @@ const styles = StyleSheet.create({
   },
   modalCardMobile: {
     maxWidth: '100%',
-    height: '96%',
+    height: '98%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1340,32 +1313,56 @@ const styles = StyleSheet.create({
   modalCloseBtn: {
     padding: 6,
   },
-  modalTabsRow: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-    backgroundColor: '#f8fafc',
-  },
-  tabBtn: {
+  stepperBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingVertical: 12,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    backgroundColor: '#f8fafc',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
   },
-  tabBtnActive: {
-    borderBottomColor: '#0d9488',
-    backgroundColor: '#ffffff',
+  stepItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  tabBtnText: {
+  stepItemActive: {
+    opacity: 1,
+  },
+  stepNumberBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumberBadgeActive: {
+    backgroundColor: '#0d9488',
+  },
+  stepNumberText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 12,
+    color: '#64748b',
+  },
+  stepNumberTextActive: {
+    color: '#ffffff',
+  },
+  stepLabel: {
     ...fontStyle('inter', 'medium'),
     fontSize: 13,
     color: '#64748b',
   },
-  tabBtnTextActive: {
-    color: '#0d9488',
+  stepLabelActive: {
+    color: '#0f172a',
     ...fontStyle('inter', 'semiBold'),
+  },
+  stepperDivider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#cbd5e1',
+    marginHorizontal: 16,
   },
   modalBodyScroll: {
     padding: 20,
@@ -1373,35 +1370,40 @@ const styles = StyleSheet.create({
   tabSection: {
     gap: 16,
   },
-  presetSection: {
-    backgroundColor: '#f8fafc',
-    padding: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  presetChip: {
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+  infoBanner: {
+    flexDirection: 'row',
+    backgroundColor: '#f0fdfa',
+    padding: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#cbd5e1',
-    marginRight: 10,
+    borderColor: '#ccfbf1',
+    alignItems: 'flex-start',
   },
-  presetChipTitle: {
-    ...fontStyle('outfit', 'semiBold'),
-    fontSize: 13,
-    color: '#0f172a',
+  infoBannerText: {
+    flex: 1,
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#115e59',
+    lineHeight: 18,
   },
-  presetChipCategory: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 11,
-    color: '#0d9488',
-    marginTop: 2,
+  aiSuccessBanner: {
+    flexDirection: 'row',
+    backgroundColor: '#ecfdf5',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    alignItems: 'flex-start',
+  },
+  aiSuccessBannerText: {
+    flex: 1,
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#065f46',
+    lineHeight: 18,
   },
   formGroup: {
-    marginBottom: 12,
+    marginBottom: 4,
   },
   twoColRow: {
     flexDirection: 'row',
@@ -1553,6 +1555,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#e2e8f0',
+    marginTop: 4,
   },
   toggleSwitch: {
     width: 48,
@@ -1598,6 +1601,34 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748b',
   },
+  reviewStepBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  reviewStepBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#334155',
+  },
+  regenerateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#f0fdfa',
+    borderWidth: 1,
+    borderColor: '#ccfbf1',
+  },
+  regenerateBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#0d9488',
+  },
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1610,92 +1641,5 @@ const styles = StyleSheet.create({
     ...fontStyle('outfit', 'semiBold'),
     fontSize: 14,
     color: '#ffffff',
-  },
-  playgroundHeader: {
-    marginBottom: 8,
-  },
-  quickChipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 12,
-  },
-  quickChip: {
-    backgroundColor: '#f1f5f9',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 14,
-  },
-  quickChipText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#334155',
-  },
-  simConsole: {
-    backgroundColor: '#0f172a',
-    borderRadius: 10,
-    padding: 14,
-    minHeight: 180,
-    maxHeight: 280,
-    gap: 10,
-  },
-  emptySim: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 30,
-  },
-  emptySimText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 12,
-    color: '#64748b',
-    textAlign: 'center',
-    marginTop: 6,
-  },
-  simMsgBubble: {
-    padding: 10,
-    borderRadius: 8,
-    maxWidth: '85%',
-  },
-  simMsgMaya: {
-    backgroundColor: '#1e293b',
-    alignSelf: 'flex-start',
-  },
-  simMsgUser: {
-    backgroundColor: '#0d9488',
-    alignSelf: 'flex-end',
-  },
-  simMsgSender: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 10,
-    color: '#94a3b8',
-    marginBottom: 2,
-    textTransform: 'uppercase',
-  },
-  simMsgText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 13,
-    color: '#ffffff',
-    lineHeight: 18,
-  },
-  simCorrectionBox: {
-    marginTop: 6,
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
-  simCorrectionLabel: {
-    ...fontStyle('inter', 'bold'),
-    fontSize: 10,
-    color: '#f59e0b',
-  },
-  simCorrectionText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#cbd5e1',
-  },
-  simInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 10,
   },
 });

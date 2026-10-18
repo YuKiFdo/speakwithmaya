@@ -5,6 +5,7 @@ import {
   UpdateRoadmapLevelDto,
   ReorderItemDto,
   SimulateLevelTurnDto,
+  GenerateScenarioPromptDto,
   parseCanonicalLessonContent,
   formatCanonicalLessonContent,
 } from './dto/roadmap.dto.js';
@@ -21,6 +22,7 @@ export interface RoadmapLevelEntity {
   title: string;
   description: string;
   topic: string;
+  targetDurationMinutes?: number;
   xpReward: number;
   iconType: string;
   numberColor: string;
@@ -37,6 +39,10 @@ export interface RoadmapLevelEntity {
   scenarioBriefing?: string;
   emotionTags?: string[];
   isScenarioMode?: boolean;
+  userRole?: string;
+  mayaRole?: string;
+  goalTitle?: string;
+  goalDescription?: string;
   isPublished: boolean;
   createdAt: string;
   updatedAt: string;
@@ -95,6 +101,7 @@ export class RoadmapService {
       title: d.title || '',
       description: d.description || '',
       topic: d.topic || '',
+      targetDurationMinutes: d.target_duration_minutes ?? d.targetDurationMinutes ?? 6,
       xpReward: d.xp_reward ?? d.xpReward ?? 100,
       iconType: d.icon_type || d.iconType || 'chat',
       numberColor: d.number_color || d.numberColor || '#0057FF',
@@ -111,6 +118,10 @@ export class RoadmapService {
       scenarioBriefing: d.scenario_briefing || d.scenarioBriefing || d.description || '',
       emotionTags: Array.isArray(d.emotion_tags || d.emotionTags) ? (d.emotion_tags || d.emotionTags) : ['neutral'],
       isScenarioMode: d.is_scenario_mode ?? d.isScenarioMode ?? true,
+      userRole: d.user_role || d.userRole || '',
+      mayaRole: d.maya_role || d.mayaRole || '',
+      goalTitle: d.goal_title || d.goalTitle || '',
+      goalDescription: d.goal_description || d.goalDescription || '',
       isPublished: d.is_published ?? d.isPublished ?? true,
       createdAt: d.created_at || d.createdAt || new Date().toISOString(),
       updatedAt: d.updated_at || d.updatedAt || new Date().toISOString(),
@@ -124,6 +135,7 @@ export class RoadmapService {
       title: e.title,
       description: e.description,
       topic: e.topic,
+      target_duration_minutes: e.targetDurationMinutes ?? 6,
       xp_reward: e.xpReward,
       icon_type: e.iconType,
       number_color: e.numberColor,
@@ -139,6 +151,10 @@ export class RoadmapService {
       scenario_briefing: e.scenarioBriefing || e.description || '',
       emotion_tags: e.emotionTags || ['neutral'],
       is_scenario_mode: e.isScenarioMode ?? true,
+      user_role: e.userRole || '',
+      maya_role: e.mayaRole || '',
+      goal_title: e.goalTitle || '',
+      goal_description: e.goalDescription || '',
       is_published: e.isPublished,
       created_at: e.createdAt,
       updated_at: e.updatedAt,
@@ -244,6 +260,7 @@ export class RoadmapService {
       title,
       description: dto.description?.trim() || '',
       topic: dto.topic?.trim() || title,
+      targetDurationMinutes: dto.targetDurationMinutes || (Math.floor(Math.random() * 4) + 5),
       xpReward: dto.xpReward || 100,
       iconType: dto.iconType || 'chat',
       numberColor: dto.numberColor || '#0057FF',
@@ -260,6 +277,10 @@ export class RoadmapService {
       scenarioBriefing: dto.scenarioBriefing || dto.description?.trim() || '',
       emotionTags: dto.emotionTags || ['neutral'],
       isScenarioMode: dto.isScenarioMode ?? true,
+      userRole: dto.userRole?.trim() || '',
+      mayaRole: dto.mayaRole?.trim() || '',
+      goalTitle: dto.goalTitle?.trim() || '',
+      goalDescription: dto.goalDescription?.trim() || '',
       isPublished: dto.isPublished ?? true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -303,6 +324,7 @@ export class RoadmapService {
       title,
       description: dto.description !== undefined ? dto.description.trim() : existing.description,
       topic: dto.topic !== undefined ? dto.topic.trim() : existing.topic,
+      targetDurationMinutes: dto.targetDurationMinutes !== undefined ? dto.targetDurationMinutes : existing.targetDurationMinutes,
       xpReward: dto.xpReward !== undefined ? dto.xpReward : existing.xpReward,
       iconType: dto.iconType !== undefined ? dto.iconType : existing.iconType,
       numberColor: dto.numberColor !== undefined ? dto.numberColor : existing.numberColor,
@@ -319,6 +341,10 @@ export class RoadmapService {
       scenarioBriefing: dto.scenarioBriefing !== undefined ? dto.scenarioBriefing : existing.scenarioBriefing,
       emotionTags: dto.emotionTags !== undefined ? dto.emotionTags : existing.emotionTags,
       isScenarioMode: dto.isScenarioMode !== undefined ? dto.isScenarioMode : existing.isScenarioMode,
+      userRole: dto.userRole !== undefined ? dto.userRole.trim() : existing.userRole || '',
+      mayaRole: dto.mayaRole !== undefined ? dto.mayaRole.trim() : existing.mayaRole || '',
+      goalTitle: dto.goalTitle !== undefined ? dto.goalTitle.trim() : existing.goalTitle || '',
+      goalDescription: dto.goalDescription !== undefined ? dto.goalDescription.trim() : existing.goalDescription || '',
       isPublished: dto.isPublished !== undefined ? dto.isPublished : existing.isPublished,
       updatedAt: new Date().toISOString(),
     };
@@ -551,5 +577,113 @@ INSTRUCTIONS:
     }
 
     return record;
+  }
+
+  async generateScenarioPrompt(dto: GenerateScenarioPromptDto): Promise<{
+    emotion: string;
+    openingMode: 'maya_explains_first' | 'maya_in_character' | 'user_starts';
+    openingLine: string;
+    scenarioPrompt: string;
+  }> {
+    const userRole = (dto.userRole || '').trim() || 'English Learner';
+    const mayaRole = (dto.mayaRole || '').trim() || 'Roleplay Partner';
+    const goalTitle = (dto.goalTitle || '').trim() || 'Reach a positive resolution';
+    const goalDesc = (dto.goalDescription || '').trim() || 'Express your thoughts clearly and resolve the situation.';
+    const briefing = (dto.briefing || '').trim() || dto.title;
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const systemPrompt = `You are an expert AI roleplay prompt engineer for Maya AI, an English speaking coach app.
+An admin is creating a real-world scenario practice level for students learning English.
+Given the scenario details below, generate:
+1. "emotion": The single most appropriate primary emotional state for Maya from: "angry" | "crying" | "cheerful" | "strict" | "professional" | "neutral"
+2. "openingMode": The best opening protocol from:
+   - "maya_explains_first" (Maya introduces setup briefly in 1 sentence, then transitions into character)
+   - "maya_in_character" (Maya immediately starts speaking in character without any intro)
+   - "user_starts" (Maya waits for the student to speak first)
+3. "openingLine": Maya's exact first spoken opening sentence in character (concise, natural English, under 18 words).
+4. "scenarioPrompt": A full, highly detailed prompt directive for the AI roleplay actor (approx 800 - 1200 characters) containing:
+   - Maya's Character Persona, role (${mayaRole}), backstory, setting, and relation to the student (${userRole}).
+   - Emotional state and acoustic acting behavior matching the selected emotion.
+   - Core Conversation Rules:
+     * Keep every spoken response strictly under 15-20 words per turn. No long monologues.
+     * React authentically to what the student says.
+     * Speak natural, conversational English.
+   - MANDATORY GOAL COMPLETION & WRAP-UP DIRECTIVE:
+     * Maya must actively track whether the student achieves their goal: "${goalTitle}: ${goalDesc}".
+     * As soon as the student demonstrates the required behavior / reaches agreement / calms Maya down / solves the problem, Maya must accept the outcome in character (e.g. "Alright, that works for me. Thank you for sorting this out."), deliver a natural concluding remark in character, and gracefully wrap up the roleplay session.
+
+SCENARIO DETAILS:
+- Title: ${dto.title}
+- Topic/Category: ${dto.topic || 'Role Play Practice'}
+- Situation Briefing: ${briefing}
+- Student's Role: ${userRole}
+- Maya's Role: ${mayaRole}
+- Student's Goal Title: ${goalTitle}
+- Student's Goal Description: ${goalDesc}
+
+Return strictly a JSON object with:
+{
+  "emotion": "angry" | "crying" | "cheerful" | "strict" | "professional" | "neutral",
+  "openingMode": "maya_explains_first" | "maya_in_character" | "user_starts",
+  "openingLine": "string",
+  "scenarioPrompt": "string"
+}`;
+
+        const res = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
+          config: {
+            responseMimeType: 'application/json',
+          },
+        });
+
+        const text = res.text?.trim() || '';
+        if (text) {
+          const parsed = JSON.parse(text);
+          return {
+            emotion: parsed.emotion || 'neutral',
+            openingMode: parsed.openingMode || 'maya_explains_first',
+            openingLine: parsed.openingLine || '',
+            scenarioPrompt: parsed.scenarioPrompt || '',
+          };
+        }
+      } catch (err: any) {
+        this.logger.warn(`Gemini generateScenarioPrompt API error: ${err?.message}`);
+      }
+    }
+
+    // High quality deterministic fallback generator
+    let detectedEmotion = 'neutral';
+    const textAll = `${dto.title} ${briefing}`.toLowerCase();
+    if (textAll.includes('angry') || textAll.includes('mix-up') || textAll.includes('complaint') || textAll.includes('dispute') || textAll.includes('delay')) {
+      detectedEmotion = 'angry';
+    } else if (textAll.includes('cry') || textAll.includes('sad') || textAll.includes('scholarship') || textAll.includes('reject')) {
+      detectedEmotion = 'crying';
+    } else if (textAll.includes('interview') || textAll.includes('strict') || textAll.includes('boss')) {
+      detectedEmotion = 'strict';
+    } else if (textAll.includes('cafe') || textAll.includes('coffee') || textAll.includes('party') || textAll.includes('friend')) {
+      detectedEmotion = 'cheerful';
+    }
+
+    return {
+      emotion: detectedEmotion,
+      openingMode: 'maya_explains_first',
+      openingLine: `Hello! I see you're here regarding the ${dto.title.toLowerCase()}. How can I assist you today?`,
+      scenarioPrompt: `You are Maya playing the role of ${mayaRole}.
+Setting & Premise: ${briefing}
+Student's Role: ${userRole}.
+
+Emotional State & Tone: ${detectedEmotion.toUpperCase()}. Speak authentically in character.
+
+Core Conversation Rules:
+1. Keep spoken responses snappy, conversational, and strictly under 15-20 words per turn.
+2. React genuinely to the student's words. If they are polite, empathetic, or structured, acknowledge it.
+3. GOAL COMPLETION & WRAP-UP DIRECTIVE:
+   - Student's Target Goal: "${goalTitle} - ${goalDesc}".
+   - As soon as the student achieves this goal or negotiates a fair resolution, accept it in character, give a closing sentence, and naturally conclude the roleplay.`,
+    };
   }
 }

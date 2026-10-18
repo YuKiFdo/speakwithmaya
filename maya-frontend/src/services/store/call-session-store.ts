@@ -20,6 +20,10 @@ export interface CallSessionConfig {
   openingLine?: string;
   scenarioBriefing?: string;
   emotionTags?: string[];
+  userRole?: string;
+  mayaRole?: string;
+  goalTitle?: string;
+  goalDescription?: string;
   targetSpeakingShare?: number;
   isIntroCall?: boolean;
   userName?: string;

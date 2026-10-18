@@ -18,6 +18,7 @@ import {
   UpdateRoadmapLevelDto,
   ReorderRoadmapLevelsDto,
   SimulateLevelTurnDto,
+  GenerateScenarioPromptDto,
 } from './dto/roadmap.dto.js';
 import { RecordUserRoadmapProgressDto } from './dto/user-roadmap-progress.dto.js';
 import { AuthService } from '../auth/auth.service.js';
@@ -90,6 +91,13 @@ export class RoadmapController {
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async simulateLevelTurn(@Body() dto: SimulateLevelTurnDto) {
     return this.roadmapService.simulateTurn(dto);
+  }
+
+  // 8b. Admin: Generate AI Persona, Emotion, Opening Protocol, and Directive
+  @Post('admin/roadmap/generate-prompt')
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  async generateScenarioPrompt(@Body() dto: GenerateScenarioPromptDto) {
+    return this.roadmapService.generateScenarioPrompt(dto);
   }
 
   // 9. User Roadmap Progress: Get completed levels for user

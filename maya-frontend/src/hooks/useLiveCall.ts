@@ -90,6 +90,10 @@ interface UseLiveCallOptions {
   openingLine?: string;
   scenarioBriefing?: string;
   emotionTags?: string[];
+  userRole?: string;
+  mayaRole?: string;
+  goalTitle?: string;
+  goalDescription?: string;
   targetSpeakingShare?: number;
   learningObjectives?: Array<{
     id: string;
@@ -564,6 +568,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             scenarioTitle: options.levelTitle || options.topic,
             scenarioBriefing: options.scenarioBriefing,
             emotionTags: options.emotionTags,
+            userRole: options.userRole,
+            mayaRole: options.mayaRole,
+            goalTitle: options.goalTitle,
+            goalDescription: options.goalDescription,
             practicePoints: options.practicePoints,
             canonicalContent: options.canonicalContent,
             passingScorePercent: options.passingScorePercent,

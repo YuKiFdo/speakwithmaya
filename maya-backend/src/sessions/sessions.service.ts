@@ -733,6 +733,10 @@ GUARDRAILS:
       .replace(/\{\{userName\}\}/gi, effectiveName)
       .replace(/\bTharindu\b/gi, effectiveName)
       .trim();
+    const userRole = (dto.userRole || '').trim();
+    const mayaRole = (dto.mayaRole || '').trim();
+    const goalTitle = (dto.goalTitle || '').trim();
+    const goalDesc = (dto.goalDescription || '').trim();
 
     return `You are an immersive method voice actor performing an authentic audio roleplay with ${userName}.
 CRITICAL: Do NOT act like a polite AI assistant, language coach, or customer service agent. You are 100% in character as described below.
@@ -741,6 +745,9 @@ CRITICAL: Do NOT act like a polite AI assistant, language coach, or customer ser
 ${customPrompt}
 
 ${briefing ? `SCENARIO CONTEXT FOR STUDENT: ${briefing}` : ''}
+${userRole ? `STUDENT'S ROLE: ${userRole}` : ''}
+${mayaRole ? `MAYA'S ROLE (YOUR CHARACTER): ${mayaRole}` : ''}
+${goalTitle || goalDesc ? `STUDENT'S GOAL: ${goalTitle ? goalTitle + (goalDesc ? ' — ' + goalDesc : '') : goalDesc}` : ''}
 
 ### AUDIO PROSODY & VOCAL PERFORMANCE (MANDATORY FOR GEMINI 3.8 LIVE):
 - Target Emotion: ${primaryEmotion.toUpperCase()}
@@ -767,7 +774,10 @@ ${openingLine ? `- MANDATORY OPENING LINE: Start the conversation immediately by
    - Fully adopt the emotions, attitude, and character traits instructed in the scenario above.
    - React authentically to what the student says. If they de-escalate or solve the issue well, gradually soften your tone as allowed by your scenario rules. If they struggle or make excuses, react in character.
 5. ZERO TASK LOCKING:
-   - Do not halt the conversation or force robotic word-for-word repetitions. Let the conversation flow naturally in character.`;
+   - Do not halt the conversation or force robotic word-for-word repetitions. Let the conversation flow naturally in character.
+6. GOAL COMPLETION & CONCLUSION DIRECTIVE:
+   - Actively listen for whether ${userName} achieves their stated goal${goalTitle || goalDesc ? ` ("${goalTitle ? goalTitle + (goalDesc ? ' — ' + goalDesc : '') : goalDesc}")` : ''}.
+   - As soon as ${userName} satisfies the goal criteria or negotiates an agreeable resolution, accept it warmly in character (e.g. "Alright, that sounds fair. Thank you for working with me on this."), deliver a natural concluding sentence in character, and gracefully wrap up the roleplay dialogue. Do not invent new artificial hurdles once the goal is achieved.`;
   }
 
   getSystemPrompt(dto: CreateSessionTokenDto): string {
@@ -1449,6 +1459,18 @@ ${memoryPart}`;
           if (!dto.emotionTags && level.emotionTags) {
             dto.emotionTags = level.emotionTags;
           }
+          if (!dto.userRole && level.userRole) {
+            dto.userRole = level.userRole;
+          }
+          if (!dto.mayaRole && level.mayaRole) {
+            dto.mayaRole = level.mayaRole;
+          }
+          if (!dto.goalTitle && level.goalTitle) {
+            dto.goalTitle = level.goalTitle;
+          }
+          if (!dto.goalDescription && level.goalDescription) {
+            dto.goalDescription = level.goalDescription;
+          }
 
           // If this is a Week Review / Consolidation level, fetch actual past mistakes from Supabase DB
           const isReviewLevel =
@@ -1752,9 +1774,52 @@ ${memoryPart}`;
               modelAudioUrl,
             },
             correctionsRecorded: grammarCorrections?.length || 0,
-            scores: scores || { overall: 85, fluency: 84, grammar: 82, pronunciation: 86 },
           };
         }
+
+        // Calculate authentic roleplay score based on fluency, grammar, and hint usage ratio
+        const userTurns = (turns || []).filter((t) => t.role === 'user');
+        const userTurnsCount = userTurns.length;
+        const hintsUsed = dto.hintsUsedCount || 0;
+        const hintRatio = userTurnsCount > 0 ? hintsUsed / userTurnsCount : 0;
+
+        let totalWords = 0;
+        userTurns.forEach((t) => {
+          const wc = (t.text || '').split(/\s+/).filter(Boolean).length;
+          totalWords += wc;
+        });
+        const avgWordsPerTurn = userTurnsCount > 0 ? totalWords / userTurnsCount : 0;
+
+        let calculatedFluency = 82;
+        if (avgWordsPerTurn >= 6 && avgWordsPerTurn <= 25) {
+          calculatedFluency += 6;
+        } else if (avgWordsPerTurn > 0 && avgWordsPerTurn < 4) {
+          calculatedFluency -= 8;
+        }
+
+        const corrCount = grammarCorrections?.length || 0;
+        let calculatedGrammar = Math.max(55, 88 - corrCount * 4);
+        let calculatedPronunciation = 85;
+
+        let hintAdjustment = 0;
+        if (hintRatio === 0 && userTurnsCount >= 3) {
+          hintAdjustment = 6; // Independent speech bonus
+        } else if (hintRatio > 0.5) {
+          hintAdjustment = -12; // Heavy reliance on hints
+        } else if (hintRatio > 0.25) {
+          hintAdjustment = -6;
+        }
+
+        const calculatedOverall = Math.min(98, Math.max(45, Math.round(
+          calculatedFluency * 0.45 + calculatedGrammar * 0.40 + calculatedPronunciation * 0.15 + hintAdjustment
+        )));
+
+        const resolvedScores = scores || {
+          overall: calculatedOverall,
+          fluency: Math.min(98, Math.max(50, calculatedFluency + (hintRatio === 0 ? 3 : 0))),
+          grammar: calculatedGrammar,
+          pronunciation: calculatedPronunciation,
+        };
 
         const finalRoadmapLevelId = dto.roadmapLevelId || active?.roadmapLevelId;
         // 1. Ensure/update session status in sessions table
@@ -1768,10 +1833,10 @@ ${memoryPart}`;
             duration_seconds: durationSeconds,
             status: 'completed',
             topic: dto.isIntroCall ? 'Introductory Practice' : (dto.topic || 'English Speaking Practice'),
-            overall_score: scores?.overall ?? 85,
-            fluency_score: scores?.fluency ?? 84,
-            grammar_score: scores?.grammar ?? 82,
-            pronunciation_score: scores?.pronunciation ?? 86,
+            overall_score: resolvedScores.overall,
+            fluency_score: resolvedScores.fluency,
+            grammar_score: resolvedScores.grammar,
+            pronunciation_score: resolvedScores.pronunciation,
             ...(finalRoadmapLevelId ? { roadmap_level_id: finalRoadmapLevelId } : {}),
           }, { onConflict: 'id' });
 
@@ -1811,7 +1876,7 @@ ${memoryPart}`;
         const roadmapLevelId = activeInfo?.roadmapLevelId || (dto as any).roadmapLevelId;
         if (roadmapLevelId && this.roadmapService) {
           try {
-            const overallScore = scores?.overall ?? 85;
+            const overallScore = resolvedScores.overall ?? 75;
             let passingScorePercent = 70;
             let levelNumber = 1;
             try {
