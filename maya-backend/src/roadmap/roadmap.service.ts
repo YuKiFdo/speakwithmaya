@@ -1,5 +1,7 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, OnModuleInit } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   CreateRoadmapLevelDto,
   UpdateRoadmapLevelDto,
@@ -53,11 +55,13 @@ export interface RoadmapLevelEntity {
 }
 
 @Injectable()
-export class RoadmapService {
+export class RoadmapService implements OnModuleInit {
   private readonly logger = new Logger(RoadmapService.name);
   private readonly supabase: SupabaseClient | null = null;
   private hasHaloBorderColorSnake = false;
   private readonly briefingAudioCache = new Map<string, Buffer>();
+  private readonly inFlightSyntheses = new Map<string, Promise<Buffer>>();
+  private readonly audioCacheDir = path.resolve(process.cwd(), 'assets', 'audio-cache');
 
   constructor() {
     const supabaseUrl = process.env.SUPABASE_URL;
@@ -73,6 +77,57 @@ export class RoadmapService {
       this.checkSchema();
     } else {
       this.logger.warn('RoadmapService: SUPABASE_URL or keys not configured; Supabase features unavailable');
+    }
+
+    try {
+      if (!fs.existsSync(this.audioCacheDir)) {
+        fs.mkdirSync(this.audioCacheDir, { recursive: true });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not create audio cache directory: ${err?.message}`);
+    }
+  }
+
+  async onModuleInit() {
+    // Eagerly prewarm roadmap audio in background on server start
+    setTimeout(() => {
+      this.warmupAllLevelsAudio().catch((err) => {
+        this.logger.warn(`[Audio Warmup] Failed during initial warmup: ${err?.message}`);
+      });
+    }, 2500);
+  }
+
+  async warmupAllLevelsAudio(): Promise<void> {
+    try {
+      const levels = await this.getAllLevels(true);
+      for (const lvl of levels) {
+        if (!lvl.isPublished && lvl.levelNumber > 3) continue;
+        for (const lang of ['en', 'si'] as const) {
+          const cacheKey = `${lvl.id}_${lang}`;
+          const diskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
+          if (!fs.existsSync(diskPath) && !this.inFlightSyntheses.has(cacheKey)) {
+            this.logger.log(`[Audio Warmup] Pre-synthesizing ${lvl.title} (${lang})...`);
+            await this.getBriefingAudio(lvl.id, lang).catch((e) => {
+              this.logger.warn(`[Audio Warmup] Error pre-synthesizing ${lvl.id} (${lang}): ${e?.message}`);
+            });
+          }
+        }
+      }
+    } catch (err: any) {
+      this.logger.debug(`warmupAllLevelsAudio skipped: ${err?.message}`);
+    }
+  }
+
+  prewarmLevelAudio(levelId: string): void {
+    // Fire-and-forget background pre-warm for both English & Sinhala
+    for (const lang of ['en', 'si'] as const) {
+      const cacheKey = `${levelId}_${lang}`;
+      const diskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
+      if (!fs.existsSync(diskPath) && !this.inFlightSyntheses.has(cacheKey)) {
+        this.getBriefingAudio(levelId, lang).catch((err) => {
+          this.logger.warn(`[Prewarm] Background audio synthesis failed for ${cacheKey}: ${err?.message}`);
+        });
+      }
     }
   }
 
@@ -314,6 +369,7 @@ export class RoadmapService {
     }
 
     this.logger.log(`[DB INSERT] Successfully added level "${newLevel.title}" (${newLevel.id}) to Supabase DB`);
+    this.prewarmLevelAudio(newLevel.id);
     return newLevel;
   }
 
@@ -383,6 +439,18 @@ export class RoadmapService {
       this.logger.error(`Failed to update level ${existing.id} in Supabase DB: ${error.message} (code: ${error.code})`);
       throw new Error(`Failed to update level in Supabase DB: ${error.message}`);
     }
+
+    // Invalidate cached audio files for this level if script changed
+    for (const lang of ['en', 'si'] as const) {
+      const cacheKey = `${existing.id}_${lang}`;
+      this.briefingAudioCache.delete(cacheKey);
+      const diskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
+      if (fs.existsSync(diskPath)) {
+        try { fs.unlinkSync(diskPath); } catch {}
+      }
+    }
+    // Re-prewarm immediately in background
+    this.prewarmLevelAudio(existing.id);
 
     this.logger.log(`[DB UPDATE] Successfully updated level "${updated.title}" (${existing.id}) in Supabase DB`);
     return updated;
@@ -638,35 +706,21 @@ Given the scenario details below, generate:
      * Maya must actively track whether the student achieves their goal: "${goalTitle}: ${goalDesc}".
      * As soon as the student demonstrates the required behavior / reaches agreement / calms Maya down / solves the problem, Maya must accept the outcome in character (e.g. "Alright, that works for me. Thank you for sorting this out."), deliver a natural concluding remark in character, and gracefully wrap up the roleplay session.
 
-5. "ttsScriptEnglish": A warm, encouraging English spoken briefing narration (approx 60-90 words) where Maya speaks directly to the student before the call to explain the scenario, roles, and goal.
-Use natural conversational expression tags: <short pause>, <sighs>, <chuckle>, <cheer>, <giggle>.
-Format EXACTLY like this structure:
-Welcome to your next scenario: ${dto.title}! <short pause>
+5. "ttsScriptEnglish": A warm, lively, punchy English spoken briefing narration (approx 35-45 words) where Maya speaks directly to the student before the call to explain the scenario, roles, and goal.
+Use natural conversational expression tags: <short pause>, <sighs>, <chuckle>.
+Keep it punchy so TTS synthesizes quickly.
+Format:
+Welcome to your next scenario: ${dto.title}! <short pause> Picture this... <sighs> [1 sentence setting the scene based on: ${briefing}]. You are the ${userRole}, and Maya is the ${mayaRole}. Your goal: ${goalTitle}. <short pause> Ready? Let's start!
 
-Picture this... <sighs> [1-2 sentences setting the scene based on: ${briefing}]
-
-In this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.
-
-Your goal here is simple: ${goalTitle}.
-
-[1-2 sentences explaining: ${goalDesc} with realistic advice]. <short pause>
-
-Ready? Let's start the roleplay!
-
-6. "ttsScriptSinhala": The equivalent warm, natural colloquial Sinhala spoken briefing narration (approx 60-90 words) where Maya speaks directly to the student in friendly everyday Sinhala.
-Use natural conversational expression tags: <short pause>, <sighs>, <chuckle>, etc.
-Format EXACTLY like this structure:
-හරි... එහෙනම් අපි ඊළඟ scenario එකට යමු. ${dto.title}! <short pause>
-
-මේක හිතන්නකෝ... <sighs> [Scene in natural Sinhala based on: ${briefing}]. <short pause>
-
-ඉතින් මේ scenario එකේ ඔයා තමයි ${userRole}. <short pause> Maya ${mayaRole} විදිහට ඉන්නවා.
-
-ඔයාගේ goal එක හරිම simple. [Goal Title in Sinhala].
-
-[Goal Description in natural Sinhala with clear encouragement]. <short pause>
-
-හරි... ready ද? <short pause> එහෙනම් roleplay එක පටන් ගමු!
+6. "ttsScriptSinhala": Spoken colloquial Sri Lankan Sinhala (කතා කරන සිංහල) warmly spoken by Maya, naturally blended with everyday English roleplay terms (Singlish conversational style).
+CRITICAL RULES FOR SINHALA:
+- DO NOT explain in English!
+- DO NOT use formal bookish Sinhala (no "කරනු ලැබේ", "ඔබට", "සඳහාය", "ලදිමි").
+- Use everyday spoken words ("ඔයා", "හිතන්නකෝ", "කලබල නොවී", "calm පිට", "issue එක explain කරලා", "හොඳ solution එකක් negotiate කරන්න", "Ready ද?").
+- Include conversational expression tags: <short pause>, <sighs>, <chuckle>.
+- Keep it punchy (approx 35-45 words) so it synthesizes quickly.
+Format:
+හිතන්නකෝ ඔයා [1 sentence setting the scene in spoken Sinhala with English loanwords, e.g. hotel එකට check-in වෙන්න ආවා කියලා]. <short pause> මම තමයි ${mayaRole}. [1 sentence scenario situation, e.g. ඔයා book කරපු ocean-view room එක වෙන කෙනෙක්ට දීලා!] <sighs> කලබල නොවී calm පිට issue එක explain කරලා, <short pause> හොඳ solution එකක් negotiate කරන්න. <chuckle> Ready ද?
 
 SCENARIO DETAILS:
 - Title: ${dto.title}
@@ -703,8 +757,8 @@ Return strictly a JSON object with:
             openingMode: parsed.openingMode || 'maya_explains_first',
             openingLine: parsed.openingLine || '',
             scenarioPrompt: parsed.scenarioPrompt || '',
-            ttsScriptEnglish: parsed.ttsScriptEnglish || `Welcome to your next scenario: ${dto.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`,
-            ttsScriptSinhala: parsed.ttsScriptSinhala || `හරි... එහෙනම් අපි ඊළඟ scenario එකට යමු. ${dto.title}! <short pause>\n\nමේක හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nඉතින් මේ scenario එකේ ඔයා තමයි ${userRole}. <short pause> Maya ${mayaRole} විදිහට ඉන්නවා.\n\nඔයාගේ goal එක හරිම simple. ${goalTitle}.\n\n${goalDesc} <short pause>\n\nහරි... ready ද? <short pause> එහෙනම් roleplay එක පටන් ගමු!`,
+            ttsScriptEnglish: parsed.ttsScriptEnglish || `Welcome to your next scenario: ${dto.title}! <short pause> Picture this... <sighs> ${briefing}. You are the ${userRole}, and Maya is the ${mayaRole}. Your goal: ${goalTitle}. <short pause> Ready? Let's start!`,
+            ttsScriptSinhala: parsed.ttsScriptSinhala || `හිතන්නකෝ ඔයා මේ scenario එකට ආවා කියලා: ${dto.title}. <short pause> මම තමයි ${mayaRole}. ${briefing} <sighs> කලබල නොවී calm පිට issue එක explain කරලා, <short pause> හොඳ solution එකක් negotiate කරන්න. <chuckle> Ready ද?`,
           };
         }
       } catch (err: any) {
@@ -741,8 +795,8 @@ Core Conversation Rules:
 3. GOAL COMPLETION & WRAP-UP DIRECTIVE:
    - Student's Target Goal: "${goalTitle} - ${goalDesc}".
    - As soon as the student achieves this goal or negotiates a fair resolution, accept it in character, give a closing sentence, and naturally conclude the roleplay.`,
-      ttsScriptEnglish: `Welcome to your next scenario: ${dto.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`,
-      ttsScriptSinhala: `හරි... එහෙනම් අපි ඊළඟ scenario එකට යමු. ${dto.title}! <short pause>\n\nමේක හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nඉතින් මේ scenario එකේ ඔයා තමයි ${userRole}. <short pause> Maya ${mayaRole} විදිහට ඉන්නවා.\n\nඔයාගේ goal එක හරිම simple. ${goalTitle}.\n\n${goalDesc} <short pause>\n\nහරි... ready ද? <short pause> එහෙනම් roleplay එක පටන් ගමු!`,
+      ttsScriptEnglish: `Welcome to your next scenario: ${dto.title}! <short pause> Picture this... <sighs> ${briefing}. You are the ${userRole}, and Maya is the ${mayaRole}. Your goal: ${goalTitle}. <short pause> Ready? Let's start!`,
+      ttsScriptSinhala: `හිතන්නකෝ ඔයා මේ scenario එකට ආවා කියලා: ${dto.title}. <short pause> මම තමයි ${mayaRole}. ${briefing} <sighs> කලබල නොවී calm පිට issue එක explain කරලා, <short pause> හොඳ solution එකක් negotiate කරන්න. <chuckle> Ready ද?`,
     };
   }
 
@@ -801,7 +855,9 @@ Core Conversation Rules:
     levelId: string,
     lang: 'en' | 'si' = 'en',
   ): Promise<{ audioBuffer: Buffer; mimeType: string }> {
-    const cacheKey = `${levelId}:${lang}`;
+    const cacheKey = `${levelId}_${lang}`;
+
+    // 1. In-memory hot cache (0ms)
     if (this.briefingAudioCache.has(cacheKey)) {
       return {
         audioBuffer: this.briefingAudioCache.get(cacheKey)!,
@@ -809,30 +865,73 @@ Core Conversation Rules:
       };
     }
 
-    // Load level
-    const level = await this.getLevelById(levelId);
-    let script = lang === 'si' ? level.ttsScriptSinhala : level.ttsScriptEnglish;
-
-    if (!script || !script.trim()) {
-      const briefing = level.scenarioBriefing || level.description || '';
-      const userRole = level.userRole || 'Learner';
-      const mayaRole = level.mayaRole || 'Roleplay Partner';
-      const goalTitle = level.goalTitle || 'Find a resolution';
-      const goalDesc = level.goalDescription || 'Negotiate politely and resolve the issue.';
-      if (lang === 'si') {
-        script = `හරි... එහෙනම් අපි ඊළඟ scenario එකට යමු. ${level.title}! <short pause>\n\nමේක හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nඉතින් මේ scenario එකේ ඔයා තමයි ${userRole}. <short pause> Maya ${mayaRole} විදිහට ඉන්නවා.\n\nඔයාගේ goal එක හරිම simple. ${goalTitle}.\n\n${goalDesc} <short pause>\n\nහරි... ready ද? <short pause> එහෙනම් roleplay එක පටන් ගමු!`;
-      } else {
-        script = `Welcome to your next scenario: ${level.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`;
+    // 2. Persistent disk cache (1-2ms)
+    const diskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
+    if (fs.existsSync(diskPath)) {
+      try {
+        const audioBuffer = fs.readFileSync(diskPath);
+        this.briefingAudioCache.set(cacheKey, audioBuffer);
+        return {
+          audioBuffer,
+          mimeType: 'audio/wav',
+        };
+      } catch (err: any) {
+        this.logger.warn(`Could not read disk cache for ${cacheKey}: ${err?.message}`);
       }
     }
 
-    const { audioBase64 } = await this.synthesizeScenarioTts(script, lang, 'Callirrhoe');
-    const audioBuffer = Buffer.from(audioBase64, 'base64');
-    this.briefingAudioCache.set(cacheKey, audioBuffer);
+    // 3. Deduplicate in-flight requests (share same Promise across concurrent calls)
+    if (this.inFlightSyntheses.has(cacheKey)) {
+      const audioBuffer = await this.inFlightSyntheses.get(cacheKey)!;
+      return {
+        audioBuffer,
+        mimeType: 'audio/wav',
+      };
+    }
 
-    return {
-      audioBuffer,
-      mimeType: 'audio/wav',
-    };
+    // 4. Synthesize with Gemini TTS and persist
+    const synthesisPromise = (async (): Promise<Buffer> => {
+      const level = await this.getLevelById(levelId);
+      let script = lang === 'si' ? level.ttsScriptSinhala : level.ttsScriptEnglish;
+
+      if (!script || !script.trim()) {
+        const briefing = level.scenarioBriefing || level.description || '';
+        const userRole = level.userRole || 'Learner';
+        const mayaRole = level.mayaRole || 'Roleplay Partner';
+        const goalTitle = level.goalTitle || 'Find a resolution';
+        if (lang === 'si') {
+          script = `හිතන්නකෝ ඔයා මේ scenario එකට ආවා කියලා: ${level.title}. <short pause> මම තමයි ${mayaRole}. ${briefing} <sighs> කලබල නොවී calm පිට issue එක explain කරලා, <short pause> හොඳ solution එකක් negotiate කරන්න. <chuckle> Ready ද?`;
+        } else {
+          script = `Welcome to your next scenario: ${level.title}! <short pause> Picture this... <sighs> ${briefing}. You are the ${userRole}, and Maya is the ${mayaRole}. Your goal: ${goalTitle}. <short pause> Ready? Let's start!`;
+        }
+      }
+
+      this.logger.log(`[TTS Synthesis] Synthesizing voice for ${level.title} (${lang})...`);
+      const { audioBase64 } = await this.synthesizeScenarioTts(script, lang, 'Callirrhoe');
+      const audioBuffer = Buffer.from(audioBase64, 'base64');
+
+      // Save to disk
+      try {
+        fs.writeFileSync(diskPath, audioBuffer);
+        this.logger.log(`[Disk Cache] Saved briefing audio: ${diskPath} (${audioBuffer.length} bytes)`);
+      } catch (err: any) {
+        this.logger.warn(`Could not write disk cache for ${cacheKey}: ${err?.message}`);
+      }
+
+      // Save to memory
+      this.briefingAudioCache.set(cacheKey, audioBuffer);
+      return audioBuffer;
+    })();
+
+    this.inFlightSyntheses.set(cacheKey, synthesisPromise);
+    try {
+      const audioBuffer = await synthesisPromise;
+      return {
+        audioBuffer,
+        mimeType: 'audio/wav',
+      };
+    } finally {
+      this.inFlightSyntheses.delete(cacheKey);
+    }
   }
 }

@@ -1126,7 +1126,7 @@ export default function AdminScenariosScreen() {
                       style={[styles.textInput, styles.ttsScriptEditor]}
                       value={formTtsSinhala}
                       onChangeText={setFormTtsSinhala}
-                      placeholder="ඔබේ ඊළඟ අවස්ථාවට සාදරයෙන් පිළිගන්නවා... <short pause> පොඩ්ඩක් හිතන්න..."
+                      placeholder="හිතන්නකෝ ඔයා hotel එකට check-in වෙන්න ආවා කියලා... <short pause> මම receptionist... <sighs>"
                       placeholderTextColor={PLACEHOLDER_COLOR}
                       multiline
                       numberOfLines={4}

@@ -3,6 +3,7 @@
 /node_modules
 /build
 /models
+/assets/audio-cache
 
 # TypeScript build cache
 *.tsbuildinfo
