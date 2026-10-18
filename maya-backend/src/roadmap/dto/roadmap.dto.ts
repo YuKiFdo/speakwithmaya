@@ -149,6 +149,22 @@ export class CreateRoadmapLevelDto {
   goalDescription?: string = '';
 
   @IsOptional()
+  @IsString()
+  ttsScriptEnglish?: string = '';
+
+  @IsOptional()
+  @IsString()
+  ttsScriptSinhala?: string = '';
+
+  @IsOptional()
+  @IsString()
+  audioUrlEnglish?: string = '';
+
+  @IsOptional()
+  @IsString()
+  audioUrlSinhala?: string = '';
+
+  @IsOptional()
   @IsBoolean()
   isPublished?: boolean = true;
 }
@@ -257,6 +273,22 @@ export class UpdateRoadmapLevelDto {
   goalDescription?: string;
 
   @IsOptional()
+  @IsString()
+  ttsScriptEnglish?: string;
+
+  @IsOptional()
+  @IsString()
+  ttsScriptSinhala?: string;
+
+  @IsOptional()
+  @IsString()
+  audioUrlEnglish?: string;
+
+  @IsOptional()
+  @IsString()
+  audioUrlSinhala?: string;
+
+  @IsOptional()
   @IsBoolean()
   isPublished?: boolean;
 }
@@ -336,6 +368,20 @@ export class GenerateScenarioPromptDto {
   @IsOptional()
   @IsString()
   goalDescription?: string;
+}
+
+export class SynthesizeScenarioTtsDto {
+  @IsString()
+  @IsNotEmpty()
+  text: string;
+
+  @IsOptional()
+  @IsString()
+  language?: 'en' | 'si' = 'en';
+
+  @IsOptional()
+  @IsString()
+  voice?: string = 'Callirrhoe';
 }
 
 

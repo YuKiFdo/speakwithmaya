@@ -8,10 +8,13 @@ import {
   Param,
   Headers,
   Query,
+  Req,
+  Res,
   UsePipes,
   ValidationPipe,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { RoadmapService } from './roadmap.service.js';
 import {
   CreateRoadmapLevelDto,
@@ -19,6 +22,7 @@ import {
   ReorderRoadmapLevelsDto,
   SimulateLevelTurnDto,
   GenerateScenarioPromptDto,
+  SynthesizeScenarioTtsDto,
 } from './dto/roadmap.dto.js';
 import { RecordUserRoadmapProgressDto } from './dto/user-roadmap-progress.dto.js';
 import { AuthService } from '../auth/auth.service.js';
@@ -98,6 +102,56 @@ export class RoadmapController {
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async generateScenarioPrompt(@Body() dto: GenerateScenarioPromptDto) {
     return this.roadmapService.generateScenarioPrompt(dto);
+  }
+
+  // 8c. Admin: Synthesize Expressive Scenario TTS Preview
+  @Post('admin/roadmap/synthesize-tts')
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  async synthesizeScenarioTts(@Body() dto: SynthesizeScenarioTtsDto) {
+    return this.roadmapService.synthesizeScenarioTts(dto.text, dto.language, dto.voice);
+  }
+
+  // 8d. Public / Student: Stream Scenario Briefing Audio (with HTTP Range Streaming support)
+  @Get('roadmap/levels/:id/briefing-audio')
+  async streamBriefingAudio(
+    @Param('id') id: string,
+    @Query('lang') lang: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const cleanLang = (lang === 'si' ? 'si' : 'en') as 'en' | 'si';
+    try {
+      const { audioBuffer, mimeType } = await this.roadmapService.getBriefingAudio(id, cleanLang);
+      const totalLength = audioBuffer.length;
+      const range = req.headers.range;
+
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : totalLength - 1;
+        const chunksize = end - start + 1;
+        const chunk = audioBuffer.subarray(start, end + 1);
+
+        res.status(206);
+        res.set({
+          'Content-Range': `bytes ${start}-${end}/${totalLength}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': String(chunksize),
+          'Content-Type': mimeType,
+        });
+        res.end(chunk);
+      } else {
+        res.set({
+          'Content-Type': mimeType,
+          'Content-Length': String(totalLength),
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=86400',
+        });
+        res.end(audioBuffer);
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Could not stream briefing audio' });
+    }
   }
 
   // 9. User Roadmap Progress: Get completed levels for user

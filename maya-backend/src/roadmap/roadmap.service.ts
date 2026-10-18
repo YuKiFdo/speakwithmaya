@@ -43,6 +43,10 @@ export interface RoadmapLevelEntity {
   mayaRole?: string;
   goalTitle?: string;
   goalDescription?: string;
+  ttsScriptEnglish?: string;
+  ttsScriptSinhala?: string;
+  audioUrlEnglish?: string;
+  audioUrlSinhala?: string;
   isPublished: boolean;
   createdAt: string;
   updatedAt: string;
@@ -53,6 +57,7 @@ export class RoadmapService {
   private readonly logger = new Logger(RoadmapService.name);
   private readonly supabase: SupabaseClient | null = null;
   private hasHaloBorderColorSnake = false;
+  private readonly briefingAudioCache = new Map<string, Buffer>();
 
   constructor() {
     const supabaseUrl = process.env.SUPABASE_URL;
@@ -122,6 +127,10 @@ export class RoadmapService {
       mayaRole: d.maya_role || d.mayaRole || '',
       goalTitle: d.goal_title || d.goalTitle || '',
       goalDescription: d.goal_description || d.goalDescription || '',
+      ttsScriptEnglish: d.tts_script_english || d.ttsScriptEnglish || '',
+      ttsScriptSinhala: d.tts_script_sinhala || d.ttsScriptSinhala || '',
+      audioUrlEnglish: d.audio_url_english || d.audioUrlEnglish || '',
+      audioUrlSinhala: d.audio_url_sinhala || d.audioUrlSinhala || '',
       isPublished: d.is_published ?? d.isPublished ?? true,
       createdAt: d.created_at || d.createdAt || new Date().toISOString(),
       updatedAt: d.updated_at || d.updatedAt || new Date().toISOString(),
@@ -155,6 +164,10 @@ export class RoadmapService {
       maya_role: e.mayaRole || '',
       goal_title: e.goalTitle || '',
       goal_description: e.goalDescription || '',
+      tts_script_english: e.ttsScriptEnglish || '',
+      tts_script_sinhala: e.ttsScriptSinhala || '',
+      audio_url_english: e.audioUrlEnglish || '',
+      audio_url_sinhala: e.audioUrlSinhala || '',
       is_published: e.isPublished,
       created_at: e.createdAt,
       updated_at: e.updatedAt,
@@ -281,6 +294,10 @@ export class RoadmapService {
       mayaRole: dto.mayaRole?.trim() || '',
       goalTitle: dto.goalTitle?.trim() || '',
       goalDescription: dto.goalDescription?.trim() || '',
+      ttsScriptEnglish: dto.ttsScriptEnglish?.trim() || '',
+      ttsScriptSinhala: dto.ttsScriptSinhala?.trim() || '',
+      audioUrlEnglish: dto.audioUrlEnglish?.trim() || '',
+      audioUrlSinhala: dto.audioUrlSinhala?.trim() || '',
       isPublished: dto.isPublished ?? true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -345,6 +362,10 @@ export class RoadmapService {
       mayaRole: dto.mayaRole !== undefined ? dto.mayaRole.trim() : existing.mayaRole || '',
       goalTitle: dto.goalTitle !== undefined ? dto.goalTitle.trim() : existing.goalTitle || '',
       goalDescription: dto.goalDescription !== undefined ? dto.goalDescription.trim() : existing.goalDescription || '',
+      ttsScriptEnglish: dto.ttsScriptEnglish !== undefined ? dto.ttsScriptEnglish.trim() : existing.ttsScriptEnglish || '',
+      ttsScriptSinhala: dto.ttsScriptSinhala !== undefined ? dto.ttsScriptSinhala.trim() : existing.ttsScriptSinhala || '',
+      audioUrlEnglish: dto.audioUrlEnglish !== undefined ? dto.audioUrlEnglish.trim() : existing.audioUrlEnglish || '',
+      audioUrlSinhala: dto.audioUrlSinhala !== undefined ? dto.audioUrlSinhala.trim() : existing.audioUrlSinhala || '',
       isPublished: dto.isPublished !== undefined ? dto.isPublished : existing.isPublished,
       updatedAt: new Date().toISOString(),
     };
@@ -584,6 +605,8 @@ INSTRUCTIONS:
     openingMode: 'maya_explains_first' | 'maya_in_character' | 'user_starts';
     openingLine: string;
     scenarioPrompt: string;
+    ttsScriptEnglish: string;
+    ttsScriptSinhala: string;
   }> {
     const userRole = (dto.userRole || '').trim() || 'English Learner';
     const mayaRole = (dto.mayaRole || '').trim() || 'Roleplay Partner';
@@ -595,7 +618,7 @@ INSTRUCTIONS:
     if (apiKey) {
       try {
         const ai = new GoogleGenAI({ apiKey });
-        const systemPrompt = `You are an expert AI roleplay prompt engineer for Maya AI, an English speaking coach app.
+        const systemPrompt = `You are an expert AI roleplay prompt engineer and voice director for Maya AI, an English speaking coach app.
 An admin is creating a real-world scenario practice level for students learning English.
 Given the scenario details below, generate:
 1. "emotion": The single most appropriate primary emotional state for Maya from: "angry" | "crying" | "cheerful" | "strict" | "professional" | "neutral"
@@ -615,6 +638,36 @@ Given the scenario details below, generate:
      * Maya must actively track whether the student achieves their goal: "${goalTitle}: ${goalDesc}".
      * As soon as the student demonstrates the required behavior / reaches agreement / calms Maya down / solves the problem, Maya must accept the outcome in character (e.g. "Alright, that works for me. Thank you for sorting this out."), deliver a natural concluding remark in character, and gracefully wrap up the roleplay session.
 
+5. "ttsScriptEnglish": A warm, encouraging English spoken briefing narration (approx 60-90 words) where Maya speaks directly to the student before the call to explain the scenario, roles, and goal.
+Use natural conversational expression tags: <short pause>, <sighs>, <chuckle>, <cheer>, <giggle>.
+Format EXACTLY like this structure:
+Welcome to your next scenario: ${dto.title}! <short pause>
+
+Picture this... <sighs> [1-2 sentences setting the scene based on: ${briefing}]
+
+In this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.
+
+Your goal here is simple: ${goalTitle}.
+
+[1-2 sentences explaining: ${goalDesc} with realistic advice]. <short pause>
+
+Ready? Let's start the roleplay!
+
+6. "ttsScriptSinhala": The equivalent warm, natural colloquial Sinhala spoken briefing narration (approx 60-90 words) where Maya speaks directly to the student in friendly everyday Sinhala.
+Use natural conversational expression tags: <short pause>, <sighs>, <chuckle>, etc.
+Format EXACTLY like this structure:
+හරි... එහෙනම් අපි ඊළඟ scenario එකට යමු. ${dto.title}! <short pause>
+
+මේක හිතන්නකෝ... <sighs> [Scene in natural Sinhala based on: ${briefing}]. <short pause>
+
+ඉතින් මේ scenario එකේ ඔයා තමයි ${userRole}. <short pause> Maya ${mayaRole} විදිහට ඉන්නවා.
+
+ඔයාගේ goal එක හරිම simple. [Goal Title in Sinhala].
+
+[Goal Description in natural Sinhala with clear encouragement]. <short pause>
+
+හරි... ready ද? <short pause> එහෙනම් roleplay එක පටන් ගමු!
+
 SCENARIO DETAILS:
 - Title: ${dto.title}
 - Topic/Category: ${dto.topic || 'Role Play Practice'}
@@ -629,7 +682,9 @@ Return strictly a JSON object with:
   "emotion": "angry" | "crying" | "cheerful" | "strict" | "professional" | "neutral",
   "openingMode": "maya_explains_first" | "maya_in_character" | "user_starts",
   "openingLine": "string",
-  "scenarioPrompt": "string"
+  "scenarioPrompt": "string",
+  "ttsScriptEnglish": "string",
+  "ttsScriptSinhala": "string"
 }`;
 
         const res = await ai.models.generateContent({
@@ -648,6 +703,8 @@ Return strictly a JSON object with:
             openingMode: parsed.openingMode || 'maya_explains_first',
             openingLine: parsed.openingLine || '',
             scenarioPrompt: parsed.scenarioPrompt || '',
+            ttsScriptEnglish: parsed.ttsScriptEnglish || `Welcome to your next scenario: ${dto.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`,
+            ttsScriptSinhala: parsed.ttsScriptSinhala || `හරි... එහෙනම් අපි ඊළඟ scenario එකට යමු. ${dto.title}! <short pause>\n\nමේක හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nඉතින් මේ scenario එකේ ඔයා තමයි ${userRole}. <short pause> Maya ${mayaRole} විදිහට ඉන්නවා.\n\nඔයාගේ goal එක හරිම simple. ${goalTitle}.\n\n${goalDesc} <short pause>\n\nහරි... ready ද? <short pause> එහෙනම් roleplay එක පටන් ගමු!`,
           };
         }
       } catch (err: any) {
@@ -684,6 +741,98 @@ Core Conversation Rules:
 3. GOAL COMPLETION & WRAP-UP DIRECTIVE:
    - Student's Target Goal: "${goalTitle} - ${goalDesc}".
    - As soon as the student achieves this goal or negotiates a fair resolution, accept it in character, give a closing sentence, and naturally conclude the roleplay.`,
+      ttsScriptEnglish: `Welcome to your next scenario: ${dto.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`,
+      ttsScriptSinhala: `හරි... එහෙනම් අපි ඊළඟ scenario එකට යමු. ${dto.title}! <short pause>\n\nමේක හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nඉතින් මේ scenario එකේ ඔයා තමයි ${userRole}. <short pause> Maya ${mayaRole} විදිහට ඉන්නවා.\n\nඔයාගේ goal එක හරිම simple. ${goalTitle}.\n\n${goalDesc} <short pause>\n\nහරි... ready ද? <short pause> එහෙනම් roleplay එක පටන් ගමු!`,
+    };
+  }
+
+  async synthesizeScenarioTts(
+    text: string,
+    language: 'en' | 'si' = 'en',
+    voice: string = 'Callirrhoe',
+  ): Promise<{ audioBase64: string; mimeType: string }> {
+    const cleanText = (text || '').trim();
+    if (!cleanText) {
+      return { audioBase64: '', mimeType: 'audio/wav' };
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY is not configured for TTS generation');
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    const interaction: any = await (ai as any).interactions.create({
+      model: 'gemini-3.8-flash-lite-tts',
+      input: [
+        {
+          type: 'user_input',
+          content: [
+            {
+              type: 'text',
+              text: cleanText,
+              annotations: [
+                {
+                  type: 'speech_metadata',
+                  style:
+                    language === 'si'
+                      ? 'warm, friendly, engaging, natural colloquial Sinhala'
+                      : 'warm, bright, encouraging, natural conversational coach',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      response_format: { type: 'audio' },
+      generation_config: {
+        speech_config: [{ voice }],
+      },
+    });
+
+    const audioBase64 = interaction.output_audio?.data || '';
+    return {
+      audioBase64,
+      mimeType: 'audio/wav',
+    };
+  }
+
+  async getBriefingAudio(
+    levelId: string,
+    lang: 'en' | 'si' = 'en',
+  ): Promise<{ audioBuffer: Buffer; mimeType: string }> {
+    const cacheKey = `${levelId}:${lang}`;
+    if (this.briefingAudioCache.has(cacheKey)) {
+      return {
+        audioBuffer: this.briefingAudioCache.get(cacheKey)!,
+        mimeType: 'audio/wav',
+      };
+    }
+
+    // Load level
+    const level = await this.getLevelById(levelId);
+    let script = lang === 'si' ? level.ttsScriptSinhala : level.ttsScriptEnglish;
+
+    if (!script || !script.trim()) {
+      const briefing = level.scenarioBriefing || level.description || '';
+      const userRole = level.userRole || 'Learner';
+      const mayaRole = level.mayaRole || 'Roleplay Partner';
+      const goalTitle = level.goalTitle || 'Find a resolution';
+      const goalDesc = level.goalDescription || 'Negotiate politely and resolve the issue.';
+      if (lang === 'si') {
+        script = `හරි... එහෙනම් අපි ඊළඟ scenario එකට යමු. ${level.title}! <short pause>\n\nමේක හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nඉතින් මේ scenario එකේ ඔයා තමයි ${userRole}. <short pause> Maya ${mayaRole} විදිහට ඉන්නවා.\n\nඔයාගේ goal එක හරිම simple. ${goalTitle}.\n\n${goalDesc} <short pause>\n\nහරි... ready ද? <short pause> එහෙනම් roleplay එක පටන් ගමු!`;
+      } else {
+        script = `Welcome to your next scenario: ${level.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`;
+      }
+    }
+
+    const { audioBase64 } = await this.synthesizeScenarioTts(script, lang, 'Callirrhoe');
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    this.briefingAudioCache.set(cacheKey, audioBuffer);
+
+    return {
+      audioBuffer,
+      mimeType: 'audio/wav',
     };
   }
 }

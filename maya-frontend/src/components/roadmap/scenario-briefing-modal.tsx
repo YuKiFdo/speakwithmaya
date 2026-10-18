@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
+import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { MilestoneItem } from '@/app/(tabs)/roadmap';
 
 export interface ScenarioBriefingDetails {
@@ -141,14 +142,81 @@ export function ScenarioBriefingModal({
   onStartRoleplay,
 }: ScenarioBriefingModalProps) {
   const { isPhone } = useBreakpoint();
-  const { height: windowHeight } = useWindowDimensions();
   const [internalVisible, setInternalVisible] = useState(visible);
   const [isBtnHovered, setIsBtnHovered] = useState(false);
+
+  // Audio briefing states
+  const [audioLang, setAudioLang] = useState<'en' | 'si'>('en');
+  const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false);
+  const [hasAudioFinished, setHasAudioFinished] = useState<boolean>(false);
+  const [audioLoading, setAudioLoading] = useState<boolean>(false);
+  const audioRef = useRef<any>(null);
 
   // Smooth entrance/exit animations
   const backdropAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(40)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  const playBriefingAudio = (lang: 'en' | 'si', targetLevelId?: string) => {
+    const lvlId = targetLevelId || item?.id;
+    if (!lvlId) return;
+
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    if (typeof Audio === 'undefined') {
+      // Non-web fallback
+      setHasAudioFinished(true);
+      setIsAudioPlaying(false);
+      return;
+    }
+
+    const baseUrl = getBackendBaseUrl();
+    const streamUrl = `${baseUrl}/v1/roadmap/levels/${lvlId}/briefing-audio?lang=${lang}`;
+
+    setAudioLoading(true);
+    setIsAudioPlaying(true);
+    setHasAudioFinished(false);
+
+    try {
+      const audio = new Audio(streamUrl);
+      audioRef.current = audio;
+
+      audio.oncanplay = () => {
+        setAudioLoading(false);
+      };
+
+      audio.onended = () => {
+        setIsAudioPlaying(false);
+        setHasAudioFinished(true);
+        setAudioLoading(false);
+      };
+
+      audio.onerror = (e) => {
+        console.warn('[BriefingModal] Audio streaming error, enabling roleplay button:', e);
+        setIsAudioPlaying(false);
+        setHasAudioFinished(true);
+        setAudioLoading(false);
+      };
+
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn('[BriefingModal] Autoplay prevented or error:', err);
+          setIsAudioPlaying(false);
+          setHasAudioFinished(true);
+          setAudioLoading(false);
+        });
+      }
+    } catch (err) {
+      console.warn('[BriefingModal] Failed to initialize Audio:', err);
+      setIsAudioPlaying(false);
+      setHasAudioFinished(true);
+      setAudioLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (visible && item) {
@@ -177,12 +245,32 @@ export function ScenarioBriefingModal({
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
+
+      // Start Maya's voice briefing immediately
+      setAudioLang('en');
+      playBriefingAudio('en', item.id);
     } else if (!visible && internalVisible) {
       handleAnimatedClose();
     }
   }, [visible, item]);
 
+  // Clean up audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
   const handleAnimatedClose = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setIsAudioPlaying(false);
+
     Animated.parallel([
       Animated.timing(backdropAnim, {
         toValue: 0,
@@ -205,6 +293,25 @@ export function ScenarioBriefingModal({
       setInternalVisible(false);
       onClose();
     });
+  };
+
+  const handleLanguageToggle = (lang: 'en' | 'si') => {
+    if (audioLang === lang && isAudioPlaying) return;
+    setAudioLang(lang);
+    playBriefingAudio(lang, item?.id);
+  };
+
+  const handleSkipBriefing = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setIsAudioPlaying(false);
+    setHasAudioFinished(true);
+  };
+
+  const handleReplay = () => {
+    playBriefingAudio(audioLang, item?.id);
   };
 
   if (!internalVisible || !item) return null;
@@ -247,23 +354,48 @@ export function ScenarioBriefingModal({
           ]}
         >
           <SafeAreaView style={styles.safeContainer} edges={['top', 'bottom']}>
-            {/* Header with Category Tag and Close Button */}
+            {/* Header with Category Tag, Voice Lang Selector, and Close Button */}
             <View style={styles.headerRow}>
               <Text style={styles.categoryTag} numberOfLines={1}>
                 {data.category}
               </Text>
-              <Pressable
-                onPress={handleAnimatedClose}
-                style={({ pressed }) => [
-                  styles.closeBtn,
-                  pressed && styles.closeBtnPressed,
-                ]}
-                hitSlop={12}
-                accessibilityRole="button"
-                accessibilityLabel="Close scenario preview"
-              >
-                <Feather name="x" size={20} color="#64748B" />
-              </Pressable>
+              
+              <View style={styles.headerRight}>
+                {/* Voice Language Toggle (English / සිංහල) */}
+                <View style={styles.langSelector}>
+                  <Pressable
+                    onPress={() => handleLanguageToggle('en')}
+                    style={[styles.langChip, audioLang === 'en' && styles.langChipActive]}
+                    hitSlop={6}
+                  >
+                    <Text style={[styles.langChipText, audioLang === 'en' && styles.langChipTextActive]}>
+                      EN
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleLanguageToggle('si')}
+                    style={[styles.langChip, audioLang === 'si' && styles.langChipActive]}
+                    hitSlop={6}
+                  >
+                    <Text style={[styles.langChipText, audioLang === 'si' && styles.langChipTextActive]}>
+                      සිං
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <Pressable
+                  onPress={handleAnimatedClose}
+                  style={({ pressed }) => [
+                    styles.closeBtn,
+                    pressed && styles.closeBtnPressed,
+                  ]}
+                  hitSlop={12}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close scenario preview"
+                >
+                  <Feather name="x" size={20} color="#64748B" />
+                </Pressable>
+              </View>
             </View>
 
             {/* Scrollable Content */}
@@ -278,6 +410,42 @@ export function ScenarioBriefingModal({
 
               {/* Scenario Premise / Description */}
               <Text style={styles.mainDescription}>{data.description}</Text>
+
+              {/* Dynamic Voice Briefing Bar */}
+              <View style={[styles.voiceBriefingCard, isAudioPlaying && styles.voiceBriefingCardActive]}>
+                <View style={styles.voiceWaveIconRow}>
+                  <View style={[styles.voiceStatusDot, isAudioPlaying ? styles.voiceStatusDotPlaying : styles.voiceStatusDotIdle]} />
+                  <Ionicons
+                    name={isAudioPlaying ? 'volume-high' : 'volume-medium-outline'}
+                    size={18}
+                    color={isAudioPlaying ? '#0057FF' : '#64748B'}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={[styles.voiceStatusText, isAudioPlaying && styles.voiceStatusTextPlaying]}>
+                    {isAudioPlaying
+                      ? audioLoading
+                        ? 'Loading Maya’s voice...'
+                        : audioLang === 'en'
+                        ? 'Maya is speaking (English briefing)...'
+                        : 'මායා හඬ විස්තරය කියයි (සිංහල)...'
+                      : hasAudioFinished
+                      ? 'Maya’s briefing completed'
+                      : 'Maya voice briefing ready'}
+                  </Text>
+                </View>
+
+                {isAudioPlaying ? (
+                  <Pressable onPress={handleSkipBriefing} style={styles.cardSmallBtn} hitSlop={8}>
+                    <Feather name="square" size={12} color="#EF4444" style={{ marginRight: 4 }} />
+                    <Text style={styles.cardSmallBtnTextDanger}>Stop</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable onPress={handleReplay} style={styles.cardSmallBtn} hitSlop={8}>
+                    <Feather name="rotate-ccw" size={12} color="#0057FF" style={{ marginRight: 4 }} />
+                    <Text style={styles.cardSmallBtnText}>Replay</Text>
+                  </Pressable>
+                )}
+              </View>
 
               {/* Card 1: YOUR ROLE (Light Blue) */}
               <View style={styles.roleCardBlue}>
@@ -311,21 +479,43 @@ export function ScenarioBriefingModal({
 
             {/* Fixed CTA Action Button at Bottom */}
             <View style={styles.bottomFooter}>
-              <Pressable
-                onPress={() => onStartRoleplay(item)}
-                onHoverIn={() => setIsBtnHovered(true)}
-                onHoverOut={() => setIsBtnHovered(false)}
-                style={({ pressed }) => [
-                  styles.ctaButton,
-                  isBtnHovered && styles.ctaButtonHovered,
-                  pressed && styles.ctaButtonPressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Start Roleplay Practice"
-              >
-                <Text style={styles.ctaButtonText}>Start Roleplay</Text>
-                <Ionicons name="arrow-forward" size={19} color="#FFFFFF" style={{ marginLeft: 8 }} />
-              </Pressable>
+              {isAudioPlaying ? (
+                <View style={styles.activeBriefingFooter}>
+                  <View style={styles.ctaButtonDisabled}>
+                    <Text style={styles.ctaButtonTextDisabled}>🔊 Maya is briefing you...</Text>
+                  </View>
+                  <Pressable
+                    onPress={handleSkipBriefing}
+                    style={styles.skipBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Skip audio briefing"
+                  >
+                    <Text style={styles.skipBtnText}>Skip Briefing ⏭️</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable
+                  onPress={() => {
+                    if (audioRef.current) {
+                      audioRef.current.pause();
+                      audioRef.current = null;
+                    }
+                    onStartRoleplay(item);
+                  }}
+                  onHoverIn={() => setIsBtnHovered(true)}
+                  onHoverOut={() => setIsBtnHovered(false)}
+                  style={({ pressed }) => [
+                    styles.ctaButton,
+                    isBtnHovered && styles.ctaButtonHovered,
+                    pressed && styles.ctaButtonPressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Start Roleplay Practice"
+                >
+                  <Text style={styles.ctaButtonText}>Start Roleplay</Text>
+                  <Ionicons name="arrow-forward" size={19} color="#FFFFFF" style={{ marginLeft: 8 }} />
+                </Pressable>
+              )}
             </View>
           </SafeAreaView>
         </Animated.View>
@@ -394,6 +584,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748B',
     letterSpacing: 0.2,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  langSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 16,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  langChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+  },
+  langChipActive: {
+    backgroundColor: '#0057FF',
+    shadowColor: '#0057FF',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  langChipText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#64748B',
+  },
+  langChipTextActive: {
+    color: '#FFFFFF',
   },
   closeBtn: {
     width: 36,
@@ -559,5 +784,101 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: '#FFFFFF',
     letterSpacing: 0.2,
+  },
+  voiceBriefingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 16,
+  },
+  voiceBriefingCardActive: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#BFDBFE',
+  },
+  voiceWaveIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  voiceStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  voiceStatusDotPlaying: {
+    backgroundColor: '#0057FF',
+  },
+  voiceStatusDotIdle: {
+    backgroundColor: '#94A3B8',
+  },
+  voiceStatusText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 13,
+    color: '#64748B',
+    flex: 1,
+  },
+  voiceStatusTextPlaying: {
+    color: '#1D4ED8',
+    ...fontStyle('inter', 'semiBold'),
+  },
+  cardSmallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    marginLeft: 8,
+  },
+  cardSmallBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#0057FF',
+  },
+  cardSmallBtnTextDanger: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#EF4444',
+  },
+  activeBriefingFooter: {
+    gap: 8,
+  },
+  ctaButtonDisabled: {
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  ctaButtonTextDisabled: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 15.5,
+    color: '#64748B',
+    letterSpacing: 0.2,
+  },
+  skipBtn: {
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  skipBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#475569',
   },
 });

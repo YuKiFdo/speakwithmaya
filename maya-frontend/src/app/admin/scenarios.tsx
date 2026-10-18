@@ -49,6 +49,10 @@ export interface ScenarioItem {
   mayaRole?: string;
   goalTitle?: string;
   goalDescription?: string;
+  ttsScriptEnglish?: string;
+  ttsScriptSinhala?: string;
+  audioUrlEnglish?: string;
+  audioUrlSinhala?: string;
   isPublished: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -132,6 +136,21 @@ export default function AdminScenariosScreen() {
   const [formOpeningMode, setFormOpeningMode] = useState<'maya_explains_first' | 'maya_in_character' | 'user_starts'>('maya_explains_first');
   const [formOpeningLine, setFormOpeningLine] = useState('');
   const [formPrompt, setFormPrompt] = useState('');
+  const [formTtsEnglish, setFormTtsEnglish] = useState('');
+  const [formTtsSinhala, setFormTtsSinhala] = useState('');
+  const [ttsAudioPlaying, setTtsAudioPlaying] = useState<'en' | 'si' | null>(null);
+  const [isSynthesizingPreview, setIsSynthesizingPreview] = useState<'en' | 'si' | null>(null);
+  const previewAudioRef = React.useRef<any>(null);
+
+  // Stop audio preview when leaving or unmounting
+  useEffect(() => {
+    return () => {
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+    };
+  }, []);
 
   // Fetch scenarios from backend
   const fetchScenarios = async () => {
@@ -162,6 +181,12 @@ export default function AdminScenariosScreen() {
     // Session duration cap randomly assigned between 5-8 minutes
     const randomDuration = Math.floor(Math.random() * 4) + 5;
 
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    setTtsAudioPlaying(null);
+
     setEditingScenario(null);
     setWizardStep('details');
     setFormLevelNumber(nextNumber);
@@ -180,16 +205,24 @@ export default function AdminScenariosScreen() {
     setFormCustomSvg('');
     setFormIsPublished(true);
 
-    // Prompt fields
+    // Prompt & Voice fields
     setFormEmotion('neutral');
     setFormOpeningMode('maya_explains_first');
     setFormOpeningLine('');
     setFormPrompt('');
+    setFormTtsEnglish('');
+    setFormTtsSinhala('');
 
     setIsEditorOpen(true);
   };
 
   const openEditModal = (item: ScenarioItem) => {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    setTtsAudioPlaying(null);
+
     setEditingScenario(item);
     setWizardStep('details');
     setFormLevelNumber(item.levelNumber);
@@ -209,11 +242,13 @@ export default function AdminScenariosScreen() {
     setFormColorIdx(colorIdx !== -1 ? colorIdx : 0);
     setFormIsPublished(item.isPublished);
 
-    // Prompt fields
+    // Prompt & Voice fields
     setFormEmotion(item.emotionTags && item.emotionTags[0] ? item.emotionTags[0] : 'neutral');
     setFormOpeningMode(item.openingMode || 'maya_explains_first');
     setFormOpeningLine(item.openingLine || '');
     setFormPrompt(item.scenarioPrompt || '');
+    setFormTtsEnglish(item.ttsScriptEnglish || '');
+    setFormTtsSinhala(item.ttsScriptSinhala || '');
 
     setIsEditorOpen(true);
   };
@@ -262,12 +297,66 @@ export default function AdminScenariosScreen() {
       if (data.openingMode) setFormOpeningMode(data.openingMode);
       if (data.openingLine !== undefined) setFormOpeningLine(data.openingLine);
       if (data.scenarioPrompt) setFormPrompt(data.scenarioPrompt);
+      if (data.ttsScriptEnglish) setFormTtsEnglish(data.ttsScriptEnglish);
+      if (data.ttsScriptSinhala) setFormTtsSinhala(data.ttsScriptSinhala);
 
       setWizardStep('prompt');
     } catch (err: any) {
       alert(`Could not generate prompt with AI: ${err?.message || 'Server error'}`);
     } finally {
       setIsGeneratingPrompt(false);
+    }
+  };
+
+  const handlePreviewTts = async (lang: 'en' | 'si') => {
+    const text = lang === 'en' ? formTtsEnglish.trim() : formTtsSinhala.trim();
+    if (!text) {
+      alert(`Please enter or generate the ${lang === 'en' ? 'English' : 'Sinhala'} speech script first.`);
+      return;
+    }
+
+    if (ttsAudioPlaying === lang) {
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+      setTtsAudioPlaying(null);
+      return;
+    }
+
+    setIsSynthesizingPreview(lang);
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/admin/roadmap/synthesize-tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, language: lang }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+      }
+      if (typeof Audio !== 'undefined') {
+        const audio = new Audio(url);
+        previewAudioRef.current = audio;
+        setTtsAudioPlaying(lang);
+        audio.onended = () => {
+          setTtsAudioPlaying(null);
+          previewAudioRef.current = null;
+        };
+        audio.onerror = () => {
+          setTtsAudioPlaying(null);
+          previewAudioRef.current = null;
+        };
+        await audio.play();
+      }
+    } catch (err: any) {
+      alert(`Speech synthesis error: ${err?.message || 'Failed'}`);
+    } finally {
+      setIsSynthesizingPreview(null);
     }
   };
 
@@ -293,6 +382,8 @@ export default function AdminScenariosScreen() {
       scenarioPrompt: formPrompt.trim(),
       openingMode: formOpeningMode,
       openingLine: formOpeningLine.trim(),
+      ttsScriptEnglish: formTtsEnglish.trim(),
+      ttsScriptSinhala: formTtsSinhala.trim(),
       emotionTags: [formEmotion],
       isScenarioMode: true,
       passingScorePercent: Number(formPassingScore) || 70,
@@ -322,6 +413,11 @@ export default function AdminScenariosScreen() {
         });
         if (!res.ok) throw new Error(await res.text());
       }
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+      setTtsAudioPlaying(null);
       setIsEditorOpen(false);
       await fetchScenarios();
     } catch (e: any) {
@@ -932,6 +1028,108 @@ export default function AdminScenariosScreen() {
                       placeholderTextColor={PLACEHOLDER_COLOR}
                       multiline
                       numberOfLines={10}
+                    />
+                  </View>
+
+                  {/* English Voice Briefing (TTS with Expressive Tags) */}
+                  <View style={styles.ttsSection}>
+                    <View style={styles.ttsHeaderRow}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={styles.fieldLabel}>🎙️ English Voice Briefing Script *</Text>
+                        <Text style={styles.ttsTagHint}>
+                          Supports natural tags: <Text style={{ ...fontStyle('inter', 'bold'), color: '#0057FF' }}>&lt;short pause&gt;</Text>, <Text style={{ ...fontStyle('inter', 'bold'), color: '#0057FF' }}>&lt;sighs&gt;</Text>, <Text style={{ ...fontStyle('inter', 'bold'), color: '#0057FF' }}>&lt;chuckle&gt;</Text>, <Text style={{ ...fontStyle('inter', 'bold'), color: '#0057FF' }}>&lt;cheer&gt;</Text>
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => handlePreviewTts('en')}
+                        disabled={isSynthesizingPreview === 'en'}
+                        style={[
+                          styles.ttsPreviewBtn,
+                          ttsAudioPlaying === 'en' && styles.ttsPreviewBtnPlaying,
+                        ]}
+                      >
+                        {isSynthesizingPreview === 'en' ? (
+                          <ActivityIndicator size="small" color="#0057FF" />
+                        ) : (
+                          <Feather
+                            name={ttsAudioPlaying === 'en' ? 'square' : 'play'}
+                            size={14}
+                            color={ttsAudioPlaying === 'en' ? '#ef4444' : '#0057FF'}
+                          />
+                        )}
+                        <Text
+                          style={[
+                            styles.ttsPreviewBtnText,
+                            ttsAudioPlaying === 'en' && styles.ttsPreviewBtnTextPlaying,
+                          ]}
+                        >
+                          {isSynthesizingPreview === 'en'
+                            ? 'Synthesizing...'
+                            : ttsAudioPlaying === 'en'
+                            ? 'Stop Playback'
+                            : '🎧 Listen to English Preview'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <TextInput
+                      style={[styles.textInput, styles.ttsScriptEditor]}
+                      value={formTtsEnglish}
+                      onChangeText={setFormTtsEnglish}
+                      placeholder="Welcome to your next scenario... <short pause> Picture this... <sighs>"
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                      multiline
+                      numberOfLines={4}
+                    />
+                  </View>
+
+                  {/* Sinhala Voice Briefing (සිංහල හඬ විස්තරය) */}
+                  <View style={styles.ttsSection}>
+                    <View style={styles.ttsHeaderRow}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={styles.fieldLabel}>🎙️ Sinhala Voice Briefing Script (සිංහල හඬ) *</Text>
+                        <Text style={styles.ttsTagHint}>
+                          Supports tags: <Text style={{ ...fontStyle('inter', 'bold'), color: '#0057FF' }}>&lt;short pause&gt;</Text>, <Text style={{ ...fontStyle('inter', 'bold'), color: '#0057FF' }}>&lt;sighs&gt;</Text>, <Text style={{ ...fontStyle('inter', 'bold'), color: '#0057FF' }}>&lt;chuckle&gt;</Text>
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => handlePreviewTts('si')}
+                        disabled={isSynthesizingPreview === 'si'}
+                        style={[
+                          styles.ttsPreviewBtn,
+                          ttsAudioPlaying === 'si' && styles.ttsPreviewBtnPlaying,
+                        ]}
+                      >
+                        {isSynthesizingPreview === 'si' ? (
+                          <ActivityIndicator size="small" color="#0057FF" />
+                        ) : (
+                          <Feather
+                            name={ttsAudioPlaying === 'si' ? 'square' : 'play'}
+                            size={14}
+                            color={ttsAudioPlaying === 'si' ? '#ef4444' : '#0057FF'}
+                          />
+                        )}
+                        <Text
+                          style={[
+                            styles.ttsPreviewBtnText,
+                            ttsAudioPlaying === 'si' && styles.ttsPreviewBtnTextPlaying,
+                          ]}
+                        >
+                          {isSynthesizingPreview === 'si'
+                            ? 'Synthesizing...'
+                            : ttsAudioPlaying === 'si'
+                            ? 'Stop Playback'
+                            : '🎧 සිංහල හඬට සවන් දෙන්න (Preview)'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <TextInput
+                      style={[styles.textInput, styles.ttsScriptEditor]}
+                      value={formTtsSinhala}
+                      onChangeText={setFormTtsSinhala}
+                      placeholder="ඔබේ ඊළඟ අවස්ථාවට සාදරයෙන් පිළිගන්නවා... <short pause> පොඩ්ඩක් හිතන්න..."
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                      multiline
+                      numberOfLines={4}
                     />
                   </View>
                 </View>
@@ -1641,5 +1839,58 @@ const styles = StyleSheet.create({
     ...fontStyle('outfit', 'semiBold'),
     fontSize: 14,
     color: '#ffffff',
+  },
+  ttsSection: {
+    marginTop: 16,
+    padding: 14,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  ttsHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  ttsPreviewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    gap: 6,
+  },
+  ttsPreviewBtnPlaying: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+  },
+  ttsPreviewBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#0057FF',
+  },
+  ttsPreviewBtnTextPlaying: {
+    color: '#ef4444',
+  },
+  ttsTagHint: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  ttsScriptEditor: {
+    minHeight: 90,
+    textAlignVertical: 'top',
+    lineHeight: 20,
+    fontSize: 13,
+    ...fontStyle('inter', 'regular'),
+    backgroundColor: '#ffffff',
   },
 });

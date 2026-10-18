@@ -81,6 +81,10 @@ export interface MilestoneItem {
   goalTitle?: string;
   goalDescription?: string;
   isScenarioMode?: boolean;
+  ttsScriptEnglish?: string;
+  ttsScriptSinhala?: string;
+  audioUrlEnglish?: string;
+  audioUrlSinhala?: string;
 }
 
 
@@ -244,6 +248,10 @@ export default function RoadmapScreen() {
           goalTitle: lvl.goal_title || lvl.goalTitle || '',
           goalDescription: lvl.goal_description || lvl.goalDescription || '',
           isScenarioMode: lvl.is_scenario_mode ?? lvl.isScenarioMode ?? true,
+          ttsScriptEnglish: lvl.tts_script_english || lvl.ttsScriptEnglish || '',
+          ttsScriptSinhala: lvl.tts_script_sinhala || lvl.ttsScriptSinhala || '',
+          audioUrlEnglish: lvl.audio_url_english || lvl.audioUrlEnglish || '',
+          audioUrlSinhala: lvl.audio_url_sinhala || lvl.audioUrlSinhala || '',
         };
       });
 

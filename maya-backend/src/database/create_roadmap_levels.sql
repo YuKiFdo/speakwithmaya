@@ -52,6 +52,10 @@ ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS user_role TEXT DEFAUL
 ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS maya_role TEXT DEFAULT '';
 ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS goal_title TEXT DEFAULT '';
 ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS goal_description TEXT DEFAULT '';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS tts_script_english TEXT DEFAULT '';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS tts_script_sinhala TEXT DEFAULT '';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS audio_url_english TEXT DEFAULT '';
+ALTER TABLE public.roadmap_levels ADD COLUMN IF NOT EXISTS audio_url_sinhala TEXT DEFAULT '';
 
 -- Enable Row Level Security
 ALTER TABLE public.roadmap_levels ENABLE ROW LEVEL SECURITY;
