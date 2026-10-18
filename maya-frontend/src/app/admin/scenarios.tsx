@@ -323,6 +323,28 @@ export default function AdminScenariosScreen() {
       setTtsAudioPlaying(null);
       return;
     }
+    // If editing existing scenario with unchanged script, play direct from Supabase Edge CDN instantly (0ms)
+    const existingCdnUrl = lang === 'si' ? editingScenario?.audioUrlSinhala : editingScenario?.audioUrlEnglish;
+    const existingScript = (lang === 'si' ? editingScenario?.ttsScriptSinhala : editingScenario?.ttsScriptEnglish)?.trim();
+    if (existingCdnUrl && existingCdnUrl.startsWith('http') && existingScript === text) {
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+      if (typeof Audio !== 'undefined') {
+        const audio = new Audio(existingCdnUrl);
+        previewAudioRef.current = audio;
+        setTtsAudioPlaying(lang);
+        const cleanup = () => {
+          setTtsAudioPlaying(null);
+          previewAudioRef.current = null;
+        };
+        audio.onended = cleanup;
+        audio.onerror = cleanup;
+        await audio.play();
+        return;
+      }
+    }
 
     setIsSynthesizingPreview(lang);
     try {

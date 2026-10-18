@@ -133,6 +133,24 @@ export class RoadmapService implements OnModuleInit {
       } catch (err: any) {
         this.logger.debug(`Could not write restored disk cache for ${cacheKey}: ${err?.message}`);
       }
+
+      // Also register contentHash cache for instant Admin Studio TTS preview hits
+      try {
+        const level = await this.getLevelById(levelId);
+        const script = (lang === 'si' ? level.ttsScriptSinhala : level.ttsScriptEnglish)?.trim();
+        if (script) {
+          const contentHash = createHash('sha256')
+            .update(`${lang}_Callirrhoe_${script}`)
+            .digest('hex')
+            .slice(0, 24);
+          this.briefingAudioCache.set(contentHash, audioBuffer);
+          const hashDiskPath = path.join(this.audioCacheDir, `tts_${contentHash}.wav`);
+          try {
+            if (!fs.existsSync(hashDiskPath)) fs.writeFileSync(hashDiskPath, audioBuffer);
+          } catch {}
+        }
+      } catch {}
+
       return audioBuffer;
     } catch {
       return null;
@@ -967,6 +985,53 @@ Core Conversation Rules:
       }
     }
 
+    // 3. Check Supabase Storage for this contentHash clip
+    if (this.supabase) {
+      try {
+        const { data, error } = await this.supabase.storage
+          .from('roadmap-audio')
+          .download(`tts_${contentHash}.wav`);
+        if (!error && data) {
+          const arrayBuffer = await data.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          this.briefingAudioCache.set(contentHash, buffer);
+          try {
+            if (!fs.existsSync(diskPath)) fs.writeFileSync(diskPath, buffer);
+          } catch {}
+          this.logger.log(`[TTS Synthesis] Restored hash TTS ${contentHash} from Supabase Storage (${buffer.length} bytes)`);
+          return {
+            audioBase64: buffer.toString('base64'),
+            mimeType: 'audio/wav',
+          };
+        }
+      } catch {}
+    }
+
+    // 4. Check if any level in the database already has this exact script (re-use existing audio)
+    try {
+      const levels = await this.getAllLevels(true);
+      const matchingLevel = levels.find((lvl) => {
+        const script = language === 'si' ? lvl.ttsScriptSinhala : lvl.ttsScriptEnglish;
+        return script && script.trim() === cleanText;
+      });
+      if (matchingLevel) {
+        this.logger.log(`[TTS Synthesis] Found matching script in "${matchingLevel.title}" (${language}) - reusing existing audio`);
+        const { audioBuffer, mimeType } = await this.getBriefingAudio(matchingLevel.id, language);
+        if (audioBuffer && audioBuffer.length > 0) {
+          this.briefingAudioCache.set(contentHash, audioBuffer);
+          try {
+            if (!fs.existsSync(diskPath)) fs.writeFileSync(diskPath, audioBuffer);
+          } catch {}
+          return {
+            audioBase64: audioBuffer.toString('base64'),
+            mimeType: mimeType || 'audio/wav',
+          };
+        }
+      }
+    } catch (err: any) {
+      this.logger.debug(`Could not check matching levels for script: ${err?.message}`);
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error('GEMINI_API_KEY is not configured for TTS generation');
@@ -1011,6 +1076,16 @@ Core Conversation Rules:
         this.logger.log(`[Disk Cache] Saved hash TTS audio: ${diskPath} (${audioBuffer.length} bytes)`);
       } catch (err: any) {
         this.logger.debug(`Could not write disk cache for hash ${contentHash}: ${err?.message}`);
+      }
+
+      if (this.supabase) {
+        this.supabase.storage
+          .from('roadmap-audio')
+          .upload(`tts_${contentHash}.wav`, audioBuffer, {
+            contentType: 'audio/wav',
+            upsert: true,
+          })
+          .catch(() => null);
       }
     }
 
