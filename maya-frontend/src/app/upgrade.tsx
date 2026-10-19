@@ -19,6 +19,7 @@ import { Fonts, fontStyle } from '@/theme/fonts';
 import { Radii } from '@/theme/tokens';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
+import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useUserStats } from '@/hooks/useUserStats';
 import { paymentApi } from '@/services/payment/payment-api';
@@ -467,37 +468,11 @@ export default function UpgradeScreen() {
         {/* ──────────── MAIN CONTAINER WITH FIXED MOBILE TOP BAR ──────────── */}
         <View style={styles.mainContainer}>
           {/* MOBILE FIXED TOP BAR (PINNED) */}
-          {!isDesktop && (
-            <View style={styles.mobileFixedTopBar}>
-              <View style={styles.mobileBrandRow}>
-                <Pressable
-                  style={styles.backButton}
-                  onPress={() => router.back()}
-                  accessibilityRole="button"
-                  accessibilityLabel="Go back"
-                >
-                  <BackArrowIcon size={20} />
-                </Pressable>
-                <View>
-                  <Text style={styles.brandTitleMobile}>
-                    Speakwith<Text style={styles.brandAccent}>Maya</Text>
-                  </Text>
-                  <Text style={styles.brandTaglineMobile}>
-                    Practice · Improve · Be Confident
-                  </Text>
-                </View>
-              </View>
-
-              <UserLevelBadge
-                levelLabel={stats.levelLabel}
-                xpLabel={stats.xpLabel}
-                progress={stats.progress}
-                isPro={stats.isPro}
-                planTier={stats.planTier}
-                avatarSource={require('@/assets/images/maya-avatar.png')}
-              />
-            </View>
-          )}
+          <MobileTopBar
+            pinned
+            showBackButton
+            onBack={() => router.back()}
+          />
 
           {/* ──────────── MAIN CONTENT ──────────── */}
           <ScrollView

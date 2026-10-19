@@ -22,6 +22,7 @@ import {
   LockIcon,
 } from '@/components/icons/nav-icons';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
+import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { CreateSessionModal, CreateSessionConfig } from '@/components/call/create-session-modal';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
@@ -391,29 +392,10 @@ export default function DashboardScreen() {
           scrollEnabled={!isDesktop || windowHeight < 520}
         >
           {/* MOBILE TOP BAR */}
-          {!isDesktop && (
-            <View style={styles.mobileTopBar}>
-              <View>
-                <Text style={styles.brandTitleMobile}>
-                  Speakwith<Text style={styles.brandAccent}>Maya</Text>
-                </Text>
-                <Text style={styles.brandTaglineMobile}>
-                  Practice · Improve · Be Confident
-                </Text>
-              </View>
-
-              {/* User Level Badge */}
-              <UserLevelBadge
-                levelLabel={stats.levelLabel}
-                xpLabel={stats.xpLabel}
-                progress={stats.progress}
-                isPro={isPro}
-                planTier={stats.planTier}
-                avatarSource={require('@/assets/images/maya-avatar.png')}
-                onPress={() => setActivePopup('level-up')}
-              />
-            </View>
-          )}
+          <MobileTopBar
+            pinned={false}
+            onLevelPress={() => setActivePopup('level-up')}
+          />
 
           {/* TOP SECTION: Header + Hero Banner paired together on desktop */}
           <View style={isDesktop ? styles.desktopTopGroup : undefined}>

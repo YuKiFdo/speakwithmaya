@@ -19,6 +19,7 @@ import { Feather, FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { fontStyle } from '@/theme/fonts';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
+import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CrownNavIcon } from '@/components/icons/nav-icons';
@@ -296,28 +297,10 @@ export default function AccountScreen() {
         {/* MAIN CONTAINER */}
         <View style={styles.mainContainer}>
           {/* MOBILE FIXED TOP BAR */}
-          {!isDesktop && (
-            <View style={styles.mobileFixedTopBar}>
-              <View>
-                <Text style={styles.brandTitleMobile}>
-                  Speakwith<Text style={styles.brandAccent}>Maya</Text>
-                </Text>
-                <Text style={styles.brandTaglineMobile}>
-                  Practice · Improve · Be Confident
-                </Text>
-              </View>
-
-              <UserLevelBadge
-                levelLabel={stats.levelLabel}
-                xpLabel={stats.xpLabel}
-                progress={stats.progress}
-                isPro={isPro}
-                planTier={stats.planTier}
-                avatarSource={require('@/assets/images/maya-avatar.png')}
-                onPress={() => setActivePopup('level-up')}
-              />
-            </View>
-          )}
+          <MobileTopBar
+            pinned
+            onLevelPress={() => setActivePopup('level-up')}
+          />
 
           {/* MAIN SCROLLABLE CONTENT */}
           <ScrollView

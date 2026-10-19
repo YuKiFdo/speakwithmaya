@@ -311,9 +311,14 @@ export const OnboardingStore = {
       try {
         window.localStorage.removeItem(STORAGE_KEY);
         window.localStorage.removeItem('maya_active_conversation_v1');
+        window.localStorage.removeItem('maya_user_stats_cache_v1');
         for (let i = window.localStorage.length - 1; i >= 0; i--) {
           const k = window.localStorage.key(i);
-          if (k && k.startsWith('maya_active_conversation_v1')) {
+          if (
+            k &&
+            (k.startsWith('maya_active_conversation_v1') ||
+              k.startsWith('maya_user_stats_cache_'))
+          ) {
             window.localStorage.removeItem(k);
           }
         }
