@@ -380,25 +380,29 @@ export default function DashboardScreen() {
         )}
 
         {/* ==================================================================== */}
-        {/* MAIN SCROLLABLE CONTENT */}
+        {/* MAIN CONTAINER WITH FIXED MOBILE TOP BAR */}
         {/* ==================================================================== */}
-        <ScrollView
-          style={[styles.mainScroll, isDesktop && styles.mainScrollDesktop]}
-          contentContainerStyle={[
-            styles.mainScrollContent,
-            isDesktop && styles.mainScrollContentDesktop,
-          ]}
-          showsVerticalScrollIndicator={false}
-          scrollEnabled={!isDesktop || windowHeight < 520}
-        >
-          {/* MOBILE TOP BAR */}
+        <View style={styles.mainContainer}>
+          {/* MOBILE FIXED TOP BAR (PINNED) */}
           <MobileTopBar
-            pinned={false}
+            pinned
             onLevelPress={() => setActivePopup('level-up')}
           />
 
-          {/* TOP SECTION: Header + Hero Banner paired together on desktop */}
-          <View style={isDesktop ? styles.desktopTopGroup : undefined}>
+          {/* ==================================================================== */}
+          {/* MAIN SCROLLABLE CONTENT */}
+          {/* ==================================================================== */}
+          <ScrollView
+            style={[styles.mainScroll, isDesktop && styles.mainScrollDesktop]}
+            contentContainerStyle={[
+              styles.mainScrollContent,
+              isDesktop && styles.mainScrollContentDesktop,
+            ]}
+            showsVerticalScrollIndicator={false}
+            scrollEnabled={!isDesktop || windowHeight < 520}
+          >
+            {/* TOP SECTION: Header + Hero Banner paired together on desktop */}
+            <View style={isDesktop ? styles.desktopTopGroup : undefined}>
             {/* DESKTOP TOP HEADER */}
             {isDesktop && (
               <View style={styles.desktopTopHeader}>
@@ -832,6 +836,7 @@ export default function DashboardScreen() {
             </View>
           </View>
         </ScrollView>
+        </View>
 
 
 
@@ -894,6 +899,10 @@ const styles = StyleSheet.create({
   layoutRoot: {
     flex: 1,
     flexDirection: 'row',
+  },
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#ffffff',
   },
   /* Desktop Sidebar */
   brandAccent: {
