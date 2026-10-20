@@ -23,6 +23,9 @@ import {
 import { speakAsCallirrhoe, stopMayaVoiceFallback } from '@/utils/maya-voice-fallback';
 import { playUnderstoodTapSound, playFinishReviewFanfare } from '@/services/sound/sound-service';
 import Svg, { Path } from 'react-native-svg';
+import { useUserStats } from '@/hooks/useUserStats';
+import { OnboardingStore } from '@/services/store/onboarding-store';
+import { CommonPopup } from '@/components/ui/common-popup';
 
 function CorrectCardStarIcon({ size = 19, color = '#00BCA5' }: { size?: number; color?: string }) {
   return (
@@ -183,10 +186,21 @@ export default function SessionFeedbackScreen() {
     return [];
   });
 
+  const userStats = useUserStats();
+  const onboardingUser = OnboardingStore.getState().user;
+  const currentPlanTier = (userStats.planTier || onboardingUser?.planTier || 'starter').toLowerCase();
+  const isStarter = currentPlanTier === 'starter';
+
   const [currentIndex, setCurrentIndex] = useState(0);
-  const totalCount = Math.max(items.length, 1);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  // If user is on Starter plan, limit them to 1 review suggestion;
+  // Basic, Pro, and Premium plans unlock all review suggestions.
+  const rawTotalCount = items.length;
+  const totalCount = isStarter && rawTotalCount > 1 ? 1 : Math.max(rawTotalCount, 1);
   const currentItem: FeedbackItem = items[currentIndex] || items[0];
-  const isLastCard = currentIndex >= items.length - 1;
+  const isLastCard = currentIndex >= totalCount - 1;
+  const hasHiddenSuggestions = isStarter && rawTotalCount > 1;
 
   useEffect(() => {
     if (!items || items.length === 0) {
@@ -865,6 +879,40 @@ export default function SessionFeedbackScreen() {
               </Text>
             </View>
           </View>
+
+          {/* Starter Plan: Upgrade Prompt Banner encouraging users to unlock all review suggestions */}
+          {hasHiddenSuggestions && (
+            <Pressable
+              onPress={() => setShowUpgradeModal(true)}
+              style={({ pressed }) => [
+                styles.upgradePromptCard,
+                isPhone && styles.upgradePromptCardPhone,
+                pressed && { opacity: 0.92, transform: [{ scale: 0.99 }] },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Upgrade your plan to unlock all review suggestions"
+            >
+              <View style={styles.upgradePromptIconCircle}>
+                <Ionicons name="lock-closed" size={20} color="#D97706" />
+              </View>
+              <View style={styles.upgradePromptTextCol}>
+                <View style={styles.upgradePromptHeaderRow}>
+                  <Text style={styles.upgradePromptTitle}>
+                    +{rawTotalCount - 1} More {rawTotalCount - 1 === 1 ? 'Suggestion' : 'Suggestions'} Locked
+                  </Text>
+                  <View style={styles.upgradeProBadge}>
+                    <Text style={styles.upgradeProBadgeText}>PRO</Text>
+                  </View>
+                </View>
+                <Text style={styles.upgradePromptDesc}>
+                  Upgrade your plan to unlock all personalized pronunciation, grammar, and vocabulary suggestions!
+                </Text>
+                <View style={styles.upgradePromptActionRow}>
+                  <Text style={styles.upgradePromptActionText}>Unlock All Suggestions →</Text>
+                </View>
+              </View>
+            </Pressable>
+          )}
         </ScrollView>
 
         {/* Bottom Actions */}
@@ -922,6 +970,21 @@ export default function SessionFeedbackScreen() {
             <Text style={[styles.skipButtonText, isPhone && styles.skipButtonTextPhone]}>Skip all</Text>
           </Pressable>
         </View>
+
+        {/* Upgrade Modal for unlocking all review suggestions */}
+        <CommonPopup
+          visible={showUpgradeModal}
+          onClose={() => setShowUpgradeModal(false)}
+          preset="unlock-premium"
+          title="Unlock All Review Suggestions"
+          titleHighlight="All Review Suggestions"
+          subtitle={`You have ${rawTotalCount - 1} more personalized speaking suggestions from this session waiting for you. Upgrade to unlock full reviews and detailed analytics!`}
+          primaryButtonText="Upgrade Your Plan"
+          onPrimaryPress={() => {
+            setShowUpgradeModal(false);
+            router.push('/upgrade');
+          }}
+        />
 
       </View>
     </SafeAreaView>
@@ -1391,5 +1454,83 @@ const styles = StyleSheet.create({
   buttonPressed: {
     opacity: 0.85,
     transform: [{ scale: 0.99 }],
+  },
+  upgradePromptCard: {
+    marginTop: 16,
+    marginBottom: 8,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1.5,
+    borderColor: '#FDE68A',
+    borderRadius: 20,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+    ...Platform.select({
+      web: { boxShadow: '0 4px 14px rgba(217, 119, 6, 0.12)' } as any,
+      default: {
+        shadowColor: '#D97706',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.12,
+        shadowRadius: 6,
+        elevation: 2,
+      },
+    }),
+  },
+  upgradePromptCardPhone: {
+    padding: 14,
+    borderRadius: 16,
+    gap: 12,
+  },
+  upgradePromptIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FDE68A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  upgradePromptTextCol: {
+    flex: 1,
+  },
+  upgradePromptHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  upgradePromptTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 15,
+    color: '#92400E',
+  },
+  upgradeProBadge: {
+    backgroundColor: '#D97706',
+    paddingHorizontal: 7,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  upgradeProBadgeText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 10,
+    color: '#ffffff',
+    letterSpacing: 0.4,
+  },
+  upgradePromptDesc: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: '#78350F',
+    marginBottom: 8,
+  },
+  upgradePromptActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  upgradePromptActionText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 13,
+    color: '#B45309',
   },
 });

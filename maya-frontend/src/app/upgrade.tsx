@@ -63,6 +63,7 @@ const PLANS: PricingPlan[] = [
     period: '/ month',
     features: [
       { text: '450 AI conversation minutes' },
+      { text: 'Unlimited speaking hints' },
       { text: 'AI conversation partner' },
       { text: 'Grammar corrections' },
       { text: 'Session transcript' },
@@ -81,7 +82,8 @@ const PLANS: PricingPlan[] = [
     period: '/ month',
     features: [
       { text: '600 AI conversation minutes' },
-      { text: 'Everything in Starter' },
+      { text: 'Unlimited speaking hints' },
+      { text: 'Everything in Basic' },
       { text: 'Advanced pronunciation feedback' },
       { text: 'Rephrasing suggestions' },
       { text: 'Conversation history' },
@@ -100,6 +102,7 @@ const PLANS: PricingPlan[] = [
     period: '/ month',
     features: [
       { text: '1,200 AI conversation minutes' },
+      { text: 'Unlimited speaking hints' },
       { text: 'Everything in Pro' },
       { text: 'Detailed speaking analytics' },
       { text: 'Personalized learning insights' },

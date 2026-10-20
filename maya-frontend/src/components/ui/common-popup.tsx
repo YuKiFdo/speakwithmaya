@@ -38,6 +38,7 @@ export type PopupPreset =
   | 'level-up'
   | 'get-extra-time'
   | 'level-locked'
+  | 'hint-limit'
   | 'custom';
 
 export interface CommonPopupProps {
@@ -91,6 +92,7 @@ const PRESET_IMAGES = {
   'daily-limit': require('@/assets/images/mayaclock.png'),
   'practice-complete': require('@/assets/images/mayathumb.png'),
   'level-locked': require('@/assets/images/mayalocked.png'),
+  'hint-limit': require('@/assets/images/mayacrown.png'),
 };
 
 /**
@@ -300,6 +302,21 @@ export function CommonPopup({
     if (finalShowArrow === undefined) finalShowArrow = true;
     if (finalFooterText === undefined) {
       finalFooterText = 'Complete each lesson step-by-step to build your speaking fluency.';
+    }
+    if (finalShowClose === undefined) finalShowClose = true;
+  } else if (resolvedPreset === 'hint-limit') {
+    if (!finalTitle) {
+      finalTitle = 'Upgrade Your Plan to Unlock More Hints';
+      finalHighlight = 'Unlock More Hints';
+    }
+    if (!finalSubtitle) {
+      finalSubtitle = "You've reached your 2 free hints for this session on the Starter Plan. Upgrade to unlock unlimited speaking hints!";
+    }
+    if (!finalBtnText) finalBtnText = 'Upgrade Your Plan';
+    if (finalBtnIcon === undefined) finalBtnIcon = 'crown';
+    if (finalShowArrow === undefined) finalShowArrow = true;
+    if (finalFooterText === undefined) {
+      finalFooterText = 'Get unlimited hints, full conversation memory, and extended practice with Pro.';
     }
     if (finalShowClose === undefined) finalShowClose = true;
   }
@@ -543,7 +560,7 @@ export function CommonPopup({
                 </Text>
                 <Pressable
                   style={({ pressed }) => [
-                    styles.extraGetBtnSolid,
+                    styles.extraGetBtnOutline,
                     pressed && styles.btnPressed,
                     purchasingPkgId === '120-min' && { opacity: 0.8 },
                   ]}
@@ -553,7 +570,7 @@ export function CommonPopup({
                   {purchasingPkgId === '120-min' ? (
                     <ActivityIndicator size="small" color="#ffffff" />
                   ) : (
-                    <Text style={[styles.extraGetBtnSolidText, !isDesktop && styles.extraGetBtnTextMobile]}>
+                    <Text style={[styles.extraGetBtnOutlineText, !isDesktop && styles.extraGetBtnTextMobile]}>
                       Get Now
                     </Text>
                   )}

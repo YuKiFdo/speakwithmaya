@@ -95,6 +95,8 @@ export default function CallScreen() {
     ? 'balanced'
     : (storeConfig?.sinhalaStyle || (params.sinhalaStyle === 'deep_guidance' ? 'deep_guidance' : 'balanced'));
   const userStats = useUserStats();
+  const currentPlanTier = (userStats.planTier || onboardingState.user?.planTier || 'starter').toLowerCase();
+  const isStarter = currentPlanTier === 'starter';
   const effectiveTopic = storeConfig?.topic || params.topic || params.goal || onboardingState.goal || 'General Speaking Practice';
   const effectiveUserName = (
     storeConfig?.userName ||
@@ -247,7 +249,9 @@ export default function CallScreen() {
 
   const [hintData, setHintData] = useState<HintResponse | null>(null);
   const [isHintVisible, setIsHintVisible] = useState(false);
+  const [showHintLimitPopup, setShowHintLimitPopup] = useState(false);
   const hintsHistoryRef = useRef<string[]>([]);
+  const hintsUsedCountRef = useRef<number>(0);
   const lastPrefetchedHintPromptRef = useRef<string>('');
   const isFetchingHintRef = useRef<boolean>(false);
 
@@ -361,6 +365,15 @@ export default function CallScreen() {
       return;
     }
 
+    // Check hint limits: Starter plan is capped at 2 hints per session
+    const MAX_STARTER_HINTS = 2;
+
+    if (isStarter && hintsUsedCountRef.current >= MAX_STARTER_HINTS) {
+      console.log(`[call.tsx] 💡 Starter plan hint limit reached (${hintsUsedCountRef.current}/${MAX_STARTER_HINTS}) -> showing upgrade popup`);
+      setShowHintLimitPopup(true);
+      return;
+    }
+
     if (isFetchingHintRef.current) return;
 
     const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
@@ -379,6 +392,7 @@ export default function CallScreen() {
       if (res && res.hintEnglish && !isWrappingUp) {
         setHintData(res);
         setIsHintVisible(true);
+        hintsUsedCountRef.current += 1;
         if (!hintsHistoryRef.current.includes(res.hintEnglish)) {
           hintsHistoryRef.current.push(res.hintEnglish);
         }
@@ -1099,6 +1113,8 @@ export default function CallScreen() {
                     hintSinhala={hintData.hintSinhala}
                     onDismiss={() => setIsHintVisible(false)}
                     isWebOrDesktop={isWebOrDesktop}
+                    isLimitReached={isStarter && hintsUsedCountRef.current >= 2 && hintData.hintEnglish.includes('Upgrade')}
+                    onUpgrade={() => setShowHintLimitPopup(true)}
                   />
                 </View>
               )}
@@ -1184,6 +1200,23 @@ export default function CallScreen() {
         footerButtonText="Wait for Maya to finish"
         onFooterButtonPress={() => setShowForceEndPopup(false)}
         showCloseButton={true}
+      />
+
+      {/* Hint Limit Reached Modal (Starter Plan: 2 hints/session limit) */}
+      <CommonPopup
+        visible={showHintLimitPopup}
+        onClose={() => setShowHintLimitPopup(false)}
+        preset="hint-limit"
+        primaryButtonText="View Upgrade Plans"
+        onPrimaryPress={() => {
+          setShowHintLimitPopup(false);
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            // Open pricing page in a new tab so the student's active live audio call remains ongoing!
+            window.open('/upgrade', '_blank');
+          } else {
+            router.push('/upgrade');
+          }
+        }}
       />
 
       {/* Contextual Call Guide */}

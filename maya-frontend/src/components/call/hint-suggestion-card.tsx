@@ -16,6 +16,8 @@ interface HintSuggestionCardProps {
   hintSinhala: string;
   onDismiss?: () => void;
   isWebOrDesktop?: boolean;
+  isLimitReached?: boolean;
+  onUpgrade?: () => void;
 }
 
 export function HintSuggestionCard({
@@ -23,6 +25,8 @@ export function HintSuggestionCard({
   hintSinhala,
   onDismiss,
   isWebOrDesktop = false,
+  isLimitReached = false,
+  onUpgrade,
 }: HintSuggestionCardProps) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(14)).current;
@@ -62,23 +66,58 @@ export function HintSuggestionCard({
         style={{ width: '100%', alignItems: 'center' }}
         disabled={!onDismiss}
       >
-        {/* Pill Badge: Try saying: */}
-        <View style={styles.badgeRow}>
-          <View style={styles.badgePill}>
-            <Text style={styles.badgeText}>Try saying:</Text>
-          </View>
-        </View>
+        {isLimitReached ? (
+          <>
+            {/* Pill Badge: Hint Limit Reached */}
+            <View style={styles.badgeRow}>
+              <View style={[styles.badgePill, { borderColor: '#FDE68A', backgroundColor: '#FEF3C7' }]}>
+                <Text style={[styles.badgeText, { color: '#B45309' }]}>💡 Hint Limit Reached</Text>
+              </View>
+            </View>
 
-        {/* Suggested English sentence */}
-        <Text style={[styles.englishText, isWebOrDesktop && styles.englishTextDesktop]}>
-          {hintEnglish}
-        </Text>
+            <Text style={[styles.englishText, isWebOrDesktop && styles.englishTextDesktop, { fontSize: 18, color: '#92400E' }]}>
+              {hintEnglish}
+            </Text>
 
-        {/* Sinhala translation of the suggested sentence */}
-        {!!hintSinhala && isValidSinhalaText(hintSinhala) && (
-          <Text style={[styles.sinhalaText, isWebOrDesktop && styles.sinhalaTextDesktop]}>
-            {hintSinhala}
-          </Text>
+            {!!hintSinhala && (
+              <Text style={[styles.sinhalaText, isWebOrDesktop && styles.sinhalaTextDesktop, { color: '#78350F', marginBottom: 12 }]}>
+                {hintSinhala}
+              </Text>
+            )}
+
+            {onUpgrade && (
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  onUpgrade();
+                }}
+                style={styles.upgradeLinkButton}
+              >
+                <Text style={styles.upgradeLinkButtonText}>Upgrade Your Plan →</Text>
+              </Pressable>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Pill Badge: Try saying: */}
+            <View style={styles.badgeRow}>
+              <View style={styles.badgePill}>
+                <Text style={styles.badgeText}>Try saying:</Text>
+              </View>
+            </View>
+
+            {/* Suggested English sentence */}
+            <Text style={[styles.englishText, isWebOrDesktop && styles.englishTextDesktop]}>
+              {hintEnglish}
+            </Text>
+
+            {/* Sinhala translation of the suggested sentence */}
+            {!!hintSinhala && isValidSinhalaText(hintSinhala) && (
+              <Text style={[styles.sinhalaText, isWebOrDesktop && styles.sinhalaTextDesktop]}>
+                {hintSinhala}
+              </Text>
+            )}
+          </>
         )}
       </Pressable>
     </Animated.View>
@@ -153,5 +192,29 @@ const styles = StyleSheet.create({
   sinhalaTextDesktop: {
     fontSize: 16,
     lineHeight: 25,
+  },
+  upgradeLinkButton: {
+    backgroundColor: '#0057FF',
+    paddingHorizontal: 20,
+    paddingVertical: 9,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    ...Platform.select({
+      web: { boxShadow: '0 2px 8px rgba(0, 87, 255, 0.25)' } as any,
+      default: {
+        shadowColor: '#0057FF',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 6,
+        elevation: 2,
+      },
+    }),
+  },
+  upgradeLinkButtonText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 14,
+    color: '#FFFFFF',
   },
 });
