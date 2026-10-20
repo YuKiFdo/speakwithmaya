@@ -519,17 +519,13 @@ export function CommonPopup({
                 </Pressable>
               </View>
 
-              {/* Package 2: +120 Min (Most Popular) */}
+              {/* Package 2: +120 Min */}
               <View
                 style={[
                   styles.extraPackageCard,
-                  styles.extraPackageCardPopular,
                   !isDesktop && styles.extraPackageCardMobileCol,
                 ]}
               >
-                <View style={styles.popularBadge}>
-                  <Text style={styles.popularBadgeText}>Most Popular</Text>
-                </View>
                 <View style={[styles.extraPackageIconCircle, { backgroundColor: '#EDE9FE' }]}>
                   <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
                     <Circle cx="12" cy="12" r="10" stroke="#6366F1" strokeWidth="2" />

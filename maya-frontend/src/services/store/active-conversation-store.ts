@@ -223,13 +223,32 @@ export const ActiveConversationStore = {
 };
 
 export function useActiveConversation(): ActiveConversationState | null {
-  const [state, setState] = useState<ActiveConversationState | null>(memoryState);
+  const [state, setState] = useState<ActiveConversationState | null>(() => ActiveConversationStore.getState());
 
   useEffect(() => {
     setState(ActiveConversationStore.getState());
-    return ActiveConversationStore.subscribe((updated) => {
+    const unsubStore = ActiveConversationStore.subscribe((updated) => {
       setState(updated);
     });
+
+    // When OnboardingStore hydrates (providing the authenticated user ID), re-check storage immediately!
+    const unsubOnboarding = OnboardingStore.subscribe((onboardingState) => {
+      if (onboardingState.isHydrated) {
+        if (!memoryState) {
+          const fresh = loadInitialState();
+          if (fresh) {
+            memoryState = fresh;
+            notify();
+          }
+        }
+        setState(ActiveConversationStore.getState());
+      }
+    });
+
+    return () => {
+      unsubStore();
+      unsubOnboarding();
+    };
   }, []);
 
   return state;

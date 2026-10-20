@@ -462,22 +462,12 @@ export default function DashboardScreen() {
                 activeConversation.summary
               ) ? (
                 <>
-                  <View style={styles.resumePillRow}>
-                    <View style={[styles.resumeScenarioPill, { backgroundColor: getScenarioDetails(activeConversation.scenarioId).iconBg }]}>
-                      <Text style={styles.resumeScenarioPillText}>
-                        {activeConversation.scenarioTitle}
-                      </Text>
-                    </View>
-                    <View style={styles.resumeLiveDot} />
-                    <Text style={styles.resumeLastActiveText}>Recent Conversation</Text>
-                  </View>
-
                   <Text style={[
                     styles.heroTitle,
                     isDesktop && styles.heroTitleDesktop,
                   ]}>
-                    Resume{' '}
-                    <Text style={styles.heroTitleHighlight}>{activeConversation.scenarioTitle}</Text>
+                    Start a{isDesktop ? ' ' : '\n'}
+                    <Text style={styles.heroTitleHighlight}>conversation</Text>
                   </Text>
                   <Text
                     style={[
@@ -485,13 +475,13 @@ export default function DashboardScreen() {
                       styles.resumeSummarySubtitle,
                       isDesktop && styles.heroSubtitleDesktop,
                     ]}
-                    numberOfLines={2}
+                    numberOfLines={isDesktop ? 4 : 3}
                   >
                     {activeConversation.summary
                       ? `"${activeConversation.summary}"`
                       : activeConversation.topic
                       ? `Topic: ${activeConversation.topic}`
-                      : 'Pick up right where you left off with Maya.'}
+                      : 'Jump into a real-time conversation with your AI English partner.'}
                   </Text>
 
                   <View style={styles.resumeButtonRow}>
@@ -506,7 +496,6 @@ export default function DashboardScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`Resume ${activeConversation.scenarioTitle} with Maya`}
                     >
-                      <Ionicons name="play" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
                       <Text style={[styles.startTalkingText, isDesktop && styles.startTalkingTextDesktop]}>
                         Resume Practice
                       </Text>
@@ -519,9 +508,9 @@ export default function DashboardScreen() {
                       ]}
                       onPress={handleStartTalking}
                       accessibilityRole="button"
-                      accessibilityLabel="Start fresh topic"
+                      accessibilityLabel="Start fresh conversation"
                     >
-                      <Text style={styles.resumeStartNewText}>Start New Topic</Text>
+                      <Text style={styles.resumeStartNewText}>New Conversation</Text>
                     </Pressable>
                   </View>
                 </>
@@ -555,30 +544,6 @@ export default function DashboardScreen() {
                       Start Talking
                     </Text>
                   </Pressable>
-
-                  {/* Social Proof */}
-                  <View style={styles.heroSocialRow}>
-                    <View style={styles.overlappingAvatars}>
-                      {SOCIAL_AVATARS.map((url, i) => (
-                        <View
-                          key={i}
-                          style={[
-                            styles.avatarCircle,
-                            { zIndex: 3 - i, marginLeft: i > 0 ? -7 : 0 },
-                          ]}
-                        >
-                          <Image
-                            source={{ uri: url }}
-                            style={styles.avatarPhoto}
-                            resizeMode="cover"
-                          />
-                        </View>
-                      ))}
-                    </View>
-                    <Text style={[styles.heroSocialText, isDesktop && styles.heroSocialTextDesktop]}>
-                      2,458+ conversations today
-                    </Text>
-                  </View>
                 </>
               )}
             </View>
@@ -1143,15 +1108,15 @@ const styles = StyleSheet.create({
   },
   heroLeft: {
     zIndex: 2,
-    maxWidth: '62%',
+    width: '100%',
   },
   heroLeftDesktop: {
-    maxWidth: 500,
+    maxWidth: 540,
   },
   heroTitle: {
     ...fontStyle('outfit', 'semiBold'),
-    fontSize: 20,
-    color: '#0f172a',
+    fontSize: 22,
+    color: '#090D14',
     letterSpacing: -0.4,
   },
   heroTitleDesktop: {
@@ -1160,62 +1125,62 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   heroTitleHighlight: {
-    fontFamily: Fonts.outfit.semiBold,
-    color: '#0057FF',
+    fontFamily: Fonts.outfit.bold,
+    color: '#0052FF',
   },
   heroSubtitle: {
-    fontFamily: Fonts.outfit.regular,
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 4,
-    lineHeight: 16,
-    maxWidth: 210,
+    ...fontStyle('inter', 'medium'),
+    fontSize: 13,
+    color: '#334155',
+    marginTop: 6,
+    lineHeight: 18,
+    maxWidth: 220,
   },
   heroSubtitleDesktop: {
-    fontSize: 15,
-    color: '#64748b',
-    marginTop: 6,
-    lineHeight: 22,
+    fontSize: 13.5,
+    color: '#334155',
+    marginTop: 8,
+    lineHeight: 23,
     maxWidth: 460,
   },
   startTalkingButton: {
-    backgroundColor: '#0057FF',
-    paddingHorizontal: 32,
-    minWidth: 120,
+    backgroundColor: '#0052FF',
+    paddingHorizontal: 20,
     height: 40,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'flex-start',
-    marginTop: 14,
+    marginTop: 16,
     ...(Platform.OS === 'web'
-      ? ({ boxShadow: '0px 3px 8px rgba(0, 87, 255, 0.2)' } as any)
+      ? ({ boxShadow: '0px 3px 10px rgba(0, 82, 255, 0.28)' } as any)
       : {
-          shadowColor: '#0057FF',
+          shadowColor: '#0052FF',
           shadowOffset: { width: 0, height: 3 },
-          shadowOpacity: 0.2,
+          shadowOpacity: 0.28,
           shadowRadius: 8,
           elevation: 3,
         }),
   },
   startTalkingButtonDesktop: {
-    paddingHorizontal: 36,
-    minWidth: 210,
+    paddingHorizontal: 32,
+    minWidth: 180,
     height: 46,
-    borderRadius: 12,
-    marginTop: 16,
+    borderRadius: 14,
+    marginTop: 18,
   },
   startTalkingPressed: {
-    backgroundColor: '#0047D4',
+    backgroundColor: '#0043D6',
     transform: [{ scale: 0.98 }],
   },
   startTalkingText: {
-    ...fontStyle('outfit', 'medium'),
+    ...fontStyle('outfit', 'semiBold'),
     color: '#ffffff',
-    fontSize: 13,
+    fontSize: 13.5,
+    letterSpacing: 0.2,
   },
   startTalkingTextDesktop: {
-    fontSize: 16,
+    fontSize: 14.5,
   },
   heroSocialRow: {
     flexDirection: 'row',
@@ -1262,10 +1227,13 @@ const styles = StyleSheet.create({
   mayaWavingImg: {
     width: 250,
     height: 206,
+    opacity: 0.15,
+
   },
   mayaWavingImgDesktop: {
     width: 260,
     height: 220,
+    opacity: 1
   },
   /* Scenarios Section */
   scenariosSection: {
@@ -1554,28 +1522,31 @@ const styles = StyleSheet.create({
   },
   resumeSummarySubtitle: {
     color: '#334155',
+    maxWidth: 270,
+    lineHeight: 19,
   },
   resumeButtonRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginTop: 14,
-    flexWrap: 'wrap',
+    marginTop: 16,
+    flexWrap: 'nowrap',
   },
   resumeActionButton: {
     marginTop: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    gap: 6,
+    paddingHorizontal: 16,
+    height: 40,
+    borderRadius: 12,
   },
   resumeStartNewButton: {
     paddingVertical: 8,
-    paddingHorizontal: 6,
+    paddingHorizontal: 4,
   },
   resumeStartNewText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 12.5,
-    color: '#0057FF',
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 13,
+    color: '#0052FF',
   },
 });

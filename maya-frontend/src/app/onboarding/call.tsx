@@ -533,6 +533,10 @@ export default function CallScreen() {
     }
   }, [guideStepIndex, blueAuraAnim, purpleGlowAnim, useNative]);
 
+  // Keep user on the "Connecting to Maya..." screen long enough to read tips
+  const mountTimeRef = useRef(Date.now());
+  const [isVisualConnected, setIsVisualConnected] = useState(false);
+
   // Orchestrate the smooth ConnectingView -> CallScreen transition
   useEffect(() => {
     const isNowConnected =
@@ -541,61 +545,71 @@ export default function CallScreen() {
 
     if (isNowConnected && !hasTransitionedRef.current) {
       hasTransitionedRef.current = true;
-      console.log('[call.tsx] 📞 Call connected! Showing green Connected state & choreographing reveal.');
+      console.log('[call.tsx] 📞 Call established in background. Ensuring user has enough time to read tips...');
 
-      // 1. Play call connected chime immediately
-      try {
-        playCallConnectedSound();
-      } catch {}
+      // Calculate elapsed time in Connecting screen:
+      // Guarantee 3.5 seconds in the "Connecting to Maya..." state so user has 3-4s to read tips
+      const elapsed = Date.now() - mountTimeRef.current;
+      const minTipsReadingTime = 3500;
+      const waitBeforeConnected = Math.max(0, minTipsReadingTime - elapsed);
 
-      // 2. After 580ms of showing the green "Connected!" celebration in ConnectingView:
-      //    - Release Maya's greeting right as the curtain opens (so voice & subtitles start as CallScreen appears)
-      //    - Simultaneously dissolve + zoom-out ConnectingView AND spring-bloom CallScreen in!
-      const handoffTimer = setTimeout(() => {
-        console.log(`[call.tsx] 🎙️ Releasing Maya greeting audio as CallScreen transitions into view (isIntro: ${isIntro})`);
-        liveCallRef.current.releaseGreeting?.();
+      const connectTimer = setTimeout(() => {
+        // Now switch visual to "Connected!"
+        setIsVisualConnected(true);
 
-        Animated.parallel([
-          // ConnectingView dissolves & subtly expands outward
-          Animated.timing(connectingFadeAnim, {
-            toValue: 0,
-            duration: 420,
-            easing: Easing.bezier(0.22, 1, 0.36, 1),
-            useNativeDriver: useNative,
-          }),
-          Animated.timing(connectingScaleAnim, {
-            toValue: 1.035,
-            duration: 420,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: useNative,
-          }),
-          // Active CallScreen blooms forward into focus
-          Animated.timing(callContentOpacityAnim, {
-            toValue: 1,
-            duration: 360,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: useNative,
-          }),
-          Animated.spring(callContentScaleAnim, {
-            toValue: 1,
-            tension: 75,
-            friction: 9,
-            useNativeDriver: useNative,
-          }),
-          Animated.spring(callContentTranslateYAnim, {
-            toValue: 0,
-            tension: 75,
-            friction: 9,
-            useNativeDriver: useNative,
-          }),
-        ]).start(({ finished }) => {
-          if (finished) {
-            setConnectingVisible(false);
-          }
-        });
-      }, 580);
+        try {
+          playCallConnectedSound();
+        } catch {}
 
-      transitionTimersRef.current.push(handoffTimer);
+        // Right after showing "Connected!" (brief 400ms flash), open the curtain into the call
+        const handoffTimer = setTimeout(() => {
+          console.log(`[call.tsx] 🎙️ Releasing Maya greeting audio as CallScreen transitions into view (isIntro: ${isIntro})`);
+          liveCallRef.current.releaseGreeting?.();
+
+          Animated.parallel([
+            // ConnectingView dissolves & subtly expands outward
+            Animated.timing(connectingFadeAnim, {
+              toValue: 0,
+              duration: 380,
+              easing: Easing.bezier(0.22, 1, 0.36, 1),
+              useNativeDriver: useNative,
+            }),
+            Animated.timing(connectingScaleAnim, {
+              toValue: 1.035,
+              duration: 380,
+              easing: Easing.out(Easing.cubic),
+              useNativeDriver: useNative,
+            }),
+            // Active CallScreen blooms forward into focus
+            Animated.timing(callContentOpacityAnim, {
+              toValue: 1,
+              duration: 320,
+              easing: Easing.out(Easing.cubic),
+              useNativeDriver: useNative,
+            }),
+            Animated.spring(callContentScaleAnim, {
+              toValue: 1,
+              tension: 75,
+              friction: 9,
+              useNativeDriver: useNative,
+            }),
+            Animated.spring(callContentTranslateYAnim, {
+              toValue: 0,
+              tension: 75,
+              friction: 9,
+              useNativeDriver: useNative,
+            }),
+          ]).start(({ finished }) => {
+            if (finished) {
+              setConnectingVisible(false);
+            }
+          });
+        }, 420); // Quick transition right after showing Connected
+
+        transitionTimersRef.current.push(handoffTimer);
+      }, waitBeforeConnected);
+
+      transitionTimersRef.current.push(connectTimer);
     }
   }, [
     liveCall.isConnected,
@@ -1130,7 +1144,7 @@ export default function CallScreen() {
         >
           <ConnectingView
             onCancel={handleHangup}
-            isConnected={liveCall.isConnected || (liveCall.status !== 'connecting' && liveCall.status !== 'idle')}
+            isConnected={isVisualConnected}
           />
         </Animated.View>
       )}

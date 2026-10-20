@@ -94,20 +94,20 @@ export function ConnectingView({
     Platform.select({ web: 64, ios: 52, default: 44 })
   );
 
-  // Dynamic hero animation size: scales with screen height to fill vertical gap
+  // Dynamic hero animation size: compact and visually balanced with Quick Tips card
   const heroSize = useMemo(() => {
-    const heightBased = Math.round(windowHeight * 0.385);
+    const heightBased = Math.round(windowHeight * 0.28);
     const contentWidth = isPhone ? windowWidth : Math.min(windowWidth, 440);
-    const maxSafeWidth = Math.round(contentWidth - 48);
-    return Math.min(350, maxSafeWidth, Math.max(230, heightBased));
+    const maxSafeWidth = Math.round(contentWidth - 80);
+    return Math.min(240, maxSafeWidth, Math.max(180, heightBased));
   }, [windowHeight, windowWidth, isPhone]);
 
-  const dashedRingSize = Math.round(heroSize * 0.85);
-  const haloSize = Math.round(heroSize * 0.7);
-  const avatarContainerSize = Math.round(heroSize * 0.6);
-  const avatarInnerSize = avatarContainerSize - 8;
-  const dotSize = Math.max(9, Math.round(heroSize * 0.032));
-  const dotOffset = Math.round(dashedRingSize * 0.146 - (dotSize - 9) / 2);
+  const dashedRingSize = Math.round(heroSize * 0.9);
+  const haloSize = Math.round(heroSize * 0.72);
+  const avatarContainerSize = Math.round(heroSize * 0.54);
+  const avatarInnerSize = avatarContainerSize - 6;
+  const dotSize = Math.max(7, Math.round(heroSize * 0.034));
+  const dotOffset = Math.round(dashedRingSize * 0.146 - (dotSize - 7) / 2);
 
   // Continuous loop animation values
   const rotateAnim = useRef(new Animated.Value(0)).current;
@@ -509,7 +509,7 @@ export function ConnectingView({
                   ]}
                 >
                   <View style={styles.tipIconBadge}>
-                    <Ionicons name="wifi" size={21} color="#2563eb" />
+                    <Ionicons name="wifi" size={18} color="#2563eb" />
                   </View>
                   <View style={styles.tipTextGroup}>
                     <Text style={styles.tipTitle}>
@@ -535,7 +535,7 @@ export function ConnectingView({
                   ]}
                 >
                   <View style={styles.tipIconBadge}>
-                    <Ionicons name="home-outline" size={21} color="#2563eb" />
+                    <Ionicons name="home-outline" size={18} color="#2563eb" />
                   </View>
                   <View style={styles.tipTextGroup}>
                     <Text style={styles.tipTitle}>Find a quiet place</Text>
@@ -559,7 +559,7 @@ export function ConnectingView({
                   ]}
                 >
                   <View style={styles.tipIconBadge}>
-                    <Ionicons name="mic-outline" size={21} color="#2563eb" />
+                    <Ionicons name="mic-outline" size={18} color="#2563eb" />
                   </View>
                   <View style={styles.tipTextGroup}>
                     <Text style={styles.tipTitle}>Allow microphone access</Text>
@@ -826,41 +826,41 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(240, 246, 255, 0.94)',
     borderWidth: 1,
     borderColor: '#dbeafe',
-    borderRadius: 24,
-    paddingHorizontal: 18,
-    paddingVertical: 18,
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
     shadowColor: '#93c5fd',
     shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
     elevation: 3,
     marginTop: 'auto',
-    marginBottom: Platform.select({ web: 10, ios: 8, default: 6 }),
+    marginBottom: Platform.select({ web: 8, ios: 6, default: 4 }),
   },
   tipsHeader: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 17,
+    fontSize: 16,
     color: '#0f172a',
     letterSpacing: -0.2,
   },
   tipsSubheader: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 13,
+    fontSize: 12.5,
     color: '#64748b',
     marginTop: 2,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   tipsList: {
-    gap: 10,
+    gap: 8,
   },
   tipRow: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    borderRadius: 14,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 13,
+    gap: 11,
     borderWidth: 1,
     borderColor: '#e2e8f0',
     shadowColor: '#0f172a',
@@ -873,9 +873,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
   },
   tipIconBadge: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#eff6ff',
     alignItems: 'center',
     justifyContent: 'center',
@@ -885,15 +885,15 @@ const styles = StyleSheet.create({
   },
   tipTitle: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 14.5,
+    fontSize: 13.5,
     color: '#0f172a',
     letterSpacing: -0.2,
   },
   tipDesc: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 12.5,
+    fontSize: 12,
     color: '#64748b',
-    marginTop: 2,
-    lineHeight: 17,
+    marginTop: 1,
+    lineHeight: 16,
   },
 });

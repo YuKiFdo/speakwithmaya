@@ -88,10 +88,9 @@ const PLANS: PricingPlan[] = [
       { text: 'Progress tracking' },
     ],
     ctaLabel: 'Upgrade to Pro',
-    highlighted: true,
-    badgeLabel: 'Most Popular',
-    iconColor: '#ffffff',
-    iconBg: '#0057FF',
+    highlighted: false,
+    iconColor: '#0057FF',
+    iconBg: '#E0EDFE',
   },
   {
     id: 'premium',
