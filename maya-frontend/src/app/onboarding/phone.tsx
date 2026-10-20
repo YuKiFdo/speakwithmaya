@@ -27,30 +27,66 @@ import {
 import { MayaPrimaryButton } from '@/components/ui';
 import { authService } from '@/services/auth/auth-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
+import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 
 export default function PhoneScreen() {
+  const params = useLocalSearchParams<{ edit?: string; mode?: string }>();
+  const isEditing = params.edit === '1' || params.edit === 'true';
+  const isLoginMode = params.mode === 'login';
+
   const [phone, setPhone] = useState(OnboardingStore.getState().phone || '');
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [showSubtitle, setShowSubtitle] = useState(false);
-  const [showInput, setShowInput] = useState(false);
+  const [showSubtitle, setShowSubtitle] = useState(isEditing || isLoginMode);
+  const [showInput, setShowInput] = useState(isEditing || isLoginMode);
   const [isLoading, setIsLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
   const { isDesktop, isTablet } = useBreakpoint();
 
+  // Dynamic CMS Text & SMS Gateway Settings
+  const [activeGateway, setActiveGateway] = useState<'smsapi' | 'ideamart'>('smsapi');
+  const [pricingNoticeText, setPricingNoticeText] = useState('');
+  const [disclaimerTextContent, setDisclaimerTextContent] = useState('');
+
+  useEffect(() => {
+    fetch(`${getBackendBaseUrl()}/v1/app-config`)
+      .then((res) => res.json())
+      .then((config) => {
+        const gateway = config?.smsGateway || 'smsapi';
+        setActiveGateway(gateway);
+
+        // Only show pricing notice and telco terms for Ideamart gateway
+        if (gateway === 'ideamart') {
+          setPricingNoticeText(
+            config.ideamartPricingNotice ||
+            'Dialog / Mobitel / Hutch: LKR 5 + tax /day. Airtime billing.'
+          );
+          setDisclaimerTextContent(
+            config.ideamartTermsDisclaimer ||
+            'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog/Mobitel/Hutch mobile balance. Send STOP MAYA to 77000 to unsubscribe anytime.'
+          );
+        } else {
+          // Normal SMS (SMSAPI.LK) does not charge airtime or show daily subscription pricing
+          setPricingNoticeText('');
+          setDisclaimerTextContent('');
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const inputRef = useRef<TextInput>(null);
 
   // Timed Choreography Animated Values
-  const cardOpacityAnim = useRef(new Animated.Value(0)).current;
-  const cardSlideAnim = useRef(new Animated.Value(16)).current;
+  const cardOpacityAnim = useRef(new Animated.Value(isEditing || isLoginMode ? 1 : 0)).current;
+  const cardSlideAnim = useRef(new Animated.Value(isEditing || isLoginMode ? 0 : 16)).current;
 
-  const subtitleOpacityAnim = useRef(new Animated.Value(0)).current;
-  const subtitleSlideAnim = useRef(new Animated.Value(12)).current;
+  const subtitleOpacityAnim = useRef(new Animated.Value(isEditing || isLoginMode ? 1 : 0)).current;
+  const subtitleSlideAnim = useRef(new Animated.Value(isEditing || isLoginMode ? 0 : 12)).current;
 
-  const inputOpacityAnim = useRef(new Animated.Value(0)).current;
-  const inputSlideAnim = useRef(new Animated.Value(14)).current;
+  const inputOpacityAnim = useRef(new Animated.Value(isEditing || isLoginMode ? 1 : 0)).current;
+  const inputSlideAnim = useRef(new Animated.Value(isEditing || isLoginMode ? 0 : 14)).current;
 
-  const buttonOpacityAnim = useRef(new Animated.Value(0)).current;
-  const buttonSlideAnim = useRef(new Animated.Value(14)).current;
+  const buttonOpacityAnim = useRef(new Animated.Value(isEditing || isLoginMode ? 1 : 0)).current;
+  const buttonSlideAnim = useRef(new Animated.Value(isEditing || isLoginMode ? 0 : 14)).current;
 
   // Soundwave animation bars
   const wave1 = useRef(new Animated.Value(0.4)).current;
@@ -59,6 +95,24 @@ export default function PhoneScreen() {
 
   // 1. Initial entrance on mount: Card appears & voice starts
   useEffect(() => {
+    if (isEditing || isLoginMode) {
+      // Immediately reveal everything and focus input
+      setShowSubtitle(true);
+      setShowInput(true);
+      cardOpacityAnim.setValue(1);
+      cardSlideAnim.setValue(0);
+      subtitleOpacityAnim.setValue(1);
+      subtitleSlideAnim.setValue(0);
+      inputOpacityAnim.setValue(1);
+      inputSlideAnim.setValue(0);
+      buttonOpacityAnim.setValue(1);
+      buttonSlideAnim.setValue(0);
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+      return;
+    }
+
     Animated.parallel([
       Animated.timing(cardOpacityAnim, {
         toValue: 1,
@@ -144,7 +198,7 @@ export default function PhoneScreen() {
       clearTimeout(inputTimer);
       stopMayaPhonePromptVoice();
     };
-  }, []);
+  }, [isEditing]);
 
   // iOS-compatible auto-focus: Triggers immediately when showInput switches to true
   // with a slight tick to allow iOS UIKit responder chain & pointerEvents to settle
@@ -225,7 +279,8 @@ export default function PhoneScreen() {
       await authService.sendOtp(formattedPhone);
       OnboardingStore.updateField('phone', formattedPhone);
       OnboardingStore.setLastActiveRoute('/onboarding/otp');
-      router.replace('/onboarding/otp');
+      const otpUrl = isLoginMode ? '/onboarding/otp?mode=login' : '/onboarding/otp';
+      router.replace(otpUrl as any);
     } catch (err: any) {
       setErrorText(err.message || 'Failed to send verification code. Please check your number.');
     } finally {
@@ -279,9 +334,18 @@ export default function PhoneScreen() {
                 >
                   <View style={styles.cardHeaderRow}>
                     <Text style={styles.cardHeader}>
-                      To continue, enter your phone number{'\n'}
-                      and enable your{' '}
-                      <Text style={styles.starterPlanHighlight}>Starter Plan</Text>
+                      {isLoginMode ? (
+                        <>
+                          Welcome back! Enter your phone number{'\n'}
+                          to log into your <Text style={styles.starterPlanHighlight}>account</Text>
+                        </>
+                      ) : (
+                        <>
+                          To continue, enter your phone number{'\n'}
+                          and enable your{' '}
+                          <Text style={styles.starterPlanHighlight}>Starter Plan</Text>
+                        </>
+                      )}
                     </Text>
 
                     {/* Speaker badge */}
@@ -308,10 +372,11 @@ export default function PhoneScreen() {
                     <Text style={styles.cardTitle}>
                       Enter your mobile number
                     </Text>
-                    <Text style={styles.cardPricingNotice}>
-                      Get started for just LKR 12 + tax /day.{'\n'}
-                      Cancel anytime.
-                    </Text>
+                    {!isLoginMode && !!pricingNoticeText && (
+                      <Text style={styles.cardPricingNotice}>
+                        {pricingNoticeText}
+                      </Text>
+                    )}
                   </Animated.View>
                 </Pressable>
               </Animated.View>
@@ -378,7 +443,7 @@ export default function PhoneScreen() {
                 )}
 
                 <MayaPrimaryButton
-                  label={isLoading ? "Sending..." : "Send Verification Code"}
+                  label={isLoading ? "Sending..." : isLoginMode ? "Log In" : "Send Verification Code"}
                   showArrow={false}
                   disabled={!isPhoneEntered || isLoading}
                   onPress={handleSendCode}
@@ -386,11 +451,12 @@ export default function PhoneScreen() {
                   borderRadius={20}
                 />
 
-                {/* Terms Disclaimer Text */}
-                <Text style={styles.disclaimerText}>
-                  By starting the Starter Plan, you agree to our Terms & Conditions.{'\n'}
-                  A subscription fee of LKR 12 + applicable taxes per day applies to prepaid users, or LKR 360 + applicable taxes per month for postpaid users. You can cancel anytime.
-                </Text>
+                {/* Terms Disclaimer Text: Only rendered when configured for Ideamart telco gateway */}
+                {!isLoginMode && !!disclaimerTextContent && (
+                  <Text style={styles.disclaimerText}>
+                    {disclaimerTextContent}
+                  </Text>
+                )}
               </Animated.View>
             </StepTransition>
           </View>

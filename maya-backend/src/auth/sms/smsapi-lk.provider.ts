@@ -21,9 +21,15 @@ export class SmsApiLkProvider implements ISmsGatewayProvider {
     return cleaned;
   }
 
-  async sendOtp(phoneNumber: string, code: string): Promise<SmsDeliveryResult> {
+  async sendOtp(phoneNumber: string, code: string, customMessage?: string): Promise<SmsDeliveryResult> {
     const recipient = this.formatRecipient(phoneNumber);
-    const message = `Your Maya AI English Coach verification code is: ${code}. Valid for 5 minutes. Do not share this code.`;
+    let message = customMessage
+      ? customMessage.replace(/\{CODE\}/gi, code).replace(/\{OTP\}/gi, code)
+      : `Your Maya AI English Coach verification code is: ${code}. Valid for 5 minutes. Do not share this code.`;
+
+    if (!message.includes(code)) {
+      message = `${message} (Code: ${code})`;
+    }
 
     // Always log in terminal for instant dev inspection
     this.logger.log(

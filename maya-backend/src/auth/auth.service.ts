@@ -17,8 +17,12 @@ import {
   SavePreferencesDto,
   UpgradePlanDto,
   AddOnTopUpDto,
+  AdminUsersQueryDto,
+  AdminUpdateUserDto,
 } from './dto/auth.dto.js';
 import { SmsApiLkProvider } from './sms/smsapi-lk.provider.js';
+import { IdeamartSmsProvider } from './sms/ideamart-sms.provider.js';
+import type { UpdateAppConfigDto } from './dto/auth.dto.js';
 
 export interface UserProfileData {
   id: string;
@@ -48,6 +52,26 @@ export interface UserProfileData {
 
 const OTP_SECRET_SALT = process.env.OTP_SALT || 'maya_ai_secure_otp_salt_2026';
 
+export interface AppConfigData {
+  smsGateway: 'smsapi' | 'ideamart';
+  pricingNotice: string;
+  termsDisclaimer: string;
+  smsTemplate: string;
+  ideamartPricingNotice: string;
+  ideamartTermsDisclaimer: string;
+  ideamartSmsTemplate: string;
+}
+
+const DEFAULT_APP_CONFIG: AppConfigData = {
+  smsGateway: 'smsapi',
+  pricingNotice: 'Get started for just LKR 12 + tax /day.\nCancel anytime.',
+  termsDisclaimer: 'By starting the Starter Plan, you agree to our Terms & Conditions.\nA subscription fee of LKR 12 + applicable taxes per day applies to prepaid users, or LKR 360 + applicable taxes per month for postpaid users. You can cancel anytime.',
+  smsTemplate: 'Your Maya AI English Coach verification code is: {CODE}. Valid for 5 minutes. Do not share this code.',
+  ideamartPricingNotice: 'Dialog / Mobitel / Hutch: LKR 5 + tax /day. Airtime billing.',
+  ideamartTermsDisclaimer: 'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog/Mobitel/Hutch mobile balance. Send STOP MAYA to 77000 to unsubscribe anytime.',
+  ideamartSmsTemplate: 'Maya AI: Your OTP is {CODE}. Valid for 5 min. Sub fee LKR 5+tax/day. Helpline 0771234567',
+};
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -56,6 +80,7 @@ export class AuthService {
   constructor(
     private readonly configService: ConfigService,
     private readonly smsProvider: SmsApiLkProvider,
+    private readonly ideamartProvider: IdeamartSmsProvider,
   ) {
     const supabaseUrl =
       this.configService.get<string>('SUPABASE_URL') ||
@@ -166,8 +191,16 @@ export class AuthService {
       throw new InternalServerErrorException('Failed to generate verification session in database.');
     }
 
-    // 4. Dispatch via SMS Gateway Provider
-    await this.smsProvider.sendOtp(phone, code);
+    // 4. Dispatch via Active Configured SMS Gateway Provider (smsapi or ideamart)
+    const config = await this.getAppConfig();
+    const isIdeamart = config.smsGateway === 'ideamart';
+    const messageTemplate = isIdeamart ? config.ideamartSmsTemplate : config.smsTemplate;
+
+    if (isIdeamart) {
+      await this.ideamartProvider.sendOtp(phone, code, messageTemplate);
+    } else {
+      await this.smsProvider.sendOtp(phone, code, messageTemplate);
+    }
 
     return {
       success: true,
@@ -893,4 +926,395 @@ export class AuthService {
       ],
     };
   }
+
+  /**
+   * Admin: List users with aggregation metrics (sessions count, total tokens, total spend LKR, roadmap progress).
+   */
+  async getAdminUsers(query?: AdminUsersQueryDto) {
+    if (!this.supabase) {
+      throw new InternalServerErrorException('Supabase database client not configured.');
+    }
+
+    try {
+      // 1. Fetch profiles
+      const { data: profiles, error: profileErr } = await this.supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (profileErr) {
+        this.logger.error(`Failed to fetch profiles for admin users: ${profileErr.message}`);
+        throw new InternalServerErrorException('Database query failed for profiles.');
+      }
+
+      const allProfiles = (profiles || []) as UserProfileData[];
+
+      // 2. Fetch sessions to aggregate per user
+      const { data: sessions } = await this.supabase
+        .from('sessions')
+        .select('id, user_id, duration_seconds, overall_score, fluency_score, grammar_score, pronunciation_score, created_at, status')
+        .order('created_at', { ascending: false });
+
+      // 3. Fetch usage ledger to aggregate spend and tokens per user
+      const { data: ledgerEntries } = await this.supabase
+        .from('usage_ledger')
+        .select('user_id, session_id, total_tokens, cost_lkr, cost_usd');
+
+      // 4. Fetch subscriptions
+      const { data: subs } = await this.supabase
+        .from('subscriptions')
+        .select('id, user_id, plan_tier, status, amount_lkr, next_billing_date, updated_at');
+
+      // 5. Fetch roadmap progress
+      const { data: progress } = await this.supabase
+        .from('user_roadmap_progress')
+        .select('user_id, roadmap_level_id, status, is_passed, score_percent, completed_at');
+
+      // Map sessions by user_id
+      const sessionsByUser = new Map<string, any[]>();
+      (sessions || []).forEach((s: any) => {
+        if (!sessionsByUser.has(s.user_id)) {
+          sessionsByUser.set(s.user_id, []);
+        }
+        sessionsByUser.get(s.user_id)!.push(s);
+      });
+
+      // Map ledger by user_id
+      const ledgerByUser = new Map<string, { totalTokens: number; totalCostLkr: number; totalCostUsd: number }>();
+      (ledgerEntries || []).forEach((l: any) => {
+        const current = ledgerByUser.get(l.user_id) || { totalTokens: 0, totalCostLkr: 0, totalCostUsd: 0 };
+        current.totalTokens += l.total_tokens || 0;
+        current.totalCostLkr += Number(l.cost_lkr || 0);
+        current.totalCostUsd += Number(l.cost_usd || 0);
+        ledgerByUser.set(l.user_id, current);
+      });
+
+      // Map subscriptions by user_id
+      const subByUser = new Map<string, any>();
+      (subs || []).forEach((s: any) => {
+        // Pick the active or most recent subscription
+        if (!subByUser.has(s.user_id) || s.status === 'ACTIVE') {
+          subByUser.set(s.user_id, s);
+        }
+      });
+
+      // Map roadmap progress by user_id
+      const progressByUser = new Map<string, { completedCount: number; passedCount: number; totalAttempts: number }>();
+      (progress || []).forEach((p: any) => {
+        const cur = progressByUser.get(p.user_id) || { completedCount: 0, passedCount: 0, totalAttempts: 0 };
+        cur.totalAttempts += 1;
+        if (p.status === 'completed' || p.is_passed) {
+          cur.completedCount += 1;
+        }
+        if (p.is_passed) {
+          cur.passedCount += 1;
+        }
+        progressByUser.set(p.user_id, cur);
+      });
+
+      // Build enriched user cards
+      let enrichedUsers = allProfiles.map((p) => {
+        const userSessions = sessionsByUser.get(p.id) || [];
+        const userLedger = ledgerByUser.get(p.id) || { totalTokens: 0, totalCostLkr: 0, totalCostUsd: 0 };
+        const activeSub = subByUser.get(p.id);
+        const userProgress = progressByUser.get(p.id) || { completedCount: 0, passedCount: 0, totalAttempts: 0 };
+
+        const totalPracticedSeconds = userSessions.reduce((acc, s) => acc + (s.duration_seconds || 0), 0);
+        const validScores = userSessions.filter((s) => typeof s.overall_score === 'number' && s.overall_score > 0);
+        const avgOverallScore = validScores.length > 0
+          ? Math.round(validScores.reduce((acc, s) => acc + s.overall_score, 0) / validScores.length)
+          : (p.baseline_fluency_score || 0);
+
+        const lastSession = userSessions[0];
+
+        return {
+          id: p.id,
+          phoneNumber: p.phone_number,
+          displayName: p.display_name || 'Anonymous Student',
+          level: p.level || 'Intermediate',
+          goal: p.goal || 'General Fluency',
+          challenge: p.challenge || 'Vocabulary & Hesitation',
+          planTier: p.plan_tier || 'starter',
+          planStatus: p.plan_status || 'active',
+          billingCycle: p.billing_cycle || 'monthly',
+          minutesBalance: p.minutes_balance ?? 10,
+          monthlyMinutesAllowance: p.monthly_minutes_allowance ?? 10,
+          addOnMinutesBalance: p.add_on_minutes_balance ?? 0,
+          minutesResetAt: p.minutes_reset_at,
+          nativeLanguage: p.native_language || 'sinhala',
+          employmentStatus: p.employment_status,
+          dailyGoalMinutes: p.daily_goal_minutes ?? 10,
+          baselineScores: {
+            overall: Math.round(((p.baseline_fluency_score || 0) + (p.baseline_grammar_score || 0) + (p.baseline_pronunciation_score || 0)) / 3) || 75,
+            fluency: p.baseline_fluency_score || 70,
+            grammar: p.baseline_grammar_score || 70,
+            pronunciation: p.baseline_pronunciation_score || 70,
+          },
+          lastActiveStep: p.last_active_step,
+          onboardingCompletedAt: p.onboarding_completed_at,
+          createdAt: p.created_at,
+          updatedAt: p.updated_at,
+          // Aggregated Metrics
+          stats: {
+            totalSessions: userSessions.length,
+            totalPracticedMinutes: Math.round(totalPracticedSeconds / 60),
+            totalTokens: userLedger.totalTokens,
+            totalCostLkr: Number(userLedger.totalCostLkr.toFixed(2)),
+            totalCostUsd: Number(userLedger.totalCostUsd.toFixed(4)),
+            avgScore: avgOverallScore,
+            completedLevelsCount: userProgress.completedCount,
+            lastSessionDate: lastSession ? lastSession.created_at : null,
+            subscriptionStatus: activeSub ? activeSub.status : (p.plan_status || 'FREE'),
+          },
+        };
+      });
+
+      // Apply Filters
+      if (query?.search) {
+        const q = query.search.toLowerCase().trim();
+        enrichedUsers = enrichedUsers.filter(
+          (u) =>
+            u.displayName.toLowerCase().includes(q) ||
+            u.phoneNumber.toLowerCase().includes(q) ||
+            u.id.toLowerCase().includes(q) ||
+            u.goal.toLowerCase().includes(q)
+        );
+      }
+
+      if (query?.tier && query.tier !== 'ALL') {
+        enrichedUsers = enrichedUsers.filter((u) => u.planTier.toLowerCase() === query.tier!.toLowerCase());
+      }
+
+      if (query?.level && query.level !== 'ALL') {
+        enrichedUsers = enrichedUsers.filter((u) => u.level.toLowerCase() === query.level!.toLowerCase());
+      }
+
+      if (query?.status && query.status !== 'ALL') {
+        enrichedUsers = enrichedUsers.filter((u) => u.planStatus.toLowerCase() === query.status!.toLowerCase());
+      }
+
+      // Summary Stats for Admin Banner
+      const totalUsers = allProfiles.length;
+      const activePaidCount = allProfiles.filter((p) => p.plan_tier !== 'starter' && p.plan_status === 'active').length;
+      const starterCount = allProfiles.filter((p) => p.plan_tier === 'starter').length;
+      const totalMinutesConsumed = Math.round(
+        (sessions || []).reduce((acc: number, s: any) => acc + (s.duration_seconds || 0), 0) / 60
+      );
+
+      return {
+        stats: {
+          totalUsers,
+          activePaidCount,
+          starterCount,
+          totalMinutesConsumed,
+          filteredCount: enrichedUsers.length,
+        },
+        users: enrichedUsers,
+      };
+    } catch (err: any) {
+      this.logger.error(`Error in getAdminUsers: ${err?.message}`);
+      throw new InternalServerErrorException(err?.message || 'Failed to fetch admin users.');
+    }
+  }
+
+  /**
+   * Admin: Get full personalized detail for a specific user, including sessions history,
+   * recent grammar corrections, orders/billing, and roadmap achievements.
+   */
+  async getAdminUserDetail(userId: string) {
+    if (!this.supabase) {
+      throw new InternalServerErrorException('Supabase database client not configured.');
+    }
+
+    try {
+      // 1. Fetch Profile and Active Subscription concurrently
+      const [
+        { data: profile, error: pErr },
+        { data: sub },
+        { data: sessions },
+        { data: orders },
+        { data: progress },
+        { data: ledger },
+      ] = await Promise.all([
+        this.supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle(),
+        this.supabase
+          .from('subscriptions')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        this.supabase
+          .from('sessions')
+          .select('id, topic, duration_seconds, overall_score, fluency_score, grammar_score, pronunciation_score, status, created_at, user_rating, user_feedback')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(25),
+        this.supabase
+          .from('orders')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(20),
+        this.supabase
+          .from('user_roadmap_progress')
+          .select('id, roadmap_level_id, level_number, session_id, status, score_percent, is_passed, xp_earned, completed_at, created_at')
+          .eq('user_id', userId)
+          .order('level_number', { ascending: true }),
+        this.supabase
+          .from('usage_ledger')
+          .select('total_tokens, cost_lkr, cost_usd')
+          .eq('user_id', userId),
+      ]);
+
+      if (pErr || !profile) {
+        throw new NotFoundException(`User with ID ${userId} not found.`);
+      }
+
+      // Fetch recent corrections for top sessions if any
+      let corrections: any[] = [];
+      const sessionIds = (sessions || []).map((s: any) => s.id);
+      if (sessionIds.length > 0) {
+        const { data: corrData } = await this.supabase
+          .from('grammar_corrections')
+          .select('id, session_id, student_said, more_natural, explanation, highlight_words, created_at')
+          .in('session_id', sessionIds.slice(0, 10))
+          .order('created_at', { ascending: false })
+          .limit(30);
+        corrections = corrData || [];
+      }
+
+      const totalTokens = (ledger || []).reduce((acc: number, l: any) => acc + (l.total_tokens || 0), 0);
+      const totalCostLkr = (ledger || []).reduce((acc: number, l: any) => acc + Number(l.cost_lkr || 0), 0);
+      const totalCostUsd = (ledger || []).reduce((acc: number, l: any) => acc + Number(l.cost_usd || 0), 0);
+      const totalPracticeSeconds = (sessions || []).reduce((acc: number, s: any) => acc + (s.duration_seconds || 0), 0);
+
+      return {
+        profile,
+        stats: {
+          totalSessions: (sessions || []).length,
+          totalPracticeMinutes: Math.round(totalPracticeSeconds / 60),
+          totalTokens,
+          totalCostLkr: Number(totalCostLkr.toFixed(2)),
+          totalCostUsd: Number(totalCostUsd.toFixed(4)),
+        },
+        sessions: sessions || [],
+        corrections,
+        orders: orders || [],
+        subscription: sub || null,
+        roadmapProgress: progress || [],
+      };
+    } catch (err: any) {
+      if (err instanceof NotFoundException) throw err;
+      this.logger.error(`Error in getAdminUserDetail: ${err?.message}`);
+      throw new InternalServerErrorException(err?.message || 'Failed to fetch user details.');
+    }
+  }
+
+  /**
+   * Admin: Update user's profile, allowance, or plan directly.
+   */
+  async adminUpdateUser(userId: string, dto: AdminUpdateUserDto) {
+    if (!this.supabase) {
+      throw new InternalServerErrorException('Supabase database client not configured.');
+    }
+
+    const updates: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (dto.displayName !== undefined) updates.display_name = dto.displayName;
+    if (dto.level !== undefined) updates.level = dto.level;
+    if (dto.goal !== undefined) updates.goal = dto.goal;
+    if (dto.challenge !== undefined) updates.challenge = dto.challenge;
+    if (dto.planTier !== undefined) updates.plan_tier = dto.planTier;
+    if (dto.planStatus !== undefined) updates.plan_status = dto.planStatus;
+    if (dto.minutesBalance !== undefined) updates.minutes_balance = dto.minutesBalance;
+    if (dto.addOnMinutesBalance !== undefined) updates.add_on_minutes_balance = dto.addOnMinutesBalance;
+    if (dto.monthlyMinutesAllowance !== undefined) updates.monthly_minutes_allowance = dto.monthlyMinutesAllowance;
+    if (dto.baselineFluencyScore !== undefined) updates.baseline_fluency_score = dto.baselineFluencyScore;
+    if (dto.baselineGrammarScore !== undefined) updates.baseline_grammar_score = dto.baselineGrammarScore;
+    if (dto.baselinePronunciationScore !== undefined) updates.baseline_pronunciation_score = dto.baselinePronunciationScore;
+
+    const { data, error } = await this.supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error || !data) {
+      this.logger.error(`Failed to update user profile in adminUpdateUser: ${error?.message}`);
+      throw new InternalServerErrorException('Failed to update user profile in database.');
+    }
+
+    return {
+      success: true,
+      message: 'User profile updated successfully.',
+      profile: data,
+    };
+  }
+
+  /**
+   * Get application configuration (SMS Gateway, Pricing notices, Terms disclaimer, SMS templates)
+   */
+  async getAppConfig(): Promise<AppConfigData> {
+    try {
+      const { data, error } = await this.supabase
+        .from('roadmap_levels')
+        .select('canonical_content')
+        .eq('id', 'sys_app_settings')
+        .maybeSingle();
+
+      if (!error && data?.canonical_content) {
+        const parsed = JSON.parse(data.canonical_content);
+        return {
+          ...DEFAULT_APP_CONFIG,
+          ...parsed,
+        };
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not read sys_app_settings: ${err?.message}. Using default app config.`);
+    }
+
+    return { ...DEFAULT_APP_CONFIG };
+  }
+
+  /**
+   * Update application configuration in database
+   */
+  async updateAppConfig(dto: UpdateAppConfigDto): Promise<{ success: boolean; config: AppConfigData }> {
+    const currentConfig = await this.getAppConfig();
+    const newConfig: AppConfigData = {
+      ...currentConfig,
+      ...dto,
+    };
+
+    const { error } = await this.supabase
+      .from('roadmap_levels')
+      .upsert({
+        id: 'sys_app_settings',
+        level_number: 9999,
+        title: 'APP_SYSTEM_SETTINGS',
+        is_published: false,
+        canonical_content: JSON.stringify(newConfig),
+        updated_at: new Date().toISOString(),
+      });
+
+    if (error) {
+      this.logger.error(`Failed to update app config in database: ${error.message}`);
+      throw new InternalServerErrorException('Failed to persist app configuration in database.');
+    }
+
+    this.logger.log(`[AppConfig] Updated successfully. Active SMS gateway: ${newConfig.smsGateway}`);
+    return {
+      success: true,
+      config: newConfig,
+    };
+  }
 }
+

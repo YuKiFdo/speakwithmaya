@@ -222,6 +222,14 @@ export default function RootLayout() {
           name="admin/usage"
           options={{ animation: 'fade', animationDuration: 200 }}
         />
+        <Stack.Screen
+          name="admin/users"
+          options={{ animation: 'fade', animationDuration: 200 }}
+        />
+        <Stack.Screen
+          name="admin/settings"
+          options={{ animation: 'fade', animationDuration: 200 }}
+        />
       </Stack>
       <AlertHost />
     </ThemeProvider>

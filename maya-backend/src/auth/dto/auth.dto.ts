@@ -128,3 +128,121 @@ export class UpdateStepDto {
   step!: string;
 }
 
+export class AdminUsersQueryDto {
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsString()
+  tier?: string;
+
+  @IsOptional()
+  @IsString()
+  level?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  limit?: string;
+
+  @IsOptional()
+  @IsString()
+  page?: string;
+}
+
+export class AdminUpdateUserDto {
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
+  @IsOptional()
+  @IsString()
+  level?: string;
+
+  @IsOptional()
+  @IsString()
+  goal?: string;
+
+  @IsOptional()
+  @IsString()
+  challenge?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['starter', 'basic', 'pro', 'premium'])
+  planTier?: 'starter' | 'basic' | 'pro' | 'premium';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['active', 'trialing', 'past_due', 'canceled'])
+  planStatus?: 'active' | 'trialing' | 'past_due' | 'canceled';
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  minutesBalance?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  addOnMinutesBalance?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  monthlyMinutesAllowance?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  baselineFluencyScore?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  baselineGrammarScore?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  baselinePronunciationScore?: number;
+}
+
+export class UpdateAppConfigDto {
+  @IsOptional()
+  @IsString()
+  @IsIn(['smsapi', 'ideamart'])
+  smsGateway?: 'smsapi' | 'ideamart';
+
+  @IsOptional()
+  @IsString()
+  pricingNotice?: string;
+
+  @IsOptional()
+  @IsString()
+  termsDisclaimer?: string;
+
+  @IsOptional()
+  @IsString()
+  smsTemplate?: string;
+
+  @IsOptional()
+  @IsString()
+  ideamartPricingNotice?: string;
+
+  @IsOptional()
+  @IsString()
+  ideamartTermsDisclaimer?: string;
+
+  @IsOptional()
+  @IsString()
+  ideamartSmsTemplate?: string;
+}
+

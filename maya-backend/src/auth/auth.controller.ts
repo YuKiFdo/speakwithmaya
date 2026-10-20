@@ -1,8 +1,11 @@
 import {
   Controller,
   Post,
+  Put,
   Get,
   Body,
+  Param,
+  Query,
   UsePipes,
   UseGuards,
   ValidationPipe,
@@ -17,6 +20,9 @@ import {
   UpgradePlanDto,
   AddOnTopUpDto,
   UpdateStepDto,
+  AdminUsersQueryDto,
+  AdminUpdateUserDto,
+  UpdateAppConfigDto,
 } from './dto/auth.dto.js';
 
 @Controller('v1')
@@ -85,4 +91,51 @@ export class AuthController {
   getPlans() {
     return this.authService.getPlansCatalog();
   }
+
+  /**
+   * Admin: List users with analytics and usage metrics
+   */
+  @Get('admin/users')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async getAdminUsers(@Query() query: AdminUsersQueryDto) {
+    return this.authService.getAdminUsers(query);
+  }
+
+  /**
+   * Admin: Get comprehensive personalized user profile with sessions and learning stats
+   */
+  @Get('admin/users/:id')
+  async getAdminUserDetail(@Param('id') userId: string) {
+    return this.authService.getAdminUserDetail(userId);
+  }
+
+  /**
+   * Admin: Update user's minutes allowance, tier, or personalized goals
+   */
+  @Put('admin/users/:id')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async adminUpdateUser(
+    @Param('id') userId: string,
+    @Body() dto: AdminUpdateUserDto,
+  ) {
+    return this.authService.adminUpdateUser(userId, dto);
+  }
+
+  /**
+   * Public: Retrieve current app configuration (SMS gateway, pricing notices, disclaimer text)
+   */
+  @Get('app-config')
+  async getAppConfig() {
+    return this.authService.getAppConfig();
+  }
+
+  /**
+   * Admin: Update application configuration
+   */
+  @Put('admin/app-config')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async updateAppConfig(@Body() dto: UpdateAppConfigDto) {
+    return this.authService.updateAppConfig(dto);
+  }
 }
+

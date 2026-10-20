@@ -40,9 +40,8 @@ const PRACTICE_OPTIONS: PracticeOption[] = [
   },
   {
     id: '10-min',
-    badge: 'Recommended',
     title: '10 min',
-    subtitle: 'Recommended for steady growth',
+    subtitle: 'For steady growth',
   },
   {
     id: '15-min',
@@ -59,7 +58,7 @@ const PRACTICE_OPTIONS: PracticeOption[] = [
 export default function DailyGoalScreen() {
   const { isTablet, isDesktop } = useBreakpoint();
   const [selectedGoal, setSelectedGoal] = useState<string | null>(
-    OnboardingStore.getState().dailyGoalMinutes ? `${OnboardingStore.getState().dailyGoalMinutes}-min` : '10-min',
+    OnboardingStore.getState().dailyGoalMinutes ? `${OnboardingStore.getState().dailyGoalMinutes}-min` : null,
   );
   const [isTransitioning, setIsTransitioning] = useState(false);
 
@@ -216,7 +215,6 @@ export default function DailyGoalScreen() {
           <View style={styles.optionsList}>
             {PRACTICE_OPTIONS.map((item, index) => {
               const isSelected = selectedGoal === item.id;
-              const isRecommended = item.badge === 'Recommended';
               const anim = cardAnims[index];
 
               return (
@@ -233,7 +231,6 @@ export default function DailyGoalScreen() {
                   <Pressable
                     style={({ pressed }) => [
                       styles.card,
-                      isRecommended && styles.cardRecommended,
                       isSelected && styles.cardSelected,
                       pressed && styles.cardPressed,
                     ]}
@@ -251,7 +248,7 @@ export default function DailyGoalScreen() {
                     <Text
                       style={[
                         styles.cardTitle,
-                        (isSelected || isRecommended) && styles.cardTitleActive,
+                        isSelected && styles.cardTitleActive,
                       ]}
                     >
                       {item.title}
@@ -261,7 +258,7 @@ export default function DailyGoalScreen() {
                     <Text
                       style={[
                         styles.cardSubtitle,
-                        (isSelected || isRecommended) && styles.cardSubtitleActive,
+                        isSelected && styles.cardSubtitleActive,
                       ]}
                     >
                       {item.subtitle}

@@ -25,6 +25,9 @@ import { OnboardingStore } from '@/services/store/onboarding-store';
 const OTP_LENGTH = 6;
 
 export default function OtpScreen() {
+  const params = useLocalSearchParams<{ mode?: string }>();
+  const isLoginMode = params.mode === 'login';
+
   const storePhone = OnboardingStore.getState().phone;
   const displayPhone = storePhone || '+94 77 123 4567';
 
@@ -204,10 +207,11 @@ export default function OtpScreen() {
     try {
       const res = await authService.verifyOtp(displayPhone, code);
 
-      // If user had finished onboarding, go straight to dashboard.
+      // If user had finished onboarding or logged in as existing user:
+      // When isLoginMode or isCompleted is true, direct straight to dashboard.
       // Otherwise resume at the exact step they reached, or proceed to /onboarding/goal
       let nextRoute = '/onboarding/goal';
-      if (res.isCompleted) {
+      if (res.isCompleted || isLoginMode) {
         nextRoute = '/(tabs)/dashboard';
       } else if (
         res.lastActiveRoute &&
@@ -272,7 +276,13 @@ export default function OtpScreen() {
                   <View style={styles.phoneRow}>
                     <Text style={styles.phoneNumber}>{displayPhone}</Text>
                     <Pressable
-                      onPress={() => router.back()}
+                      onPress={() => {
+                        OnboardingStore.setLastActiveRoute('/onboarding/phone');
+                        const editUrl = isLoginMode
+                          ? '/onboarding/phone?edit=1&mode=login'
+                          : '/onboarding/phone?edit=1';
+                        router.replace(editUrl as any);
+                      }}
                       hitSlop={8}
                       accessibilityRole="button"
                       accessibilityLabel="Edit phone number"

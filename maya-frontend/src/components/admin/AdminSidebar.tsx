@@ -19,11 +19,9 @@ export interface AdminNavGroup {
 
 export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
-    group: 'AI CONFIGURATION',
+    group: 'USER MANAGEMENT',
     items: [
-      { id: 'scenario-studio', label: 'Scenario Studio', icon: 'message-square', route: '/admin/scenarios' },
-      { id: 'roadmap-studio', label: 'Roadmap Studio (Legacy)', icon: 'sliders', route: '/admin/roadmap' },
-      { id: 'ai-usage', label: 'AI Usage & Logs', icon: 'bar-chart-2', route: '/admin/usage' },
+      { id: 'users-directory', label: 'Users & Profiles', icon: 'users', route: '/admin/users' },
     ],
   },
   {
@@ -33,10 +31,17 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     ],
   },
   {
-    group: 'STUDENT APP',
+    group: 'AI CONFIGURATION',
     items: [
-      { id: 'dashboard', label: 'Student Dashboard', icon: 'home', route: '/(tabs)/dashboard' },
-      { id: 'student-roadmap', label: 'Student Roadmap View', icon: 'map', route: '/(tabs)/roadmap' },
+      { id: 'scenario-studio', label: 'Scenario Studio', icon: 'message-square', route: '/admin/scenarios' },
+      // { id: 'roadmap-studio', label: 'Roadmap Studio (Legacy)', icon: 'sliders', route: '/admin/roadmap' },
+      { id: 'ai-usage', label: 'AI Usage & Logs', icon: 'bar-chart-2', route: '/admin/usage' },
+    ],
+  },
+  {
+    group: 'PLATFORM SETTINGS',
+    items: [
+      { id: 'app-settings', label: 'SMS & Gateway Settings', icon: 'settings', route: '/admin/settings' },
     ],
   },
 ];

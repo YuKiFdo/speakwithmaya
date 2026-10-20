@@ -378,6 +378,7 @@ export class RoadmapService implements OnModuleInit {
       let query = this.supabase
         .from('roadmap_levels')
         .select('*')
+        .neq('id', 'sys_app_settings')
         .order('level_number', { ascending: true });
 
       if (!adminView) {

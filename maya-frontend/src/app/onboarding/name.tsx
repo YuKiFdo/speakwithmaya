@@ -334,6 +334,25 @@ export default function NameScreen() {
                 height={58}
                 borderRadius={20}
               />
+
+              {/* Already have an account? Login */}
+              <Pressable
+                onPress={() => {
+                  stopMayaNamePromptVoice();
+                  setIsSpeaking(false);
+                  OnboardingStore.setLastActiveRoute('/onboarding/phone?mode=login');
+                  router.replace('/onboarding/phone?mode=login' as any);
+                }}
+                style={({ pressed }) => [
+                  styles.loginRow,
+                  pressed && { opacity: 0.7 },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Already have an account? Log in"
+              >
+                <Text style={styles.loginTextNormal}>Already have an account ? </Text>
+                <Text style={styles.loginTextBold}>Login</Text>
+              </Pressable>
             </Animated.View>
           </StepTransition>
         </View>
@@ -485,5 +504,22 @@ const styles = StyleSheet.create({
   buttonWrapper: {
     width: '100%',
     marginTop: 6,
+  },
+  loginRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+    paddingVertical: 8,
+  },
+  loginTextNormal: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 14.5,
+    color: '#64748B',
+  },
+  loginTextBold: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 14.5,
+    color: '#0F172A',
   },
 });

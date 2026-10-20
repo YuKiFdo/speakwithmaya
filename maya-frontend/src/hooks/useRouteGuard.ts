@@ -16,10 +16,10 @@ const ONBOARDING_STEP_CHAIN: {
 }[] = [
   // Step 1: Name — always accessible (first step after welcome)
   { route: 'onboarding/name',         canAccess: () => true },
-  // Step 2: Phone — requires name
-  { route: 'onboarding/phone',        canAccess: (s) => !!s.name },
-  // Step 3: OTP — requires name + phone
-  { route: 'onboarding/otp',          canAccess: (s) => !!s.name && !!s.phone },
+  // Step 2: Phone — accessible for login as well as registration
+  { route: 'onboarding/phone',        canAccess: () => true },
+  // Step 3: OTP — requires phone
+  { route: 'onboarding/otp',          canAccess: (s) => !!s.phone },
   // Step 4+: Post-auth steps — require authentication
   { route: 'onboarding/goal',         canAccess: (s) => s.isAuthenticated },
   { route: 'onboarding/challenge',    canAccess: (s) => s.isAuthenticated && !!s.goal },
