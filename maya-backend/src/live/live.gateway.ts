@@ -1364,6 +1364,13 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const rawExplanation = String(args.explanation || '').replace(/"/g, "'");
           let instruction: string;
 
+          // Forward to client so UI displays the animated grammar feedback drawer / card
+          this.safeSendToClient(state, JSON.stringify({
+            type: 'tool_call',
+            name: fc.name,
+            args: fc.args,
+          }));
+
           if (isRoadmap) {
             instruction = isSinhala
               ? `Correction card displayed to student. In friendly spoken Sinhala: explain why it was wrong, model the correct English phrase "${shortKeyPhrase}", and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '${shortKeyPhrase}'"). STRICTLY DO NOT ask your next question yet. DO NOT advance to the next step. Wait for the student to repeat.`
@@ -1388,6 +1395,13 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const shortKeyPhrase = String(args.moreNatural || args.more_natural || '').split(/[.,;!?]/)[0].trim().replace(/"/g, "'");
           const rawExplanation = String(args.explanation || '').replace(/"/g, "'");
           let instruction: string;
+
+          // Forward to client so UI displays the animated rephrase feedback drawer / card
+          this.safeSendToClient(state, JSON.stringify({
+            type: 'tool_call',
+            name: fc.name,
+            args: fc.args,
+          }));
 
           if (isRoadmap) {
             instruction = isSinhala
