@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   challenge TEXT,
   plan_tier TEXT CHECK (plan_tier IN ('starter', 'basic', 'pro', 'premium')) DEFAULT 'starter',
   plan_status TEXT CHECK (plan_status IN ('active', 'trialing', 'past_due', 'canceled')) DEFAULT 'active',
-  billing_cycle TEXT CHECK (billing_cycle IN ('monthly', 'quarterly', 'yearly')) DEFAULT 'monthly',
+  billing_cycle TEXT CHECK (billing_cycle IN ('daily', 'monthly', 'quarterly', 'yearly')) DEFAULT 'monthly',
   monthly_minutes_allowance INTEGER DEFAULT 10,
   add_on_minutes_balance INTEGER DEFAULT 0,
   minutes_reset_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '1 month'),

@@ -34,7 +34,7 @@ export interface UserProfileData {
   challenge: string | null;
   plan_tier: 'starter' | 'basic' | 'pro' | 'premium';
   plan_status: 'active' | 'trialing' | 'past_due' | 'canceled';
-  billing_cycle: 'monthly' | 'quarterly' | 'yearly';
+  billing_cycle: 'daily' | 'monthly' | 'quarterly' | 'yearly';
   monthly_minutes_allowance: number;
   add_on_minutes_balance: number;
   minutes_balance: number;
@@ -556,11 +556,26 @@ export class AuthService {
       updated_at: new Date().toISOString(),
     };
 
-    const { data: created, error: insertErr } = await this.supabase
+    let { data: created, error: insertErr } = await this.supabase
       .from('profiles')
       .insert(newProfile)
       .select()
       .single();
+
+    // Fallback: If DB check constraint doesn't allow 'daily' yet, fall back to 'monthly'
+    if (insertErr && (insertErr.message?.includes('profiles_billing_cycle_check') || insertErr.code === '23514')) {
+      this.logger.warn(
+        "DB constraint 'profiles_billing_cycle_check' does not allow 'daily' yet. Falling back to 'monthly'. Run migration 012 in Supabase.",
+      );
+      const fallbackProfile = { ...newProfile, billing_cycle: 'monthly' as const };
+      const fallbackResult = await this.supabase
+        .from('profiles')
+        .insert(fallbackProfile)
+        .select()
+        .single();
+      created = fallbackResult.data;
+      insertErr = fallbackResult.error;
+    }
 
     if (insertErr || !created) {
       // If error is unique constraint violation (another concurrent process already claimed this phone), fetch that profile
