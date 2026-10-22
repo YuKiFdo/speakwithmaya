@@ -30,7 +30,7 @@ export class IdeamartSmsProvider implements ISmsGatewayProvider {
     const formattedTel = this.formatRecipient(phoneNumber);
     let message = customMessage
       ? customMessage.replace(/\{CODE\}/gi, code).replace(/\{OTP\}/gi, code)
-      : `Maya AI: Your OTP is ${code}. Valid for 5 min. Sub fee LKR 5+tax/day. Helpline 0771234567`;
+      : `Maya AI: Your OTP is ${code}. Valid for 5 min. Do not share this code.`;
 
     if (!message.includes(code)) {
       message = `${message} (Code: ${code})`;

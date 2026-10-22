@@ -18,23 +18,49 @@ import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 
 export interface AppConfigState {
-  smsGateway: 'smsapi' | 'ideamart';
+  smsGateway: 'smsapi' | 'ideamart' | 'mspace';
   pricingNotice: string;
   termsDisclaimer: string;
   smsTemplate: string;
   ideamartPricingNotice: string;
   ideamartTermsDisclaimer: string;
   ideamartSmsTemplate: string;
+  ideamartEnabled: boolean;
+  ideamartAppId: string;
+  ideamartPassword: string;
+  ideamartAppCode: string;
+  ideamartAppHash: string;
+  ideamartBaseUrl: string;
+  mspaceEnabled: boolean;
+  mspaceAppId: string;
+  mspacePassword: string;
+  mspaceAppCode: string;
+  mspaceAppHash: string;
+  mspaceBaseUrl: string;
+  telcoUnsubButtonEnabled: boolean;
 }
 
 const DEFAULT_CONFIG: AppConfigState = {
   smsGateway: 'smsapi',
-  pricingNotice: 'Get started for just LKR 12 + tax /day.\nCancel anytime.',
-  termsDisclaimer: 'By starting the Starter Plan, you agree to our Terms & Conditions.\nA subscription fee of LKR 12 + applicable taxes per day applies to prepaid users, or LKR 360 + applicable taxes per month for postpaid users. You can cancel anytime.',
+  pricingNotice: '',
+  termsDisclaimer: '',
   smsTemplate: 'Your Maya AI English Coach verification code is: {CODE}. Valid for 5 minutes. Do not share this code.',
   ideamartPricingNotice: 'Dialog / Mobitel / Hutch: LKR 5 + tax /day. Airtime billing.',
-  ideamartTermsDisclaimer: 'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog/Mobitel/Hutch mobile balance. Send STOP MAYA to 77000 to unsubscribe anytime.',
-  ideamartSmsTemplate: 'Maya AI: Your OTP is {CODE}. Valid for 5 min. Sub fee LKR 5+tax/day. Helpline 0771234567',
+  ideamartTermsDisclaimer: 'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog, Mobitel, or Hutch mobile balance.',
+  ideamartSmsTemplate: 'Maya AI: Your OTP is {CODE}. Valid for 5 min. Do not share this code.',
+  ideamartEnabled: true,
+  ideamartAppId: 'APP_000001',
+  ideamartPassword: '',
+  ideamartAppCode: 'https://speakwithmaya.com',
+  ideamartAppHash: '',
+  ideamartBaseUrl: 'https://api.dialog.lk',
+  mspaceEnabled: true,
+  mspaceAppId: 'MSPACE_000001',
+  mspacePassword: '',
+  mspaceAppCode: 'https://speakwithmaya.com',
+  mspaceAppHash: '',
+  mspaceBaseUrl: 'https://api.mspace.lk',
+  telcoUnsubButtonEnabled: true,
 };
 
 export default function AdminSettingsScreen() {
@@ -46,7 +72,7 @@ export default function AdminSettingsScreen() {
   const [errorMsg, setErrorMsg] = useState('');
 
   // Form Fields
-  const [smsGateway, setSmsGateway] = useState<'smsapi' | 'ideamart'>('smsapi');
+  const [smsGateway, setSmsGateway] = useState<'smsapi' | 'ideamart' | 'mspace'>('smsapi');
   const [pricingNotice, setPricingNotice] = useState(DEFAULT_CONFIG.pricingNotice);
   const [termsDisclaimer, setTermsDisclaimer] = useState(DEFAULT_CONFIG.termsDisclaimer);
   const [smsTemplate, setSmsTemplate] = useState(DEFAULT_CONFIG.smsTemplate);
@@ -54,20 +80,106 @@ export default function AdminSettingsScreen() {
   const [ideamartTermsDisclaimer, setIdeamartTermsDisclaimer] = useState(DEFAULT_CONFIG.ideamartTermsDisclaimer);
   const [ideamartSmsTemplate, setIdeamartSmsTemplate] = useState(DEFAULT_CONFIG.ideamartSmsTemplate);
 
-  const fetchConfig = async () => {
+  // Ideamart Credential & Toggle State
+  const [ideamartEnabled, setIdeamartEnabled] = useState(true);
+  const [ideamartAppId, setIdeamartAppId] = useState('');
+  const [ideamartPassword, setIdeamartPassword] = useState('');
+  const [ideamartAppCode, setIdeamartAppCode] = useState('');
+  const [ideamartAppHash, setIdeamartAppHash] = useState('');
+  const [ideamartBaseUrl, setIdeamartBaseUrl] = useState('');
+
+  // mSpace Credential & Toggle State
+  const [mspaceEnabled, setMspaceEnabled] = useState(true);
+  const [mspaceAppId, setMspaceAppId] = useState('');
+  const [mspacePassword, setMspacePassword] = useState('');
+  const [mspaceAppCode, setMspaceAppCode] = useState('');
+  const [mspaceAppHash, setMspaceAppHash] = useState('');
+  const [mspaceBaseUrl, setMspaceBaseUrl] = useState('');
+  const [telcoUnsubButtonEnabled, setTelcoUnsubButtonEnabled] = useState(true);
+
+  const getEffectiveTelcoPricingNotice = (ideaOn: boolean, mspaceOn: boolean, customVal?: string) => {
+    if (customVal !== undefined && customVal !== '') return customVal;
+    if (ideaOn && mspaceOn) return 'Dialog / Mobitel / Hutch: LKR 5 + tax /day. Airtime billing.';
+    if (ideaOn) return 'Dialog / Hutch: LKR 5 + tax /day. Airtime billing.';
+    if (mspaceOn) return 'Mobitel: LKR 5 + tax /day. Airtime billing.';
+    return 'Telco carrier billing is currently disabled.';
+  };
+
+  const getEffectiveTelcoDisclaimer = (ideaOn: boolean, mspaceOn: boolean, customVal?: string) => {
+    if (customVal !== undefined && customVal !== '') return customVal;
+    if (ideaOn && mspaceOn) return 'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog, Mobitel, or Hutch mobile balance.';
+    if (ideaOn) return 'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog or Hutch mobile balance.';
+    if (mspaceOn) return 'By subscribing, LKR 5 + taxes per day will be deducted from your Mobitel mobile balance.';
+    return '';
+  };
+
+  const handleToggleIdeamart = () => {
+    const nextIdea = !ideamartEnabled;
+    setIdeamartEnabled(nextIdea);
+    setIdeamartPricingNotice((prev) => getEffectiveTelcoPricingNotice(nextIdea, mspaceEnabled));
+    setIdeamartTermsDisclaimer((prev) => getEffectiveTelcoDisclaimer(nextIdea, mspaceEnabled));
+  };
+
+  const handleToggleMspace = () => {
+    const nextMspace = !mspaceEnabled;
+    setMspaceEnabled(nextMspace);
+    setIdeamartPricingNotice((prev) => getEffectiveTelcoPricingNotice(ideamartEnabled, nextMspace));
+    setIdeamartTermsDisclaimer((prev) => getEffectiveTelcoDisclaimer(ideamartEnabled, nextMspace));
+  };
+
+  const fetchConfig = async (isManualReload = false) => {
     try {
       setIsLoading(true);
       setErrorMsg('');
-      const res = await fetch(`${getBackendBaseUrl()}/v1/app-config`);
+      let res = await fetch(`${getBackendBaseUrl()}/v1/admin/app-config`);
+      if (!res.ok) {
+        res = await fetch(`${getBackendBaseUrl()}/v1/app-config`);
+      }
       if (res.ok) {
         const data: AppConfigState = await res.json();
         setSmsGateway(data.smsGateway || 'smsapi');
-        setPricingNotice(data.pricingNotice || DEFAULT_CONFIG.pricingNotice);
-        setTermsDisclaimer(data.termsDisclaimer || DEFAULT_CONFIG.termsDisclaimer);
+
+        // Only override if not already customized or if it contains the legacy default with daily fees
+        const isLegacyNormalPricing = data.pricingNotice && data.pricingNotice.includes('LKR 12');
+        const isLegacyNormalDisclaimer = data.termsDisclaimer && data.termsDisclaimer.includes('LKR 12');
+
+        setPricingNotice(isLegacyNormalPricing ? '' : (data.pricingNotice ?? ''));
+        setTermsDisclaimer(isLegacyNormalDisclaimer ? '' : (data.termsDisclaimer ?? ''));
         setSmsTemplate(data.smsTemplate || DEFAULT_CONFIG.smsTemplate);
-        setIdeamartPricingNotice(data.ideamartPricingNotice || DEFAULT_CONFIG.ideamartPricingNotice);
-        setIdeamartTermsDisclaimer(data.ideamartTermsDisclaimer || DEFAULT_CONFIG.ideamartTermsDisclaimer);
-        setIdeamartSmsTemplate(data.ideamartSmsTemplate || DEFAULT_CONFIG.ideamartSmsTemplate);
+
+        const ideaOn = data.ideamartEnabled ?? true;
+        const mspaceOn = data.mspaceEnabled ?? true;
+        setIdeamartEnabled(ideaOn);
+        setMspaceEnabled(mspaceOn);
+
+        // Check if legacy telco text has STOP MAYA or helpline/sub fee
+        const isLegacyTelcoDisclaimer = data.ideamartTermsDisclaimer && data.ideamartTermsDisclaimer.includes('STOP MAYA');
+        const isLegacyTelcoSms = data.ideamartSmsTemplate && (data.ideamartSmsTemplate.includes('Sub fee') || data.ideamartSmsTemplate.includes('Helpline'));
+
+        setIdeamartPricingNotice(data.ideamartPricingNotice || getEffectiveTelcoPricingNotice(ideaOn, mspaceOn));
+        setIdeamartTermsDisclaimer(
+          isLegacyTelcoDisclaimer
+            ? getEffectiveTelcoDisclaimer(ideaOn, mspaceOn)
+            : (data.ideamartTermsDisclaimer || getEffectiveTelcoDisclaimer(ideaOn, mspaceOn))
+        );
+        setIdeamartSmsTemplate(
+          isLegacyTelcoSms
+            ? DEFAULT_CONFIG.ideamartSmsTemplate
+            : (data.ideamartSmsTemplate || DEFAULT_CONFIG.ideamartSmsTemplate)
+        );
+
+        setIdeamartAppId(data.ideamartAppId || '');
+        setIdeamartPassword(data.ideamartPassword || '');
+        setIdeamartAppCode(data.ideamartAppCode || '');
+        setIdeamartAppHash(data.ideamartAppHash || '');
+        setIdeamartBaseUrl(data.ideamartBaseUrl || '');
+
+        setMspaceAppId(data.mspaceAppId || '');
+        setMspacePassword(data.mspacePassword || '');
+        setMspaceAppCode(data.mspaceAppCode || '');
+        setMspaceAppHash(data.mspaceAppHash || '');
+        setMspaceBaseUrl(data.mspaceBaseUrl || '');
+        setTelcoUnsubButtonEnabled(data.telcoUnsubButtonEnabled ?? true);
       }
     } catch (err: any) {
       setErrorMsg(`Failed to load app config: ${err?.message}`);
@@ -94,6 +206,19 @@ export default function AdminSettingsScreen() {
         ideamartPricingNotice,
         ideamartTermsDisclaimer,
         ideamartSmsTemplate,
+        ideamartEnabled,
+        ideamartAppId,
+        ideamartPassword,
+        ideamartAppCode,
+        ideamartAppHash,
+        ideamartBaseUrl,
+        mspaceEnabled,
+        mspaceAppId,
+        mspacePassword,
+        mspaceAppCode,
+        mspaceAppHash,
+        mspaceBaseUrl,
+        telcoUnsubButtonEnabled,
       };
 
       const res = await fetch(`${getBackendBaseUrl()}/v1/admin/app-config`, {
@@ -132,13 +257,13 @@ export default function AdminSettingsScreen() {
         <View style={styles.contentArea}>
           <AdminTopBar
             title="SMS & Gateway Configuration"
-            subtitle="Switch between SMSAPI (Direct OTP) and Ideamart (Telco Billing). Customize pricing notices, terms disclaimers, and SMS message templates."
-            badgeText={`Gateway: ${smsGateway === 'ideamart' ? 'Ideamart (Telco)' : 'SMSAPI.LK'}`}
+            subtitle="Switch between Normal SMS (Direct OTP) and Telco SMS (Carrier Billing). Configure IdeaMart and mSpace credentials and copy."
+            badgeText={`Gateway: ${smsGateway === 'smsapi' ? 'Normal SMS (SMSAPI.LK)' : 'Telco SMS (Carrier Billing)'}`}
             sidebarOpen={sidebarOpen}
             onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
             rightElement={
               <Pressable
-                onPress={fetchConfig}
+                onPress={() => fetchConfig(true)}
                 style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.8 }]}
               >
                 <Feather name="refresh-cw" size={14} color="#0d9488" />
@@ -201,44 +326,44 @@ export default function AdminSettingsScreen() {
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.gatewayName}>Normal SMS (SMSAPI.LK)</Text>
-                        <Text style={styles.gatewaySub}>Standard Verification OTP</Text>
+                        <Text style={styles.gatewaySub}>Standard OTP Verification</Text>
                       </View>
                       <View style={styles.badgeStandard}>
-                        <Text style={styles.badgeStandardText}>Normal Gateway</Text>
+                        <Text style={styles.badgeStandardText}>Standard OTP</Text>
                       </View>
                     </View>
                     <Text style={styles.gatewayExplain}>
-                      Sends instant 6-digit OTP code through SMSAPI.LK (TRCSL approved route). Ideal for standard onboarding and card/online billing.
+                      Sends instant 6-digit OTP codes through SMSAPI.LK (TRCSL approved route). Ideal for standard onboarding and card/online billing.
                     </Text>
                   </Pressable>
 
-                  {/* Option 2: Ideamart Telco Gateway */}
+                  {/* Option 2: Telco SMS (Carrier Billing) */}
                   <Pressable
                     onPress={() => setSmsGateway('ideamart')}
                     style={[
                       styles.gatewayCard,
-                      smsGateway === 'ideamart' && styles.gatewayCardActive,
+                      smsGateway !== 'smsapi' && styles.gatewayCardActive,
                     ]}
                   >
                     <View style={styles.gatewayRadioRow}>
                       <View
                         style={[
                           styles.radioCircle,
-                          smsGateway === 'ideamart' && styles.radioCircleActive,
+                          smsGateway !== 'smsapi' && styles.radioCircleActive,
                         ]}
                       >
-                        {smsGateway === 'ideamart' && <View style={styles.radioDot} />}
+                        {smsGateway !== 'smsapi' && <View style={styles.radioDot} />}
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.gatewayName}>Ideamart (Dialog / Axiata)</Text>
-                        <Text style={styles.gatewaySub}>Telco Direct Carrier Billing</Text>
+                        <Text style={styles.gatewayName}>Telco SMS (Direct Carrier Billing)</Text>
+                        <Text style={styles.gatewaySub}>Airtime Billing via IdeaMart & mSpace</Text>
                       </View>
                       <View style={styles.badgeIdeamart}>
                         <Text style={styles.badgeIdeamartText}>Telco Billing</Text>
                       </View>
                     </View>
                     <Text style={styles.gatewayExplain}>
-                      Dispatches subscriber verification via Ideamart API. Displays carrier airtime subscription terms and daily micro-billing notices.
+                      Enables carrier billing via Dialog (IdeaMart) and Mobitel (mSpace) SDP gateways. Daily micro-charges deducted directly from subscriber airtime.
                     </Text>
                   </Pressable>
                 </View>
@@ -256,9 +381,9 @@ export default function AdminSettingsScreen() {
 
                     {/* Field 1: Pricing Notice Under Number Header */}
                     <View style={styles.fieldItem}>
-                      <Text style={styles.fieldLabel}>Subtitle Pricing Notice (Below "Enter your mobile number"):</Text>
+                      <Text style={styles.fieldLabel}>Subtitle Notice (Optional - Below "Enter your mobile number"):</Text>
                       <Text style={styles.fieldHelp}>
-                        Displayed on the mobile number screen directly under the title.
+                        Optional notice on the mobile screen. Leave blank if standard registration (no airtime cost).
                       </Text>
                       <TextInput
                         style={styles.fieldInputMulti}
@@ -266,7 +391,7 @@ export default function AdminSettingsScreen() {
                         numberOfLines={2}
                         value={pricingNotice}
                         onChangeText={setPricingNotice}
-                        placeholder="Get started for just LKR 12 + tax /day.&#10;Cancel anytime."
+                        placeholder="Leave empty or customize notice"
                       />
                     </View>
 
@@ -274,15 +399,15 @@ export default function AdminSettingsScreen() {
                     <View style={styles.fieldItem}>
                       <Text style={styles.fieldLabel}>Terms & Disclaimer Text (Below "Send Verification Code"):</Text>
                       <Text style={styles.fieldHelp}>
-                        Full terms and subscription disclosures shown at the bottom of the registration card.
+                        Terms and privacy disclaimer shown at the bottom of the registration card.
                       </Text>
                       <TextInput
                         style={styles.fieldInputMultiTall}
                         multiline
-                        numberOfLines={4}
+                        numberOfLines={3}
                         value={termsDisclaimer}
                         onChangeText={setTermsDisclaimer}
-                        placeholder="By starting the Starter Plan, you agree to our Terms & Conditions..."
+                        placeholder="By continuing, you agree to our Terms of Service & Privacy Policy."
                       />
                     </View>
 
@@ -304,16 +429,187 @@ export default function AdminSettingsScreen() {
                   </View>
                 ) : (
                   <View style={styles.configFieldsGroup}>
+                    {/* Section Header */}
                     <View style={styles.groupHeaderRow}>
-                      <Feather name="smartphone" size={17} color="#2563eb" />
-                      <Text style={[styles.groupHeaderTitle, { color: '#1e40af' }]}>Ideamart Telco Gateway Copy & Templates</Text>
+                      <Feather name="smartphone" size={18} color="#2563eb" />
+                      <Text style={[styles.groupHeaderTitle, { color: '#1e40af' }]}>Telco Gateways & Credentials</Text>
+                    </View>
+                    <Text style={styles.sectionDesc}>
+                      Turn individual mobile network gateways on/off. When enabled, enter your credentials from the provider developer portal.
+                    </Text>
+
+                    {/* Provider 1: IdeaMart (Dialog & Hutch) */}
+                    <View style={[styles.providerBox, ideamartEnabled && styles.providerBoxActive]}>
+                      <View style={styles.providerHeaderRow}>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={styles.providerTitle}>IdeaMart (Dialog & Hutch)</Text>
+                            <View style={[styles.statusPill, ideamartEnabled ? styles.statusPillOn : styles.statusPillOff]}>
+                              <Text style={[styles.statusPillText, ideamartEnabled ? styles.statusPillTextOn : styles.statusPillTextOff]}>
+                                {ideamartEnabled ? 'ENABLED' : 'DISABLED'}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.providerSub}>
+                            Covers Dialog (077, 076, 074) and Hutch (078, 072) mobile subscribers.
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={handleToggleIdeamart}
+                          style={[styles.switchTrack, ideamartEnabled && styles.switchTrackActive]}
+                        >
+                          <View style={[styles.switchThumb, ideamartEnabled && styles.switchThumbActive]} />
+                        </Pressable>
+                      </View>
+
+                      {ideamartEnabled && (
+                        <View style={styles.credentialsForm}>
+                          <View style={styles.fieldItem}>
+                            <Text style={styles.fieldLabel}>IdeaMart Application ID:</Text>
+                            <TextInput
+                              style={styles.fieldInputMulti}
+                              value={ideamartAppId}
+                              onChangeText={setIdeamartAppId}
+                              placeholder="APP_000001"
+                            />
+                          </View>
+
+                          <View style={styles.fieldItem}>
+                            <Text style={styles.fieldLabel}>IdeaMart Password / Secret:</Text>
+                            <TextInput
+                              style={styles.fieldInputMulti}
+                              secureTextEntry
+                              value={ideamartPassword}
+                              onChangeText={setIdeamartPassword}
+                              placeholder="Enter IdeaMart password"
+                            />
+                          </View>
+
+                          <View style={styles.fieldItem}>
+                            <Text style={styles.fieldLabel}>IdeaMart App Code / Shortcode:</Text>
+                            <TextInput
+                              style={styles.fieldInputMulti}
+                              value={ideamartAppCode}
+                              onChangeText={setIdeamartAppCode}
+                              placeholder="77000"
+                            />
+                          </View>
+
+                          <View style={styles.fieldItem}>
+                            <Text style={styles.fieldLabel}>IdeaMart Base URL:</Text>
+                            <TextInput
+                              style={styles.fieldInputMulti}
+                              value={ideamartBaseUrl}
+                              onChangeText={setIdeamartBaseUrl}
+                              placeholder="https://api.dialog.lk"
+                            />
+                          </View>
+                        </View>
+                      )}
                     </View>
 
-                    {/* Field 1: Ideamart Pricing Notice */}
+                    {/* Provider 2: mSpace (Mobitel) */}
+                    <View style={[styles.providerBox, mspaceEnabled && styles.providerBoxActive]}>
+                      <View style={styles.providerHeaderRow}>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={styles.providerTitle}>mSpace (Mobitel)</Text>
+                            <View style={[styles.statusPill, mspaceEnabled ? styles.statusPillOn : styles.statusPillOff]}>
+                              <Text style={[styles.statusPillText, mspaceEnabled ? styles.statusPillTextOn : styles.statusPillTextOff]}>
+                                {mspaceEnabled ? 'ENABLED' : 'DISABLED'}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.providerSub}>
+                            Covers Mobitel (070, 071) mobile subscribers.
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={handleToggleMspace}
+                          style={[styles.switchTrack, mspaceEnabled && styles.switchTrackActive]}
+                        >
+                          <View style={[styles.switchThumb, mspaceEnabled && styles.switchThumbActive]} />
+                        </Pressable>
+                      </View>
+
+                      {mspaceEnabled && (
+                        <View style={styles.credentialsForm}>
+                          <View style={styles.fieldItem}>
+                            <Text style={styles.fieldLabel}>mSpace Application ID:</Text>
+                            <TextInput
+                              style={styles.fieldInputMulti}
+                              value={mspaceAppId}
+                              onChangeText={setMspaceAppId}
+                              placeholder="MSPACE_000001"
+                            />
+                          </View>
+
+                          <View style={styles.fieldItem}>
+                            <Text style={styles.fieldLabel}>mSpace Password / Secret:</Text>
+                            <TextInput
+                              style={styles.fieldInputMulti}
+                              secureTextEntry
+                              value={mspacePassword}
+                              onChangeText={setMspacePassword}
+                              placeholder="Enter mSpace password"
+                            />
+                          </View>
+
+                          <View style={styles.fieldItem}>
+                            <Text style={styles.fieldLabel}>mSpace App Code / Shortcode:</Text>
+                            <TextInput
+                              style={styles.fieldInputMulti}
+                              value={mspaceAppCode}
+                              onChangeText={setMspaceAppCode}
+                              placeholder="1234"
+                            />
+                          </View>
+
+                          <View style={styles.fieldItem}>
+                            <Text style={styles.fieldLabel}>mSpace Base URL:</Text>
+                            <TextInput
+                              style={styles.fieldInputMulti}
+                              value={mspaceBaseUrl}
+                              onChangeText={setMspaceBaseUrl}
+                              placeholder="https://api.mspace.lk"
+                            />
+                          </View>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Option 3: Telco In-App Unsubscribe Button Toggle */}
+                    <View style={styles.providerBox}>
+                      <View style={styles.providerHeaderRow}>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={styles.providerTitle}>In-App Unsubscribe Option</Text>
+                            <View style={[styles.statusPill, telcoUnsubButtonEnabled ? styles.statusPillOn : styles.statusPillOff]}>
+                              <Text style={[styles.statusPillText, telcoUnsubButtonEnabled ? styles.statusPillTextOn : styles.statusPillTextOff]}>
+                                {telcoUnsubButtonEnabled ? 'VISIBLE' : 'HIDDEN'}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.providerSub}>
+                            Allows subscribed users to unsubscribe from their mobile airtime plan directly inside the app.
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={() => setTelcoUnsubButtonEnabled(!telcoUnsubButtonEnabled)}
+                          style={[styles.switchTrack, telcoUnsubButtonEnabled && styles.switchTrackActive]}
+                        >
+                          <View style={[styles.switchThumb, telcoUnsubButtonEnabled && styles.switchThumbActive]} />
+                        </Pressable>
+                      </View>
+                    </View>
+
+                    <View style={styles.divider} />
+
+                    {/* Telco Pricing Notice */}
                     <View style={styles.fieldItem}>
-                      <Text style={styles.fieldLabel}>Ideamart Pricing Notice (Below "Enter your mobile number"):</Text>
+                      <Text style={styles.fieldLabel}>Telco Pricing Notice (Below Mobile Number):</Text>
                       <Text style={styles.fieldHelp}>
-                        Pricing terms shown when Ideamart Telco Gateway is selected.
+                        Displayed on the mobile number screen when Telco Carrier Billing is active.
                       </Text>
                       <TextInput
                         style={styles.fieldInputMulti}
@@ -325,27 +621,27 @@ export default function AdminSettingsScreen() {
                       />
                     </View>
 
-                    {/* Field 2: Ideamart Terms & Disclaimer */}
+                    {/* Telco Terms & Disclaimer */}
                     <View style={styles.fieldItem}>
-                      <Text style={styles.fieldLabel}>Ideamart Terms & Telco Disclaimer (Below Button):</Text>
+                      <Text style={styles.fieldLabel}>Telco Terms & Disclaimer (Below Button):</Text>
                       <Text style={styles.fieldHelp}>
-                        Telco-mandated terms disclosure regarding airtime deductions and SMS unsubscribe shortcodes.
+                        Carrier terms disclosure regarding airtime deductions for the Starter Plan.
                       </Text>
                       <TextInput
                         style={styles.fieldInputMultiTall}
                         multiline
-                        numberOfLines={4}
+                        numberOfLines={3}
                         value={ideamartTermsDisclaimer}
                         onChangeText={setIdeamartTermsDisclaimer}
-                        placeholder="By subscribing, LKR 5 + taxes per day will be deducted from your mobile balance..."
+                        placeholder="By subscribing, LKR 5 + taxes per day will be deducted from your Dialog, Mobitel, or Hutch mobile balance."
                       />
                     </View>
 
-                    {/* Field 3: Ideamart SMS Message Template */}
+                    {/* Telco SMS Message Template */}
                     <View style={styles.fieldItem}>
-                      <Text style={styles.fieldLabel}>Ideamart SMS Message Body Template:</Text>
+                      <Text style={styles.fieldLabel}>Telco SMS Message Body Template:</Text>
                       <Text style={styles.fieldHelp}>
-                        SMS content sent through Ideamart. Must contain <Text style={{ ...fontStyle('inter', 'bold'), color: '#2563eb' }}>{'{CODE}'}</Text> placeholder.
+                        SMS content dispatched via Telco gateways. Must contain the <Text style={{ ...fontStyle('inter', 'bold'), color: '#2563eb' }}>{'{CODE}'}</Text> placeholder.
                       </Text>
                       <TextInput
                         style={styles.fieldInputMulti}
@@ -353,7 +649,7 @@ export default function AdminSettingsScreen() {
                         numberOfLines={2}
                         value={ideamartSmsTemplate}
                         onChangeText={setIdeamartSmsTemplate}
-                        placeholder="Maya AI: Your OTP is {CODE}. Valid for 5 min. Sub fee LKR 5+tax/day. Helpline 0771234567"
+                        placeholder="Maya AI: Your OTP is {CODE}. Valid for 5 min. Do not share this code."
                       />
                     </View>
                   </View>
@@ -658,5 +954,94 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'medium'),
     fontSize: 14,
     color: '#FFFFFF',
+  },
+  providerBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    padding: 16,
+    gap: 16,
+  },
+  providerBoxActive: {
+    borderColor: '#93C5FD',
+    backgroundColor: '#F8FAFC',
+  },
+  providerHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  providerTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 16,
+    color: '#0F172A',
+  },
+  providerSub: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 3,
+  },
+  statusPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  statusPillOn: {
+    backgroundColor: '#DCFCE7',
+  },
+  statusPillOff: {
+    backgroundColor: '#F1F5F9',
+  },
+  statusPillText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 10,
+    letterSpacing: 0.5,
+  },
+  statusPillTextOn: {
+    color: '#16A34A',
+  },
+  statusPillTextOff: {
+    color: '#94A3B8',
+  },
+  switchTrack: {
+    width: 48,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#CBD5E1',
+    padding: 2,
+    justifyContent: 'center',
+  },
+  switchTrackActive: {
+    backgroundColor: '#0d9488',
+  },
+  switchThumb: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#FFFFFF',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+      } as any,
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+        elevation: 2,
+      },
+    }),
+  },
+  switchThumbActive: {
+    alignSelf: 'flex-end',
+  },
+  credentialsForm: {
+    gap: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
   },
 });

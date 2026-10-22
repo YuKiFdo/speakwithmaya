@@ -123,9 +123,18 @@ export class AuthController {
 
   /**
    * Public: Retrieve current app configuration (SMS gateway, pricing notices, disclaimer text)
+   * Note: Zero secrets / credentials exposed to public client.
    */
   @Get('app-config')
   async getAppConfig() {
+    return this.authService.getPublicAppConfig();
+  }
+
+  /**
+   * Admin: Retrieve full configuration including credentials
+   */
+  @Get('admin/app-config')
+  async getAdminAppConfig() {
     return this.authService.getAppConfig();
   }
 

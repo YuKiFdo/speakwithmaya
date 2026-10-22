@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsIn,
   IsNumber,
+  IsBoolean,
   Min,
   Max,
   ValidateNested,
@@ -218,8 +219,8 @@ export class AdminUpdateUserDto {
 export class UpdateAppConfigDto {
   @IsOptional()
   @IsString()
-  @IsIn(['smsapi', 'ideamart'])
-  smsGateway?: 'smsapi' | 'ideamart';
+  @IsIn(['smsapi', 'ideamart', 'mspace'])
+  smsGateway?: 'smsapi' | 'ideamart' | 'mspace';
 
   @IsOptional()
   @IsString()
@@ -244,5 +245,58 @@ export class UpdateAppConfigDto {
   @IsOptional()
   @IsString()
   ideamartSmsTemplate?: string;
+
+  // Telco Carrier Billing (IdeaMart & mSpace) Toggles & Credentials
+  @IsOptional()
+  @IsBoolean()
+  ideamartEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  ideamartAppId?: string;
+
+  @IsOptional()
+  @IsString()
+  ideamartPassword?: string;
+
+  @IsOptional()
+  @IsString()
+  ideamartAppCode?: string;
+
+  @IsOptional()
+  @IsString()
+  ideamartAppHash?: string;
+
+  @IsOptional()
+  @IsString()
+  ideamartBaseUrl?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  mspaceEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  mspaceAppId?: string;
+
+  @IsOptional()
+  @IsString()
+  mspacePassword?: string;
+
+  @IsOptional()
+  @IsString()
+  mspaceAppCode?: string;
+
+  @IsOptional()
+  @IsString()
+  mspaceAppHash?: string;
+
+  @IsOptional()
+  @IsString()
+  mspaceBaseUrl?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  telcoUnsubButtonEnabled?: boolean;
 }
 

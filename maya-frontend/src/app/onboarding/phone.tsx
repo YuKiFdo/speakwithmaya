@@ -43,31 +43,44 @@ export default function PhoneScreen() {
   const { isDesktop, isTablet } = useBreakpoint();
 
   // Dynamic CMS Text & SMS Gateway Settings
-  const [activeGateway, setActiveGateway] = useState<'smsapi' | 'ideamart'>('smsapi');
+  const [activeGateway, setActiveGateway] = useState<'smsapi' | 'ideamart' | 'mspace' | 'telco'>('smsapi');
   const [pricingNoticeText, setPricingNoticeText] = useState('');
   const [disclaimerTextContent, setDisclaimerTextContent] = useState('');
+  const [ideamartEnabled, setIdeamartEnabled] = useState(true);
+  const [mspaceEnabled, setMspaceEnabled] = useState(true);
 
   useEffect(() => {
     fetch(`${getBackendBaseUrl()}/v1/app-config`)
       .then((res) => res.json())
       .then((config) => {
         const gateway = config?.smsGateway || 'smsapi';
-        setActiveGateway(gateway);
+        const ideaOn = config?.ideamartEnabled ?? true;
+        const mspaceOn = config?.mspaceEnabled ?? true;
 
-        // Only show pricing notice and telco terms for Ideamart gateway
-        if (gateway === 'ideamart') {
-          setPricingNoticeText(
-            config.ideamartPricingNotice ||
-            'Dialog / Mobitel / Hutch: LKR 5 + tax /day. Airtime billing.'
-          );
-          setDisclaimerTextContent(
-            config.ideamartTermsDisclaimer ||
-            'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog/Mobitel/Hutch mobile balance. Send STOP MAYA to 77000 to unsubscribe anytime.'
-          );
+        setActiveGateway(gateway);
+        setIdeamartEnabled(ideaOn);
+        setMspaceEnabled(mspaceOn);
+
+        if (gateway === 'ideamart' || gateway === 'mspace' || gateway === 'telco') {
+          let defaultPricing = 'Dialog / Mobitel / Hutch: LKR 5 + tax /day. Airtime billing.';
+          let defaultDisclaimer =
+            'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog, Mobitel, or Hutch mobile balance.';
+
+          if (ideaOn && !mspaceOn) {
+            defaultPricing = 'Dialog / Hutch: LKR 5 + tax /day. Airtime billing.';
+            defaultDisclaimer =
+              'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog or Hutch mobile balance.';
+          } else if (!ideaOn && mspaceOn) {
+            defaultPricing = 'Mobitel: LKR 5 + tax /day. Airtime billing.';
+            defaultDisclaimer =
+              'By subscribing, LKR 5 + taxes per day will be deducted from your Mobitel mobile balance.';
+          }
+
+          setPricingNoticeText(config.ideamartPricingNotice || defaultPricing);
+          setDisclaimerTextContent(config.ideamartTermsDisclaimer || defaultDisclaimer);
         } else {
-          // Normal SMS (SMSAPI.LK) does not charge airtime or show daily subscription pricing
-          setPricingNoticeText('');
-          setDisclaimerTextContent('');
+          setPricingNoticeText(config?.pricingNotice || '');
+          setDisclaimerTextContent(config?.termsDisclaimer || '');
         }
       })
       .catch(() => {});
@@ -266,6 +279,50 @@ export default function PhoneScreen() {
     setIsSpeaking(false);
 
     const cleanInput = phone.trim().replace(/\s+/g, '');
+    const digits = cleanInput.startsWith('+94')
+      ? cleanInput.slice(3)
+      : cleanInput.startsWith('94')
+      ? cleanInput.slice(2)
+      : cleanInput.startsWith('0')
+      ? cleanInput.slice(1)
+      : cleanInput;
+
+    // Operator Carrier validation for Telco Mobile Balance Billing
+    if (activeGateway === 'ideamart' || activeGateway === 'mspace' || activeGateway === 'telco') {
+      const prefix = digits.slice(0, 2);
+      const isMobitel = ['70', '71'].includes(prefix);
+      const isDialogOrHutch = ['77', '76', '74', '78', '72', '75'].includes(prefix);
+
+      if (isMobitel && !mspaceEnabled) {
+        setErrorText('Mobile balance billing is currently unavailable for Mobitel numbers. Please enter a Dialog or Hutch number.');
+        return;
+      }
+
+      if (isDialogOrHutch && !ideamartEnabled) {
+        setErrorText('Mobile balance billing is currently unavailable for Dialog and Hutch numbers. Please enter a Mobitel number.');
+        return;
+      }
+
+      if (!isMobitel && !isDialogOrHutch) {
+        if (ideamartEnabled && mspaceEnabled) {
+          setErrorText(
+            'Mobile balance billing is available for Dialog, Mobitel, and Hutch numbers. Please enter a valid mobile number.'
+          );
+        } else if (ideamartEnabled) {
+          setErrorText(
+            'Mobile balance billing is currently available for Dialog and Hutch numbers. Please enter a valid mobile number.'
+          );
+        } else if (mspaceEnabled) {
+          setErrorText(
+            'Mobile balance billing is currently available for Mobitel numbers. Please enter a valid mobile number.'
+          );
+        } else {
+          setErrorText('Mobile balance billing is currently unavailable. Please try again later.');
+        }
+        return;
+      }
+    }
+
     const formattedPhone = cleanInput.startsWith('+')
       ? cleanInput
       : cleanInput.startsWith('0')

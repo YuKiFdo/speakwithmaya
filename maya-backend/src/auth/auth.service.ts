@@ -22,6 +22,7 @@ import {
 } from './dto/auth.dto.js';
 import { SmsApiLkProvider } from './sms/smsapi-lk.provider.js';
 import { IdeamartSmsProvider } from './sms/ideamart-sms.provider.js';
+import { TelcoSubscriptionService } from './sms/telco-subscription.service.js';
 import type { UpdateAppConfigDto } from './dto/auth.dto.js';
 
 export interface UserProfileData {
@@ -53,23 +54,49 @@ export interface UserProfileData {
 const OTP_SECRET_SALT = process.env.OTP_SALT || 'maya_ai_secure_otp_salt_2026';
 
 export interface AppConfigData {
-  smsGateway: 'smsapi' | 'ideamart';
+  smsGateway: 'smsapi' | 'ideamart' | 'mspace';
   pricingNotice: string;
   termsDisclaimer: string;
   smsTemplate: string;
   ideamartPricingNotice: string;
   ideamartTermsDisclaimer: string;
   ideamartSmsTemplate: string;
+  ideamartEnabled: boolean;
+  ideamartAppId: string;
+  ideamartPassword: string;
+  ideamartAppCode: string;
+  ideamartAppHash: string;
+  ideamartBaseUrl: string;
+  mspaceEnabled: boolean;
+  mspaceAppId: string;
+  mspacePassword: string;
+  mspaceAppCode: string;
+  mspaceAppHash: string;
+  mspaceBaseUrl: string;
+  telcoUnsubButtonEnabled: boolean;
 }
 
 const DEFAULT_APP_CONFIG: AppConfigData = {
   smsGateway: 'smsapi',
-  pricingNotice: 'Get started for just LKR 12 + tax /day.\nCancel anytime.',
-  termsDisclaimer: 'By starting the Starter Plan, you agree to our Terms & Conditions.\nA subscription fee of LKR 12 + applicable taxes per day applies to prepaid users, or LKR 360 + applicable taxes per month for postpaid users. You can cancel anytime.',
+  pricingNotice: '',
+  termsDisclaimer: '',
   smsTemplate: 'Your Maya AI English Coach verification code is: {CODE}. Valid for 5 minutes. Do not share this code.',
   ideamartPricingNotice: 'Dialog / Mobitel / Hutch: LKR 5 + tax /day. Airtime billing.',
-  ideamartTermsDisclaimer: 'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog/Mobitel/Hutch mobile balance. Send STOP MAYA to 77000 to unsubscribe anytime.',
-  ideamartSmsTemplate: 'Maya AI: Your OTP is {CODE}. Valid for 5 min. Sub fee LKR 5+tax/day. Helpline 0771234567',
+  ideamartTermsDisclaimer: 'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog, Mobitel, or Hutch mobile balance.',
+  ideamartSmsTemplate: 'Maya AI: Your OTP is {CODE}. Valid for 5 min. Do not share this code.',
+  ideamartEnabled: true,
+  ideamartAppId: 'APP_000001',
+  ideamartPassword: '',
+  ideamartAppCode: '77000',
+  ideamartAppHash: '',
+  ideamartBaseUrl: 'https://api.dialog.lk',
+  mspaceEnabled: true,
+  mspaceAppId: 'MSPACE_000001',
+  mspacePassword: '',
+  mspaceAppCode: '1234',
+  mspaceAppHash: '',
+  mspaceBaseUrl: 'https://api.mspace.lk',
+  telcoUnsubButtonEnabled: true,
 };
 
 @Injectable()
@@ -81,6 +108,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly smsProvider: SmsApiLkProvider,
     private readonly ideamartProvider: IdeamartSmsProvider,
+    private readonly telcoService: TelcoSubscriptionService,
   ) {
     const supabaseUrl =
       this.configService.get<string>('SUPABASE_URL') ||
@@ -191,13 +219,24 @@ export class AuthService {
       throw new InternalServerErrorException('Failed to generate verification session in database.');
     }
 
-    // 4. Dispatch via Active Configured SMS Gateway Provider (smsapi or ideamart)
+    // 4. Dispatch via Active Configured SMS Gateway Provider (smsapi or telco carrier billing)
     const config = await this.getAppConfig();
-    const isIdeamart = config.smsGateway === 'ideamart';
-    const messageTemplate = isIdeamart ? config.ideamartSmsTemplate : config.smsTemplate;
+    const gateway = config.smsGateway;
+    const messageTemplate = gateway === 'smsapi' ? config.smsTemplate : config.ideamartSmsTemplate;
 
-    if (isIdeamart) {
-      await this.ideamartProvider.sendOtp(phone, code, messageTemplate);
+    if (gateway === 'ideamart' || gateway === 'mspace') {
+      const pinResult = await this.telcoService.requestPin(phone, config);
+      if (pinResult?.referenceNo) {
+        await this.supabase
+          .from('phone_verifications')
+          .update({
+            reference_no: pinResult.referenceNo,
+            telco_provider: pinResult.provider,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('phone_number', phone)
+          .eq('is_verified', false);
+      }
     } else {
       await this.smsProvider.sendOtp(phone, code, messageTemplate);
     }
@@ -258,28 +297,45 @@ export class AuthService {
       );
     }
 
-    // 4. Verify code hash match
-    const computedHash = this.hashOtp(code, phone);
-    if (computedHash !== record.otp_hash) {
-      const newAttempts = attempts + 1;
-      const remaining = maxAttempts - newAttempts;
+    // 4. Verify code via Telco Gateway or local hash
+    const config = await this.getAppConfig();
+    let rawSubscriberId: string | null = null;
+    let telcoProvider: 'ideamart' | 'mspace' | null = null;
 
-      // Update attempt count in database
-      await this.supabase
-        .from('phone_verifications')
-        .update({ attempts: newAttempts, updated_at: new Date().toISOString() })
-        .eq('id', record.id);
+    if (record.reference_no) {
+      telcoProvider = (record.telco_provider as any) || this.telcoService.detectProvider(phone);
+      const telcoVerify = await this.telcoService.verifyPin(
+        telcoProvider!,
+        code,
+        record.reference_no,
+        phone,
+        config,
+      );
+      rawSubscriberId = telcoVerify.subscriberId;
+    } else {
+      // Verify code hash match for SMSAPI
+      const computedHash = this.hashOtp(code, phone);
+      if (computedHash !== record.otp_hash) {
+        const newAttempts = attempts + 1;
+        const remaining = maxAttempts - newAttempts;
 
-      if (remaining <= 0) {
-        throw new HttpException(
-          'Too many failed attempts. Please request a new code.',
-          HttpStatus.TOO_MANY_REQUESTS,
+        // Update attempt count in database
+        await this.supabase
+          .from('phone_verifications')
+          .update({ attempts: newAttempts, updated_at: new Date().toISOString() })
+          .eq('id', record.id);
+
+        if (remaining <= 0) {
+          throw new HttpException(
+            'Too many failed attempts. Please request a new code.',
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+
+        throw new BadRequestException(
+          `Incorrect code. You have ${remaining} ${remaining === 1 ? 'attempt' : 'attempts'} remaining.`,
         );
       }
-
-      throw new BadRequestException(
-        `Incorrect code. You have ${remaining} ${remaining === 1 ? 'attempt' : 'attempts'} remaining.`,
-      );
     }
 
     // 5. Mark as verified in database
@@ -299,6 +355,19 @@ export class AuthService {
 
     // 6. Find or Provision User Profile with Starter Plan (10 min / mo) in database
     const userProfile = await this.findOrCreateProfileByPhone(phone);
+
+    // If Telco carrier billing was verified, save the raw unformatted subscriberId
+    if (rawSubscriberId) {
+      await this.supabase
+        .from('profiles')
+        .update({
+          telco_provider: telcoProvider,
+          telco_subscriber_id: rawSubscriberId,
+          telco_reference_no: record.reference_no,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userProfile.id);
+    }
 
     // 7. Generate bearer access token
     const accessToken = this.generateTokenForUser(userProfile);
@@ -1263,6 +1332,25 @@ export class AuthService {
       success: true,
       message: 'User profile updated successfully.',
       profile: data,
+    };
+  }
+
+  /**
+   * Public: Safe configuration without credentials / secrets
+   */
+  async getPublicAppConfig() {
+    const config = await this.getAppConfig();
+    return {
+      smsGateway: config.smsGateway,
+      pricingNotice: config.pricingNotice,
+      termsDisclaimer: config.termsDisclaimer,
+      smsTemplate: config.smsTemplate,
+      ideamartPricingNotice: config.ideamartPricingNotice,
+      ideamartTermsDisclaimer: config.ideamartTermsDisclaimer,
+      ideamartSmsTemplate: config.ideamartSmsTemplate,
+      ideamartEnabled: config.ideamartEnabled ?? true,
+      mspaceEnabled: config.mspaceEnabled ?? true,
+      telcoUnsubButtonEnabled: config.telcoUnsubButtonEnabled ?? true,
     };
   }
 
