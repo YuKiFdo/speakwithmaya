@@ -1,0 +1,61 @@
+name: Deploy Frontend to Ubuntu VM (Production)
+
+on:
+  push:
+    branches: [production]
+    paths:
+      - 'maya-frontend/**'
+      - '.github/workflows/deploy-vm-frontend.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'maya-frontend/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: ./maya-frontend
+        run: npm ci
+
+      - name: Export Expo Static Web
+        working-directory: ./maya-frontend
+        env:
+          EXPO_PUBLIC_BACKEND_URL: ${{ vars.EXPO_PUBLIC_BACKEND_URL || 'http://20.198.240.185:3000' }}
+          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL || 'https://clfjfhdsjwkzgxwoolgp.supabase.co' }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_gQOKzy0Kf5Mw9Uc4wdCdIA_WaLKtaip' }}
+          EXPO_PUBLIC_USE_SERVER_LIVE: 'true'
+        run: npx expo export --platform web
+
+      - name: Deploy to Ubuntu VM
+        env:
+          SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          VM_IP: ${{ secrets.VM_IP || '20.198.240.185' }}
+          VM_USER: ${{ secrets.VM_USER || 'speakwithmaya' }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "$VM_IP" >> ~/.ssh/known_hosts
+
+          # Ensure app directory exists
+          ssh "$VM_USER@$VM_IP" "mkdir -p /home/$VM_USER/apps/maya-frontend/dist"
+
+          # Sync exported dist directory and PM2 config
+          rsync -avz --delete ./maya-frontend/dist/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/"
+          rsync -avz ./maya-frontend/ecosystem.config.cjs "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/"
+
+          # Start or reload PM2
+          ssh "$VM_USER@$VM_IP" "bash -l -c '
+            cd /home/$VM_USER/apps/maya-frontend
+            pm2 startOrReload ecosystem.config.cjs --update-env
+            pm2 save
+          '"

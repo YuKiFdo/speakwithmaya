@@ -1,0 +1,60 @@
+name: Deploy Backend to Ubuntu VM (Production)
+
+on:
+  push:
+    branches: [production]
+    paths:
+      - 'maya-backend/**'
+      - '.github/workflows/deploy-vm-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'maya-backend/package-lock.json'
+
+      - name: Install dependencies & Build
+        working-directory: ./maya-backend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to Ubuntu VM
+        env:
+          SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          VM_IP: ${{ secrets.VM_IP || '20.198.240.185' }}
+          VM_USER: ${{ secrets.VM_USER || 'speakwithmaya' }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "$VM_IP" >> ~/.ssh/known_hosts
+
+          # Ensure app directory exists
+          ssh "$VM_USER@$VM_IP" "mkdir -p /home/$VM_USER/apps/maya-backend"
+
+          # Sync backend built artifacts and package manifests to VM
+          rsync -avz --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude 'src' \
+            --exclude 'test' \
+            --exclude '.env' \
+            ./maya-backend/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-backend/"
+
+          # Install production dependencies and start/restart PM2
+          ssh "$VM_USER@$VM_IP" "bash -l -c '
+            cd /home/$VM_USER/apps/maya-backend
+            npm ci --omit=dev --legacy-peer-deps
+            pm2 startOrReload ecosystem.config.cjs --update-env
+            pm2 save
+          '"
