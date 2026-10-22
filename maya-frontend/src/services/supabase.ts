@@ -137,6 +137,15 @@ export async function persistSessionRecord(record: SessionHistoryRecord): Promis
  * Fetches practice sessions directly from Supabase / Backend API (no localStorage).
  */
 export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]> {
+  // If on admin route or no user access token exists, skip network request
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+    return [];
+  }
+  const token = OnboardingStore.getState().accessToken;
+  if (!token) {
+    return [];
+  }
+
   // 1. Fetch authoritative records from backend API (connected to Supabase via service role key)
   try {
     const backendUrl = getBackendBaseUrl();

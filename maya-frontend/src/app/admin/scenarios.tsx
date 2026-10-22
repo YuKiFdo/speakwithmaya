@@ -15,8 +15,8 @@ import { router } from 'expo-router';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
-import { useUserStats } from '@/hooks/useUserStats';
 import { CallSessionStore } from '@/services/store/call-session-store';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
@@ -98,7 +98,6 @@ const OPENING_MODES = [
 
 export default function AdminScenariosScreen() {
   const { isPhone } = useBreakpoint();
-  const userStats = useUserStats();
 
   const [sidebarOpen, setSidebarOpen] = useState(!isPhone);
   const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
@@ -617,7 +616,7 @@ export default function AdminScenariosScreen() {
   };
 
   const handleLaunchVoiceCall = (lvl: ScenarioItem) => {
-    const studentName = (userStats.displayName || 'Learner').trim();
+    const studentName = (OnboardingStore.getState().user?.displayName || OnboardingStore.getState().name || 'Admin Tester').trim();
     CallSessionStore.startCall({
       roadmapLevelId: lvl.id,
       levelNumber: lvl.levelNumber,

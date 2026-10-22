@@ -234,6 +234,14 @@ export function useUserStats(): UserStats {
   const dailyGoalDisplay = `${dailyMins} min daily`;
 
   const refreshStats = useCallback(async () => {
+    // If running on web and currently on an admin route, or if no user is authenticated, skip network sync
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+      return;
+    }
+    if (!store.accessToken && !user?.id) {
+      return;
+    }
+
     if (inFlightRefreshPromise) {
       return inFlightRefreshPromise;
     }
@@ -307,10 +315,12 @@ export function useUserStats(): UserStats {
     // Auto-sync when window / browser tab regains focus or becomes visible
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const handleFocus = () => {
-        refreshStats();
+        if (!window.location.pathname.startsWith('/admin')) {
+          refreshStats();
+        }
       };
       const handleVisibilityChange = () => {
-        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible' && !window.location.pathname.startsWith('/admin')) {
           refreshStats();
         }
       };
@@ -319,7 +329,11 @@ export function useUserStats(): UserStats {
       document.addEventListener('visibilitychange', handleVisibilityChange);
 
       // Periodic background sync every 60 seconds to ensure session matches DB
-      const intervalId = setInterval(refreshStats, 60000);
+      const intervalId = setInterval(() => {
+        if (!window.location.pathname.startsWith('/admin')) {
+          refreshStats();
+        }
+      }, 60000);
 
       return () => {
         window.removeEventListener('focus', handleFocus);
