@@ -93,42 +93,94 @@ const PRO_FEATURES = [
   'Early access to new features',
 ];
 
-const TESTIMONIALS = [
+interface TestimonialItem {
+  id: string;
+  quote: string;
+  author: string;
+}
+
+const TESTIMONIALS: TestimonialItem[] = [
   {
-    id: 1,
-    quote: '"I feel much more confident speaking at work now."',
-    author: 'Dinesh S.',
+    id: 'sanduni',
+    quote: '"SpeakwithMaya has really helped me improve my confidence. The extra practice time in Pro is worth it!"',
+    author: '— Sanduni, Sri Lanka',
   },
   {
-    id: 2,
-    quote: '"The pronunciation feedback is amazing. Highly recommend!"',
-    author: 'Kavindi P.',
+    id: 'kasun',
+    quote: '"I know English grammar, but speaking was difficult for me. Practicing with Maya helps me speak more naturally."',
+    author: '— Kasun, Sri Lanka',
   },
   {
-    id: 3,
-    quote: '"Best investment for my English journey!"',
-    author: 'Dulaj M.',
+    id: 'amaya',
+    quote: '"I love that I can practice speaking anytime. The corrections help me understand my mistakes and improve."',
+    author: '— Amaya, Sri Lanka',
+  },
+  {
+    id: 'dilshan',
+    quote: '"The roleplay sessions are really useful. I can practice real-life situations like job interviews and everyday conversations."',
+    author: '— Dilshan, Sri Lanka',
+  },
+  {
+    id: 'nethmi',
+    quote: '"Maya gives me a comfortable place to practice English. I am slowly overcoming my fear of making mistakes."',
+    author: '— Nethmi, Sri Lanka',
   },
 ];
 
-const FAQS = [
+interface FAQItem {
+  id: string;
+  question: string;
+  answer: string;
+}
+
+const FAQS: FAQItem[] = [
   {
-    id: 'cancel',
-    question: 'Can I cancel anytime?',
+    id: 'what-is-maya',
+    question: 'What is SpeakwithMaya?',
     answer:
-      'Yes, you can cancel your subscription at any time from your account settings. You will retain access until the end of your billing period.',
+      'SpeakwithMaya is an AI-powered English-speaking coach that helps you improve your speaking skills through real-time conversations, roleplays, and personalized feedback.',
   },
   {
-    id: 'auto-charge',
-    question: 'Will I be charged automatically after 3 months?',
+    id: 'who-is-it-for',
+    question: 'Who is SpeakwithMaya for?',
     answer:
-      'Your plan will automatically renew at the standard rate unless cancelled prior to the renewal date.',
+      'SpeakwithMaya is for anyone who wants to improve their spoken English, build confidence, and speak more naturally, even if they already know English grammar but struggle to speak.',
   },
   {
-    id: 'after-3-months',
-    question: 'What happens after 3 months?',
+    id: 'plan-differences',
+    question: 'What is the difference between Basic, Pro, and Premium?',
     answer:
-      'You can continue with your selected plan, change tiers, or pause anytime without losing your practice history and progress.',
+      'Basic is ideal for getting started. Pro offers more practice time and additional speaking feedback. Premium provides the most practice time and advanced learning features.',
+  },
+  {
+    id: 'practice-minutes',
+    question: 'How many minutes can I practice?',
+    answer:
+      'Your available AI conversation minutes depend on your selected plan. Check the pricing table to see the included minutes and session durations for each plan.',
+  },
+  {
+    id: 'daily-limit-handling',
+    question: 'What happens when I use all my daily practice time?',
+    answer:
+      "Once you use your included daily practice time, you may be able to continue practicing using your remaining monthly AI minutes, depending on your plan's limits.",
+  },
+  {
+    id: 'correct-mistakes',
+    question: 'Can Maya correct my English mistakes?',
+    answer:
+      'Yes! Maya can help you identify grammar mistakes, improve pronunciation, and find more natural ways to express yourself. Available feedback features depend on your plan.',
+  },
+  {
+    id: 'cancel-subscription',
+    question: 'Can I cancel my subscription?',
+    answer:
+      'You can manage or cancel your subscription through the subscription or billing options available for your account.',
+  },
+  {
+    id: 'subscription-expires',
+    question: 'What happens when my subscription expires?',
+    answer:
+      'When your subscription expires, you may lose access to paid-plan features. You can renew your subscription or choose another available plan to continue enjoying premium features.',
   },
 ];
 
@@ -196,6 +248,46 @@ export default function PersonalizedPlanScreen() {
 
   // FAQ accordion state
   const [openFaq, setOpenFaq] = useState<string | null>(null);
+
+  // Testimonial horizontal auto-rotation state
+  const [activeTestimonialIdx, setActiveTestimonialIdx] = useState<number>(0);
+  const testimonialFadeAnim = useRef(new Animated.Value(1)).current;
+  const testimonialSlideAnim = useRef(new Animated.Value(0)).current;
+
+  // Auto-rotate testimonials horizontally every 4.5 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      Animated.parallel([
+        Animated.timing(testimonialFadeAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.timing(testimonialSlideAnim, {
+          toValue: -15,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setActiveTestimonialIdx((prev) => (prev + 1) % TESTIMONIALS.length);
+        testimonialSlideAnim.setValue(15);
+        Animated.parallel([
+          Animated.timing(testimonialFadeAnim, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+          Animated.timing(testimonialSlideAnim, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      });
+    }, 4500);
+
+    return () => clearInterval(interval);
+  }, [testimonialFadeAnim, testimonialSlideAnim]);
 
   // Modal scale animation
   const modalScaleAnim = useRef(new Animated.Value(0.85)).current;
@@ -600,54 +692,89 @@ export default function PersonalizedPlanScreen() {
             </View>
           </View>
 
-          {/* What Our Learners Say Section */}
+          {/* Automatic Horizontal Testimonial Carousel */}
           <View style={styles.testimonialsSection}>
-            <View style={styles.testimonialsHeader}>
-              <Text style={styles.testimonialsTitle}>What our learners say</Text>
-              <Text style={styles.testimonialsRating}>
-                <Text style={{ ...fontStyle('inter', 'bold'), color: '#10213D' }}>4.8/5</Text>
-                {' from 2,000+ learners'}
-              </Text>
-            </View>
-
-            {TESTIMONIALS.map((t) => (
-              <View key={t.id} style={styles.testimonialCard}>
-                <View style={styles.starsRow}>
-                  {[1, 2, 3, 4, 5].map((s) => (
-                    <Ionicons key={s} name="star" size={14} color="#FBBF24" style={styles.starIcon} />
-                  ))}
+            <Animated.View
+              style={[
+                styles.testimonialCard,
+                {
+                  opacity: testimonialFadeAnim,
+                  transform: [{ translateX: testimonialSlideAnim }],
+                },
+              ]}
+            >
+              <View style={styles.testimonialQuoteRow}>
+                <Ionicons name="chatbubble-ellipses-outline" size={24} color="#93C5FD" style={{ marginTop: 2 }} />
+                <View style={{ flex: 1, justifyContent: 'center' }}>
+                  <Text style={styles.testimonialQuote}>
+                    {TESTIMONIALS[activeTestimonialIdx].quote}
+                  </Text>
+                  <View style={styles.testimonialMetaCol}>
+                    <Text style={styles.testimonialAuthor}>
+                      {TESTIMONIALS[activeTestimonialIdx].author}
+                    </Text>
+                    <View style={styles.starsRow}>
+                      {[1, 2, 3, 4, 5].map((s) => (
+                        <Ionicons key={s} name="star" size={14} color="#FBBF24" style={{ marginRight: 2 }} />
+                      ))}
+                    </View>
+                  </View>
                 </View>
-                <Text style={styles.testimonialQuote}>{t.quote}</Text>
-                <Text style={styles.testimonialAuthor}>{t.author}</Text>
               </View>
-            ))}
+            </Animated.View>
+
+            {/* Horizontal indicators / dots */}
+            <View style={styles.testimonialDotsRow}>
+              {TESTIMONIALS.map((_, idx) => (
+                <Pressable
+                  key={idx}
+                  onPress={() => setActiveTestimonialIdx(idx)}
+                  hitSlop={8}
+                >
+                  <View
+                    style={[
+                      styles.testimonialDot,
+                      idx === activeTestimonialIdx && styles.testimonialDotActive,
+                    ]}
+                  />
+                </Pressable>
+              ))}
+            </View>
           </View>
 
           {/* Frequently Asked Questions Section */}
           <View style={styles.faqSection}>
-            <Text style={styles.faqTitle}>Frequently Asked Questions</Text>
-            {FAQS.map((faq) => {
-              const isOpen = openFaq === faq.id;
-              return (
-                <Pressable
-                  key={faq.id}
-                  onPress={() => toggleFaq(faq.id)}
-                  style={styles.faqCard}
-                >
-                  <View style={styles.faqQuestionRow}>
-                    <Text style={styles.faqQuestionText}>{faq.question}</Text>
-                    <Ionicons
-                      name={isOpen ? 'chevron-up' : 'chevron-down'}
-                      size={16}
-                      color="#64748B"
-                    />
-                  </View>
-                  {isOpen && (
-                    <Text style={styles.faqAnswerText}>{faq.answer}</Text>
-                  )}
-                </Pressable>
-              );
-            })}
+            <View style={styles.faqHeaderRow}>
+              <Text style={styles.faqTitle}>Frequently Asked Questions</Text>
+              <Pressable onPress={() => setOpenFaq(openFaq ? null : FAQS[0].id)}>
+                <Text style={styles.faqViewAllLink}>View all</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.faqListContainer}>
+              {FAQS.map((faq) => {
+                const isOpen = openFaq === faq.id;
+                return (
+                  <Pressable
+                    key={faq.id}
+                    onPress={() => toggleFaq(faq.id)}
+                    style={[styles.faqCard, isOpen && styles.faqCardOpen]}
+                  >
+                    <View style={styles.faqQuestionRow}>
+                      <Text style={styles.faqQuestionText}>{faq.question}</Text>
+                      <Ionicons
+                        name={isOpen ? 'chevron-up' : 'chevron-down'}
+                        size={16}
+                        color="#64748B"
+                      />
+                    </View>
+                    {isOpen && (
+                      <Text style={styles.faqAnswerText}>{faq.answer}</Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -1026,24 +1153,7 @@ const styles = StyleSheet.create({
   },
   testimonialsSection: {
     width: '100%',
-    marginBottom: 32,
-  },
-  testimonialsHeader: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  testimonialsTitle: {
-    fontSize: 17,
-    color: '#10213D',
-    ...fontStyle('inter', 'extraBold'),
-  },
-  testimonialsRating: {
-    fontSize: 12,
-    color: '#64748B',
-    ...fontStyle('inter', 'medium'),
+    marginBottom: 28,
   },
   testimonialCard: {
     width: '100%',
@@ -1051,47 +1161,98 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    padding: 16,
-    marginBottom: 10,
+    padding: 18,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+      } as any,
+    }),
   },
-  starsRow: {
+  testimonialQuoteRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    gap: 2,
-  },
-  starIcon: {
-    marginRight: 1,
+    alignItems: 'flex-start',
+    gap: 12,
   },
   testimonialQuote: {
     fontSize: 13,
     lineHeight: 19,
     color: '#334155',
-    marginBottom: 8,
-    ...fontStyle('inter', 'regular'),
+    marginBottom: 6,
+    fontStyle: 'italic',
+    ...fontStyle('inter', 'medium'),
+  },
+  testimonialMetaCol: {
+    marginTop: 2,
   },
   testimonialAuthor: {
-    fontSize: 12,
-    color: '#94A3B8',
-    ...fontStyle('inter', 'medium'),
+    fontSize: 11.5,
+    color: '#64748B',
+    ...fontStyle('inter', 'regular'),
+  },
+  starsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  testimonialDotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  testimonialDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#CBD5E1',
+  },
+  testimonialDotActive: {
+    width: 22,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#0057FF',
   },
   faqSection: {
     width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 24,
+  },
+  faqHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
   faqTitle: {
     fontSize: 17,
     color: '#10213D',
-    marginBottom: 16,
-    ...fontStyle('inter', 'extraBold'),
+    ...fontStyle('outfit', 'bold'),
+  },
+  faqViewAllLink: {
+    fontSize: 13,
+    color: '#0057FF',
+    ...fontStyle('inter', 'semiBold'),
+  },
+  faqListContainer: {
+    gap: 10,
   },
   faqCard: {
     width: '100%',
     backgroundColor: '#FFFFFF',
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    padding: 16,
-    marginBottom: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  faqCardOpen: {
+    borderColor: '#93C5FD',
+    backgroundColor: '#F8FAFC',
   },
   faqQuestionRow: {
     flexDirection: 'row',
@@ -1110,6 +1271,9 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     color: '#64748B',
     marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
     ...fontStyle('inter', 'regular'),
   },
   // Modal styles

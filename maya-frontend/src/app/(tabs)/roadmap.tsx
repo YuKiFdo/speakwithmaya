@@ -204,7 +204,12 @@ export default function RoadmapScreen() {
 
         let status: 'completed' | 'in-progress' | 'locked' = 'locked';
 
-        if (isThisLevelCompleted) {
+        const isStarter = (stats.planTier || 'starter').toLowerCase() === 'starter';
+
+        if (isStarter && levelNum > 1) {
+          // Starter plan users are strictly locked to Level 1 only
+          status = 'locked';
+        } else if (isThisLevelCompleted) {
           status = 'completed';
         } else if (levelNum === 1 || isPrevLevelCompleted) {
           status = 'in-progress';
@@ -509,7 +514,12 @@ export default function RoadmapScreen() {
   const handleMilestonePress = (item: MilestoneItem) => {
     if (item.status === 'locked') {
       setLockedTargetLevel(item);
-      setActivePopup('level-locked');
+      const isStarter = (stats.planTier || 'starter').toLowerCase() === 'starter';
+      if (isStarter && item.levelNumber > 1) {
+        setActivePopup('unlock-premium');
+      } else {
+        setActivePopup('level-locked');
+      }
     } else {
       setSelectedMission(item);
     }
@@ -518,9 +528,14 @@ export default function RoadmapScreen() {
   const handleStartMission = (item: MilestoneItem) => {
     setSelectedMission(null);
 
-    const minutesBalance = onboardingState.user?.minutesBalance ?? 10;
+    const isStarter = (stats.planTier || 'starter').toLowerCase() === 'starter';
+    const minutesBalance = onboardingState.user?.minutesBalance ?? stats.minutesBalance ?? 5;
     if (minutesBalance <= 0) {
-      setActivePopup('get-extra-time');
+      if (isStarter) {
+        setActivePopup('daily-limit');
+      } else {
+        setActivePopup('get-extra-time');
+      }
       return;
     }
 
@@ -1069,7 +1084,7 @@ export default function RoadmapScreen() {
           }}
           onPrimaryPress={() => {
             const popupToActOn = activePopup || lastActivePopupRef.current;
-            if (popupToActOn === 'unlock-premium') {
+            if (popupToActOn === 'unlock-premium' || popupToActOn === 'daily-limit') {
               router.push('/upgrade');
             } else if (popupToActOn === 'level-locked') {
               if (currentActiveLevel) {

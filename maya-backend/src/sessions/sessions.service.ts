@@ -1458,6 +1458,9 @@ ${memoryPart}`;
         }
 
         if (level) {
+          if (!dto.levelNumber && level.levelNumber) {
+            dto.levelNumber = level.levelNumber;
+          }
           if (!dto.topic && (level.topic || level.title)) {
             dto.topic = level.topic || level.title;
           }
@@ -1575,9 +1578,13 @@ ${memoryPart}`;
         );
       }
 
+      const isStarterUser = (userProfile.plan_tier || 'starter').toLowerCase() === 'starter';
+
       if (!dto.isIntroCall && (userProfile.minutes_balance ?? 0) <= 0) {
         throw new HttpException(
-          'Your practice minutes have expired. Please recharge or upgrade your plan to continue practicing.',
+          isStarterUser
+            ? "You've reached your daily limit! Continue your practice with Premium."
+            : 'Your practice minutes have expired. Please recharge or upgrade your plan to continue practicing.',
           HttpStatus.PAYMENT_REQUIRED,
         );
       }
@@ -1588,6 +1595,24 @@ ${memoryPart}`;
     }
 
     await this.enrichRoadmapDto(dto, resolvedUserId);
+
+    // Starter plan users are strictly locked to Level 1 on the curriculum roadmap
+    const isStarter = ((dto as any).planTier || '').toLowerCase() === 'starter';
+    if (dto.levelNumber && dto.levelNumber > 1) {
+      if (this.supabase && resolvedUserId) {
+        const { data: userProf } = await this.supabase
+          .from('profiles')
+          .select('plan_tier')
+          .eq('id', resolvedUserId)
+          .maybeSingle();
+        if ((userProf?.plan_tier || 'starter').toLowerCase() === 'starter') {
+          throw new HttpException(
+            'Roadmap Level 2 and above are locked for Starter Plan. Please upgrade to unlock all levels.',
+            HttpStatus.FORBIDDEN,
+          );
+        }
+      }
+    }
 
     const isReconnect = Boolean(dto.sessionId);
     const sessionId = dto.sessionId || randomUUID();

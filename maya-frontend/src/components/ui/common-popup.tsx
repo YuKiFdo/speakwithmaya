@@ -244,11 +244,11 @@ export function CommonPopup({
     if (!finalSubtitle) {
       finalSubtitle = 'This feature is available for Premium users only.';
     }
-    if (!finalBtnText) finalBtnText = 'Upgrade to Premium';
+    if (!finalBtnText) finalBtnText = 'Upgrade Your Plan';
     if (finalBtnIcon === undefined) finalBtnIcon = 'crown';
     if (finalShowArrow === undefined) finalShowArrow = true;
     if (finalFooterText === undefined) {
-      finalFooterText = 'Upgrade to Premium and get access to all features.';
+      finalFooterText = 'Upgrade and get access to all features.';
     }
   } else if (resolvedPreset === 'daily-limit') {
     if (!finalTitle) {
@@ -258,7 +258,7 @@ export function CommonPopup({
     if (!finalSubtitle) {
       finalSubtitle = 'Continue your practice with Premium.';
     }
-    if (!finalBtnText) finalBtnText = 'Upgrade to Premium';
+    if (!finalBtnText) finalBtnText = 'Upgrade Your Plan';
     if (finalBtnIcon === undefined) finalBtnIcon = 'crown';
     if (finalShowArrow === undefined) finalShowArrow = true;
     if (finalFooterText === undefined) {

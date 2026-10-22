@@ -460,6 +460,7 @@ export class AuthService {
     }
 
     // 4. Provision fresh profile
+    const nextResetIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const newProfile = {
       id: userId,
       phone_number: cleanPhone,
@@ -469,14 +470,14 @@ export class AuthService {
       challenge: null,
       plan_tier: 'starter',
       plan_status: 'active',
-      billing_cycle: 'monthly',
-      monthly_minutes_allowance: 10,
+      billing_cycle: 'daily',
+      monthly_minutes_allowance: 5,
       add_on_minutes_balance: 0,
-      minutes_balance: 10,
-      minutes_reset_at: nextMonthIso,
+      minutes_balance: 5,
+      minutes_reset_at: nextResetIso,
       native_language: 'sinhala',
       employment_status: null,
-      daily_goal_minutes: 10,
+      daily_goal_minutes: 5,
       baseline_fluency_score: 0,
       baseline_grammar_score: 0,
       baseline_pronunciation_score: 0,
@@ -516,32 +517,38 @@ export class AuthService {
   }
 
   /**
-   * Automatically refreshes 10 minutes balance if user crossed their monthly reset date.
+   * Automatically refreshes quota balance if user crossed their reset date.
+   * Starter tier refreshes 5 minutes daily (every 24h).
+   * Paid tiers refresh their allowance monthly.
    */
   private async checkAndResetMonthlyQuota(profile: UserProfileData): Promise<UserProfileData> {
     if (!profile.minutes_reset_at) return profile;
 
+    const isStarter = (profile.plan_tier || 'starter') === 'starter';
     const resetDate = new Date(profile.minutes_reset_at).getTime();
     const now = Date.now();
 
     if (now >= resetDate) {
-      const nextResetIso = new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString();
+      // 24 hours for daily starter, 30 days for monthly paid plans
+      const intervalMs = isStarter ? 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+      const nextResetIso = new Date(now + intervalMs).toISOString();
 
       // If user's recurring subscription failed (past_due) or was canceled:
       // Do NOT grant paid minutes without successful payment deduction.
-      if (profile.plan_tier !== 'starter' && profile.plan_status !== 'active') {
+      if (!isStarter && profile.plan_status !== 'active') {
         if (profile.plan_status === 'canceled') {
           // Revert to free starter tier if subscription ended
           profile.plan_tier = 'starter';
-          profile.monthly_minutes_allowance = 10;
-          profile.minutes_balance = 10 + (profile.add_on_minutes_balance || 0);
+          profile.monthly_minutes_allowance = 5;
+          profile.minutes_balance = 5 + (profile.add_on_minutes_balance || 0);
         } else if (profile.plan_status === 'past_due') {
           // Freeze paid tier quota until recurring charge is successfully captured
           profile.minutes_balance = 0 + (profile.add_on_minutes_balance || 0);
         }
       } else {
-        const updatedBalance =
-          profile.monthly_minutes_allowance + (profile.add_on_minutes_balance || 0);
+        const baseAllowance = isStarter ? 5 : (profile.monthly_minutes_allowance || 5);
+        profile.monthly_minutes_allowance = baseAllowance;
+        const updatedBalance = baseAllowance + (profile.add_on_minutes_balance || 0);
         profile.minutes_balance = updatedBalance;
       }
 
@@ -559,7 +566,7 @@ export class AuthService {
         .eq('id', profile.id);
 
       if (resetError) {
-        this.logger.warn(`Failed to update monthly reset in DB: ${resetError.message}`);
+        this.logger.warn(`Failed to update quota reset in DB: ${resetError.message}`);
       }
     }
 
@@ -888,9 +895,9 @@ export class AuthService {
           id: 'starter',
           name: 'Starter',
           priceLkr: 0,
-          period: '/ month',
-          minutes: 10,
-          features: ['10 AI conversation minutes / mo', 'Basic AI speaking partner', 'Voice captions'],
+          period: '/ day',
+          minutes: 5,
+          features: ['5 AI conversation minutes / day', 'Basic AI speaking partner', 'Level 1 Roadmap Practice', 'Voice captions'],
         },
         {
           id: 'basic',

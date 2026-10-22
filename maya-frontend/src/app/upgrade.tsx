@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   useWindowDimensions,
   Alert,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -59,40 +60,38 @@ const PLANS: PricingPlan[] = [
     id: 'basic',
     name: 'Basic',
     subtitle: 'Great for getting started',
-    price: 'LKR 2,700',
+    price: 'LKR 3,600',
     period: '/ month',
     features: [
       { text: '450 AI conversation minutes' },
-      { text: 'Unlimited speaking hints' },
-      { text: 'AI conversation partner' },
+      { text: '10-minute practice sessions' },
       { text: 'Grammar corrections' },
       { text: 'Session transcript' },
       { text: 'Voice captions' },
     ],
-    ctaLabel: 'Upgrade to Basic',
+    ctaLabel: 'Choose Basic',
     highlighted: false,
-    iconColor: '#64748b',
-    iconBg: '#f1f5f9',
+    iconColor: '#0057FF',
+    iconBg: '#EFF6FF',
   },
   {
     id: 'pro',
     name: 'Pro',
     subtitle: 'Best for consistent learners',
-    price: 'LKR 3,600',
+    price: 'LKR 5,400',
     period: '/ month',
     features: [
       { text: '600 AI conversation minutes' },
-      { text: 'Unlimited speaking hints' },
-      { text: 'Everything in Basic' },
+      { text: '15-minute practice sessions' },
       { text: 'Advanced pronunciation feedback' },
       { text: 'Rephrasing suggestions' },
       { text: 'Conversation history' },
-      { text: 'Progress tracking' },
+      { text: 'Everything in Basic' },
     ],
-    ctaLabel: 'Upgrade to Pro',
+    ctaLabel: 'Choose Pro',
     highlighted: false,
     iconColor: '#0057FF',
-    iconBg: '#E0EDFE',
+    iconBg: '#EFF6FF',
   },
   {
     id: 'premium',
@@ -102,17 +101,117 @@ const PLANS: PricingPlan[] = [
     period: '/ month',
     features: [
       { text: '1,200 AI conversation minutes' },
-      { text: 'Unlimited speaking hints' },
-      { text: 'Everything in Pro' },
+      { text: '30-minute practice sessions' },
       { text: 'Detailed speaking analytics' },
       { text: 'Personalized learning insights' },
       { text: 'Priority AI responses' },
-      { text: 'Early access to new features' },
+      { text: 'Everything in Pro' },
     ],
-    ctaLabel: 'Upgrade to Premium',
+    ctaLabel: 'Choose Premium',
     highlighted: false,
-    iconColor: '#64748b',
-    iconBg: '#f1f5f9',
+    iconColor: '#0057FF',
+    iconBg: '#EFF6FF',
+  },
+];
+
+// ─── Trust Badges ────────────────────────────────────────────────────────────
+
+// ─── FAQ Data ────────────────────────────────────────────────────────────────
+
+interface FAQItem {
+  id: string;
+  question: string;
+  answer: string;
+}
+
+const UPGRADE_FAQS: FAQItem[] = [
+  {
+    id: 'what-is-maya',
+    question: 'What is SpeakwithMaya?',
+    answer:
+      'SpeakwithMaya is an AI-powered English-speaking coach that helps you improve your speaking skills through real-time conversations, roleplays, and personalized feedback.',
+  },
+  {
+    id: 'who-is-it-for',
+    question: 'Who is SpeakwithMaya for?',
+    answer:
+      'SpeakwithMaya is for anyone who wants to improve their spoken English, build confidence, and speak more naturally, even if they already know English grammar but struggle to speak.',
+  },
+  {
+    id: 'plan-differences',
+    question: 'What is the difference between Basic, Pro, and Premium?',
+    answer:
+      'Basic is ideal for getting started. Pro offers more practice time and additional speaking feedback. Premium provides the most practice time and advanced learning features.',
+  },
+  {
+    id: 'practice-minutes',
+    question: 'How many minutes can I practice?',
+    answer:
+      'Your available AI conversation minutes depend on your selected plan. Check the pricing table to see the included minutes and session durations for each plan.',
+  },
+  {
+    id: 'daily-limit-handling',
+    question: 'What happens when I use all my daily practice time?',
+    answer:
+      "Once you use your included daily practice time, you may be able to continue practicing using your remaining monthly AI minutes, depending on your plan's limits.",
+  },
+  {
+    id: 'correct-mistakes',
+    question: 'Can Maya correct my English mistakes?',
+    answer:
+      'Yes! Maya can help you identify grammar mistakes, improve pronunciation, and find more natural ways to express yourself. Available feedback features depend on your plan.',
+  },
+  {
+    id: 'cancel-subscription',
+    question: 'Can I cancel my subscription?',
+    answer:
+      'You can manage or cancel your subscription through the subscription or billing options available for your account.',
+  },
+  {
+    id: 'subscription-expires',
+    question: 'What happens when my subscription expires?',
+    answer:
+      'When your subscription expires, you may lose access to paid-plan features. You can renew your subscription or choose another available plan to continue enjoying premium features.',
+  },
+];
+
+interface TestimonialItem {
+  id: string;
+  quote: string;
+  author: string;
+  stars: string;
+}
+
+const UPGRADE_TESTIMONIALS: TestimonialItem[] = [
+  {
+    id: 'sanduni',
+    quote: '"SpeakwithMaya has really helped me improve my confidence. The extra practice time in Pro is worth it!"',
+    author: '— Sanduni, Sri Lanka',
+    stars: '⭐⭐⭐⭐⭐',
+  },
+  {
+    id: 'kasun',
+    quote: '"I know English grammar, but speaking was difficult for me. Practicing with Maya helps me speak more naturally."',
+    author: '— Kasun , Sri Lanka',
+    stars: '⭐⭐⭐⭐⭐',
+  },
+  {
+    id: 'amaya',
+    quote: '"I love that I can practice speaking anytime. The corrections help me understand my mistakes and improve."',
+    author: '— Amaya, Sri Lanka',
+    stars: '⭐⭐⭐⭐⭐',
+  },
+  {
+    id: 'dilshan',
+    quote: '"The roleplay sessions are really useful. I can practice real-life situations like job interviews and everyday conversations."',
+    author: '— Dilshan, Sri Lanka',
+    stars: '⭐⭐⭐⭐⭐',
+  },
+  {
+    id: 'nethmi',
+    quote: '"Maya gives me a comfortable place to practice English. I am slowly overcoming my fear of making mistakes."',
+    author: '— Nethmi, Sri Lanka',
+    stars: '⭐⭐⭐⭐⭐',
   },
 ];
 
@@ -355,10 +454,58 @@ export default function UpgradeScreen() {
     : 16;
 
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
+  const [showOtherPlans, setShowOtherPlans] = useState<boolean>(false);
+  const [openFaq, setOpenFaq] = useState<string | null>(null);
 
   const currentTier = (stats.planTier || (stats.isPro ? 'pro' : 'starter')).toLowerCase();
   const currentWeight = TIER_ORDER[currentTier] ?? 0;
   const isPaidUser = currentWeight > 0;
+  const isStarter = currentTier === 'starter';
+
+  const [activeTestimonialIdx, setActiveTestimonialIdx] = useState<number>(0);
+  const testimonialFadeAnim = useRef(new Animated.Value(1)).current;
+  const testimonialSlideAnim = useRef(new Animated.Value(0)).current;
+
+  // Auto-rotate testimonials horizontally every 4.5 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Animate out to the left
+      Animated.parallel([
+        Animated.timing(testimonialFadeAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.timing(testimonialSlideAnim, {
+          toValue: -15,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setActiveTestimonialIdx((prev) => (prev + 1) % UPGRADE_TESTIMONIALS.length);
+        testimonialSlideAnim.setValue(15);
+        // Animate in from the right
+        Animated.parallel([
+          Animated.timing(testimonialFadeAnim, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+          Animated.timing(testimonialSlideAnim, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      });
+    }, 4500);
+
+    return () => clearInterval(interval);
+  }, [testimonialFadeAnim, testimonialSlideAnim]);
+
+  const toggleFaq = (faqId: string) => {
+    setOpenFaq((prev) => (prev === faqId ? null : faqId));
+  };
 
   const handleSelectPlan = async (planId: string) => {
     const planWeight = TIER_ORDER[planId] ?? 0;
@@ -472,8 +619,7 @@ export default function UpgradeScreen() {
           {/* MOBILE FIXED TOP BAR (PINNED) */}
           <MobileTopBar
             pinned
-            showBackButton
-            onBack={() => router.back()}
+            showBackButton={false}
           />
 
           {/* ──────────── MAIN CONTENT ──────────── */}
@@ -483,8 +629,8 @@ export default function UpgradeScreen() {
               styles.scrollContent,
               isDesktop && styles.scrollContentDesktop,
             ]}
-            showsVerticalScrollIndicator={false}
-            scrollEnabled={!isDesktop || windowHeight < 560}
+            showsVerticalScrollIndicator={true}
+            scrollEnabled={true}
           >
             {/* ──────────── HEADER ──────────── */}
             {isDesktop ? (
@@ -526,219 +672,394 @@ export default function UpgradeScreen() {
               </View>
             )}
 
-          {/* ──────────── PRICING CARDS ──────────── */}
-          <View
-            style={[
-              styles.cardsRow,
-              isDesktop && [
-                styles.cardsRowDesktop,
-                { marginBottom: desktopCardsMarginBottom },
-              ],
-            ]}
-          >
-            {PLANS.map((plan) => {
-              const planWeight = TIER_ORDER[plan.id] ?? 0;
-              const isCurrentPlan = currentTier === plan.id;
-              const isUpgrade = planWeight > currentWeight;
-              const isDowngrade = planWeight < currentWeight;
+          {/* ──────────── 3 MONTHS PRO SPECIAL OFFER CARD (For starter users) ──────────── */}
+          {isStarter && (
+            <View style={styles.specialOfferContainer}>
+              <View style={styles.specialOfferCard}>
+                {/* Header ribbon / badge row */}
+                <View style={styles.specialOfferHeaderRow}>
+                  <Text style={styles.specialOfferBadgeLeftText}>Your special offer is reserved for you</Text>
+                  <View style={styles.saveBadgePill}>
+                    <Text style={styles.saveBadgePillText}>Save 20%</Text>
+                  </View>
+                </View>
 
-              let ctaText = plan.ctaLabel;
-              if (isCurrentPlan) {
-                ctaText = 'Active Plan';
-              } else if (isUpgrade) {
-                ctaText = `Upgrade to ${plan.name}`;
-              } else if (isDowngrade) {
-                ctaText = `Downgrade to ${plan.name}`;
-              }
+                {/* Offer content: responsive between Desktop and Mobile */}
+                {isDesktop ? (
+                  <View style={styles.specialOfferMainRow}>
+                    {/* Left Column: Title & Total Price & Minutes */}
+                    <View style={styles.specialOfferLeftCol}>
+                      <Text style={styles.specialOfferTitle}>3 Months Pro</Text>
+                      <Text style={styles.specialOfferTotalSubtitle}>LKR 8,640 for 3 months</Text>
 
-              return (
-                <View
-                  key={plan.id}
-                  style={[
-                    styles.card,
-                    isDesktop && [
-                      styles.cardDesktop,
-                      {
-                        paddingVertical: desktopCardPaddingV,
-                        paddingHorizontal: desktopCardPaddingH,
-                      },
-                    ],
-                    plan.highlighted && !isCurrentPlan && styles.cardHighlighted,
-                    isCurrentPlan && styles.cardCurrentPlan,
-                  ]}
+                      <View style={styles.specialOfferMinutesRow}>
+                        <View style={styles.specialOfferClockCircle}>
+                          <Ionicons name="time-outline" size={18} color="#0057FF" />
+                        </View>
+                        <View>
+                          <Text style={styles.specialOfferMinutesText}>1,800 AI conversation minutes</Text>
+                          <Text style={styles.specialOfferPeriodSub}>for 3 months</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Vertical divider on desktop */}
+                    <View style={styles.specialOfferDividerV} />
+
+                    {/* Middle Column: Price per month */}
+                    <View style={styles.specialOfferPriceCol}>
+                      <Text style={styles.specialOfferOriginalPrice}>LKR 3,600 / month</Text>
+                      <Text style={styles.specialOfferMonthlyPrice}>
+                        LKR 2,880 <Text style={styles.specialOfferPerMonthText}>/ month</Text>
+                      </Text>
+                    </View>
+
+                    {/* Right Column: CTA button */}
+                    <View style={styles.specialOfferCtaCol}>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.specialOfferButton,
+                          pressed && styles.ctaButtonPressed,
+                          loadingPlanId === '3-months-pro' && { opacity: 0.8 },
+                        ]}
+                        disabled={loadingPlanId !== null}
+                        onPress={() => handleSelectPlan('3-months-pro')}
+                      >
+                        {loadingPlanId === '3-months-pro' ? (
+                          <ActivityIndicator size="small" color="#ffffff" />
+                        ) : (
+                          <View style={styles.specialOfferButtonContent}>
+                            <Text style={styles.specialOfferButtonText}>Get This Offer</Text>
+                            <Ionicons name="arrow-forward" size={16} color="#ffffff" style={{ marginLeft: 6 }} />
+                          </View>
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  /* Mobile: Exactly matching the mobile screenshot */
+                  <View style={styles.specialOfferMobileBody}>
+                    <View style={styles.specialOfferMobileTopRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.specialOfferTitle}>3 Months Pro</Text>
+                        <Text style={styles.specialOfferTotalSubtitle}>LKR 8,640 for 3 months</Text>
+                      </View>
+                      <View style={styles.specialOfferMobilePriceRight}>
+                        <Text style={styles.specialOfferOriginalPrice}>LKR 3,600 / month</Text>
+                        <Text style={styles.specialOfferMonthlyPrice}>
+                          LKR 2,880<Text style={styles.specialOfferPerMonthText}> / month</Text>
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.specialOfferMinutesRow}>
+                      <View style={styles.specialOfferClockCircle}>
+                        <Ionicons name="time-outline" size={18} color="#0057FF" />
+                      </View>
+                      <Text style={styles.specialOfferMinutesText}>1,800 AI conversation minutes</Text>
+                    </View>
+
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.specialOfferButtonMobile,
+                        pressed && styles.ctaButtonPressed,
+                        loadingPlanId === '3-months-pro' && { opacity: 0.8 },
+                      ]}
+                      disabled={loadingPlanId !== null}
+                      onPress={() => handleSelectPlan('3-months-pro')}
+                    >
+                      {loadingPlanId === '3-months-pro' ? (
+                        <ActivityIndicator size="small" color="#ffffff" />
+                      ) : (
+                        <View style={styles.specialOfferButtonContent}>
+                          <Text style={styles.specialOfferButtonText}>Get This Offer</Text>
+                          <Ionicons name="arrow-forward" size={16} color="#ffffff" style={{ marginLeft: 8 }} />
+                        </View>
+                      )}
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+
+              {/* See other plans toggle line */}
+              <View style={styles.seeOtherPlansWrap}>
+                <View style={styles.seeOtherPlansLine} />
+                <Pressable
+                  style={styles.seeOtherPlansButton}
+                  onPress={() => setShowOtherPlans((prev) => !prev)}
                 >
-                  {/* "Active Plan" or "Most Popular" badge */}
-                  {isCurrentPlan ? (
-                    <View style={styles.activePlanBadge}>
-                      <Ionicons name="checkmark-circle" size={13} color="#ffffff" style={{ marginRight: 4 }} />
-                      <Text style={styles.activePlanBadgeText}>Active Plan</Text>
-                    </View>
-                  ) : plan.badgeLabel ? (
-                    <View style={styles.popularBadge}>
-                      <Text style={styles.popularBadgeText}>{plan.badgeLabel}</Text>
-                    </View>
-                  ) : null}
+                  <Text style={styles.seeOtherPlansText}>See other plans</Text>
+                  <Ionicons
+                    name={showOtherPlans ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color="#0057FF"
+                    style={{ marginLeft: 4 }}
+                  />
+                </Pressable>
+                <View style={styles.seeOtherPlansLine} />
+              </View>
+            </View>
+          )}
 
-                  <View style={[styles.cardTopContent, isDesktop && styles.cardTopContentDesktop]}>
-                    {/* Plan header */}
-                    <View
-                      style={[
-                        styles.cardHeader,
-                        isDesktop && { marginBottom: desktopCardHeaderMarginBottom },
-                      ]}
-                    >
-                      <View style={[
-                        styles.planIconWrap,
-                        isDesktop && styles.planIconWrapDesktop,
-                        { backgroundColor: isCurrentPlan ? '#E0F2FE' : plan.iconBg },
-                      ]}>
-                        <PlanIcon planId={plan.id} color={isCurrentPlan ? '#0284C7' : plan.iconColor} />
-                      </View>
-                      <View style={styles.planNameCol}>
-                        <Text
-                          style={[
-                            styles.planName,
-                            isDesktop && styles.planNameDesktop,
-                            (plan.highlighted || isCurrentPlan) && styles.planNameHighlighted,
-                          ]}
-                        >
-                          {plan.name}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.planSubtitle,
-                            isDesktop && styles.planSubtitleDesktop,
-                            (plan.highlighted || isCurrentPlan) && styles.planSubtitleHighlighted,
-                          ]}
-                        >
-                          {plan.subtitle}
-                        </Text>
-                      </View>
-                    </View>
+          {/* ──────────── PRICING CARDS (Shown if not starter or if showOtherPlans is true) ──────────── */}
+          {(!isStarter || showOtherPlans) && (
+            <View
+              style={[
+                styles.cardsRow,
+                isDesktop && [
+                  styles.cardsRowDesktop,
+                  { marginBottom: desktopCardsMarginBottom },
+                ],
+              ]}
+            >
+              {PLANS.map((plan) => {
+                const planWeight = TIER_ORDER[plan.id] ?? 0;
+                const isCurrentPlan = currentTier === plan.id;
+                const isUpgrade = planWeight > currentWeight;
+                const isDowngrade = planWeight < currentWeight;
 
-                    {/* Price */}
-                    <View
-                      style={[
-                        styles.priceRow,
-                        isDesktop && { marginBottom: desktopPriceMarginBottom },
-                      ]}
-                    >
-                      <Text
+                let ctaText = plan.ctaLabel;
+                if (isCurrentPlan) {
+                  ctaText = 'Active Plan';
+                } else if (isUpgrade && isPaidUser) {
+                  ctaText = `Upgrade to ${plan.name}`;
+                } else if (isDowngrade) {
+                  ctaText = `Downgrade to ${plan.name}`;
+                }
+
+                return (
+                  <View
+                    key={plan.id}
+                    style={[
+                      styles.card,
+                      isDesktop && [
+                        styles.cardDesktop,
+                        {
+                          paddingVertical: desktopCardPaddingV,
+                          paddingHorizontal: desktopCardPaddingH,
+                        },
+                      ],
+                      plan.highlighted && !isCurrentPlan && styles.cardHighlighted,
+                      isCurrentPlan && styles.cardCurrentPlan,
+                    ]}
+                  >
+                    {/* "Active Plan" or "Most Popular" badge */}
+                    {isCurrentPlan ? (
+                      <View style={styles.activePlanBadge}>
+                        <Ionicons name="checkmark-circle" size={13} color="#ffffff" style={{ marginRight: 4 }} />
+                        <Text style={styles.activePlanBadgeText}>Active Plan</Text>
+                      </View>
+                    ) : plan.badgeLabel ? (
+                      <View style={styles.popularBadge}>
+                        <Text style={styles.popularBadgeText}>{plan.badgeLabel}</Text>
+                      </View>
+                    ) : null}
+
+                    <View style={[styles.cardTopContent, isDesktop && styles.cardTopContentDesktop]}>
+                      {/* Responsive Plan Header: On Mobile, icon+title on left, price on right! On Desktop, stacked */}
+                      {isDesktop ? (
+                        <>
+                          {/* Desktop Plan Header */}
+                          <View
+                            style={[
+                              styles.cardHeader,
+                              { marginBottom: desktopCardHeaderMarginBottom },
+                            ]}
+                          >
+                            <View style={[
+                              styles.planIconWrap,
+                              styles.planIconWrapDesktop,
+                              { backgroundColor: isCurrentPlan ? '#E0F2FE' : plan.iconBg },
+                            ]}>
+                              <PlanIcon planId={plan.id} color={isCurrentPlan ? '#0284C7' : plan.iconColor} />
+                            </View>
+                            <View style={styles.planNameCol}>
+                              <Text
+                                style={[
+                                  styles.planName,
+                                  styles.planNameDesktop,
+                                  (plan.highlighted || isCurrentPlan) && styles.planNameHighlighted,
+                                ]}
+                              >
+                                {plan.name}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.planSubtitle,
+                                  styles.planSubtitleDesktop,
+                                  (plan.highlighted || isCurrentPlan) && styles.planSubtitleHighlighted,
+                                ]}
+                              >
+                                {plan.subtitle}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Desktop Price */}
+                          <View
+                            style={[
+                              styles.priceRow,
+                              { marginBottom: desktopPriceMarginBottom },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.priceText,
+                                styles.priceTextDesktop,
+                                isCompact && styles.priceTextCompact,
+                                (plan.highlighted || isCurrentPlan) && styles.priceTextHighlighted,
+                              ]}
+                            >
+                              {plan.price}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.pricePeriod,
+                                styles.pricePeriodDesktop,
+                                (plan.highlighted || isCurrentPlan) && styles.pricePeriodHighlighted,
+                              ]}
+                            >
+                              {plan.period}
+                            </Text>
+                          </View>
+
+                          {/* Divider */}
+                          <View
+                            style={[
+                              styles.divider,
+                              { marginBottom: desktopDividerMarginBottom },
+                              plan.highlighted && styles.dividerHighlighted,
+                              isCurrentPlan && styles.dividerCurrentPlan,
+                            ]}
+                          />
+                        </>
+                      ) : (
+                        /* Mobile Plan Header: Icon + Name on Left, Price on Right */
+                        <View style={styles.cardHeaderMobile}>
+                          <View style={styles.cardHeaderMobileLeft}>
+                            <View style={[
+                              styles.planIconWrap,
+                              { backgroundColor: isCurrentPlan ? '#E0F2FE' : plan.iconBg },
+                            ]}>
+                              <PlanIcon planId={plan.id} color={isCurrentPlan ? '#0284C7' : plan.iconColor} />
+                            </View>
+                            <View style={styles.planNameCol}>
+                              <Text
+                                style={[
+                                  styles.planName,
+                                  (plan.highlighted || isCurrentPlan) && styles.planNameHighlighted,
+                                ]}
+                              >
+                                {plan.name}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.planSubtitle,
+                                  (plan.highlighted || isCurrentPlan) && styles.planSubtitleHighlighted,
+                                ]}
+                              >
+                                {plan.subtitle}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.priceRowMobile}>
+                            <Text
+                              style={[
+                                styles.priceTextMobile,
+                                (plan.highlighted || isCurrentPlan) && styles.priceTextHighlighted,
+                              ]}
+                            >
+                              {plan.price}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.pricePeriodMobile,
+                                (plan.highlighted || isCurrentPlan) && styles.pricePeriodHighlighted,
+                              ]}
+                            >
+                              {plan.period}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+
+                      {/* Features list */}
+                      <View
                         style={[
-                          styles.priceText,
-                          isDesktop && styles.priceTextDesktop,
-                          isCompact && styles.priceTextCompact,
-                          (plan.highlighted || isCurrentPlan) && styles.priceTextHighlighted,
+                          styles.featuresList,
+                          isDesktop && [
+                            styles.featuresListDesktop,
+                            {
+                              gap: desktopFeatureGap,
+                              marginBottom: desktopFeatureMarginBottom,
+                            },
+                          ],
                         ]}
                       >
-                        {plan.price}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.pricePeriod,
-                          isDesktop && styles.pricePeriodDesktop,
-                          (plan.highlighted || isCurrentPlan) && styles.pricePeriodHighlighted,
-                        ]}
-                      >
-                        {plan.period}
-                      </Text>
+                        {plan.features.map((feat, idx) => (
+                          <View key={idx} style={styles.featureRow}>
+                            <Ionicons name="checkmark-circle" size={isDesktop ? 18 : 16} color="#0057FF" />
+                            <Text
+                              style={[
+                                styles.featureText,
+                                isDesktop && styles.featureTextDesktop,
+                                (plan.highlighted || isCurrentPlan) && styles.featureTextHighlighted,
+                              ]}
+                            >
+                              {feat.text}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
                     </View>
 
-                    {/* Divider */}
-                    <View
-                      style={[
-                        styles.divider,
-                        isDesktop && { marginBottom: desktopDividerMarginBottom },
-                        plan.highlighted && styles.dividerHighlighted,
-                        isCurrentPlan && styles.dividerCurrentPlan,
+                    {/* CTA button */}
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.ctaButton,
+                        isDesktop && { height: desktopCtaHeight },
+                        isCurrentPlan
+                          ? styles.ctaButtonCurrentPlan
+                          : styles.ctaButtonOutline,
+                        (pressed || loadingPlanId === plan.id) && !isCurrentPlan && styles.ctaButtonPressed,
                       ]}
-                    />
-
-                    {/* Features list */}
-                    <View
-                      style={[
-                        styles.featuresList,
-                        isDesktop && [
-                          styles.featuresListDesktop,
-                          {
-                            gap: desktopFeatureGap,
-                            marginBottom: desktopFeatureMarginBottom,
-                          },
-                        ],
-                      ]}
+                      onPress={() => !isCurrentPlan && handleSelectPlan(plan.id)}
+                      disabled={isCurrentPlan || loadingPlanId !== null}
+                      accessibilityRole="button"
+                      accessibilityLabel={ctaText}
                     >
-                      {plan.features.map((feat, idx) => (
-                        <View key={idx} style={styles.featureRow}>
-                          {isCurrentPlan ? (
-                            <Ionicons name="checkmark-circle" size={isDesktop ? 18 : 16} color="#059669" />
-                          ) : plan.highlighted ? (
-                            <CheckIcon color="#0057FF" size={isDesktop ? 18 : 16} />
-                          ) : (
-                            <CheckOutlineIcon size={isDesktop ? 18 : 16} />
+                      {loadingPlanId === plan.id ? (
+                        <ActivityIndicator
+                          size="small"
+                          color="#0057FF"
+                        />
+                      ) : (
+                        <View style={styles.ctaButtonContent}>
+                          {isCurrentPlan && (
+                            <Ionicons name="checkmark-circle" size={16} color="#059669" style={{ marginRight: 6 }} />
                           )}
                           <Text
                             style={[
-                              styles.featureText,
-                              isDesktop && styles.featureTextDesktop,
-                              (plan.highlighted || isCurrentPlan) && styles.featureTextHighlighted,
+                              styles.ctaButtonText,
+                              isCurrentPlan
+                                ? styles.ctaButtonTextCurrentPlan
+                                : isDowngrade
+                                ? styles.ctaButtonTextDowngrade
+                                : null,
                             ]}
                           >
-                            {feat.text}
+                            {ctaText}
                           </Text>
                         </View>
-                      ))}
-                    </View>
+                      )}
+                    </Pressable>
+
                   </View>
-
-                  {/* CTA button */}
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.ctaButton,
-                      isDesktop && { height: desktopCtaHeight },
-                      isCurrentPlan
-                        ? styles.ctaButtonCurrentPlan
-                        : isUpgrade
-                        ? (plan.highlighted ? styles.ctaButtonHighlighted : styles.ctaButtonOutline)
-                        : styles.ctaButtonDowngrade,
-                      (pressed || loadingPlanId === plan.id) && !isCurrentPlan && styles.ctaButtonPressed,
-                    ]}
-                    onPress={() => !isCurrentPlan && handleSelectPlan(plan.id)}
-                    disabled={isCurrentPlan || loadingPlanId !== null}
-                    accessibilityRole="button"
-                    accessibilityLabel={ctaText}
-                  >
-                    {loadingPlanId === plan.id ? (
-                      <ActivityIndicator
-                        size="small"
-                        color={plan.highlighted && !isDowngrade ? '#ffffff' : '#0057FF'}
-                      />
-                    ) : (
-                      <View style={styles.ctaButtonContent}>
-                        {isCurrentPlan && (
-                          <Ionicons name="checkmark-circle" size={16} color="#059669" style={{ marginRight: 6 }} />
-                        )}
-                        <Text
-                          style={[
-                            styles.ctaButtonText,
-                            isCurrentPlan
-                              ? styles.ctaButtonTextCurrentPlan
-                              : isUpgrade && plan.highlighted
-                              ? styles.ctaButtonTextHighlighted
-                              : isDowngrade
-                              ? styles.ctaButtonTextDowngrade
-                              : null,
-                          ]}
-                        >
-                          {ctaText}
-                        </Text>
-                      </View>
-                    )}
-                  </Pressable>
-
-                </View>
-              );
-            })}
-          </View>
+                );
+              })}
+            </View>
+          )}
 
           {/* ──────────── TRUST BADGES ──────────── */}
           <View
@@ -784,38 +1105,98 @@ export default function UpgradeScreen() {
             })}
           </View>
 
-          {/* ──────────── TESTIMONIAL ──────────── */}
-          <View
-            style={[
-              styles.testimonialCard,
-              isDesktop && [
-                styles.testimonialCardDesktop,
-                { paddingVertical: desktopTestimonialPaddingV },
-              ],
-            ]}
-          >
-            <View style={styles.testimonialQuoteRow}>
-              <Text style={styles.testimonialQuoteMark}>"</Text>
-              <View style={{ flex: 1, justifyContent: 'center' }}>
-                <Text
-                  style={[
-                    styles.testimonialText,
-                    isDesktop && styles.testimonialTextDesktop,
-                  ]}
-                >
-                  "SpeakwithMaya has really helped me improve my confidence. The extra practice time in Pro is worth it!"
-                </Text>
-                <View style={styles.testimonialMetaCol}>
-                  <Text style={styles.testimonialAuthor}>— Sanduni, Sri Lanka</Text>
-                  <Text style={styles.testimonialStars}>⭐⭐⭐⭐⭐</Text>
+          {/* ──────────── AUTOMATIC HORIZONTAL TESTIMONIAL CAROUSEL ──────────── */}
+          <View style={styles.testimonialCarouselWrap}>
+            <Animated.View
+              style={[
+                styles.testimonialCard,
+                isDesktop && [
+                  styles.testimonialCardDesktop,
+                  { paddingVertical: desktopTestimonialPaddingV },
+                ],
+                {
+                  opacity: testimonialFadeAnim,
+                  transform: [{ translateX: testimonialSlideAnim }],
+                },
+              ]}
+            >
+              <View style={styles.testimonialQuoteRow}>
+                <Ionicons name="chatbubble-ellipses-outline" size={24} color="#93C5FD" style={{ marginTop: 2 }} />
+                <View style={{ flex: 1, justifyContent: 'center' }}>
+                  <Text
+                    style={[
+                      styles.testimonialText,
+                      isDesktop && styles.testimonialTextDesktop,
+                    ]}
+                  >
+                    {UPGRADE_TESTIMONIALS[activeTestimonialIdx].quote}
+                  </Text>
+                  <View style={styles.testimonialMetaCol}>
+                    <Text style={styles.testimonialAuthor}>
+                      {UPGRADE_TESTIMONIALS[activeTestimonialIdx].author}
+                    </Text>
+                    <View style={styles.starsRow}>
+                      {[1, 2, 3, 4, 5].map((s) => (
+                        <Ionicons key={s} name="star" size={14} color="#FBBF24" style={{ marginRight: 2 }} />
+                      ))}
+                    </View>
+                  </View>
                 </View>
               </View>
+            </Animated.View>
+
+            {/* Horizontal indicators / dots */}
+            <View style={styles.testimonialDotsRow}>
+              {UPGRADE_TESTIMONIALS.map((_, idx) => (
+                <Pressable
+                  key={idx}
+                  onPress={() => setActiveTestimonialIdx(idx)}
+                  hitSlop={8}
+                >
+                  <View
+                    style={[
+                      styles.testimonialDot,
+                      idx === activeTestimonialIdx && styles.testimonialDotActive,
+                    ]}
+                  />
+                </Pressable>
+              ))}
             </View>
-            <Image
-              source={{ uri: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80' }}
-              style={styles.testimonialAvatar}
-              resizeMode="cover"
-            />
+          </View>
+
+          {/* ──────────── FREQUENTLY ASKED QUESTIONS SECTION ──────────── */}
+          <View style={styles.faqSectionContainer}>
+            <View style={styles.faqHeaderRow}>
+              <Text style={styles.faqSectionTitle}>Frequently Asked Questions</Text>
+              <Pressable onPress={() => setOpenFaq(openFaq ? null : UPGRADE_FAQS[0].id)}>
+                <Text style={styles.faqViewAllLink}>View all</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.faqListContainer}>
+              {UPGRADE_FAQS.map((faq) => {
+                const isOpen = openFaq === faq.id;
+                return (
+                  <Pressable
+                    key={faq.id}
+                    onPress={() => toggleFaq(faq.id)}
+                    style={[styles.faqAccordionCard, isOpen && styles.faqAccordionCardOpen]}
+                  >
+                    <View style={styles.faqAccordionQuestionRow}>
+                      <Text style={styles.faqAccordionQuestionText}>{faq.question}</Text>
+                      <Ionicons
+                        name={isOpen ? 'chevron-up' : 'chevron-down'}
+                        size={18}
+                        color="#64748B"
+                      />
+                    </View>
+                    {isOpen && (
+                      <Text style={styles.faqAccordionAnswerText}>{faq.answer}</Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
 
           {/* Room for mobile tabs on phone */}
@@ -919,12 +1300,11 @@ const styles = StyleSheet.create({
   scrollContentDesktop: {
     paddingHorizontal: 38,
     paddingTop: 16,
-    paddingBottom: 16,
+    paddingBottom: 48,
     maxWidth: 1600,
     alignSelf: 'center',
     width: '100%',
     flexGrow: 1,
-    justifyContent: 'space-between',
   },
 
   /* ── Header ── */
@@ -1096,6 +1476,34 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 14,
   },
+  cardHeaderMobile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  cardHeaderMobileLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  priceRowMobile: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  priceTextMobile: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 16,
+    color: '#0f172a',
+    letterSpacing: -0.2,
+  },
+  pricePeriodMobile: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11.5,
+    color: '#64748b',
+    marginTop: 1,
+  },
   planIconWrap: {
     width: 36,
     height: 36,
@@ -1220,9 +1628,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ctaButtonOutline: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#ffffff',
     borderWidth: 1.5,
-    borderColor: '#e2e8f0',
+    borderColor: '#CBD5E1',
   },
   ctaButtonHighlighted: {
     backgroundColor: '#0057FF',
@@ -1344,21 +1752,53 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  /* ── Testimonial ── */
+  /* ── Testimonials ── */
+  testimonialCarouselWrap: {
+    marginBottom: 20,
+  },
+  testimonialDotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  testimonialDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#CBD5E1',
+    transitionDuration: '200ms',
+  } as any,
+  testimonialDotActive: {
+    width: 22,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#0057FF',
+  },
+  testimonialsStack: {
+    gap: 14,
+    marginBottom: 20,
+  },
   testimonialCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#ffffff',
     borderRadius: 14,
-    padding: 16,
+    padding: 18,
     borderWidth: 1,
     borderColor: '#e2e8f0',
     gap: 16,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+      } as any,
+    }),
   },
   testimonialCardDesktop: {
-    paddingVertical: 14,
+    paddingVertical: 18,
     paddingHorizontal: 24,
-    minHeight: 110,
+    minHeight: 90,
   },
   testimonialQuoteRow: {
     flex: 1,
@@ -1391,6 +1831,11 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'regular'),
     fontSize: 11,
     color: '#64748b',
+  },
+  starsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
   },
   testimonialStars: {
     fontSize: 11,
@@ -1431,5 +1876,268 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#64748b',
     marginTop: 3,
+  },
+
+  /* ── 3 Months Pro Special Offer Card ── */
+  specialOfferContainer: {
+    marginBottom: 24,
+  },
+  specialOfferCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#3B82F6',
+    borderRadius: 16,
+    padding: 20,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 12px rgba(59, 130, 246, 0.08)',
+      } as any,
+      default: {
+        elevation: 2,
+      },
+    }),
+  },
+  specialOfferHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  specialOfferBadgeLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  specialOfferBadgeLeftText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 13,
+    color: '#0057FF',
+  },
+  saveBadgePill: {
+    backgroundColor: '#FF0055',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  saveBadgePillText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 12,
+    color: '#FFFFFF',
+  },
+  specialOfferMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  specialOfferMainRowMobile: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 16,
+  },
+  specialOfferLeftCol: {
+    flex: 1.2,
+  },
+  specialOfferTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 26,
+    color: '#0057FF',
+    lineHeight: 30,
+  },
+  specialOfferTotalSubtitle: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 3,
+    marginBottom: 12,
+  },
+  specialOfferMinutesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  specialOfferClockCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  specialOfferMinutesText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 13.5,
+    color: '#0F172A',
+  },
+  specialOfferPeriodSub: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11.5,
+    color: '#64748B',
+  },
+  specialOfferDividerV: {
+    width: 1,
+    height: 60,
+    backgroundColor: '#E2E8F0',
+    marginHorizontal: 16,
+  },
+  specialOfferPriceCol: {
+    flex: 1,
+  },
+  specialOfferMonthlyPrice: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 24,
+    color: '#0057FF',
+  },
+  specialOfferPerMonthText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#64748B',
+  },
+  specialOfferOriginalPrice: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12.5,
+    color: '#94A3B8',
+    textDecorationLine: 'line-through',
+    marginTop: 3,
+  },
+  specialOfferCtaCol: {
+    alignItems: 'flex-end',
+  },
+  specialOfferButton: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 10px rgba(37, 99, 235, 0.25)',
+      } as any,
+    }),
+  },
+  specialOfferMobileBody: {
+    gap: 14,
+  },
+  specialOfferMobileTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  specialOfferMobilePriceRight: {
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+  },
+  specialOfferButtonMobile: {
+    backgroundColor: '#2563EB',
+    width: '100%',
+    paddingVertical: 14,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)',
+      } as any,
+    }),
+  },
+  specialOfferButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  specialOfferButtonText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 14.5,
+    color: '#FFFFFF',
+  },
+
+  /* ── See Other Plans Toggle ── */
+  seeOtherPlansWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 18,
+    gap: 12,
+  },
+  seeOtherPlansLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E2E8F0',
+  },
+  seeOtherPlansButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  seeOtherPlansText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#0F172A',
+  },
+
+  /* ── Frequently Asked Questions ── */
+  faqSectionContainer: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  faqHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  faqSectionTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 18,
+    color: '#0F172A',
+  },
+  faqViewAllLink: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#0057FF',
+  },
+  faqListContainer: {
+    gap: 10,
+  },
+  faqAccordionCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  faqAccordionCardOpen: {
+    borderColor: '#93C5FD',
+    backgroundColor: '#F8FAFC',
+  },
+  faqAccordionQuestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  faqAccordionQuestionText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 15,
+    color: '#0F172A',
+    flex: 1,
+  },
+  faqAccordionAnswerText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13.5,
+    color: '#475569',
+    lineHeight: 20,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
   },
 });

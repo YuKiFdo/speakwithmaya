@@ -65,6 +65,10 @@ export class CreateSessionTokenDto {
   roadmapLevelId?: string;
 
   @IsOptional()
+  @IsNumber()
+  levelNumber?: number;
+
+  @IsOptional()
   isReconnect?: boolean;
 
   @IsOptional()

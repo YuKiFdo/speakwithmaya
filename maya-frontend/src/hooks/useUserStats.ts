@@ -130,7 +130,10 @@ OnboardingStore.subscribe((state) => {
   }
 });
 
-function calculateResetsIn(resetAt?: string): string {
+function calculateResetsIn(resetAt?: string, isStarter: boolean = false): string {
+  if (isStarter) {
+    return 'Resets daily';
+  }
   if (!resetAt) return 'Resets in 30 days';
   try {
     const diffMs = new Date(resetAt).getTime() - Date.now();
@@ -205,8 +208,9 @@ export function useUserStats(): UserStats {
   }, [user?.id]);
 
   const planTier = (user?.planTier || 'starter').toLowerCase() as 'starter' | 'basic' | 'pro' | 'premium';
-  const isPro = planTier === 'pro' || planTier === 'premium';
-  const defaultMonthlyAllowance = planTier === 'premium' ? 1200 : planTier === 'pro' ? 600 : planTier === 'basic' ? 450 : 10;
+  const isStarter = planTier === 'starter';
+  const isPro = planTier === 'pro' || planTier === 'premium' || planTier === 'basic';
+  const defaultMonthlyAllowance = planTier === 'premium' ? 1200 : planTier === 'pro' ? 600 : planTier === 'basic' ? 450 : 5;
   const monthlyMinutesAllowance = user?.monthlyMinutesAllowance ?? defaultMonthlyAllowance;
   const addOnMinutesBalance = user?.addOnMinutesBalance ?? 0;
   const minutesBalance = user?.minutesBalance ?? (monthlyMinutesAllowance + addOnMinutesBalance);
@@ -218,7 +222,7 @@ export function useUserStats(): UserStats {
   const totalMinutes = monthlyMinutesAllowance + effectiveAddOn;
   const usedMinutes = Math.max(0, totalMinutes - minutesBalance);
   const isTimeExpired = minutesBalance <= 0;
-  const resetsInText = calculateResetsIn(user?.minutesResetAt);
+  const resetsInText = calculateResetsIn(user?.minutesResetAt, isStarter);
 
   const displayName = user?.displayName || store.name || 'Learner';
   const initials = computeInitials(displayName);

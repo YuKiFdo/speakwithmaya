@@ -120,8 +120,8 @@ export function DesktopSidebar({
   const isProTier = resolvedTier === 'pro';
 
   const currentUsed = usedMinutes ?? (isPaid ? 320 : 0);
-  const currentTotal = totalMinutes ?? (resolvedTier === 'premium' ? 1200 : resolvedTier === 'pro' ? 600 : resolvedTier === 'basic' ? 450 : 10);
-  const currentResetsIn = resetsInText ?? 'Resets in 30 days';
+  const currentTotal = totalMinutes ?? (resolvedTier === 'premium' ? 1200 : resolvedTier === 'pro' ? 600 : resolvedTier === 'basic' ? 450 : 5);
+  const currentResetsIn = resetsInText ?? (isPaid ? 'Resets in 30 days' : 'Resets daily');
   const percentFilled = Math.min(100, Math.round((currentUsed / currentTotal) * 100));
   const displayMinutes = isPaid ? String(currentUsed) : String(currentUsed).padStart(2, '0');
 

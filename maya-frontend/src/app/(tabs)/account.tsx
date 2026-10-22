@@ -563,7 +563,7 @@ export default function AccountScreen() {
           onPrimaryPress={() => {
             if (activePopup === 'level-up') {
               router.push('/(tabs)/roadmap');
-            } else if (activePopup === 'unlock-premium') {
+            } else if (activePopup === 'unlock-premium' || activePopup === 'daily-limit') {
               router.push('/upgrade');
             }
             setActivePopup(null);
@@ -810,7 +810,7 @@ function CurrentPlanCard({
   onGetExtraTime: () => void;
   onChangePayment: () => void;
 }) {
-  const isPro = planTier === 'pro' || planTier === 'premium';
+  const isPro = planTier === 'pro' || planTier === 'premium' || planTier === 'basic';
   const planDisplayName = planTier.charAt(0).toUpperCase() + planTier.slice(1) + ' Plan';
   const nextBillingDateText = formatBillingDate(nextBillingDate, renewalDate || '25 Jun 2026');
 
@@ -869,13 +869,13 @@ function CurrentPlanCard({
 
       {/* Main Title & Subtitle */}
       <Text style={styles.planMainTitle}>
-        {planDisplayName} ({isPro ? 'Monthly' : '10 Min/Month'})
+        {planDisplayName} ({isPro ? 'Monthly' : '5 Min/Day'})
       </Text>
       <Text style={styles.planMainSubtitle}>
         {isPastDue
           ? 'Payment retry in progress. Paid features are frozen until payment settles.'
           : isTimeExpired
-          ? 'You have used all available minutes for this cycle. Get extra time to continue.'
+          ? (isPro ? 'You have used all available minutes for this cycle. Get extra time to continue.' : "You've reached your daily limit! Continue your practice with Premium.")
           : 'Perfect for getting started with Maya.'}
       </Text>
 
@@ -942,7 +942,7 @@ function CurrentPlanCard({
           </Pressable>
         )}
 
-        {isTimeExpired && !isPastDue && (
+        {isPro && isTimeExpired && !isPastDue && (
           <Pressable
             onPress={onGetExtraTime}
             style={({ pressed }) => [

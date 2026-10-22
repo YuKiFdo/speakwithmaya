@@ -290,7 +290,11 @@ export default function DashboardScreen() {
     setCreateSessionVisible(false);
 
     if (isTimeExpired) {
-      setActivePopup('get-extra-time');
+      if (!isPro) {
+        setActivePopup('daily-limit');
+      } else {
+        setActivePopup('get-extra-time');
+      }
       return;
     }
 
@@ -317,7 +321,11 @@ export default function DashboardScreen() {
 
   const handleStartTalking = () => {
     if (isTimeExpired) {
-      setActivePopup('get-extra-time');
+      if (!isPro) {
+        setActivePopup('daily-limit');
+      } else {
+        setActivePopup('get-extra-time');
+      }
       return;
     }
     handleOpenCreateSession();
@@ -325,7 +333,11 @@ export default function DashboardScreen() {
 
   const handleResumeTalking = () => {
     if (isTimeExpired) {
-      setActivePopup('get-extra-time');
+      if (!isPro) {
+        setActivePopup('daily-limit');
+      } else {
+        setActivePopup('get-extra-time');
+      }
       return;
     }
     if (activeConversation) {
