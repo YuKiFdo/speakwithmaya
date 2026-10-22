@@ -252,6 +252,7 @@ export default function CallScreen() {
   const [showHintLimitPopup, setShowHintLimitPopup] = useState(false);
   const hintsHistoryRef = useRef<string[]>([]);
   const hintsUsedCountRef = useRef<number>(0);
+  const hasRevealedHintThisTurnRef = useRef<boolean>(false);
   const lastPrefetchedHintPromptRef = useRef<string>('');
   const isFetchingHintRef = useRef<boolean>(false);
 
@@ -269,6 +270,7 @@ export default function CallScreen() {
 
       setIsHintVisible(false);
       setHintData(null);
+      hasRevealedHintThisTurnRef.current = false;
       lastPrefetchedHintPromptRef.current = '';
       isFetchingHintRef.current = false;
     }
@@ -347,6 +349,50 @@ export default function CallScreen() {
     }
   }, [isWrappingUp]);
 
+  // Background prefetch: when Maya finishes speaking a prompt, silently fetch hint in background so it displays instantly on tap
+  useEffect(() => {
+    if (liveCall.status !== 'listening' || isWrappingUp) return;
+
+    const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
+    if (!question || question.length < 3) return;
+
+    const norm = question.toLowerCase().trim().replace(/[?!.,]/g, '');
+    if (lastPrefetchedHintPromptRef.current === norm || isFetchingHintRef.current) {
+      return;
+    }
+
+    lastPrefetchedHintPromptRef.current = norm;
+    isFetchingHintRef.current = true;
+
+    fetchHint(question, {
+      topic: effectiveTopic,
+      level: params.level,
+      scenarioId: params.scenarioId,
+      userName: effectiveUserName,
+      sessionId: liveCall.sessionId,
+      isPrefetch: true,
+    })
+      .then((res) => {
+        isFetchingHintRef.current = false;
+        if (res && res.hintEnglish) {
+          setHintData(res);
+        }
+      })
+      .catch(() => {
+        isFetchingHintRef.current = false;
+      });
+  }, [
+    liveCall.status,
+    liveCall.subtitles,
+    liveCall.previousSubtitles,
+    isWrappingUp,
+    effectiveTopic,
+    effectiveUserName,
+    liveCall.sessionId,
+    params.level,
+    params.scenarioId,
+  ]);
+
   const handleToggleHint = async () => {
     if (isWrappingUp) {
       setIsHintVisible(false);
@@ -355,27 +401,38 @@ export default function CallScreen() {
 
     liveCall.suppressMicFor?.(1400);
 
+    // If already visible, tapping closes the card (does not consume another hint credit)
     if (isHintVisible) {
       setIsHintVisible(false);
       return;
     }
 
-    if (hintData) {
-      setIsHintVisible(true);
-      return;
-    }
-
-    // Check hint limits: Starter plan is capped at 2 hints per session
+    // Hint Limits:
+    // - Intro Call: Unlimited hints
+    // - Paid Plans: Unlimited hints
+    // - Starter Plan (regular calls): 2 hint reveals per session
     const MAX_STARTER_HINTS = 2;
 
-    if (isStarter && hintsUsedCountRef.current >= MAX_STARTER_HINTS) {
+    if (isStarter && !isIntro && !hasRevealedHintThisTurnRef.current && hintsUsedCountRef.current >= MAX_STARTER_HINTS) {
       console.log(`[call.tsx] 💡 Starter plan hint limit reached (${hintsUsedCountRef.current}/${MAX_STARTER_HINTS}) -> showing upgrade popup`);
       setShowHintLimitPopup(true);
       return;
     }
 
-    if (isFetchingHintRef.current) return;
+    // If hint is already pre-fetched in background, show it immediately (0ms delay)
+    if (hintData) {
+      if (!hasRevealedHintThisTurnRef.current) {
+        hintsUsedCountRef.current += 1;
+        hasRevealedHintThisTurnRef.current = true;
+      }
+      if (hintData.hintEnglish && !hintsHistoryRef.current.includes(hintData.hintEnglish)) {
+        hintsHistoryRef.current.push(hintData.hintEnglish);
+      }
+      setIsHintVisible(true);
+      return;
+    }
 
+    // Fallback: If user tapped before background prefetch completed
     const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
     if (!question || question.length < 3) return;
 
@@ -387,15 +444,19 @@ export default function CallScreen() {
         scenarioId: params.scenarioId,
         userName: effectiveUserName,
         sessionId: liveCall.sessionId,
+        isPrefetch: false,
       });
 
       if (res && res.hintEnglish && !isWrappingUp) {
         setHintData(res);
-        setIsHintVisible(true);
-        hintsUsedCountRef.current += 1;
+        if (!hasRevealedHintThisTurnRef.current) {
+          hintsUsedCountRef.current += 1;
+          hasRevealedHintThisTurnRef.current = true;
+        }
         if (!hintsHistoryRef.current.includes(res.hintEnglish)) {
           hintsHistoryRef.current.push(res.hintEnglish);
         }
+        setIsHintVisible(true);
       }
     } finally {
       isFetchingHintRef.current = false;
@@ -577,8 +638,12 @@ export default function CallScreen() {
 
         // Right after showing "Connected!" (brief 400ms flash), open the curtain into the call
         const handoffTimer = setTimeout(() => {
-          console.log(`[call.tsx] 🎙️ Releasing Maya greeting audio as CallScreen transitions into view (isIntro: ${isIntro})`);
-          liveCallRef.current.releaseGreeting?.();
+          if (!isIntro) {
+            console.log('[call.tsx] 🎙️ Releasing Maya greeting audio as CallScreen transitions into view');
+            liveCallRef.current.releaseGreeting?.();
+          } else {
+            console.log('[call.tsx] ⏳ Intro call: holding Maya greeting audio until ContextualCallGuide finishes');
+          }
 
           Animated.parallel([
             // ConnectingView dissolves & subtly expands outward
@@ -1229,7 +1294,8 @@ export default function CallScreen() {
             setGuideStepIndex(null);
             setIsTranslationVisible(false);
             setTranslationText('');
-            liveCall.releaseGreeting?.();
+            console.log('[call.tsx] 🎙️ Intro tour guide finished: releasing Maya greeting audio');
+            liveCallRef.current.releaseGreeting?.();
           }}
           isDesktop={isWebOrDesktop}
         />

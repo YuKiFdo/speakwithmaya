@@ -88,7 +88,14 @@ export async function fetchTranslation(text: string): Promise<string> {
  */
 export async function fetchHint(
   question: string,
-  options?: { topic?: string; level?: string; scenarioId?: string; userName?: string; sessionId?: string }
+  options?: {
+    topic?: string;
+    level?: string;
+    scenarioId?: string;
+    userName?: string;
+    sessionId?: string;
+    isPrefetch?: boolean;
+  }
 ): Promise<HintResponse | null> {
   const trimmed = (question || '').trim();
   if (!trimmed) return null;
@@ -120,6 +127,7 @@ export async function fetchHint(
           level: options?.level,
           scenarioId: options?.scenarioId,
           userName: options?.userName,
+          isPrefetch: options?.isPrefetch,
         }),
       });
 
