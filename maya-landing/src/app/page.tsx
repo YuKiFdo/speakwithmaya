@@ -236,71 +236,65 @@ function CheckCircleIcon() {
 
 function QuotesCardsContainer() {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [filledWordCount, setFilledWordCount] = useState(0);
-  const [targetWordCount, setTargetWordCount] = useState(0);
+  const [smoothWordPos, setSmoothWordPos] = useState(0);
 
-  // Scroll listener: tracks user scroll through Section 2 to fill forward on scroll down and un-fill on scroll up
+  // 60fps spring-interpolated scroll tracker: glides smoothly forward & backward without choppy timer ticks
   useEffect(() => {
     let rafId: number | null = null;
+    let targetPos = 0;
+    let currentPos = 0;
+    let isAnimating = false;
 
-    const onScroll = () => {
+    const computeTarget = () => {
       const el = containerRef.current;
       if (!el) return;
 
       const rect = el.getBoundingClientRect();
       const vh = window.innerHeight || 800;
 
-      // Start filling as container approaches comfortable view (85% down viewport)
-      // Reach full completion (all 3 cards filled sequentially) when scrolled through (22% down viewport)
-      const startY = vh * 0.85;
-      const endY = vh * 0.22;
+      const startY = vh * 0.86;
+      const endY = vh * 0.24;
 
       const progress = Math.max(
         0,
         Math.min(1, (startY - rect.top) / (startY - endY))
       );
-      const nextTarget = Math.round(progress * TOTAL_QUOTE_WORDS);
-
-      setTargetWordCount((prev) => (prev === nextTarget ? prev : nextTarget));
+      targetPos = progress * TOTAL_QUOTE_WORDS;
+      startTicking();
     };
 
-    const handleScroll = () => {
-      if (rafId !== null) return;
-      rafId = window.requestAnimationFrame(() => {
-        onScroll();
+    const tick = () => {
+      const diff = targetPos - currentPos;
+      if (Math.abs(diff) > 0.02) {
+        // Smooth exponential easing toward target scroll position
+        currentPos += diff * 0.14;
+        setSmoothWordPos(currentPos);
+        rafId = window.requestAnimationFrame(tick);
+      } else {
+        currentPos = targetPos;
+        setSmoothWordPos(targetPos);
+        isAnimating = false;
         rafId = null;
-      });
+      }
     };
 
-    onScroll();
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("resize", handleScroll, { passive: true });
+    const startTicking = () => {
+      if (!isAnimating) {
+        isAnimating = true;
+        rafId = window.requestAnimationFrame(tick);
+      }
+    };
+
+    computeTarget();
+    window.addEventListener("scroll", computeTarget, { passive: true });
+    window.addEventListener("resize", computeTarget, { passive: true });
 
     return () => {
-      window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("resize", handleScroll);
+      window.removeEventListener("scroll", computeTarget);
+      window.removeEventListener("resize", computeTarget);
       if (rafId !== null) window.cancelAnimationFrame(rafId);
     };
   }, []);
-
-  // Smooth stepper: steps forward when scrolling down, steps backward when scrolling up
-  // Ensures card 2 only starts after card 1 is 100% complete, and card 3 only after card 2 is complete!
-  useEffect(() => {
-    if (filledWordCount === targetWordCount) return;
-
-    const stepTimer = window.setTimeout(() => {
-      setFilledWordCount((prev) => {
-        if (prev < targetWordCount) {
-          return Math.min(TOTAL_QUOTE_WORDS, prev + 1);
-        } else if (prev > targetWordCount) {
-          return Math.max(0, prev - 1);
-        }
-        return prev;
-      });
-    }, 65);
-
-    return () => window.clearTimeout(stepTimer);
-  }, [filledWordCount, targetWordCount]);
 
   return (
     <div
@@ -309,33 +303,33 @@ function QuotesCardsContainer() {
     >
       {QUOTES_WITH_OFFSETS.map((card, cardIdx) => {
         const cardStart = card.startOffset;
-        const cardFilledCount = Math.max(
+        const cardProgressWords = Math.max(
           0,
-          Math.min(card.words.length, filledWordCount - cardStart)
+          Math.min(card.words.length, smoothWordPos - cardStart)
         );
-        const isCardComplete = cardFilledCount >= card.words.length;
+        const isCardComplete = cardProgressWords >= card.words.length - 0.15;
         const isCardActive =
-          cardFilledCount > 0 && cardFilledCount < card.words.length;
+          cardProgressWords > 0.05 && cardProgressWords < card.words.length - 0.15;
 
         return (
           <Reveal
             key={card.id}
-            delay={100 + cardIdx * 80}
-            y={16}
-            duration={800}
+            delay={80 + cardIdx * 70}
+            y={14}
+            duration={750}
           >
             <div
-              className={`bg-white rounded-xl px-5 py-4 border transition-all duration-300 flex items-start gap-2.5 select-none ${
+              className={`bg-white rounded-xl px-5 py-4 border transition-all duration-500 ease-out flex items-start gap-2.5 select-none ${
                 isCardActive
-                  ? "border-[#BFDBFE] shadow-[0_8px_24px_rgba(13,78,253,0.08)] ring-1 ring-[#0D4EFD]/25"
+                  ? "border-[#BFDBFE] shadow-[0_8px_24px_rgba(13,78,253,0.08)] ring-1 ring-[#0D4EFD]/20"
                   : isCardComplete
-                    ? "border-[#EDF2F9] shadow-[0_4px_20px_rgba(15,23,42,0.03)] hover:border-[#BFDBFE] hover:shadow-[0_6px_20px_rgba(13,78,253,0.06)]"
-                    : "border-[#EDF2F9] opacity-75"
+                    ? "border-[#E2ECF9] shadow-[0_4px_20px_rgba(15,23,42,0.04)] hover:border-[#BFDBFE] hover:shadow-[0_6px_20px_rgba(13,78,253,0.06)]"
+                    : "border-[#EDF2F9] opacity-85"
               }`}
             >
               <span
-                className={`font-serif text-[20px] leading-none select-none mt-0.5 transition-colors duration-300 ${
-                  cardFilledCount > 0 ? "text-[#0D4EFD]" : "text-[#93C5FD]"
+                className={`font-serif text-[20px] leading-none select-none mt-0.5 transition-colors duration-500 ease-out ${
+                  cardProgressWords > 0.1 ? "text-[#0D4EFD]" : "text-[#93C5FD]"
                 }`}
               >
                 “
@@ -343,33 +337,45 @@ function QuotesCardsContainer() {
               <p className="text-[13.5px] sm:text-[14.5px] leading-relaxed">
                 {card.words.map((word, wIdx) => {
                   const globalIdx = cardStart + wIdx;
-                  const isFilled = globalIdx < filledWordCount;
-                  const isCurrentActiveWord =
-                    globalIdx === filledWordCount - 1 &&
-                    filledWordCount > 0 &&
-                    filledWordCount < TOTAL_QUOTE_WORDS;
+                  // Continuous 0..1 fill ratio for each word so transitions never snap or reflow
+                  const wordFill = Math.max(
+                    0,
+                    Math.min(1, smoothWordPos - globalIdx)
+                  );
+                  const isFilled = wordFill >= 0.5;
                   const isBlueHighlight =
                     card.blueHighlightIndices.includes(wIdx);
                   const isBoldPrefix = wIdx < card.boldPrefixCount;
 
+                  // Keep font-weight and horizontal padding constant across states to eliminate layout shift/jitter
+                  const weightClass = isBlueHighlight
+                    ? "font-extrabold"
+                    : isBoldPrefix
+                      ? "font-bold"
+                      : "font-semibold";
+
                   return (
-                    <span key={`${card.id}-${wIdx}`} className="inline-block">
+                    <span key={`${card.id}-${wIdx}`} className="inline">
                       <span
-                        className={`rounded transition-all duration-150 inline-block ${
-                          isCurrentActiveWord
-                            ? "bg-[#0D4EFD] text-white font-bold px-1.5 py-0.5 shadow-[0_2px_8px_rgba(13,78,253,0.35)] scale-105"
+                        style={{
+                          opacity: 0.32 + wordFill * 0.68,
+                          transform: `translate3d(0, ${(1 - wordFill) * 1.5}px, 0)`,
+                        }}
+                        className={`inline-block rounded transition-colors duration-300 ease-out will-change-[opacity,transform] ${weightClass} ${
+                          isBlueHighlight
+                            ? isFilled
+                              ? "text-[#0D4EFD] bg-[#EBF2FF] px-1.5 py-0.5 border border-[#BFDBFE]/80 shadow-[0_1px_3px_rgba(13,78,253,0.08)]"
+                              : "text-[#64748B] bg-transparent px-1.5 py-0.5 border border-transparent"
                             : isFilled
-                              ? isBlueHighlight
-                                ? "text-[#0D4EFD] font-extrabold bg-[#EBF2FF] px-1.5 py-0.5 rounded border border-[#BFDBFE]/70 shadow-[0_1px_3px_rgba(13,78,253,0.08)]"
-                                : isBoldPrefix
-                                  ? "font-bold text-[#0F172A]"
-                                  : "font-semibold text-[#1E293B]"
-                              : "font-normal text-[#94A3B8]/60 opacity-40"
+                              ? isBoldPrefix
+                                ? "text-[#0F172A]"
+                                : "text-[#1E293B]"
+                              : "text-[#94A3B8]"
                         }`}
                       >
                         {word}
                       </span>
-                      {wIdx < card.words.length - 1 ? "\u00A0" : ""}
+                      {wIdx < card.words.length - 1 ? " " : ""}
                     </span>
                   );
                 })}
@@ -935,7 +941,7 @@ export default function Home() {
               {/* Step 01 */}
               <Reveal delay={0} y={22} scale={0.98} className="h-full">
                 <div className="group h-full relative bg-[#F8FAFF] hover:bg-[#F3F7FF] border border-[#EAF1FF] hover:border-[#D6E4FF] rounded-2xl p-6 sm:p-7 text-center flex flex-col items-center transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_10px_28px_rgba(13,78,253,0.06)]">
-                  <span className="hidden md:block absolute top-4 left-5 text-[11px] font-semibold text-[#CBD5E1]">
+                  <span className="block absolute top-4 left-5 text-[11px] font-semibold text-[#CBD5E1]">
                     01
                   </span>
                   <div className="w-12 h-12 rounded-xl bg-[#0D4EFD] text-white flex items-center justify-center shadow-[0_6px_14px_rgba(13,78,253,0.25)] mb-4 mt-1 transition-transform duration-300 group-hover:scale-105">
@@ -974,7 +980,7 @@ export default function Home() {
               {/* Step 02 */}
               <Reveal delay={140} y={22} scale={0.98} className="h-full">
                 <div className="group h-full relative bg-[#F8FAFF] hover:bg-[#F3F7FF] border border-[#EAF1FF] hover:border-[#D6E4FF] rounded-2xl p-6 sm:p-7 text-center flex flex-col items-center transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_10px_28px_rgba(13,78,253,0.06)]">
-                  <span className="hidden md:block absolute top-4 left-5 text-[11px] font-semibold text-[#CBD5E1]">
+                  <span className="block absolute top-4 left-5 text-[11px] font-semibold text-[#CBD5E1]">
                     02
                   </span>
                   <div className="w-12 h-12 rounded-xl bg-[#0D4EFD] text-white flex items-center justify-center shadow-[0_6px_14px_rgba(13,78,253,0.25)] mb-4 mt-1 transition-transform duration-300 group-hover:scale-105">
@@ -1016,7 +1022,7 @@ export default function Home() {
               {/* Step 03 */}
               <Reveal delay={280} y={22} scale={0.98} className="h-full">
                 <div className="group h-full relative bg-[#F8FAFF] hover:bg-[#F3F7FF] border border-[#EAF1FF] hover:border-[#D6E4FF] rounded-2xl p-6 sm:p-7 text-center flex flex-col items-center transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_10px_28px_rgba(13,78,253,0.06)]">
-                  <span className="hidden md:block absolute top-4 left-5 text-[11px] font-semibold text-[#CBD5E1]">
+                  <span className="block absolute top-4 left-5 text-[11px] font-semibold text-[#CBD5E1]">
                     03
                   </span>
                   <div className="w-12 h-12 rounded-xl bg-[#0D4EFD] text-white flex items-center justify-center shadow-[0_6px_14px_rgba(13,78,253,0.25)] mb-4 mt-1 transition-transform duration-300 group-hover:scale-105">
