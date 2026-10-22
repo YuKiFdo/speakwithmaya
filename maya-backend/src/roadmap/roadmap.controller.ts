@@ -147,7 +147,7 @@ export class RoadmapController {
     return this.roadmapService.uploadScenarioAudio(dto);
   }
 
-  // 8d. Public / Student: Stream Scenario Briefing Audio (with HTTP Range Streaming support)
+  // 8d. Public / Student: Stream Scenario Briefing Audio (Direct Azure CDN 302 Redirect with range fallback)
   @Get('roadmap/levels/:id/briefing-audio')
   async streamBriefingAudio(
     @Param('id') id: string,
@@ -157,6 +157,13 @@ export class RoadmapController {
   ) {
     const cleanLang = (lang === 'si' ? 'si' : 'en') as 'en' | 'si';
     try {
+      // Approach A: Instant 302 redirect to Azure Blob Storage CDN for native client HTTP range streaming
+      const directCdnUrl = await this.roadmapService.getBriefingAudioUrl(id, cleanLang);
+      if (directCdnUrl) {
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.redirect(302, directCdnUrl);
+      }
+
       const { audioBuffer, mimeType } = await this.roadmapService.getBriefingAudio(id, cleanLang);
       const totalLength = audioBuffer.length;
       const range = req.headers.range;

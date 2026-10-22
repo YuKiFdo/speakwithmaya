@@ -364,7 +364,7 @@ export default function AnalyzingScreen() {
             const supabaseAudioUrl = rawSupabaseUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
             const itemsWithAudio: FeedbackItem[] = data.items.map((item: any) => {
               const matchingTurn = report?.sessionTurns?.find((t) => t.turnIndex === item.userTurnIndex);
-              const rawCandidate = item.userAudioUrl || supabaseAudioUrl || matchingTurn?.audioUrl || '';
+              const rawCandidate = item.userAudioUrl || supabaseAudioUrl || matchingTurn?.audioUrl || (activeSessionId ? `${backendBaseUrl}/v1/sessions/${activeSessionId}/recording-audio?type=turn&speaker=user&index=${item.userTurnIndex ?? 0}` : '');
               const candidate = rawCandidate.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
               // Strictly avoid dead in-memory blob URLs (blob:http://...) which fail with net::ERR_FILE_NOT_FOUND
               const safeAudioUrl = candidate && !candidate.startsWith('blob:') ? candidate : '';

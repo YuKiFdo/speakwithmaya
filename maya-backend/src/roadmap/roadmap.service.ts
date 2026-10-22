@@ -65,6 +65,10 @@ export class RoadmapService implements OnModuleInit {
   private readonly inFlightSyntheses = new Map<string, Promise<Buffer>>();
   private readonly audioCacheDir = path.resolve(process.cwd(), 'assets', 'audio-cache');
 
+  private get storageProviderLabel(): string {
+    return process.env.AZURE_STORAGE_CONNECTION_STRING ? 'Azure Blob Storage' : 'Supabase Storage';
+  }
+
   constructor() {
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey =
@@ -132,7 +136,7 @@ export class RoadmapService implements OnModuleInit {
       this.briefingAudioCache.set(cacheKey, audioBuffer);
       try {
         fs.writeFileSync(diskPath, audioBuffer);
-        this.logger.log(`[Supabase CDN Cache] Restored ${cacheKey}.wav from Supabase Storage (${audioBuffer.length} bytes)`);
+        this.logger.log(`[${this.storageProviderLabel}] Restored ${cacheKey}.wav from cloud storage (${audioBuffer.length} bytes)`);
       } catch (err: any) {
         this.logger.debug(`Could not write restored disk cache for ${cacheKey}: ${err?.message}`);
       }
@@ -176,7 +180,7 @@ export class RoadmapService implements OnModuleInit {
         });
 
       if (uploadErr) {
-        this.logger.warn(`[Supabase Storage] Upload error for ${cacheKey}: ${uploadErr.message}`);
+        this.logger.warn(`[${this.storageProviderLabel}] Upload error for ${cacheKey}: ${uploadErr.message}`);
         return null;
       }
 
@@ -184,7 +188,7 @@ export class RoadmapService implements OnModuleInit {
         .from('roadmap-audio')
         .getPublicUrl(`${cacheKey}.wav`);
       const publicUrl = pubData?.publicUrl || '';
-      this.logger.log(`[Supabase Storage] Uploaded ${cacheKey}.wav -> ${publicUrl}`);
+      this.logger.log(`[${this.storageProviderLabel}] Uploaded ${cacheKey}.wav -> ${publicUrl}`);
 
       // Update roadmap_levels row in Supabase
       const updatePayload: Record<string, any> = {
@@ -198,7 +202,7 @@ export class RoadmapService implements OnModuleInit {
 
       return publicUrl;
     } catch (err: any) {
-      this.logger.warn(`[Supabase Storage] Failed to upload ${cacheKey}: ${err?.message}`);
+      this.logger.warn(`[${this.storageProviderLabel}] Failed to upload ${cacheKey}: ${err?.message}`);
       return null;
     }
   }
@@ -573,17 +577,28 @@ export class RoadmapService implements OnModuleInit {
       throw new Error(`Failed to update level in Supabase DB: ${error.message}`);
     }
 
-    // Invalidate cached audio files for this level if script changed
-    for (const lang of ['en', 'si'] as const) {
-      const cacheKey = `${existing.id}_${lang}`;
-      this.briefingAudioCache.delete(cacheKey);
-      const diskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
-      if (fs.existsSync(diskPath)) {
-        try { fs.unlinkSync(diskPath); } catch {}
+    // Invalidate cached audio files for this level only if script or audio URL changed
+    const scriptChangedEn = dto.ttsScriptEnglish !== undefined && dto.ttsScriptEnglish.trim() !== (existing.ttsScriptEnglish || '').trim();
+    const scriptChangedSi = dto.ttsScriptSinhala !== undefined && dto.ttsScriptSinhala.trim() !== (existing.ttsScriptSinhala || '').trim();
+    const audioUrlChangedEn = dto.audioUrlEnglish !== undefined && dto.audioUrlEnglish.trim() !== (existing.audioUrlEnglish || '').trim();
+    const audioUrlChangedSi = dto.audioUrlSinhala !== undefined && dto.audioUrlSinhala.trim() !== (existing.audioUrlSinhala || '').trim();
+
+    if (scriptChangedEn || scriptChangedSi || audioUrlChangedEn || audioUrlChangedSi) {
+      for (const lang of ['en', 'si'] as const) {
+        const changed = (lang === 'en' && (scriptChangedEn || audioUrlChangedEn)) ||
+                        (lang === 'si' && (scriptChangedSi || audioUrlChangedSi));
+        if (changed) {
+          const cacheKey = `${existing.id}_${lang}`;
+          this.briefingAudioCache.delete(cacheKey);
+          const diskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
+          if (fs.existsSync(diskPath)) {
+            try { fs.unlinkSync(diskPath); } catch {}
+          }
+        }
       }
+      // Re-prewarm immediately in background only when audio-related fields changed
+      this.prewarmLevelAudio(existing.id);
     }
-    // Re-prewarm immediately in background
-    this.prewarmLevelAudio(existing.id);
 
     this.logger.log(`[DB UPDATE] Successfully updated level "${updated.title}" (${existing.id}) in Supabase DB`);
     return updated;
@@ -962,6 +977,7 @@ Core Conversation Rules:
     text: string,
     language: 'en' | 'si' = 'en',
     voice: string = 'Callirrhoe',
+    fromBriefingPrewarm = false,
   ): Promise<{ audioBase64: string; mimeType: string }> {
     const cleanText = (text || '').trim();
     if (!cleanText) {
@@ -1009,7 +1025,7 @@ Core Conversation Rules:
           try {
             if (!fs.existsSync(diskPath)) fs.writeFileSync(diskPath, buffer);
           } catch {}
-          this.logger.log(`[TTS Synthesis] Restored hash TTS ${contentHash} from Supabase Storage (${buffer.length} bytes)`);
+          this.logger.log(`[TTS Synthesis] Restored hash TTS ${contentHash} from ${this.storageProviderLabel} (${buffer.length} bytes)`);
           return {
             audioBase64: buffer.toString('base64'),
             mimeType: 'audio/wav',
@@ -1018,29 +1034,58 @@ Core Conversation Rules:
       } catch {}
     }
 
-    // 4. Check if any level in the database already has this exact script (re-use existing audio)
-    try {
-      const levels = await this.getAllLevels(true);
-      const matchingLevel = levels.find((lvl) => {
-        const script = language === 'si' ? lvl.ttsScriptSinhala : lvl.ttsScriptEnglish;
-        return script && script.trim() === cleanText;
-      });
-      if (matchingLevel) {
-        this.logger.log(`[TTS Synthesis] Found matching script in "${matchingLevel.title}" (${language}) - reusing existing audio`);
-        const { audioBuffer, mimeType } = await this.getBriefingAudio(matchingLevel.id, language);
-        if (audioBuffer && audioBuffer.length > 0) {
-          this.briefingAudioCache.set(contentHash, audioBuffer);
-          try {
-            if (!fs.existsSync(diskPath)) fs.writeFileSync(diskPath, audioBuffer);
-          } catch {}
-          return {
-            audioBase64: audioBuffer.toString('base64'),
-            mimeType: mimeType || 'audio/wav',
-          };
+    // 4. Check if any level in the database already has this exact script (re-use existing audio without recursive loop)
+    if (!fromBriefingPrewarm) {
+      try {
+        const levels = await this.getAllLevels(true);
+        const matchingLevel = levels.find((lvl) => {
+          const script = language === 'si' ? lvl.ttsScriptSinhala : lvl.ttsScriptEnglish;
+          return script && script.trim() === cleanText;
+        });
+        if (matchingLevel) {
+          const cacheKey = `${matchingLevel.id}_${language}`;
+          if (this.briefingAudioCache.has(cacheKey)) {
+            const buffer = this.briefingAudioCache.get(cacheKey)!;
+            this.briefingAudioCache.set(contentHash, buffer);
+            this.logger.log(`[TTS Synthesis] Reused in-memory audio from "${matchingLevel.title}" (${language})`);
+            return {
+              audioBase64: buffer.toString('base64'),
+              mimeType: 'audio/wav',
+            };
+          }
+          const levelDiskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
+          if (fs.existsSync(levelDiskPath)) {
+            const buffer = fs.readFileSync(levelDiskPath);
+            this.briefingAudioCache.set(contentHash, buffer);
+            this.briefingAudioCache.set(cacheKey, buffer);
+            this.logger.log(`[TTS Synthesis] Reused disk audio from "${matchingLevel.title}" (${language})`);
+            return {
+              audioBase64: buffer.toString('base64'),
+              mimeType: 'audio/wav',
+            };
+          }
+          const directUrl = language === 'si' ? matchingLevel.audioUrlSinhala : matchingLevel.audioUrlEnglish;
+          if (directUrl && directUrl.startsWith('http')) {
+            try {
+              const res = await fetch(directUrl);
+              if (res.ok) {
+                const ab = await res.arrayBuffer();
+                const buffer = Buffer.from(ab);
+                this.briefingAudioCache.set(contentHash, buffer);
+                this.briefingAudioCache.set(cacheKey, buffer);
+                try { if (!fs.existsSync(diskPath)) fs.writeFileSync(diskPath, buffer); } catch {}
+                this.logger.log(`[TTS Synthesis] Reused cloud audio from "${matchingLevel.title}" (${language}) direct URL`);
+                return {
+                  audioBase64: buffer.toString('base64'),
+                  mimeType: 'audio/wav',
+                };
+              }
+            } catch {}
+          }
         }
+      } catch (err: any) {
+        this.logger.debug(`Could not check matching levels for script: ${err?.message}`);
       }
-    } catch (err: any) {
-      this.logger.debug(`Could not check matching levels for script: ${err?.message}`);
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -1104,6 +1149,22 @@ Core Conversation Rules:
       audioBase64,
       mimeType: 'audio/wav',
     };
+  }
+
+  async getBriefingAudioUrl(
+    levelId: string,
+    lang: 'en' | 'si' = 'en',
+  ): Promise<string | null> {
+    try {
+      const level = await this.getLevelById(levelId);
+      const directUrl = lang === 'si' ? level.audioUrlSinhala : level.audioUrlEnglish;
+      if (directUrl && directUrl.startsWith('http')) {
+        return directUrl;
+      }
+    } catch (e: any) {
+      this.logger.debug(`Could not resolve direct audio URL for ${levelId} (${lang}): ${e?.message}`);
+    }
+    return null;
   }
 
   async getBriefingAudio(
@@ -1174,7 +1235,7 @@ Core Conversation Rules:
       }
 
       this.logger.log(`[TTS Synthesis] Synthesizing voice for ${level.title} (${lang})...`);
-      const { audioBase64 } = await this.synthesizeScenarioTts(script, lang, 'Callirrhoe');
+      const { audioBase64 } = await this.synthesizeScenarioTts(script, lang, 'Callirrhoe', true);
       const audioBuffer = Buffer.from(audioBase64, 'base64');
 
       // Save to disk
@@ -1250,15 +1311,15 @@ Core Conversation Rules:
         });
 
       if (uploadErr) {
-        this.logger.warn(`[Supabase Storage] Custom audio upload error: ${uploadErr.message}`);
-        throw new Error(`Supabase Storage upload failed: ${uploadErr.message}`);
+        this.logger.warn(`[${this.storageProviderLabel}] Custom audio upload error: ${uploadErr.message}`);
+        throw new Error(`${this.storageProviderLabel} upload failed: ${uploadErr.message}`);
       }
 
       const { data: pubData } = this.supabase.storage
         .from('roadmap-audio')
         .getPublicUrl(storageFileName);
       publicUrl = pubData?.publicUrl || '';
-      this.logger.log(`[Supabase Storage] Custom audio uploaded successfully -> ${publicUrl}`);
+      this.logger.log(`[${this.storageProviderLabel}] Custom audio uploaded successfully -> ${publicUrl}`);
 
       // If levelId exists in database, also update the row
       if (cleanLevelId) {

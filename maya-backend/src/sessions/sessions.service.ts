@@ -206,6 +206,10 @@ export class SessionsService {
   private readonly hintCache = new Map<string, { hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number }>();
   private readonly sessionHintUsage = new Map<string, { count: number; totalTokens: number; costUsd: number; costLkr: number; generatedKeys?: Set<string> }>();
 
+  private get storageProviderLabel(): string {
+    return process.env.AZURE_STORAGE_CONNECTION_STRING ? 'Azure Blob Storage' : 'Supabase Storage';
+  }
+
   private readonly sessionRecordingsMap = new Map<string, { userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string }>();
   private readonly sessionTurnAudioMap = new Map<string, Map<number, string>>();
   private readonly authoritativeTurnsMap = new Map<string, Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>();
@@ -326,7 +330,7 @@ export class SessionsService {
             .from('session-recordings')
             .getPublicUrl(userFilePath);
           userAudioUrl = (pubData?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
-          this.logger.log(`[SessionsService] 🎙️ Saved user audio recording to Supabase: ${userAudioUrl} (${(userWav.length / 1024).toFixed(1)} KB)`);
+          this.logger.log(`[SessionsService] 🎙️ Saved user audio recording to ${this.storageProviderLabel}: ${userAudioUrl} (${(userWav.length / 1024).toFixed(1)} KB)`);
         }
       }
 
@@ -347,7 +351,7 @@ export class SessionsService {
             .from('session-recordings')
             .getPublicUrl(modelFilePath);
           modelAudioUrl = (pubData?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
-          this.logger.log(`[SessionsService] 🤖 Saved model audio recording to Supabase: ${modelAudioUrl} (${(modelWav.length / 1024).toFixed(1)} KB)`);
+          this.logger.log(`[SessionsService] 🤖 Saved model audio recording to ${this.storageProviderLabel}: ${modelAudioUrl} (${(modelWav.length / 1024).toFixed(1)} KB)`);
         }
       }
 
@@ -383,7 +387,7 @@ export class SessionsService {
                 .from('session-recordings')
                 .getPublicUrl(fullFilePath);
               fullConversationAudioUrl = (pubData?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
-              this.logger.log(`[SessionsService] 🎧 Saved chronological full conversation to Supabase: ${fullConversationAudioUrl} (${(fullWav.length / 1024).toFixed(1)} KB)`);
+              this.logger.log(`[SessionsService] 🎧 Saved chronological full conversation to ${this.storageProviderLabel}: ${fullConversationAudioUrl} (${(fullWav.length / 1024).toFixed(1)} KB)`);
             }
           }
         } catch (err: any) {
@@ -449,6 +453,78 @@ export class SessionsService {
     } catch (err: any) {
       this.logger.error(`Error saving session recordings: ${err?.message}`);
       return { userAudioUrl, modelAudioUrl };
+    }
+  }
+
+  async getRecordingAudioUrl(
+    sessionId: string,
+    type: 'full' | 'user' | 'model' | 'turn' = 'full',
+    speaker: 'user' | 'model' = 'user',
+    index: number = 0,
+  ): Promise<string | null> {
+    if (!this.supabase) return null;
+    const validSessionId = toValidUuid(sessionId);
+
+    // 1. Check in-memory recordings map for fast hit
+    const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
+    if (type === 'full' && rec?.fullConversationAudioUrl && rec.fullConversationAudioUrl.startsWith('http')) {
+      return rec.fullConversationAudioUrl;
+    }
+    if (type === 'user' && rec?.userAudioUrl && rec.userAudioUrl.startsWith('http')) {
+      return rec.userAudioUrl;
+    }
+    if (type === 'model' && rec?.modelAudioUrl && rec.modelAudioUrl.startsWith('http')) {
+      return rec.modelAudioUrl;
+    }
+    if (type === 'turn') {
+      const turnMap = this.sessionTurnAudioMap.get(validSessionId) || this.sessionTurnAudioMap.get(sessionId);
+      const url = turnMap?.get(index);
+      if (url && url.startsWith('http')) {
+        return url;
+      }
+    }
+
+    // 2. Resolve from cloud storage (Azure Blob Storage or Supabase Storage)
+    let filePath = `${validSessionId}/full_conversation.wav`;
+    if (type === 'user') filePath = `${validSessionId}/user_recording.wav`;
+    else if (type === 'model') filePath = `${validSessionId}/model_recording.wav`;
+    else if (type === 'turn') filePath = `${validSessionId}/turns/${speaker}_turn_${index}.wav`;
+
+    try {
+      const { data: pubData } = this.supabase.storage
+        .from('session-recordings')
+        .getPublicUrl(filePath);
+      if (pubData?.publicUrl && pubData.publicUrl.startsWith('http')) {
+        return pubData.publicUrl;
+      }
+    } catch (e: any) {
+      this.logger.debug(`Could not resolve recording URL for ${filePath}: ${e?.message}`);
+    }
+    return null;
+  }
+
+  async downloadRecordingBuffer(
+    sessionId: string,
+    type: 'full' | 'user' | 'model' | 'turn' = 'full',
+    speaker: 'user' | 'model' = 'user',
+    index: number = 0,
+  ): Promise<Buffer | null> {
+    if (!this.supabase) return null;
+    const validSessionId = toValidUuid(sessionId);
+    let filePath = `${validSessionId}/full_conversation.wav`;
+    if (type === 'user') filePath = `${validSessionId}/user_recording.wav`;
+    else if (type === 'model') filePath = `${validSessionId}/model_recording.wav`;
+    else if (type === 'turn') filePath = `${validSessionId}/turns/${speaker}_turn_${index}.wav`;
+
+    try {
+      const { data, error } = await this.supabase.storage
+        .from('session-recordings')
+        .download(filePath);
+      if (error || !data) return null;
+      const ab = await data.arrayBuffer();
+      return Buffer.from(ab);
+    } catch {
+      return null;
     }
   }
 

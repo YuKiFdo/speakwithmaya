@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Radii } from '@/theme/tokens';
 import { fontStyle } from '@/theme/fonts';
+import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 
 import {
   SearchIcon,
@@ -852,7 +853,12 @@ export default function HistoryScreen() {
       return;
     }
 
-    const audioUrl = (activeSession.fullConversationAudioUrl || activeSession.userAudioUrl || activeSession.modelAudioUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+    const baseUrl = getBackendBaseUrl();
+    const resolvedUrl = activeSession.fullConversationAudioUrl ||
+      activeSession.userAudioUrl ||
+      activeSession.modelAudioUrl ||
+      (activeSession.id ? `${baseUrl}/v1/sessions/${activeSession.id}/recording-audio?type=full` : '');
+    const audioUrl = resolvedUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
 
     if (!audioUrl || unreachableAudioUrls.has(audioUrl) || typeof window === 'undefined') {
       const generated = generateSpeechEnvelopeBars(42);
@@ -1050,7 +1056,8 @@ export default function HistoryScreen() {
     }
 
     // Priority 1: Full conversation audio URL (Maya & User stitched in proper chronological order)
-    const rawFullAudioUrl = session.fullConversationAudioUrl || '';
+    const baseUrl = getBackendBaseUrl();
+    const rawFullAudioUrl = session.fullConversationAudioUrl || (session.id ? `${baseUrl}/v1/sessions/${session.id}/recording-audio?type=full` : '');
     const fullAudioUrl = withCacheBust(rawFullAudioUrl);
 
     if (fullAudioUrl && typeof window !== 'undefined') {
@@ -1109,7 +1116,7 @@ export default function HistoryScreen() {
     }
 
     // Priority 3: Fallback to userAudioUrl or modelAudioUrl if available
-    const fallbackUrl = (session.userAudioUrl || session.modelAudioUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+    const fallbackUrl = (session.userAudioUrl || session.modelAudioUrl || (session.id ? `${baseUrl}/v1/sessions/${session.id}/recording-audio?type=user` : '')).replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
     if (fallbackUrl && typeof window !== 'undefined') {
       try {
         const audio = new Audio(fallbackUrl);
@@ -1153,7 +1160,9 @@ export default function HistoryScreen() {
     // Stop previous audio
     stopAudio();
 
-    const turnAudioUrl = (turn.audioUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+    const baseUrl = getBackendBaseUrl();
+    const rawTurnUrl = turn.audioUrl || (session.id ? `${baseUrl}/v1/sessions/${session.id}/recording-audio?type=turn&speaker=${turn.speaker === 'user' ? 'user' : 'model'}&index=${turn.id || 0}` : '');
+    const turnAudioUrl = rawTurnUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
     if (!turnAudioUrl || typeof window !== 'undefined' && !window.Audio) {
       console.warn('[History] No audio recording clip available for turn', turn.id);
       return;
@@ -1163,7 +1172,7 @@ export default function HistoryScreen() {
     setPlayingTurnId(turn.id);
     setIsPlaying(true);
 
-    const playUrl = withCacheBust(turn.audioUrl);
+    const playUrl = withCacheBust(turnAudioUrl);
     const audio = new Audio(playUrl);
     audio.playbackRate = playbackSpeed;
 

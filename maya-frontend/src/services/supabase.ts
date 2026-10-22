@@ -146,9 +146,10 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
     return [];
   }
 
+  const backendUrl = getBackendBaseUrl();
+
   // 1. Fetch authoritative records from backend API (connected to Supabase via service role key)
   try {
-    const backendUrl = getBackendBaseUrl();
     const headers = await getAuthHeaders();
     const res = await fetch(`${backendUrl}/v1/sessions`, {
       method: 'GET',
@@ -193,9 +194,9 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
           grammar_score: s.grammar_score || 82,
           pronunciation_score: s.pronunciation_score || 86,
           status: s.status || 'completed',
-          fullConversationAudioUrl: s.full_conversation_audio_url || s.fullConversationAudioUrl || (s.id ? `https://clfjfhdsjwkzgxwoolgp.supabase.co/storage/v1/object/public/session-recordings/${s.id}/full_conversation.wav` : null),
-          userAudioUrl: s.user_audio_url || s.userAudioUrl || (s.id ? `https://clfjfhdsjwkzgxwoolgp.supabase.co/storage/v1/object/public/session-recordings/${s.id}/user_recording.wav` : null),
-          modelAudioUrl: s.model_audio_url || s.modelAudioUrl || (s.id ? `https://clfjfhdsjwkzgxwoolgp.supabase.co/storage/v1/object/public/session-recordings/${s.id}/model_recording.wav` : null),
+          fullConversationAudioUrl: s.full_conversation_audio_url || s.fullConversationAudioUrl || (s.id ? `${backendUrl}/v1/sessions/${s.id}/recording-audio?type=full` : null),
+          userAudioUrl: s.user_audio_url || s.userAudioUrl || (s.id ? `${backendUrl}/v1/sessions/${s.id}/recording-audio?type=user` : null),
+          modelAudioUrl: s.model_audio_url || s.modelAudioUrl || (s.id ? `${backendUrl}/v1/sessions/${s.id}/recording-audio?type=model` : null),
           user_rating: s.user_rating ?? null,
           user_feedback: s.user_feedback ?? null,
           turns: (s.session_turns || [])
@@ -203,7 +204,7 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
             .map((t: any) => ({
               role: t.role,
               text: t.text_transcript,
-              audioUrl: t.audio_url || t.audioUrl || null,
+              audioUrl: t.audio_url || t.audioUrl || (s.id ? `${backendUrl}/v1/sessions/${s.id}/recording-audio?type=turn&speaker=${t.role || 'user'}&index=${t.turn_order ?? 0}` : null),
               timestamp: t.timestamp || t.created_at,
             })),
           corrections: (s.grammar_corrections || []).map((c: any) => ({
