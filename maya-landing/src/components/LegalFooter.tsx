@@ -1,6 +1,15 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export function LegalFooter() {
+  const pathname = usePathname();
+
+  const isTerms = pathname === "/terms";
+  const isPrivacy = pathname === "/privacy";
+  const isRefund = pathname === "/refund";
+
   return (
     <footer className="bg-[#EDF3FE] pt-14 pb-10 text-[#475569] border-t border-[#DCE6F7]">
       <div className="max-w-[1040px] mx-auto px-6 sm:px-10">
@@ -100,7 +109,11 @@ export function LegalFooter() {
               <li>
                 <Link
                   href="/terms"
-                  className="hover:text-[#0D4EFD] transition-colors"
+                  className={`transition-colors ${
+                    isTerms
+                      ? "text-[#0D4EFD] font-semibold"
+                      : "hover:text-[#0D4EFD]"
+                  }`}
                 >
                   Terms of Service
                 </Link>
@@ -108,7 +121,11 @@ export function LegalFooter() {
               <li>
                 <Link
                   href="/privacy"
-                  className="hover:text-[#0D4EFD] transition-colors"
+                  className={`transition-colors ${
+                    isPrivacy
+                      ? "text-[#0D4EFD] font-semibold"
+                      : "hover:text-[#0D4EFD]"
+                  }`}
                 >
                   Privacy Policy
                 </Link>
@@ -116,7 +133,11 @@ export function LegalFooter() {
               <li>
                 <Link
                   href="/refund"
-                  className="hover:text-[#0D4EFD] transition-colors font-medium text-[#0D4EFD]"
+                  className={`transition-colors ${
+                    isRefund
+                      ? "text-[#0D4EFD] font-semibold"
+                      : "hover:text-[#0D4EFD]"
+                  }`}
                 >
                   Refund Policy
                 </Link>
