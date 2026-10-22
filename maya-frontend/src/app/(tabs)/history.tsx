@@ -45,7 +45,7 @@ import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { HistoryDetailSkeleton } from '@/components/ui/skeleton';
-import { fetchAllPracticeSessions } from '@/services/supabase';
+import { fetchAllPracticeSessions, isIntroSessionTopic } from '@/services/supabase';
 import { useUserStats } from '@/hooks/useUserStats';
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
@@ -496,7 +496,9 @@ export default function HistoryScreen() {
   const lastCorrectionIndexScrolled = useRef<number>(-1);
 
   // Dynamic & cached practice sessions
-  const [allSessions, setAllSessions] = useState<HistorySession[]>(() => cachedHistorySessions || []);
+  const [allSessions, setAllSessions] = useState<HistorySession[]>(() =>
+    (cachedHistorySessions || []).filter((s) => !isIntroSessionTopic(s.title))
+  );
   const [isLoading, setIsLoading] = useState<boolean>(() => !cachedHistorySessions || cachedHistorySessions.length === 0);
 
 
@@ -524,8 +526,11 @@ export default function HistoryScreen() {
 
   useEffect(() => {
     fetchAllPracticeSessions().then((records) => {
-      if (records && records.length > 0) {
-        const converted: HistorySession[] = records.map((r, idx) => {
+      const validRecords = (records || []).filter(
+        (r) => !isIntroSessionTopic(r.topic, r.scenario_title || r.scenarioTitle, r.scenario_id || r.scenarioId)
+      );
+      if (validRecords && validRecords.length > 0) {
+        const converted: HistorySession[] = validRecords.map((r, idx) => {
           const d = parseIsoDateSafe(r.start_time);
           const durationMin = Math.max(1, Math.ceil((r.duration_seconds || 60) / 60));
           const durSecs = (r.duration_seconds || 0) % 60;
@@ -777,7 +782,10 @@ export default function HistoryScreen() {
           setDetailSessionId((prev) => (prev ? prev : isDesktop ? converted[0].id : null));
         }
       } else {
+        cachedHistorySessions = [];
         setAllSessions([]);
+        setSelectedSessionId(null);
+        setDetailSessionId(null);
         setIsLoading(false);
       }
     }).catch(() => {
@@ -790,6 +798,7 @@ export default function HistoryScreen() {
   // Filtered Sessions
   const filteredSessions = useMemo(() => {
     return allSessions.filter((session) => {
+      if (isIntroSessionTopic(session.title)) return false;
       const matchesSearch =
         session.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         session.dateString.toLowerCase().includes(searchQuery.toLowerCase()) ||

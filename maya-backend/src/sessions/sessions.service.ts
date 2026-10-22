@@ -2690,12 +2690,26 @@ ${memoryPart}`;
         query = query.eq('user_id', userId);
       }
 
-      const { data: sessions, error } = await query.order('created_at', { ascending: false });
+      const { data: rawSessions, error } = await query.order('created_at', { ascending: false });
 
       if (error) {
         this.logger.error(`Error querying user sessions from Supabase: ${error.message}`);
         return [];
       }
+
+      // Filter out intro calls, diagnostic onboarding assessments, and free trial intro sessions
+      const isIntroSession = (s: any) => {
+        if (s?.is_intro_call) return true;
+        const topic = (s?.topic || '').toLowerCase();
+        return (
+          topic.includes('intro') ||
+          topic.includes('onboarding') ||
+          topic.includes('assessment') ||
+          topic.includes('placement') ||
+          topic.includes('free trial')
+        );
+      };
+      const sessions = (rawSessions || []).filter((s: any) => !isIntroSession(s));
 
       // Inspect storage files directly for the queried sessions in parallel
       const sessionFilesMap = new Map<string, Set<string>>();

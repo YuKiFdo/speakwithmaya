@@ -133,6 +133,15 @@ export async function persistSessionRecord(record: SessionHistoryRecord): Promis
   }
 }
 
+export function isIntroSessionTopic(topic?: string | null, scenarioTitle?: string | null, scenarioId?: string | null): boolean {
+  const t = ((topic || '') + ' ' + (scenarioTitle || '') + ' ' + (scenarioId || '')).toLowerCase();
+  return (
+    t.includes('intro') ||
+    t.includes('onboarding') ||
+    t.includes('free trial')
+  );
+}
+
 /**
  * Fetches practice sessions directly from Supabase / Backend API (no localStorage).
  */
@@ -158,7 +167,7 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
     if (res.ok) {
       const serverSessions: SessionHistoryRecord[] = await res.json();
       if (Array.isArray(serverSessions)) {
-        return serverSessions;
+        return serverSessions.filter((s) => !isIntroSessionTopic(s.topic, s.scenario_title || s.scenarioTitle, s.scenario_id || s.scenarioId));
       }
     } else {
       console.warn(`[fetchAllPracticeSessions] Backend returned ${res.status}: ${res.statusText}`);
@@ -179,7 +188,8 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
         query = query.eq('user_id', currentUserId);
       }
 
-      const { data: sessions, error } = await query.order('start_time', { ascending: false });
+      const { data: rawSessions, error } = await query.order('start_time', { ascending: false });
+      const sessions = (rawSessions || []).filter((s: any) => !isIntroSessionTopic(s.topic, s.scenario_title || s.scenarioTitle, s.scenario_id || s.scenarioId));
 
       if (!error && sessions && sessions.length > 0) {
         return sessions.map((s: any) => ({
