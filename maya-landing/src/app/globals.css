@@ -57,6 +57,34 @@ body {
   }
 }
 
+@keyframes maya-circular-spin {
+  0% {
+    transform: translate3d(-50%, -50%, 0) rotate(0deg);
+  }
+  100% {
+    transform: translate3d(-50%, -50%, 0) rotate(360deg);
+  }
+}
+
+@keyframes maya-particle-rise {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.4);
+  }
+  25% {
+    opacity: 0.95;
+    transform: translate3d(var(--drift-x, 4px), 2px, 0) scale(1);
+  }
+  75% {
+    opacity: 0.8;
+    transform: translate3d(calc(var(--drift-x, 4px) * -0.6), -14px, 0) scale(0.9);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--drift-x, 4px), -26px, 0) scale(0.3);
+  }
+}
+
 @keyframes marquee-scroll-right {
   0% {
     transform: translate3d(-50%, 0, 0);
@@ -92,6 +120,102 @@ body {
   animation: star-pop 520ms var(--ease-spring) forwards;
 }
 
+.landing-primary-cta {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: none !important;
+  background: #0d4efd !important;
+  box-shadow:
+    0 8px 24px -4px rgba(13, 78, 253, 0.45),
+    0 0 16px 0 rgba(59, 130, 246, 0.28);
+  transition:
+    transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 240ms ease;
+}
+
+.landing-primary-cta::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 250%;
+  aspect-ratio: 1 / 1;
+  z-index: -2;
+  pointer-events: none;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    #38bdf8 45deg,
+    #ffffff 80deg,
+    #60a5fa 115deg,
+    transparent 150deg,
+    transparent 180deg,
+    #38bdf8 225deg,
+    #ffffff 260deg,
+    #60a5fa 295deg,
+    transparent 330deg,
+    transparent 360deg
+  );
+  transform: translate3d(-50%, -50%, 0) rotate(0deg);
+  animation: maya-circular-spin 3.4s linear infinite !important;
+  will-change: transform;
+}
+
+.landing-primary-cta::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #0d4efd 0%, #1d4ed8 100%);
+  z-index: -1;
+  pointer-events: none;
+  transition: background 220ms ease;
+}
+
+.landing-primary-cta > :not(.cta-particles) {
+  position: relative;
+  z-index: 1;
+}
+
+.cta-particles {
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.cta-particle {
+  position: absolute;
+  bottom: 4px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, #ffffff 0%, #bae6fd 65%, transparent 100%);
+  box-shadow: 0 0 6px rgba(186, 230, 253, 0.95);
+  opacity: 0;
+  pointer-events: none;
+  animation: maya-particle-rise var(--dur, 2.8s) ease-in-out var(--delay, 0s) infinite !important;
+  will-change: transform, opacity;
+}
+
+.landing-primary-cta:hover,
+.landing-primary-cta:focus-visible {
+  transform: translate3d(0, -2px, 0);
+  box-shadow:
+    0 12px 28px -4px rgba(13, 78, 253, 0.58),
+    0 0 22px 2px rgba(56, 189, 248, 0.36);
+}
+
+.landing-primary-cta:hover::after,
+.landing-primary-cta:focus-visible::after {
+  background: linear-gradient(135deg, #0b42d8 0%, #1e40af 100%);
+}
+
+.landing-primary-cta:active {
+  transform: translate3d(0, 1px, 0) scale(0.98);
+}
+
 /* Smooth accordion expand/collapse using CSS grid */
 .faq-accordion-content {
   display: grid;
@@ -111,16 +235,14 @@ body {
   overflow: hidden;
 }
 
-/* Respect user reduced-motion preferences (keep explicit continuous marquees running) */
+/* Respect user reduced-motion preferences (keep explicit continuous marquees and CTA glows running) */
 @media (prefers-reduced-motion: reduce) {
-  *:not(.animate-marquee-right),
-  *::before,
-  *::after {
+  *:not(.animate-marquee-right):not(.landing-primary-cta):not(.cta-particle),
+  *:not(.landing-primary-cta)::before,
+  *:not(.landing-primary-cta)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
 }
-
-

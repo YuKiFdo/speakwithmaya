@@ -3,6 +3,10 @@
 import Image from "next/image";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
+const APP_BASE_URL = "https://app.speakwithmaya.com";
+const SIGN_IN_URL = `${APP_BASE_URL}/onboarding/phone?mode=login`;
+const SIGN_UP_URL = `${APP_BASE_URL}/`;
+
 const FLUENCY_QUOTES = [
   {
     id: "quote-1",
@@ -196,6 +200,39 @@ function StarIcon({ className = "w-3.5 h-3.5 text-[#F97316]" }: { className?: st
     >
       <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
     </svg>
+  );
+}
+
+const CTA_PARTICLES = [
+  { left: "10%", size: 3, dur: "2.6s", delay: "0s", drift: "5px" },
+  { left: "22%", size: 2.5, dur: "3.1s", delay: "0.6s", drift: "-4px" },
+  { left: "36%", size: 3.5, dur: "2.8s", delay: "1.2s", drift: "6px" },
+  { left: "50%", size: 2.5, dur: "3.3s", delay: "0.3s", drift: "-5px" },
+  { left: "64%", size: 3, dur: "2.7s", delay: "0.9s", drift: "4px" },
+  { left: "78%", size: 3.5, dur: "3.0s", delay: "1.5s", drift: "-6px" },
+  { left: "90%", size: 2.5, dur: "2.5s", delay: "0.4s", drift: "4px" },
+];
+
+function CtaParticles() {
+  return (
+    <span className="cta-particles" aria-hidden="true">
+      {CTA_PARTICLES.map((p, i) => (
+        <span
+          key={i}
+          className="cta-particle"
+          style={
+            {
+              left: p.left,
+              width: `${p.size}px`,
+              height: `${p.size}px`,
+              "--dur": p.dur,
+              "--delay": p.delay,
+              "--drift-x": p.drift,
+            } as React.CSSProperties
+          }
+        />
+      ))}
+    </span>
   );
 }
 
@@ -650,9 +687,10 @@ export default function Home() {
 
               {/* Sign in Button (Desktop) */}
               <a
-                href="#signin"
-                className="group hidden md:inline-flex items-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[13px] font-semibold px-4 py-2.5 rounded-lg shadow-[0_4px_12px_rgba(13,78,253,0.24)] hover:shadow-[0_8px_20px_rgba(13,78,253,0.32)] transition-all duration-200"
+                href={SIGN_IN_URL}
+                className="landing-primary-cta group hidden md:inline-flex items-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[13px] font-semibold px-4 py-2.5 rounded-lg shadow-[0_4px_12px_rgba(13,78,253,0.24)] hover:shadow-[0_8px_20px_rgba(13,78,253,0.32)] transition-all duration-200"
               >
+                <CtaParticles />
                 <span>Sign in</span>
                 <ArrowRightIcon className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
               </a>
@@ -730,10 +768,11 @@ export default function Home() {
                     </a>
                   </nav>
                   <a
-                    href="#signin"
+                    href={SIGN_IN_URL}
                     onClick={() => setMobileMenuOpen(false)}
-                    className="w-full inline-flex items-center justify-center gap-2 bg-[#0D4EFD] text-white text-[13.5px] font-semibold py-3 rounded-xl shadow-[0_4px_12px_rgba(13,78,253,0.24)]"
+                    className="landing-primary-cta w-full inline-flex items-center justify-center gap-2 bg-[#0D4EFD] text-white text-[13.5px] font-semibold py-3 rounded-xl shadow-[0_4px_12px_rgba(13,78,253,0.24)]"
                   >
+                    <CtaParticles />
                     <span>Sign in</span>
                     <ArrowRightIcon className="w-3.5 h-3.5" />
                   </a>
@@ -779,14 +818,15 @@ export default function Home() {
                 <Reveal delay={380} y={16} duration={950} threshold={0.05}>
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center lg:justify-start gap-3 mb-5 lg:mb-7 max-w-[400px] sm:max-w-none mx-auto lg:mx-0">
                     <a
-                      href="#pricing"
-                      className="group w-full sm:w-auto inline-flex items-center justify-center gap-2.5 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[14px] lg:text-[13.5px] font-semibold px-5 py-3.5 lg:py-3 rounded-xl lg:rounded-lg shadow-[0_6px_16px_rgba(13,78,253,0.25)] hover:shadow-[0_10px_22px_rgba(13,78,253,0.32)] transition-all duration-200"
+                      href={SIGN_UP_URL}
+                      className="landing-primary-cta group w-full sm:w-auto inline-flex items-center justify-center gap-2.5 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[14px] lg:text-[13.5px] font-semibold px-5 py-3.5 lg:py-3 rounded-xl lg:rounded-lg shadow-[0_6px_16px_rgba(13,78,253,0.25)] hover:shadow-[0_10px_22px_rgba(13,78,253,0.32)] transition-all duration-200"
                     >
+                      <CtaParticles />
                       <span>Create an account</span>
                       <ArrowRightIcon className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
                     </a>
                     <a
-                      href="#signin"
+                      href={SIGN_IN_URL}
                       className="w-full sm:w-auto inline-flex items-center justify-center bg-white hover:bg-[#F8FAFC] hover:-translate-y-0.5 text-[#0F172A] border border-[#E2E8F0] text-[14px] lg:text-[13.5px] font-semibold px-5 py-3.5 lg:py-3 rounded-xl lg:rounded-lg transition-all duration-200"
                     >
                       Sign in
@@ -905,9 +945,10 @@ export default function Home() {
             <Reveal delay={340} y={18} duration={950}>
               <div className="flex flex-col items-center max-w-[540px] mx-auto">
                 <a
-                  href="#pricing"
-                  className="group w-full sm:max-w-[360px] inline-flex items-center justify-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[14px] font-semibold py-3.5 px-6 rounded-xl shadow-[0_8px_20px_rgba(13,78,253,0.28)] hover:shadow-[0_12px_26px_rgba(13,78,253,0.36)] transition-all duration-200"
+                  href={SIGN_UP_URL}
+                  className="landing-primary-cta group w-full sm:max-w-[360px] inline-flex items-center justify-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[14px] font-semibold py-3.5 px-6 rounded-xl shadow-[0_8px_20px_rgba(13,78,253,0.28)] hover:shadow-[0_12px_26px_rgba(13,78,253,0.36)] transition-all duration-200"
                 >
+                  <CtaParticles />
                   <span>Start Speaking with Maya</span>
                   <ArrowRightIcon className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
                 </a>
@@ -1428,9 +1469,10 @@ export default function Home() {
                 {/* CTA Button */}
                 <Reveal delay={460} y={12}>
                   <a
-                    href="#pricing"
-                    className="group inline-flex items-center justify-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[13.5px] font-semibold px-6 py-3 rounded-xl lg:rounded-lg shadow-[0_6px_16px_rgba(13,78,253,0.24)] hover:shadow-[0_10px_22px_rgba(13,78,253,0.32)] transition-all duration-200"
+                    href={SIGN_UP_URL}
+                    className="landing-primary-cta group inline-flex items-center justify-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[13.5px] font-semibold px-6 py-3 rounded-xl lg:rounded-lg shadow-[0_6px_16px_rgba(13,78,253,0.24)] hover:shadow-[0_10px_22px_rgba(13,78,253,0.32)] transition-all duration-200"
                   >
+                    <CtaParticles />
                     <span>Start Speaking</span>
                     <ArrowRightIcon className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
                   </a>
@@ -1513,7 +1555,7 @@ export default function Home() {
                   </div>
 
                   <a
-                    href="#signin"
+                    href={SIGN_UP_URL}
                     className="w-full py-3 rounded-xl border border-[#E2E8F0] hover:bg-[#F8FAFC] text-[#0F172A] text-[13px] font-bold text-center transition-colors"
                   >
                     Start Basic
@@ -1572,10 +1614,11 @@ export default function Home() {
                   </div>
 
                   <a
-                    href="#signin"
-                    className="w-full py-3 rounded-xl bg-[#0D4EFD] hover:bg-[#0B42D8] text-white text-[13px] font-bold text-center shadow-[0_6px_16px_rgba(13,78,253,0.28)] transition-all"
+                    href={SIGN_UP_URL}
+                    className="landing-primary-cta w-full py-3 rounded-xl bg-[#0D4EFD] hover:bg-[#0B42D8] text-white text-[13px] font-bold text-center shadow-[0_6px_16px_rgba(13,78,253,0.28)] transition-all"
                   >
-                    Upgrade to Pro
+                    <CtaParticles />
+                    <span>Upgrade to Pro</span>
                   </a>
                 </div>
               </Reveal>
@@ -1636,7 +1679,7 @@ export default function Home() {
                   </div>
 
                   <a
-                    href="#signin"
+                    href={SIGN_UP_URL}
                     className="w-full py-3 rounded-xl border border-[#E2E8F0] md:border-transparent bg-white md:bg-[#EDF4FF] hover:bg-[#F8FAFC] md:hover:bg-[#E0ECFF] text-[#0F172A] md:text-[#0D4EFD] text-[13px] font-bold text-center transition-colors"
                   >
                     Upgrade to Premium
@@ -2008,4 +2051,3 @@ export default function Home() {
     </div>
   );
 }
-
