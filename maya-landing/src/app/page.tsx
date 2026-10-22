@@ -297,7 +297,7 @@ function QuotesCardsContainer() {
         }
         return prev;
       });
-    }, 55);
+    }, 65);
 
     return () => window.clearTimeout(stepTimer);
   }, [filledWordCount, targetWordCount]);
