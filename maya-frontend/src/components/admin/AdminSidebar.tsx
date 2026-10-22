@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
+import { AdminAuthStore } from '@/services/store/admin-auth-store';
 
 export interface AdminNavItem {
   id: string;
@@ -127,11 +128,14 @@ export function AdminSidebar({ activeRoute, isOpen, onClose }: AdminSidebarProps
         </View>
 
         <Pressable
-          onPress={() => router.replace('/(tabs)/dashboard')}
+          onPress={() => {
+            AdminAuthStore.logout();
+            router.replace('/admin/login' as any);
+          }}
           style={styles.logoutBtn}
         >
           <Feather name="log-out" size={14} color="#ef4444" style={{ marginRight: 6 }} />
-          <Text style={styles.logoutText}>Back to App</Text>
+          <Text style={styles.logoutText}>Sign Out</Text>
         </Pressable>
       </View>
     </View>

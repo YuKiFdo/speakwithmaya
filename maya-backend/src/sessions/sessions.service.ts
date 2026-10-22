@@ -1,5 +1,6 @@
 import { Injectable, Logger, UnauthorizedException, HttpException, HttpStatus, Optional } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { attachAzureStorageIfConfigured } from '../storage/azure-blob-storage.js';
 import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto, AnalyzeSessionDto, SessionTtsDto, SessionReviewDto } from './dto/session.dto.js';
 import { RoadmapService } from '../roadmap/roadmap.service.js';
 import { parseCanonicalLessonContent, formatCanonicalLessonContent } from '../roadmap/dto/roadmap.dto.js';
@@ -249,6 +250,7 @@ export class SessionsService {
 
     if (supabaseUrl && supabaseKey) {
       this.supabase = createClient(supabaseUrl, supabaseKey);
+      attachAzureStorageIfConfigured(this.supabase);
       this.logger.log('Connected to Supabase client');
       this.ensureRecordingsBucket().catch((e) => {
         this.logger.warn(`Failed ensuring storage bucket: ${e?.message}`);

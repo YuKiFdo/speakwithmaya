@@ -34,6 +34,9 @@ export const getBackendBaseUrl = (): string => {
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://127.0.0.1:3000';
     }
+    if (hostname.endsWith('speakwithmaya.com')) {
+      return 'https://api.speakwithmaya.com';
+    }
     if (hostname.includes('azurecontainerapps.io') || hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
       return 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io';
     }
@@ -41,7 +44,7 @@ export const getBackendBaseUrl = (): string => {
     if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
       return envUrl;
     }
-    return 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io';
+    return 'https://api.speakwithmaya.com';
   }
 
   if (typeof __DEV__ !== 'undefined' && __DEV__) {

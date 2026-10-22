@@ -29,9 +29,9 @@ jobs:
       - name: Export Expo Static Web
         working-directory: ./maya-frontend
         env:
-          EXPO_PUBLIC_BACKEND_URL: ${{ vars.EXPO_PUBLIC_BACKEND_URL || 'http://20.198.240.185:3000' }}
-          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL || 'https://clfjfhdsjwkzgxwoolgp.supabase.co' }}
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_gQOKzy0Kf5Mw9Uc4wdCdIA_WaLKtaip' }}
+          EXPO_PUBLIC_BACKEND_URL: ${{ vars.EXPO_PUBLIC_BACKEND_URL || 'https://api.speakwithmaya.com' }}
+          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.PROD_SUPABASE_URL || 'https://sjhvhjxbkpidrjbpiqfw.supabase.co' }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.PROD_SUPABASE_ANON_KEY || 'sb_publishable_usiFVN4cjSUgfKokGGBgyw_FFjWHg5f' }}
           EXPO_PUBLIC_USE_SERVER_LIVE: 'true'
         run: npx expo export --platform web
 

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { useSegments, router } from 'expo-router';
 import { OnboardingStore, OnboardingState } from '@/services/store/onboarding-store';
+import { AdminAuthStore } from '@/services/store/admin-auth-store';
 import { authService } from '@/services/auth/auth-service';
 
 /**
@@ -96,6 +98,33 @@ export function useRouteGuard() {
     if (!segments || !segments[0]) return;
 
     const routePath = segments.join('/');
+
+    // 0. If accessed via admin.* subdomain at root, route directly into Admin Portal
+    if (
+      Platform.OS === 'web' &&
+      typeof window !== 'undefined' &&
+      window.location.hostname.startsWith('admin.') &&
+      (routePath === 'index' || routePath === '')
+    ) {
+      router.replace((AdminAuthStore.isAuthenticated() ? '/admin/users' : '/admin/login') as any);
+      return;
+    }
+
+    // 1. Dedicated Admin Portal guard (/admin/*) — completely independent of student phone login
+    if (segments[0] === 'admin') {
+      const isAdminLoggedIn = AdminAuthStore.isAuthenticated();
+      if (routePath === 'admin/login') {
+        if (isAdminLoggedIn) {
+          router.replace('/admin/users' as any);
+        }
+        return;
+      }
+      if (!isAdminLoggedIn) {
+        router.replace('/admin/login' as any);
+      }
+      return;
+    }
+
     const state = OnboardingStore.getState();
 
     // Real-time check: If user claims to be authenticated, verify account is not deleted in DB
@@ -107,7 +136,7 @@ export function useRouteGuard() {
       });
     }
 
-    // 1. Fully onboarded user visiting guest/login screens → dashboard
+    // 2. Fully onboarded user visiting guest/login screens → dashboard
     if (state.isAuthenticated && state.isCompleted) {
       if (
         routePath === 'index' ||
@@ -121,7 +150,7 @@ export function useRouteGuard() {
       }
     }
 
-    // 2. Onboarding step prerequisite enforcement
+    // 3. Onboarding step prerequisite enforcement
     if (segments[0] === 'onboarding') {
       const stepDef = ONBOARDING_STEP_CHAIN.find((s) => s.route === routePath);
       if (stepDef && !stepDef.canAccess(state)) {
@@ -135,13 +164,12 @@ export function useRouteGuard() {
       }
     }
 
-    // 3. Protected routes guard (dashboard, call, explore, etc.)
+    // 4. Protected student routes guard (dashboard, call, explore, etc.)
     const isProtected =
       segments[0] === '(tabs)' ||
       segments[0] === 'call' ||
       segments[0] === 'explore' ||
       segments[0] === 'upgrade' ||
-      segments[0] === 'admin' ||
       segments[0] === 'history';
 
     if (isProtected) {

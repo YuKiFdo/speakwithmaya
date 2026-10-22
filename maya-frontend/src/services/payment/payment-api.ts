@@ -12,6 +12,9 @@ const getBackendUrl = (): string => {
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://127.0.0.1:3000';
     }
+    if (hostname.endsWith('speakwithmaya.com')) {
+      return 'https://api.speakwithmaya.com';
+    }
     if (
       hostname.includes('azurecontainerapps.io') ||
       hostname.includes('azurewebsites.net') ||

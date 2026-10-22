@@ -71,7 +71,9 @@ export class ServerLiveTransport implements ILiveTransport {
       // If backend gave an explicit wsUrl or if on web, dynamically match window location or configured backend
       if (typeof window !== 'undefined' && window.location) {
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        if (window.location.hostname.endsWith('speakwithmaya.com')) {
+          targetWsUrl = 'wss://api.speakwithmaya.com/live-session';
+        } else if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
           // If on a public domain or local network IP, connect to backend at the same origin or configured API
           const host = process.env.EXPO_PUBLIC_BACKEND_URL 
             ? process.env.EXPO_PUBLIC_BACKEND_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')

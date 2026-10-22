@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { attachAzureStorageIfConfigured } from '../storage/azure-blob-storage.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -74,6 +75,7 @@ export class RoadmapService implements OnModuleInit {
 
     if (supabaseUrl && supabaseKey) {
       this.supabase = createClient(supabaseUrl, supabaseKey);
+      attachAzureStorageIfConfigured(this.supabase);
       this.logger.log('RoadmapService connected to Supabase client');
       this.checkSchema();
     } else {
