@@ -1893,37 +1893,44 @@ export default function Home() {
               {/* Contact Us Column */}
               <div className="md:col-span-3">
                 <h4 className="text-[12px] font-bold text-[#0F172A] mb-3.5">
-                  Contact Us
+                  Contact & Support
                 </h4>
                 <ul className="space-y-2.5 text-[12px] text-[#64748B]">
                   <li>
                     <a
-                      href="mailto:support@talkwithmaya.com"
-                      className="hover:text-[#0D4EFD] transition-colors"
+                      href="mailto:support@speakwithmaya.com"
+                      className="hover:text-[#0D4EFD] transition-colors flex items-center gap-1.5"
                     >
-                      support@talkwithmaya.com
+                      <svg className="w-3.5 h-3.5 text-[#0D4EFD]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      <span>support@speakwithmaya.com</span>
                     </a>
                   </li>
+                  <li className="text-[11.5px] text-[#64748B]">
+                    Colombo, Sri Lanka
+                  </li>
                 </ul>
+
+                <div className="mt-4 pt-3 border-t border-[#DCE6F7]/60">
+                  <span className="text-[10px] text-[#64748B] block mb-1 font-semibold uppercase tracking-wider">
+                    Secured by PayHere
+                  </span>
+                  <p className="text-[11px] text-[#64748B]">
+                    Visa · Mastercard · Amex · eZ Cash · Genie · Frimi
+                  </p>
+                </div>
               </div>
 
               {/* Legal Column */}
               <div className="md:col-span-2">
                 <h4 className="text-[12px] font-bold text-[#0F172A] mb-3.5">
-                  Legal
+                  Legal & Policies
                 </h4>
                 <ul className="space-y-2.5 text-[12px] text-[#64748B]">
                   <li>
                     <a
-                      href="#privacy"
-                      className="hover:text-[#0D4EFD] transition-colors"
-                    >
-                      Privacy Policy
-                    </a>
-                  </li>
-                  <li>
-                    <a
-                      href="#terms"
+                      href="/terms"
                       className="hover:text-[#0D4EFD] transition-colors"
                     >
                       Terms of Service
@@ -1931,7 +1938,15 @@ export default function Home() {
                   </li>
                   <li>
                     <a
-                      href="#refund"
+                      href="/privacy"
+                      className="hover:text-[#0D4EFD] transition-colors"
+                    >
+                      Privacy Policy
+                    </a>
+                  </li>
+                  <li>
+                    <a
+                      href="/refund"
                       className="hover:text-[#0D4EFD] transition-colors"
                     >
                       Refund Policy
@@ -1943,10 +1958,14 @@ export default function Home() {
 
             {/* Bottom Copyright Row */}
             <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-[#94A3B8]">
-              <p>© 2026 MAYA. All rights reserved.</p>
-              <p className="uppercase tracking-[0.04em] font-medium">
-                IDEACIPHER PVT LTD
-              </p>
+              <p>© 2026 SpeakwithMaya. All rights reserved.</p>
+              <div className="flex items-center gap-2">
+                <span className="uppercase tracking-[0.04em] font-medium text-[#64748B]">
+                  IDEACIPHER (PVT) LTD
+                </span>
+                <span>·</span>
+                <span>Sri Lanka</span>
+              </div>
             </div>
           </div>
         </Reveal>
