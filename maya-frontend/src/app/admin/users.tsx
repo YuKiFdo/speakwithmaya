@@ -287,6 +287,40 @@ export default function AdminUsersScreen() {
     return testAccounts.some((t) => (t.phoneNumber || '').replace(/\D/g, '') === cleanDigits);
   };
 
+  const handleDeleteUser = async (u: UserSummaryItem) => {
+    const confirmed = await mayaAlert.confirm({
+      title: 'Delete Student Profile',
+      message: `Permanently delete student "${u.displayName || 'Student'}" (${u.phoneNumber || u.id}) and all their practice data? This cannot be undone.`,
+      confirmText: 'Delete Permanently',
+      cancelText: 'Cancel',
+      isDestructive: true,
+    });
+    if (!confirmed) return;
+
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/admin/users/${u.id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        await mayaAlert.success(`Student profile deleted successfully.`, 'Deleted');
+        if (selectedUserId === u.id) {
+          closeUserDetail();
+        }
+        if (editingUser?.id === u.id) {
+          closeEditUser();
+        }
+        fetchUsers();
+        fetchTestAccounts();
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        await mayaAlert.error(errJson.message || 'Failed to delete user profile.', 'Error');
+      }
+    } catch (err: any) {
+      await mayaAlert.error(err.message || 'Network error deleting user.', 'Error');
+    }
+  };
+
   const fetchUsers = async () => {
     try {
       setIsLoading(true);
@@ -786,6 +820,17 @@ export default function AdminUsersScreen() {
                           >
                             <Feather name="edit-2" size={13} color="#475569" />
                             <Text style={styles.editBtnText}>Edit</Text>
+                          </Pressable>
+
+                          <Pressable
+                            onPress={() => handleDeleteUser(u)}
+                            style={({ pressed }) => [
+                              styles.actionBtn,
+                              styles.deleteUserRowBtn,
+                              pressed && { opacity: 0.8 },
+                            ]}
+                          >
+                            <Feather name="trash-2" size={13} color="#ef4444" />
                           </Pressable>
                         </View>
                       </View>
@@ -1360,6 +1405,19 @@ export default function AdminUsersScreen() {
 
               {/* Actions */}
               <View style={styles.editActionRow}>
+                <Pressable
+                  onPress={() => editingUser && handleDeleteUser(editingUser)}
+                  style={({ pressed }) => [
+                    styles.deleteModalBtn,
+                    pressed && { opacity: 0.8 },
+                  ]}
+                >
+                  <Feather name="trash-2" size={14} color="#ef4444" />
+                  <Text style={styles.deleteModalBtnText}>Delete User</Text>
+                </Pressable>
+
+                <View style={{ flex: 1 }} />
+
                 <Pressable
                   onPress={closeEditUser}
                   style={({ pressed }) => [styles.cancelBtn, pressed && { opacity: 0.8 }]}
@@ -2591,6 +2649,30 @@ const styles = StyleSheet.create({
   deleteTestBtnText: {
     ...fontStyle('inter', 'medium'),
     fontSize: 12,
+    color: '#ef4444',
+  },
+  deleteUserRowBtn: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  deleteModalBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  deleteModalBtnText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 13,
     color: '#ef4444',
   },
 });

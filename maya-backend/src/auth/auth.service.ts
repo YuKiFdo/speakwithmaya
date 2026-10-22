@@ -1618,31 +1618,135 @@ export class AuthService {
   }
 
   /**
-   * Admin: Remove a test account
+   * Admin: Permanently delete a user profile and all associated data
+   */
+  async deleteUser(userId: string): Promise<{ success: boolean; message: string }> {
+    if (!this.supabase) {
+      throw new InternalServerErrorException('Supabase database client not configured.');
+    }
+
+    const { data: profile, error: pErr } = await this.supabase
+      .from('profiles')
+      .select('id, phone_number, display_name')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (pErr || !profile) {
+      throw new NotFoundException(`User with ID ${userId} not found.`);
+    }
+
+    // 1. Remove from sys_app_settings.testAccounts if present
+    try {
+      const config = await this.getAppConfig();
+      const cleanPhoneDigits = (profile.phone_number || '').replace(/\D/g, '');
+      const filteredTestAccounts = (config.testAccounts || []).filter((t: any) => {
+        const tDigits = (t.phoneNumber || '').replace(/\D/g, '');
+        return tDigits !== cleanPhoneDigits && t.id !== userId;
+      });
+      if (filteredTestAccounts.length !== (config.testAccounts || []).length) {
+        await this.updateAppConfig({ testAccounts: filteredTestAccounts });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not sync test accounts on user deletion: ${err.message}`);
+    }
+
+    // 2. Clean up child records across all dependent tables
+    try {
+      const { data: userSessions } = await this.supabase
+        .from('sessions')
+        .select('id')
+        .eq('user_id', userId);
+
+      const sessionIds = (userSessions || []).map((s: any) => s.id);
+      if (sessionIds.length > 0) {
+        await Promise.allSettled([
+          this.supabase.from('grammar_corrections').delete().in('session_id', sessionIds),
+          this.supabase.from('session_transcripts').delete().in('session_id', sessionIds),
+        ]);
+      }
+
+      await Promise.allSettled([
+        this.supabase.from('sessions').delete().eq('user_id', userId),
+        this.supabase.from('subscriptions').delete().eq('user_id', userId),
+        this.supabase.from('orders').delete().eq('user_id', userId),
+        this.supabase.from('user_roadmap_progress').delete().eq('user_id', userId),
+        this.supabase.from('usage_ledger').delete().eq('user_id', userId),
+        this.supabase.from('phone_verifications').delete().eq('phone_number', profile.phone_number),
+      ]);
+    } catch (err: any) {
+      this.logger.warn(`Error cleaning up child records for user ${userId}: ${err.message}`);
+    }
+
+    // 3. Delete from profiles
+    const { error: delError } = await this.supabase
+      .from('profiles')
+      .delete()
+      .eq('id', userId);
+
+    if (delError) {
+      this.logger.error(`Failed to delete profile ${userId}: ${delError.message}`);
+      throw new InternalServerErrorException(`Failed to delete user profile: ${delError.message}`);
+    }
+
+    this.logger.log(`[Admin] Deleted profile "${profile.display_name}" (${profile.phone_number}, ID: ${userId})`);
+    return {
+      success: true,
+      message: `User ${profile.display_name || profile.phone_number} successfully deleted.`,
+    };
+  }
+
+  /**
+   * Admin: Remove a test account and delete its corresponding profile
    */
   async deleteTestAccount(idOrPhone: string): Promise<{ success: boolean; deletedId: string }> {
     const config = await this.getAppConfig();
     const existingList = config.testAccounts || [];
     const cleanParam = idOrPhone.trim();
-    const cleanParamDigits = cleanParam.replace('+', '');
+    const cleanParamDigits = cleanParam.replace(/\D/g, '');
 
     const found = existingList.find(
       (t) =>
         t.id === cleanParam ||
-        this.normalizePhoneNumber(t.phoneNumber).replace('+', '') === cleanParamDigits,
+        (t.phoneNumber || '').replace(/\D/g, '') === cleanParamDigits,
     );
 
-    if (!found) {
-      throw new NotFoundException(`Test account '${idOrPhone}' not found.`);
+    // 1. Remove from sys_app_settings.testAccounts
+    if (found) {
+      const filtered = existingList.filter((t) => t.id !== found.id);
+      await this.updateAppConfig({ testAccounts: filtered });
+      this.logger.log(`[Test Account] Admin removed test account "${found.name}" (${found.phoneNumber})`);
     }
 
-    const filtered = existingList.filter((t) => t.id !== found.id);
-    await this.updateAppConfig({ testAccounts: filtered });
-    this.logger.log(`[Test Account] Admin removed test account "${found.name}" (${found.phoneNumber})`);
+    // 2. Also remove matching user profile from database
+    const targetPhone = found ? found.phoneNumber : idOrPhone;
+    const cleanTargetDigits = targetPhone.replace(/\D/g, '');
+
+    const { data: profiles } = await this.supabase
+      .from('profiles')
+      .select('id, phone_number')
+      .or(`id.eq.${idOrPhone},phone_number.eq.${this.normalizePhoneNumber(targetPhone)}`);
+
+    let targetProfile = profiles && profiles.length > 0 ? profiles[0] : null;
+
+    if (!targetProfile && cleanTargetDigits.length >= 9) {
+      const { data: fallbackProfiles } = await this.supabase
+        .from('profiles')
+        .select('id, phone_number');
+      targetProfile =
+        (fallbackProfiles || []).find(
+          (p: any) => (p.phone_number || '').replace(/\D/g, '') === cleanTargetDigits,
+        ) || null;
+    }
+
+    if (targetProfile) {
+      await this.deleteUser(targetProfile.id);
+    } else if (!found) {
+      throw new NotFoundException(`Test account or user '${idOrPhone}' not found.`);
+    }
 
     return {
       success: true,
-      deletedId: found.id,
+      deletedId: found?.id || targetProfile?.id || idOrPhone,
     };
   }
 }

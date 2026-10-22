@@ -124,6 +124,14 @@ export class AuthController {
   }
 
   /**
+   * Admin: Permanently delete a user profile and all associated data
+   */
+  @Delete('admin/users/:id')
+  async deleteUser(@Param('id') userId: string) {
+    return this.authService.deleteUser(userId);
+  }
+
+  /**
    * Public: Retrieve current app configuration (SMS gateway, pricing notices, disclaimer text)
    * Note: Zero secrets / credentials exposed to public client.
    */
