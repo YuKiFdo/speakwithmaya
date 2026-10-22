@@ -66,22 +66,39 @@ body {
   }
 }
 
-@keyframes maya-particle-rise {
-  0% {
-    opacity: 0;
-    transform: translate3d(0, 10px, 0) scale(0.4);
-  }
-  25% {
-    opacity: 0.95;
-    transform: translate3d(var(--drift-x, 4px), 2px, 0) scale(1);
-  }
-  75% {
-    opacity: 0.8;
-    transform: translate3d(calc(var(--drift-x, 4px) * -0.6), -14px, 0) scale(0.9);
-  }
+@keyframes maya-cta-bounce {
+  0%,
   100% {
-    opacity: 0;
-    transform: translate3d(var(--drift-x, 4px), -26px, 0) scale(0.3);
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  18% {
+    transform: translate3d(0, -3px, 0) scale(1.022);
+  }
+  34% {
+    transform: translate3d(0, 0, 0) scale(0.996);
+  }
+  50% {
+    transform: translate3d(0, -2px, 0) scale(1.014);
+  }
+  68% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes maya-cta-arrow-nudge {
+  0%,
+  68%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  18% {
+    transform: translate3d(3.5px, 0, 0);
+  }
+  34% {
+    transform: translate3d(0.5px, 0, 0);
+  }
+  50% {
+    transform: translate3d(2.5px, 0, 0);
   }
 }
 
@@ -127,11 +144,19 @@ body {
   border: none !important;
   background: #0d4efd !important;
   box-shadow:
-    0 8px 24px -4px rgba(13, 78, 253, 0.45),
-    0 0 16px 0 rgba(59, 130, 246, 0.28);
+    0 10px 26px -4px rgba(13, 78, 253, 0.5),
+    0 0 18px 1px rgba(56, 189, 248, 0.32),
+    0 0 0 3px rgba(13, 78, 253, 0.12);
+  animation: maya-cta-bounce 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite !important;
+  will-change: transform;
   transition:
-    transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 240ms ease;
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 220ms ease;
+}
+
+.landing-primary-cta svg {
+  animation: maya-cta-arrow-nudge 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite !important;
+  will-change: transform;
 }
 
 .landing-primary-cta::before {
@@ -173,38 +198,20 @@ body {
   transition: background 220ms ease;
 }
 
-.landing-primary-cta > :not(.cta-particles) {
-  position: relative;
-  z-index: 1;
-}
-
-.cta-particles {
-  position: absolute;
-  inset: 2px;
-  border-radius: inherit;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.cta-particle {
-  position: absolute;
-  bottom: 4px;
-  border-radius: 9999px;
-  background: radial-gradient(circle, #ffffff 0%, #bae6fd 65%, transparent 100%);
-  box-shadow: 0 0 6px rgba(186, 230, 253, 0.95);
-  opacity: 0;
-  pointer-events: none;
-  animation: maya-particle-rise var(--dur, 2.8s) ease-in-out var(--delay, 0s) infinite !important;
-  will-change: transform, opacity;
-}
-
 .landing-primary-cta:hover,
 .landing-primary-cta:focus-visible {
-  transform: translate3d(0, -2px, 0);
+  animation-name: none !important;
+  transform: translate3d(0, -2.5px, 0) scale(1.02);
   box-shadow:
-    0 12px 28px -4px rgba(13, 78, 253, 0.58),
-    0 0 22px 2px rgba(56, 189, 248, 0.36);
+    0 14px 30px -4px rgba(13, 78, 253, 0.62),
+    0 0 24px 3px rgba(56, 189, 248, 0.4),
+    0 0 0 4px rgba(13, 78, 253, 0.18);
+}
+
+.landing-primary-cta:hover svg,
+.landing-primary-cta:focus-visible svg {
+  animation-name: none !important;
+  transform: translate3d(4px, 0, 0);
 }
 
 .landing-primary-cta:hover::after,
@@ -213,7 +220,8 @@ body {
 }
 
 .landing-primary-cta:active {
-  transform: translate3d(0, 1px, 0) scale(0.98);
+  animation: none !important;
+  transform: translate3d(0, 1px, 0) scale(0.99) !important;
 }
 
 /* Smooth accordion expand/collapse using CSS grid */
@@ -237,7 +245,7 @@ body {
 
 /* Respect user reduced-motion preferences (keep explicit continuous marquees and CTA glows running) */
 @media (prefers-reduced-motion: reduce) {
-  *:not(.animate-marquee-right):not(.landing-primary-cta):not(.cta-particle),
+  *:not(.animate-marquee-right):not(.landing-primary-cta):not(.landing-primary-cta svg),
   *:not(.landing-primary-cta)::before,
   *:not(.landing-primary-cta)::after {
     animation-duration: 0.01ms !important;

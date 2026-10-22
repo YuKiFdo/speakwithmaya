@@ -203,39 +203,6 @@ function StarIcon({ className = "w-3.5 h-3.5 text-[#F97316]" }: { className?: st
   );
 }
 
-const CTA_PARTICLES = [
-  { left: "10%", size: 3, dur: "2.6s", delay: "0s", drift: "5px" },
-  { left: "22%", size: 2.5, dur: "3.1s", delay: "0.6s", drift: "-4px" },
-  { left: "36%", size: 3.5, dur: "2.8s", delay: "1.2s", drift: "6px" },
-  { left: "50%", size: 2.5, dur: "3.3s", delay: "0.3s", drift: "-5px" },
-  { left: "64%", size: 3, dur: "2.7s", delay: "0.9s", drift: "4px" },
-  { left: "78%", size: 3.5, dur: "3.0s", delay: "1.5s", drift: "-6px" },
-  { left: "90%", size: 2.5, dur: "2.5s", delay: "0.4s", drift: "4px" },
-];
-
-function CtaParticles() {
-  return (
-    <span className="cta-particles" aria-hidden="true">
-      {CTA_PARTICLES.map((p, i) => (
-        <span
-          key={i}
-          className="cta-particle"
-          style={
-            {
-              left: p.left,
-              width: `${p.size}px`,
-              height: `${p.size}px`,
-              "--dur": p.dur,
-              "--delay": p.delay,
-              "--drift-x": p.drift,
-            } as React.CSSProperties
-          }
-        />
-      ))}
-    </span>
-  );
-}
-
 function ArrowRightIcon({ className = "w-3.5 h-3.5" }: { className?: string }) {
   return (
     <svg
@@ -690,7 +657,6 @@ export default function Home() {
                 href={SIGN_IN_URL}
                 className="landing-primary-cta group hidden md:inline-flex items-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[13px] font-semibold px-4 py-2.5 rounded-lg shadow-[0_4px_12px_rgba(13,78,253,0.24)] hover:shadow-[0_8px_20px_rgba(13,78,253,0.32)] transition-all duration-200"
               >
-                <CtaParticles />
                 <span>Sign in</span>
                 <ArrowRightIcon className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
               </a>
@@ -772,7 +738,6 @@ export default function Home() {
                     onClick={() => setMobileMenuOpen(false)}
                     className="landing-primary-cta w-full inline-flex items-center justify-center gap-2 bg-[#0D4EFD] text-white text-[13.5px] font-semibold py-3 rounded-xl shadow-[0_4px_12px_rgba(13,78,253,0.24)]"
                   >
-                    <CtaParticles />
                     <span>Sign in</span>
                     <ArrowRightIcon className="w-3.5 h-3.5" />
                   </a>
@@ -821,7 +786,6 @@ export default function Home() {
                       href={SIGN_UP_URL}
                       className="landing-primary-cta group w-full sm:w-auto inline-flex items-center justify-center gap-2.5 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[14px] lg:text-[13.5px] font-semibold px-5 py-3.5 lg:py-3 rounded-xl lg:rounded-lg shadow-[0_6px_16px_rgba(13,78,253,0.25)] hover:shadow-[0_10px_22px_rgba(13,78,253,0.32)] transition-all duration-200"
                     >
-                      <CtaParticles />
                       <span>Create an account</span>
                       <ArrowRightIcon className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
                     </a>
@@ -948,7 +912,6 @@ export default function Home() {
                   href={SIGN_UP_URL}
                   className="landing-primary-cta group w-full sm:max-w-[360px] inline-flex items-center justify-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[14px] font-semibold py-3.5 px-6 rounded-xl shadow-[0_8px_20px_rgba(13,78,253,0.28)] hover:shadow-[0_12px_26px_rgba(13,78,253,0.36)] transition-all duration-200"
                 >
-                  <CtaParticles />
                   <span>Start Speaking with Maya</span>
                   <ArrowRightIcon className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
                 </a>
@@ -1472,7 +1435,6 @@ export default function Home() {
                     href={SIGN_UP_URL}
                     className="landing-primary-cta group inline-flex items-center justify-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[13.5px] font-semibold px-6 py-3 rounded-xl lg:rounded-lg shadow-[0_6px_16px_rgba(13,78,253,0.24)] hover:shadow-[0_10px_22px_rgba(13,78,253,0.32)] transition-all duration-200"
                   >
-                    <CtaParticles />
                     <span>Start Speaking</span>
                     <ArrowRightIcon className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
                   </a>
@@ -1617,8 +1579,7 @@ export default function Home() {
                     href={SIGN_UP_URL}
                     className="landing-primary-cta w-full py-3 rounded-xl bg-[#0D4EFD] hover:bg-[#0B42D8] text-white text-[13px] font-bold text-center shadow-[0_6px_16px_rgba(13,78,253,0.28)] transition-all"
                   >
-                    <CtaParticles />
-                    <span>Upgrade to Pro</span>
+                    Upgrade to Pro
                   </a>
                 </div>
               </Reveal>
