@@ -118,6 +118,9 @@ export class RoadmapController {
         dto.text,
         dto.language,
         dto.voice,
+        false,
+        dto.levelId,
+        dto.forceFresh,
       );
 
       // If client explicitly requests JSON without audio, return JSON object

@@ -437,39 +437,10 @@ export default function AdminScenariosScreen() {
       return;
     }
 
-    // 1. If custom uploaded audio exists, play it directly
-    const customUrl = lang === 'si' ? formAudioUrlSinhala : formAudioUrlEnglish;
-    if (customUrl && customUrl.startsWith('http')) {
-      await handlePlayCustomAudio(customUrl, lang);
-      return;
-    }
-
     const text = lang === 'en' ? formTtsEnglish.trim() : formTtsSinhala.trim();
     if (!text) {
       alert(`Please enter or generate the ${lang === 'en' ? 'English' : 'Sinhala'} speech script first.`);
       return;
-    }
-    // If editing existing scenario with unchanged script, play direct from Supabase Edge CDN instantly (0ms)
-    const existingCdnUrl = lang === 'si' ? editingScenario?.audioUrlSinhala : editingScenario?.audioUrlEnglish;
-    const existingScript = (lang === 'si' ? editingScenario?.ttsScriptSinhala : editingScenario?.ttsScriptEnglish)?.trim();
-    if (existingCdnUrl && existingCdnUrl.startsWith('http') && existingScript === text) {
-      if (previewAudioRef.current) {
-        previewAudioRef.current.pause();
-        previewAudioRef.current = null;
-      }
-      if (typeof Audio !== 'undefined') {
-        const audio = new Audio(existingCdnUrl);
-        previewAudioRef.current = audio;
-        setTtsAudioPlaying(lang);
-        const cleanup = () => {
-          setTtsAudioPlaying(null);
-          previewAudioRef.current = null;
-        };
-        audio.onended = cleanup;
-        audio.onerror = cleanup;
-        await audio.play();
-        return;
-      }
     }
 
     setIsSynthesizingPreview(lang);
@@ -481,7 +452,12 @@ export default function AdminScenariosScreen() {
           'Content-Type': 'application/json',
           'Accept': 'audio/wav, application/json;q=0.9',
         },
-        body: JSON.stringify({ text, language: lang }),
+        body: JSON.stringify({
+          text,
+          language: lang,
+          levelId: editingScenario?.id,
+          forceFresh: true,
+        }),
       });
       if (!res.ok) {
         let errMessage = 'Failed to synthesize TTS';

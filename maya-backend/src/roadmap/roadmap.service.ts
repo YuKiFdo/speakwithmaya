@@ -320,8 +320,8 @@ export class RoadmapService implements OnModuleInit {
       goalDescription: d.goal_description || d.goalDescription || '',
       ttsScriptEnglish: d.tts_script_english || d.ttsScriptEnglish || '',
       ttsScriptSinhala: d.tts_script_sinhala || d.ttsScriptSinhala || '',
-      audioUrlEnglish: d.audio_url_english || d.audioUrlEnglish || '',
-      audioUrlSinhala: d.audio_url_sinhala || d.audioUrlSinhala || '',
+      audioUrlEnglish: /_si\.wav/i.test(d.audio_url_english || d.audioUrlEnglish || '') ? '' : (d.audio_url_english || d.audioUrlEnglish || ''),
+      audioUrlSinhala: /_en\.wav/i.test(d.audio_url_sinhala || d.audioUrlSinhala || '') ? '' : (d.audio_url_sinhala || d.audioUrlSinhala || ''),
       isPublished: d.is_published ?? d.isPublished ?? true,
       createdAt: d.created_at || d.createdAt || new Date().toISOString(),
       updatedAt: d.updated_at || d.updatedAt || new Date().toISOString(),
@@ -978,113 +978,63 @@ Core Conversation Rules:
     language: 'en' | 'si' = 'en',
     voice: string = 'Callirrhoe',
     fromBriefingPrewarm = false,
-  ): Promise<{ audioBase64: string; mimeType: string }> {
+    levelId?: string,
+    forceFresh = false,
+  ): Promise<{ audioBase64: string; mimeType: string; audioUrl?: string }> {
     const cleanText = (text || '').trim();
     if (!cleanText) {
       return { audioBase64: '', mimeType: 'audio/wav' };
     }
 
-    // Check content hash cache first (0ms if already generated or warmed up)
+    // Check content hash cache first (0ms if already generated or warmed up, unless forceFresh)
     const contentHash = createHash('sha256')
       .update(`${language}_${voice}_${cleanText}`)
       .digest('hex')
       .slice(0, 24);
     const diskPath = path.join(this.audioCacheDir, `tts_${contentHash}.wav`);
 
-    if (this.briefingAudioCache.has(contentHash)) {
-      const buffer = this.briefingAudioCache.get(contentHash)!;
-      return {
-        audioBase64: buffer.toString('base64'),
-        mimeType: 'audio/wav',
-      };
-    }
-
-    if (fs.existsSync(diskPath)) {
-      try {
-        const buffer = fs.readFileSync(diskPath);
-        this.briefingAudioCache.set(contentHash, buffer);
+    if (!forceFresh) {
+      if (this.briefingAudioCache.has(contentHash)) {
+        const buffer = this.briefingAudioCache.get(contentHash)!;
         return {
           audioBase64: buffer.toString('base64'),
           mimeType: 'audio/wav',
         };
-      } catch (err: any) {
-        this.logger.debug(`Could not read disk cache for hash ${contentHash}: ${err?.message}`);
       }
-    }
 
-    // 3. Check Supabase Storage for this contentHash clip
-    if (this.supabase) {
-      try {
-        const { data, error } = await this.supabase.storage
-          .from('roadmap-audio')
-          .download(`tts_${contentHash}.wav`);
-        if (!error && data) {
-          const arrayBuffer = await data.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
+      if (fs.existsSync(diskPath)) {
+        try {
+          const buffer = fs.readFileSync(diskPath);
           this.briefingAudioCache.set(contentHash, buffer);
-          try {
-            if (!fs.existsSync(diskPath)) fs.writeFileSync(diskPath, buffer);
-          } catch {}
-          this.logger.log(`[TTS Synthesis] Restored hash TTS ${contentHash} from ${this.storageProviderLabel} (${buffer.length} bytes)`);
           return {
             audioBase64: buffer.toString('base64'),
             mimeType: 'audio/wav',
           };
+        } catch (err: any) {
+          this.logger.debug(`Could not read disk cache for hash ${contentHash}: ${err?.message}`);
         }
-      } catch {}
-    }
+      }
 
-    // 4. Check if any level in the database already has this exact script (re-use existing audio without recursive loop)
-    if (!fromBriefingPrewarm) {
-      try {
-        const levels = await this.getAllLevels(true);
-        const matchingLevel = levels.find((lvl) => {
-          const script = language === 'si' ? lvl.ttsScriptSinhala : lvl.ttsScriptEnglish;
-          return script && script.trim() === cleanText;
-        });
-        if (matchingLevel) {
-          const cacheKey = `${matchingLevel.id}_${language}`;
-          if (this.briefingAudioCache.has(cacheKey)) {
-            const buffer = this.briefingAudioCache.get(cacheKey)!;
+      // Check Cloud Storage for this contentHash clip
+      if (this.supabase) {
+        try {
+          const { data, error } = await this.supabase.storage
+            .from('roadmap-audio')
+            .download(`tts_${contentHash}.wav`);
+          if (!error && data) {
+            const arrayBuffer = await data.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
             this.briefingAudioCache.set(contentHash, buffer);
-            this.logger.log(`[TTS Synthesis] Reused in-memory audio from "${matchingLevel.title}" (${language})`);
-            return {
-              audioBase64: buffer.toString('base64'),
-              mimeType: 'audio/wav',
-            };
-          }
-          const levelDiskPath = path.join(this.audioCacheDir, `${cacheKey}.wav`);
-          if (fs.existsSync(levelDiskPath)) {
-            const buffer = fs.readFileSync(levelDiskPath);
-            this.briefingAudioCache.set(contentHash, buffer);
-            this.briefingAudioCache.set(cacheKey, buffer);
-            this.logger.log(`[TTS Synthesis] Reused disk audio from "${matchingLevel.title}" (${language})`);
-            return {
-              audioBase64: buffer.toString('base64'),
-              mimeType: 'audio/wav',
-            };
-          }
-          const directUrl = language === 'si' ? matchingLevel.audioUrlSinhala : matchingLevel.audioUrlEnglish;
-          if (directUrl && directUrl.startsWith('http')) {
             try {
-              const res = await fetch(directUrl);
-              if (res.ok) {
-                const ab = await res.arrayBuffer();
-                const buffer = Buffer.from(ab);
-                this.briefingAudioCache.set(contentHash, buffer);
-                this.briefingAudioCache.set(cacheKey, buffer);
-                try { if (!fs.existsSync(diskPath)) fs.writeFileSync(diskPath, buffer); } catch {}
-                this.logger.log(`[TTS Synthesis] Reused cloud audio from "${matchingLevel.title}" (${language}) direct URL`);
-                return {
-                  audioBase64: buffer.toString('base64'),
-                  mimeType: 'audio/wav',
-                };
-              }
+              if (!fs.existsSync(diskPath)) fs.writeFileSync(diskPath, buffer);
             } catch {}
+            this.logger.log(`[TTS Synthesis] Restored hash TTS ${contentHash} from ${this.storageProviderLabel} (${buffer.length} bytes)`);
+            return {
+              audioBase64: buffer.toString('base64'),
+              mimeType: 'audio/wav',
+            };
           }
-        }
-      } catch (err: any) {
-        this.logger.debug(`Could not check matching levels for script: ${err?.message}`);
+        } catch {}
       }
     }
 
@@ -1093,7 +1043,7 @@ Core Conversation Rules:
       throw new Error('GEMINI_API_KEY is not configured for TTS generation');
     }
 
-    this.logger.log(`[TTS Synthesis] Requesting Gemini TTS for voice=${voice}, lang=${language}...`);
+    this.logger.log(`[TTS Synthesis] Requesting Gemini TTS for voice=${voice}, lang=${language} (text len=${cleanText.length})...`);
     const ai = new GoogleGenAI({ apiKey });
     const interaction: any = await (ai as any).interactions.create({
       model: 'gemini-3.8-flash-lite-tts',
@@ -1143,6 +1093,31 @@ Core Conversation Rules:
           })
           .catch(() => null);
       }
+
+      // If associated with a level, save directly to that level's cache and persist to cloud storage
+      let uploadedUrl: string | null = null;
+      if (levelId) {
+        const cleanLevelId = levelId.trim();
+        const levelCacheKey = `${cleanLevelId}_${language}`;
+        this.briefingAudioCache.set(levelCacheKey, audioBuffer);
+        const levelDiskPath = path.join(this.audioCacheDir, `${levelCacheKey}.wav`);
+        try {
+          fs.writeFileSync(levelDiskPath, audioBuffer);
+          this.logger.log(`[Disk Cache] Updated scenario audio for ${cleanLevelId} (${language}): ${levelDiskPath}`);
+        } catch {}
+
+        try {
+          uploadedUrl = await this.uploadAudioToSupabase(cleanLevelId, language, audioBuffer);
+        } catch (e: any) {
+          this.logger.warn(`Could not upload synthesized TTS for ${cleanLevelId}: ${e?.message}`);
+        }
+      }
+
+      return {
+        audioBase64,
+        mimeType: 'audio/wav',
+        audioUrl: uploadedUrl || undefined,
+      };
     }
 
     return {
@@ -1159,6 +1134,9 @@ Core Conversation Rules:
       const level = await this.getLevelById(levelId);
       const directUrl = lang === 'si' ? level.audioUrlSinhala : level.audioUrlEnglish;
       if (directUrl && directUrl.startsWith('http')) {
+        // Enforce language match on audio URL
+        if (lang === 'en' && /_si\.wav/i.test(directUrl)) return null;
+        if (lang === 'si' && /_en\.wav/i.test(directUrl)) return null;
         return directUrl;
       }
     } catch (e: any) {

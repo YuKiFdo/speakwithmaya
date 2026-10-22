@@ -382,6 +382,14 @@ export class SynthesizeScenarioTtsDto {
   @IsOptional()
   @IsString()
   voice?: string = 'Callirrhoe';
+
+  @IsOptional()
+  @IsString()
+  levelId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  forceFresh?: boolean;
 }
 
 export class UploadScenarioAudioDto {
