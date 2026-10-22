@@ -9,7 +9,7 @@ WORKDIR /app
 COPY package*.json .npmrc* ./
 
 # Install all dependencies (including devDependencies needed for build)
-RUN npm ci --legacy-peer-deps
+RUN npm ci --legacy-peer-deps --ignore-scripts
 
 # Copy source code and config
 COPY tsconfig*.json nest-cli.json ./

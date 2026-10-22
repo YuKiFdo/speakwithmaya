@@ -18,14 +18,14 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
           cache-dependency-path: 'maya-backend/package-lock.json'
 
       - name: Install dependencies & Build
         working-directory: ./maya-backend
         run: |
-          npm ci
+          npm ci --ignore-scripts
           npm run build
 
       - name: Deploy to Ubuntu VM
@@ -54,7 +54,7 @@ jobs:
           # Install production dependencies and start/restart PM2
           ssh "$VM_USER@$VM_IP" "bash -l -c '
             cd /home/$VM_USER/apps/maya-backend
-            npm ci --omit=dev --legacy-peer-deps
+            npm ci --omit=dev --legacy-peer-deps --ignore-scripts
             pm2 startOrReload ecosystem.config.cjs --update-env
             pm2 save
           '"
