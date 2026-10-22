@@ -298,5 +298,33 @@ export class UpdateAppConfigDto {
   @IsOptional()
   @IsBoolean()
   telcoUnsubButtonEnabled?: boolean;
+
+  @IsOptional()
+  testAccounts?: any[];
 }
+
+export class CreateTestAccountDto {
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^\+?[0-9\s-]{9,18}$/, {
+    message: 'Invalid phone number format.',
+  })
+  phoneNumber!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['starter', 'basic', 'pro', 'premium', 'unlimited'])
+  plan!: 'starter' | 'basic' | 'pro' | 'premium' | 'unlimited';
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(99999)
+  minutesBalance?: number;
+}
+
 

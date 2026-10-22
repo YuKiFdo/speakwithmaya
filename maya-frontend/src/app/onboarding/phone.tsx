@@ -333,8 +333,15 @@ export default function PhoneScreen() {
 
     setIsLoading(true);
     try {
-      await authService.sendOtp(formattedPhone);
+      const res = await authService.sendOtp(formattedPhone);
       OnboardingStore.updateField('phone', formattedPhone);
+
+      // If this is a registered test account, bypass OTP verification directly into the dashboard
+      if (res.isTestAccount) {
+        router.replace('/(tabs)/dashboard');
+        return;
+      }
+
       OnboardingStore.setLastActiveRoute('/onboarding/otp');
       const otpUrl = isLoginMode ? '/onboarding/otp?mode=login' : '/onboarding/otp';
       router.replace(otpUrl as any);

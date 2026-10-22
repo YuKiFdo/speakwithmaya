@@ -3,9 +3,14 @@ import { OnboardingStore } from '../store/onboarding-store';
 
 export interface SendOtpResponse {
   success: boolean;
-  cooldownSeconds: number;
-  expiresInSeconds: number;
+  cooldownSeconds?: number;
+  expiresInSeconds?: number;
   message?: string;
+  isTestAccount?: boolean;
+  accessToken?: string;
+  user?: any;
+  lastActiveRoute?: string;
+  isCompleted?: boolean;
 }
 
 export interface VerifyOtpResponse {
@@ -84,6 +89,16 @@ class AuthService {
     if (!res.ok) {
       throw new Error(data.message || 'Failed to send verification code');
     }
+
+    // If test account was authenticated directly without OTP, set the session immediately
+    if (data.isTestAccount && data.accessToken && data.user) {
+      OnboardingStore.setAuthSession(data.accessToken, data.user);
+      if (data.lastActiveRoute) {
+        OnboardingStore.setLastActiveRoute(data.lastActiveRoute);
+      }
+      OnboardingStore.setOnboardingCompleted();
+    }
+
     return data;
   }
 

@@ -19,6 +19,7 @@ import {
   AddOnTopUpDto,
   AdminUsersQueryDto,
   AdminUpdateUserDto,
+  CreateTestAccountDto,
 } from './dto/auth.dto.js';
 import { SmsApiLkProvider } from './sms/smsapi-lk.provider.js';
 import { IdeamartSmsProvider } from './sms/ideamart-sms.provider.js';
@@ -53,6 +54,15 @@ export interface UserProfileData {
 
 const OTP_SECRET_SALT = process.env.OTP_SALT || 'maya_ai_secure_otp_salt_2026';
 
+export interface TestAccountItem {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  plan: 'starter' | 'basic' | 'pro' | 'premium' | 'unlimited';
+  minutesBalance: number;
+  createdAt: string;
+}
+
 export interface AppConfigData {
   smsGateway: 'smsapi' | 'ideamart' | 'mspace';
   pricingNotice: string;
@@ -74,6 +84,7 @@ export interface AppConfigData {
   mspaceAppHash: string;
   mspaceBaseUrl: string;
   telcoUnsubButtonEnabled: boolean;
+  testAccounts?: TestAccountItem[];
 }
 
 const DEFAULT_APP_CONFIG: AppConfigData = {
@@ -97,6 +108,7 @@ const DEFAULT_APP_CONFIG: AppConfigData = {
   mspaceAppHash: '',
   mspaceBaseUrl: 'https://api.mspace.lk',
   telcoUnsubButtonEnabled: true,
+  testAccounts: [],
 };
 
 @Injectable()
@@ -169,6 +181,63 @@ export class AuthService {
       throw new BadRequestException('Please enter a valid mobile number.');
     }
 
+    // Check if phone belongs to an authorized Admin Test Account (Bypass OTP verification directly into dashboard)
+    const config = await this.getAppConfig();
+    const cleanPhoneDigits = phone.replace('+', '');
+    const testAccount = (config.testAccounts || []).find((t) => {
+      const tDigits = this.normalizePhoneNumber(t.phoneNumber).replace('+', '');
+      return tDigits === cleanPhoneDigits;
+    });
+
+    if (testAccount) {
+      this.logger.log(`[Test Account] Instant dashboard bypass for test user "${testAccount.name}" (${phone})`);
+      const userProfile = await this.findOrCreateProfileByPhone(phone);
+      const planTier = (testAccount.plan === 'unlimited' ? 'pro' : testAccount.plan) as any;
+      const mins = testAccount.minutesBalance || (testAccount.plan === 'unlimited' ? 9999 : 120);
+
+      await this.supabase
+        .from('profiles')
+        .update({
+          display_name: testAccount.name || userProfile.display_name,
+          plan_tier: planTier,
+          plan_status: 'active',
+          minutes_balance: Math.max(userProfile.minutes_balance || 0, mins),
+          monthly_minutes_allowance: Math.max(userProfile.monthly_minutes_allowance || 0, mins),
+          onboarding_completed_at: userProfile.onboarding_completed_at || new Date().toISOString(),
+          last_active_step: '/(tabs)/dashboard',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userProfile.id);
+
+      userProfile.display_name = testAccount.name || userProfile.display_name;
+      userProfile.plan_tier = planTier;
+      userProfile.plan_status = 'active';
+      userProfile.minutes_balance = Math.max(userProfile.minutes_balance || 0, mins);
+      userProfile.last_active_step = '/(tabs)/dashboard';
+      userProfile.onboarding_completed_at = userProfile.onboarding_completed_at || new Date().toISOString();
+
+      const accessToken = this.generateTokenForUser(userProfile);
+      return {
+        success: true,
+        isTestAccount: true,
+        accessToken,
+        lastActiveRoute: '/(tabs)/dashboard',
+        isCompleted: true,
+        user: {
+          id: userProfile.id,
+          phoneNumber: userProfile.phone_number,
+          displayName: testAccount.name || userProfile.display_name,
+          planTier: userProfile.plan_tier,
+          planStatus: 'active',
+          monthlyMinutesAllowance: userProfile.monthly_minutes_allowance,
+          minutesBalance: userProfile.minutes_balance,
+          lastActiveStep: '/(tabs)/dashboard',
+          isCompleted: true,
+        },
+        message: 'Test account authenticated directly without OTP verification.',
+      };
+    }
+
     const now = Date.now();
 
     // 1. Check cooldown (60 seconds) strictly against database
@@ -220,7 +289,6 @@ export class AuthService {
     }
 
     // 4. Dispatch via Active Configured SMS Gateway Provider (smsapi or telco carrier billing)
-    const config = await this.getAppConfig();
     const gateway = config.smsGateway;
     const messageTemplate = gateway === 'smsapi' ? config.smsTemplate : config.ideamartSmsTemplate;
 
@@ -257,6 +325,54 @@ export class AuthService {
     const phone = this.normalizePhoneNumber(dto.phoneNumber);
     const code = (dto.code || '').trim();
     const now = Date.now();
+
+    // Test account fast-path: allow instant verification
+    const config = await this.getAppConfig();
+    const cleanPhoneDigits = phone.replace('+', '');
+    const testAccount = (config.testAccounts || []).find((t) => {
+      const tDigits = this.normalizePhoneNumber(t.phoneNumber).replace('+', '');
+      return tDigits === cleanPhoneDigits;
+    });
+
+    if (testAccount) {
+      const userProfile = await this.findOrCreateProfileByPhone(phone);
+      const planTier = (testAccount.plan === 'unlimited' ? 'pro' : testAccount.plan) as any;
+      const mins = testAccount.minutesBalance || (testAccount.plan === 'unlimited' ? 9999 : 120);
+
+      await this.supabase
+        .from('profiles')
+        .update({
+          display_name: testAccount.name || userProfile.display_name,
+          plan_tier: planTier,
+          plan_status: 'active',
+          minutes_balance: Math.max(userProfile.minutes_balance || 0, mins),
+          monthly_minutes_allowance: Math.max(userProfile.monthly_minutes_allowance || 0, mins),
+          onboarding_completed_at: userProfile.onboarding_completed_at || new Date().toISOString(),
+          last_active_step: '/(tabs)/dashboard',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userProfile.id);
+
+      const accessToken = this.generateTokenForUser(userProfile);
+      return {
+        success: true,
+        accessToken,
+        isNewUser: false,
+        isCompleted: true,
+        lastActiveRoute: '/(tabs)/dashboard',
+        user: {
+          id: userProfile.id,
+          phoneNumber: userProfile.phone_number,
+          displayName: testAccount.name || userProfile.display_name,
+          planTier: planTier,
+          planStatus: 'active',
+          monthlyMinutesAllowance: userProfile.monthly_minutes_allowance,
+          minutesBalance: userProfile.minutes_balance,
+          lastActiveStep: '/(tabs)/dashboard',
+          isCompleted: true,
+        },
+      };
+    }
 
     // 1. Fetch latest pending verification record strictly from database
     const { data: record, error: fetchError } = await this.supabase
@@ -298,7 +414,6 @@ export class AuthService {
     }
 
     // 4. Verify code via Telco Gateway or local hash
-    const config = await this.getAppConfig();
     let rawSubscriberId: string | null = null;
     let telcoProvider: 'ideamart' | 'mspace' | null = null;
 
@@ -1424,6 +1539,110 @@ export class AuthService {
     return {
       success: true,
       config: newConfig,
+    };
+  }
+
+  /**
+   * Admin: Retrieve all registered test accounts
+   */
+  async getTestAccounts(): Promise<TestAccountItem[]> {
+    const config = await this.getAppConfig();
+    return config.testAccounts || [];
+  }
+
+  /**
+   * Admin: Create and provision a new test account
+   */
+  async createTestAccount(dto: CreateTestAccountDto): Promise<{ success: boolean; testAccount: TestAccountItem }> {
+    const phone = this.normalizePhoneNumber(dto.phoneNumber);
+    if (!phone || phone.length < 10) {
+      throw new BadRequestException('Please provide a valid phone number.');
+    }
+
+    const name = (dto.name || '').trim();
+    if (!name) {
+      throw new BadRequestException('Please provide a display name for the test account.');
+    }
+
+    let defaultMins = 120;
+    if (dto.plan === 'starter') defaultMins = 15;
+    else if (dto.plan === 'basic') defaultMins = 45;
+    else if (dto.plan === 'pro') defaultMins = 120;
+    else if (dto.plan === 'premium') defaultMins = 300;
+    else if (dto.plan === 'unlimited') defaultMins = 9999;
+    const mins = dto.minutesBalance ?? defaultMins;
+
+    // 1. Provision / update profile in Supabase
+    const userProfile = await this.findOrCreateProfileByPhone(phone);
+    const planTier = (dto.plan === 'unlimited' ? 'pro' : dto.plan) as any;
+
+    await this.supabase
+      .from('profiles')
+      .update({
+        display_name: name,
+        plan_tier: planTier,
+        plan_status: 'active',
+        minutes_balance: mins,
+        monthly_minutes_allowance: mins,
+        onboarding_completed_at: userProfile.onboarding_completed_at || new Date().toISOString(),
+        last_active_step: '/(tabs)/dashboard',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userProfile.id);
+
+    // 2. Persist to sys_app_settings.testAccounts
+    const config = await this.getAppConfig();
+    const existingList = config.testAccounts || [];
+    const cleanPhoneDigits = phone.replace('+', '');
+    const filtered = existingList.filter(
+      (t) => this.normalizePhoneNumber(t.phoneNumber).replace('+', '') !== cleanPhoneDigits,
+    );
+
+    const testAccountItem: TestAccountItem = {
+      id: crypto.randomUUID(),
+      name,
+      phoneNumber: phone,
+      plan: dto.plan,
+      minutesBalance: mins,
+      createdAt: new Date().toISOString(),
+    };
+    filtered.unshift(testAccountItem);
+
+    await this.updateAppConfig({ testAccounts: filtered });
+    this.logger.log(`[Test Account] Admin created test account "${name}" (${phone}) on plan ${dto.plan} (${mins} min)`);
+
+    return {
+      success: true,
+      testAccount: testAccountItem,
+    };
+  }
+
+  /**
+   * Admin: Remove a test account
+   */
+  async deleteTestAccount(idOrPhone: string): Promise<{ success: boolean; deletedId: string }> {
+    const config = await this.getAppConfig();
+    const existingList = config.testAccounts || [];
+    const cleanParam = idOrPhone.trim();
+    const cleanParamDigits = cleanParam.replace('+', '');
+
+    const found = existingList.find(
+      (t) =>
+        t.id === cleanParam ||
+        this.normalizePhoneNumber(t.phoneNumber).replace('+', '') === cleanParamDigits,
+    );
+
+    if (!found) {
+      throw new NotFoundException(`Test account '${idOrPhone}' not found.`);
+    }
+
+    const filtered = existingList.filter((t) => t.id !== found.id);
+    await this.updateAppConfig({ testAccounts: filtered });
+    this.logger.log(`[Test Account] Admin removed test account "${found.name}" (${found.phoneNumber})`);
+
+    return {
+      success: true,
+      deletedId: found.id,
     };
   }
 }

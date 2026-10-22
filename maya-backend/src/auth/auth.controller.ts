@@ -3,6 +3,7 @@ import {
   Post,
   Put,
   Get,
+  Delete,
   Body,
   Param,
   Query,
@@ -23,6 +24,7 @@ import {
   AdminUsersQueryDto,
   AdminUpdateUserDto,
   UpdateAppConfigDto,
+  CreateTestAccountDto,
 } from './dto/auth.dto.js';
 
 @Controller('v1')
@@ -145,6 +147,31 @@ export class AuthController {
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async updateAppConfig(@Body() dto: UpdateAppConfigDto) {
     return this.authService.updateAppConfig(dto);
+  }
+
+  /**
+   * Admin: List all test accounts
+   */
+  @Get('admin/test-accounts')
+  async getTestAccounts() {
+    return this.authService.getTestAccounts();
+  }
+
+  /**
+   * Admin: Create and provision a new test account
+   */
+  @Post('admin/test-accounts')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async createTestAccount(@Body() dto: CreateTestAccountDto) {
+    return this.authService.createTestAccount(dto);
+  }
+
+  /**
+   * Admin: Delete/remove a test account
+   */
+  @Delete('admin/test-accounts/:id')
+  async deleteTestAccount(@Param('id') id: string) {
+    return this.authService.deleteTestAccount(id);
   }
 }
 
