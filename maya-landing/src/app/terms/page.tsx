@@ -216,7 +216,7 @@ export default function TermsPage() {
         </div>
       </main>
 
-      <LegalFooter />
+      <LegalFooter active="terms" />
     </div>
   );
 }

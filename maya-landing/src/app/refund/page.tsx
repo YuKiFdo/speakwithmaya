@@ -235,7 +235,7 @@ export default function RefundPage() {
         </div>
       </main>
 
-      <LegalFooter />
+      <LegalFooter active="refund" />
     </div>
   );
 }

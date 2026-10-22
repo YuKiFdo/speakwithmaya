@@ -190,7 +190,7 @@ export default function PrivacyPage() {
         </div>
       </main>
 
-      <LegalFooter />
+      <LegalFooter active="privacy" />
     </div>
   );
 }

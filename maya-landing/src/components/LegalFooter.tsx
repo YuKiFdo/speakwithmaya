@@ -3,12 +3,25 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export function LegalFooter() {
+interface LegalFooterProps {
+  active?: "terms" | "privacy" | "refund" | "none";
+}
+
+export function LegalFooter({ active }: LegalFooterProps) {
   const pathname = usePathname();
 
-  const isTerms = pathname === "/terms";
-  const isPrivacy = pathname === "/privacy";
-  const isRefund = pathname === "/refund";
+  // Determine active item from prop first (100% deterministic on SSR), fallback to pathname
+  let currentActive = active;
+  if (!currentActive) {
+    if (pathname?.includes("/terms")) currentActive = "terms";
+    else if (pathname?.includes("/privacy")) currentActive = "privacy";
+    else if (pathname?.includes("/refund")) currentActive = "refund";
+    else currentActive = "none";
+  }
+
+  const isTerms = currentActive === "terms";
+  const isPrivacy = currentActive === "privacy";
+  const isRefund = currentActive === "refund";
 
   return (
     <footer className="bg-[#EDF3FE] pt-14 pb-10 text-[#475569] border-t border-[#DCE6F7]">
@@ -105,14 +118,14 @@ export function LegalFooter() {
             <h4 className="text-[12px] font-bold text-[#0F172A] mb-3.5">
               Legal & Policies
             </h4>
-            <ul className="space-y-2.5 text-[12px] text-[#64748B]">
+            <ul className="space-y-2.5 text-[12.5px]">
               <li>
                 <Link
                   href="/terms"
-                  className={`transition-colors ${
+                  className={`inline-block transition-colors ${
                     isTerms
-                      ? "text-[#0D4EFD] font-semibold"
-                      : "hover:text-[#0D4EFD]"
+                      ? "text-[#0D4EFD] font-bold"
+                      : "text-[#64748B] hover:text-[#0D4EFD]"
                   }`}
                 >
                   Terms of Service
@@ -121,10 +134,10 @@ export function LegalFooter() {
               <li>
                 <Link
                   href="/privacy"
-                  className={`transition-colors ${
+                  className={`inline-block transition-colors ${
                     isPrivacy
-                      ? "text-[#0D4EFD] font-semibold"
-                      : "hover:text-[#0D4EFD]"
+                      ? "text-[#0D4EFD] font-bold"
+                      : "text-[#64748B] hover:text-[#0D4EFD]"
                   }`}
                 >
                   Privacy Policy
@@ -133,10 +146,10 @@ export function LegalFooter() {
               <li>
                 <Link
                   href="/refund"
-                  className={`transition-colors ${
+                  className={`inline-block transition-colors ${
                     isRefund
-                      ? "text-[#0D4EFD] font-semibold"
-                      : "hover:text-[#0D4EFD]"
+                      ? "text-[#0D4EFD] font-bold"
+                      : "text-[#64748B] hover:text-[#0D4EFD]"
                   }`}
                 >
                   Refund Policy

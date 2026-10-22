@@ -64,9 +64,14 @@ const QUOTES_WITH_OFFSETS = FLUENCY_QUOTES.map((q, idx) => ({
   ),
 }));
 
-function useInView(options?: { threshold?: number; rootMargin?: string }) {
+function useInView(options?: {
+  threshold?: number;
+  rootMargin?: string;
+  triggerOnce?: boolean;
+}) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [inView, setInView] = useState(false);
+  const triggerOnce = options?.triggerOnce ?? true;
 
   useEffect(() => {
     const node = ref.current;
@@ -76,7 +81,11 @@ function useInView(options?: { threshold?: number; rootMargin?: string }) {
       ([entry]) => {
         if (entry.isIntersecting) {
           setInView(true);
-          observer.unobserve(node);
+          if (triggerOnce) {
+            observer.unobserve(node);
+          }
+        } else if (!triggerOnce) {
+          setInView(false);
         }
       },
       {
@@ -87,7 +96,7 @@ function useInView(options?: { threshold?: number; rootMargin?: string }) {
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, [options?.threshold, options?.rootMargin]);
+  }, [options?.threshold, options?.rootMargin, triggerOnce]);
 
   return { ref, inView };
 }
@@ -225,18 +234,163 @@ function CheckCircleIcon() {
   );
 }
 
+function QuotesCardsContainer() {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [filledWordCount, setFilledWordCount] = useState(0);
+  const [targetWordCount, setTargetWordCount] = useState(0);
+
+  // Scroll listener: tracks user scroll through Section 2 to fill forward on scroll down and un-fill on scroll up
+  useEffect(() => {
+    let rafId: number | null = null;
+
+    const onScroll = () => {
+      const el = containerRef.current;
+      if (!el) return;
+
+      const rect = el.getBoundingClientRect();
+      const vh = window.innerHeight || 800;
+
+      // Start filling as container approaches comfortable view (85% down viewport)
+      // Reach full completion (all 3 cards filled sequentially) when scrolled through (22% down viewport)
+      const startY = vh * 0.85;
+      const endY = vh * 0.22;
+
+      const progress = Math.max(
+        0,
+        Math.min(1, (startY - rect.top) / (startY - endY))
+      );
+      const nextTarget = Math.round(progress * TOTAL_QUOTE_WORDS);
+
+      setTargetWordCount((prev) => (prev === nextTarget ? prev : nextTarget));
+    };
+
+    const handleScroll = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        onScroll();
+        rafId = null;
+      });
+    };
+
+    onScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("resize", handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", handleScroll);
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  // Smooth stepper: steps forward when scrolling down, steps backward when scrolling up
+  // Ensures card 2 only starts after card 1 is 100% complete, and card 3 only after card 2 is complete!
+  useEffect(() => {
+    if (filledWordCount === targetWordCount) return;
+
+    const stepTimer = window.setTimeout(() => {
+      setFilledWordCount((prev) => {
+        if (prev < targetWordCount) {
+          return Math.min(TOTAL_QUOTE_WORDS, prev + 1);
+        } else if (prev > targetWordCount) {
+          return Math.max(0, prev - 1);
+        }
+        return prev;
+      });
+    }, 95);
+
+    return () => window.clearTimeout(stepTimer);
+  }, [filledWordCount, targetWordCount]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="max-w-[540px] mx-auto space-y-3 sm:space-y-3.5 mb-7 sm:mb-9 text-left"
+    >
+      {QUOTES_WITH_OFFSETS.map((card, cardIdx) => {
+        const cardStart = card.startOffset;
+        const cardFilledCount = Math.max(
+          0,
+          Math.min(card.words.length, filledWordCount - cardStart)
+        );
+        const isCardComplete = cardFilledCount >= card.words.length;
+        const isCardActive =
+          cardFilledCount > 0 && cardFilledCount < card.words.length;
+
+        return (
+          <Reveal
+            key={card.id}
+            delay={100 + cardIdx * 80}
+            y={16}
+            duration={800}
+          >
+            <div
+              className={`bg-white rounded-xl px-5 py-4 border transition-all duration-300 flex items-start gap-2.5 select-none ${
+                isCardActive
+                  ? "border-[#BFDBFE] shadow-[0_8px_24px_rgba(13,78,253,0.08)] ring-1 ring-[#0D4EFD]/25"
+                  : isCardComplete
+                    ? "border-[#EDF2F9] shadow-[0_4px_20px_rgba(15,23,42,0.03)] hover:border-[#BFDBFE] hover:shadow-[0_6px_20px_rgba(13,78,253,0.06)]"
+                    : "border-[#EDF2F9] opacity-75"
+              }`}
+            >
+              <span
+                className={`font-serif text-[20px] leading-none select-none mt-0.5 transition-colors duration-300 ${
+                  cardFilledCount > 0 ? "text-[#0D4EFD]" : "text-[#93C5FD]"
+                }`}
+              >
+                “
+              </span>
+              <p className="text-[13.5px] sm:text-[14.5px] leading-relaxed">
+                {card.words.map((word, wIdx) => {
+                  const globalIdx = cardStart + wIdx;
+                  const isFilled = globalIdx < filledWordCount;
+                  const isCurrentActiveWord =
+                    globalIdx === filledWordCount - 1 &&
+                    filledWordCount > 0 &&
+                    filledWordCount < TOTAL_QUOTE_WORDS;
+                  const isBlueHighlight =
+                    card.blueHighlightIndices.includes(wIdx);
+                  const isBoldPrefix = wIdx < card.boldPrefixCount;
+
+                  return (
+                    <span key={`${card.id}-${wIdx}`} className="inline-block">
+                      <span
+                        className={`rounded transition-all duration-150 inline-block ${
+                          isCurrentActiveWord
+                            ? "bg-[#0D4EFD] text-white font-bold px-1.5 py-0.5 shadow-[0_2px_8px_rgba(13,78,253,0.35)] scale-105"
+                            : isFilled
+                              ? isBlueHighlight
+                                ? "text-[#0D4EFD] font-extrabold bg-[#EBF2FF] px-1.5 py-0.5 rounded border border-[#BFDBFE]/70 shadow-[0_1px_3px_rgba(13,78,253,0.08)]"
+                                : isBoldPrefix
+                                  ? "font-bold text-[#0F172A]"
+                                  : "font-semibold text-[#1E293B]"
+                              : "font-normal text-[#94A3B8]/60 opacity-40"
+                        }`}
+                      >
+                        {word}
+                      </span>
+                      {wIdx < card.words.length - 1 ? "\u00A0" : ""}
+                    </span>
+                  );
+                })}
+              </p>
+            </div>
+          </Reveal>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function Home() {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"feedback" | "expressions" | "pronunciation">("feedback");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [filledWordCount, setFilledWordCount] = useState(2);
-  const [targetWordCount, setTargetWordCount] = useState(2);
   const [isScrolled, setIsScrolled] = useState(false);
   const [activeSection, setActiveSection] = useState<
     "home" | "features" | "how-it-works" | "pricing" | "faq"
   >("home");
 
-  const quotesTrackRef = useRef<HTMLDivElement | null>(null);
   const marqueeTrackRef = useRef<HTMLDivElement | null>(null);
   const marqueePausedRef = useRef(false);
 
@@ -285,22 +439,8 @@ export default function Home() {
     return () => window.cancelAnimationFrame(rafId);
   }, []);
 
-  // Balanced word-by-word stepper (35ms per word so fast scroll still cascades smoothly in ~0.8s)
-  useEffect(() => {
-    if (filledWordCount === targetWordCount) return;
 
-    const stepTimer = window.setTimeout(() => {
-      setFilledWordCount((prev) =>
-        prev < targetWordCount
-          ? Math.min(TOTAL_QUOTE_WORDS, prev + 1)
-          : Math.max(2, prev - 1)
-      );
-    }, 35);
-
-    return () => window.clearTimeout(stepTimer);
-  }, [filledWordCount, targetWordCount]);
-
-  // Native sticky scroll-pinned progressive word-by-word fill + floating navbar state
+  // Floating navbar state & active section detection
   useEffect(() => {
     let rafId: number | null = null;
 
@@ -326,26 +466,6 @@ export default function Home() {
         }
       }
       setActiveSection((prev) => (prev === detected ? prev : detected));
-
-      const track = quotesTrackRef.current;
-      if (!track) return;
-      const rect = track.getBoundingClientRect();
-      const vh = window.innerHeight || 800;
-
-      const pinnedDistance = Math.max(1, rect.height - vh);
-      const scrolledIntoPin = vh * 0.15 - rect.top;
-      const activeRange = pinnedDistance * 0.85 + vh * 0.15;
-      const rawProgress = scrolledIntoPin / Math.max(1, activeRange);
-      const clamped = Math.max(0, Math.min(1, rawProgress));
-
-      const nextTarget = Math.max(
-        2,
-        Math.min(
-          TOTAL_QUOTE_WORDS,
-          2 + Math.round(clamped * (TOTAL_QUOTE_WORDS - 2))
-        )
-      );
-      setTargetWordCount((prev) => (prev === nextTarget ? prev : nextTarget));
     };
 
     const onScroll = () => {
@@ -740,149 +860,58 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ================= SECTION 2: WHY IS SPEAKING SO HARD (STICKY SCROLL-PINNED) ================= */}
-        <div ref={quotesTrackRef} className="relative h-[210vh] sm:h-[230vh]">
-          <section
-            className="sticky top-0 min-h-screen flex flex-col justify-center py-12 sm:py-20 overflow-hidden"
-            style={{
-              background:
-                "radial-gradient(65% 55% at 92% 96%, rgba(160, 190, 254, 0.6) 0%, rgba(246, 249, 255, 0) 100%), linear-gradient(180deg, #F6F9FF 0%, #EEF4FF 100%)",
-            }}
-          >
-            <div className="max-w-[780px] w-full mx-auto px-5 sm:px-6 text-center relative z-10">
-              <Reveal delay={0} y={18} duration={900}>
-                <p className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-[0.14em] text-[#0D4EFD] mb-2.5 sm:mb-3">
-                  YOUR NEXT STEP TO FLUENCY
+        {/* ================= SECTION 2: WHY IS SPEAKING SO HARD ================= */}
+        <section
+          className="py-16 sm:py-24 overflow-hidden"
+          style={{
+            background:
+              "radial-gradient(65% 55% at 92% 96%, rgba(160, 190, 254, 0.6) 0%, rgba(246, 249, 255, 0) 100%), linear-gradient(180deg, #F6F9FF 0%, #EEF4FF 100%)",
+          }}
+        >
+          <div className="max-w-[780px] w-full mx-auto px-5 sm:px-6 text-center relative z-10">
+            <Reveal delay={0} y={18} duration={900}>
+              <p className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-[0.14em] text-[#0D4EFD] mb-2.5 sm:mb-3">
+                YOUR NEXT STEP TO FLUENCY
+              </p>
+            </Reveal>
+
+            <Reveal delay={110} y={20} duration={950}>
+              <h2 className="font-display text-[28px] sm:text-[40px] font-extrabold leading-[1.18] sm:leading-[1.16] tracking-[-0.025em] text-[#0F172A] mb-3.5 sm:mb-4">
+                You Know English.
+                <br />
+                So Why Is{" "}
+                <span className="text-[#0D4EFD]">Speaking So Hard?</span>
+              </h2>
+            </Reveal>
+
+            <Reveal delay={220} y={20} duration={950}>
+              <p className="text-[13.5px] sm:text-[15px] leading-[1.6] text-[#64748B] max-w-[340px] sm:max-w-[540px] mx-auto mb-8 sm:mb-10">
+                You understand English, but speaking feels difficult. Maya
+                helps you practise real conversations, improve your sentences,
+                and speak with confidence.
+              </p>
+            </Reveal>
+
+            {/* 3 Quote Cards with Sequential Scroll-triggered Word-by-Word Fill Animation */}
+            <QuotesCardsContainer />
+
+            {/* Primary Wide CTA */}
+            <Reveal delay={340} y={18} duration={950}>
+              <div className="flex flex-col items-center max-w-[540px] mx-auto">
+                <a
+                  href="#pricing"
+                  className="group w-full sm:max-w-[360px] inline-flex items-center justify-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[14px] font-semibold py-3.5 px-6 rounded-xl shadow-[0_8px_20px_rgba(13,78,253,0.28)] hover:shadow-[0_12px_26px_rgba(13,78,253,0.36)] transition-all duration-200"
+                >
+                  <span>Start Speaking with Maya</span>
+                  <ArrowRightIcon className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+                </a>
+                <p className="text-[11.5px] text-[#475569] mt-3.5">
+                  Make mistakes. Learn naturally. Speak with confidence.
                 </p>
-              </Reveal>
-
-              <Reveal delay={110} y={20} duration={950}>
-                <h2 className="font-display text-[28px] sm:text-[40px] font-extrabold leading-[1.18] sm:leading-[1.16] tracking-[-0.025em] text-[#0F172A] mb-3.5 sm:mb-4">
-                  You Know English.
-                  <br />
-                  So Why Is{" "}
-                  <span className="text-[#0D4EFD]">Speaking So Hard?</span>
-                </h2>
-              </Reveal>
-
-              <Reveal delay={220} y={20} duration={950}>
-                <p className="text-[13.5px] sm:text-[15px] leading-[1.6] text-[#64748B] max-w-[340px] sm:max-w-[540px] mx-auto mb-8 sm:mb-10">
-                  You understand English, but speaking feels difficult. Maya
-                  helps you practise real conversations, improve your sentences,
-                  and speak with confidence.
-                </p>
-              </Reveal>
-
-              {/* 3 Quote Cards with Word-by-Word Fill */}
-              <div className="max-w-[540px] mx-auto space-y-3 sm:space-y-3.5 mb-7 sm:mb-9 text-left">
-                {QUOTES_WITH_OFFSETS.map((card, cardIdx) => {
-                  const cardEndOffset = card.startOffset + card.words.length;
-                  const isCardActiveOrFilled =
-                    filledWordCount > card.startOffset;
-                  const isCardCurrentlyFilling =
-                    filledWordCount > card.startOffset &&
-                    filledWordCount < cardEndOffset;
-
-                  return (
-                    <Reveal
-                      key={card.id}
-                      delay={160 + cardIdx * 130}
-                      y={20}
-                      duration={950}
-                    >
-                      <div
-                        onClick={() => setTargetWordCount(cardEndOffset)}
-                        className={`bg-white rounded-xl px-5 py-4 border transition-all duration-400 flex items-start gap-2 cursor-pointer ${
-                          isCardCurrentlyFilling
-                            ? "border-[#BFDBFE] shadow-[0_8px_24px_rgba(13,78,253,0.08)]"
-                            : "border-[#EDF2F9] shadow-[0_4px_20px_rgba(15,23,42,0.03)]"
-                        }`}
-                      >
-                        <span
-                          className={`font-serif text-[20px] leading-none select-none mt-0.5 transition-colors duration-400 ${
-                            isCardActiveOrFilled
-                              ? "text-[#0D4EFD]"
-                              : "text-[#60A5FA]"
-                          }`}
-                        >
-                          “
-                        </span>
-                        <p className="text-[13.5px] sm:text-[14.5px] leading-snug">
-                          {card.desktopQuotes && (
-                            <span
-                              className={`hidden sm:inline transition-colors duration-400 ${
-                                filledWordCount > card.startOffset
-                                  ? "text-[#1E293B]"
-                                  : "text-[#94A3B8]"
-                              }`}
-                            >
-                              &ldquo;
-                            </span>
-                          )}
-                          {card.words.map((word, wIdx) => {
-                            const globalIdx = card.startOffset + wIdx;
-                            const isFilled = globalIdx < filledWordCount;
-                            const isCurrentActiveWord =
-                              globalIdx === filledWordCount - 1 &&
-                              filledWordCount > 2 &&
-                              filledWordCount < TOTAL_QUOTE_WORDS;
-                            const isBoldPrefix = wIdx < card.boldPrefixCount;
-
-                            return (
-                              <span key={`${card.id}-${wIdx}`}>
-                                <span
-                                  className={`rounded transition-all duration-300 ${
-                                    isCurrentActiveWord
-                                      ? "bg-[#DBEAFE] text-[#0D4EFD] font-bold px-1 py-0.5"
-                                      : isBoldPrefix
-                                        ? "font-bold text-[#1E293B]"
-                                        : isFilled
-                                          ? "font-bold text-[#1E293B]"
-                                          : "font-normal text-[#94A3B8]"
-                                  }`}
-                                >
-                                  {word}
-                                </span>
-                                {wIdx < card.words.length - 1 ? " " : ""}
-                              </span>
-                            );
-                          })}
-                          {card.desktopQuotes && (
-                            <span
-                              className={`hidden sm:inline transition-colors duration-400 ${
-                                filledWordCount >= cardEndOffset
-                                  ? "text-[#1E293B]"
-                                  : "text-[#94A3B8]"
-                              }`}
-                            >
-                              &rdquo;
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                    </Reveal>
-                  );
-                })}
               </div>
-
-              {/* Primary Wide CTA */}
-              <Reveal delay={340} y={18} duration={950}>
-                <div className="flex flex-col items-center max-w-[540px] mx-auto">
-                  <a
-                    href="#pricing"
-                    className="group w-full sm:max-w-[360px] inline-flex items-center justify-center gap-2 bg-[#0D4EFD] hover:bg-[#0B42D8] hover:-translate-y-0.5 text-white text-[14px] font-semibold py-3.5 px-6 rounded-xl shadow-[0_8px_20px_rgba(13,78,253,0.28)] hover:shadow-[0_12px_26px_rgba(13,78,253,0.36)] transition-all duration-200"
-                  >
-                    <span>Start Speaking with Maya</span>
-                    <ArrowRightIcon className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
-                  </a>
-                  <p className="text-[11.5px] text-[#475569] mt-3.5">
-                    Make mistakes. Learn naturally. Speak with confidence.
-                  </p>
-                </div>
-              </Reveal>
-            </div>
-          </section>
-        </div>
+            </Reveal>
+          </div>
+        </section>
 
         {/* ================= SECTION 3: HOW IT WORKS + PERSONALIZED FEEDBACK ================= */}
         <section id="how-it-works" className="bg-white py-16 sm:py-24">
