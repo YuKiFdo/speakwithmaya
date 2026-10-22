@@ -20,6 +20,15 @@ import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
 import { mayaAlert } from '@/components/ui/alert-modal';
 
+export interface TestAccountItem {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  plan: 'starter' | 'basic' | 'pro' | 'premium' | 'unlimited';
+  minutesBalance: number;
+  createdAt?: string;
+}
+
 export interface UserSummaryItem {
   id: string;
   phoneNumber: string;
@@ -158,6 +167,126 @@ export default function AdminUsersScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 12;
 
+  // Modal: Test Accounts (Zero OTP Bypass)
+  const [testAccounts, setTestAccounts] = useState<TestAccountItem[]>([]);
+  const [isTestAccountsModalOpen, setIsTestAccountsModalOpen] = useState(false);
+  const [isLoadingTestAccounts, setIsLoadingTestAccounts] = useState(false);
+  const [newTestName, setNewTestName] = useState('');
+  const [newTestPhone, setNewTestPhone] = useState('+94');
+  const [newTestPlan, setNewTestPlan] = useState<'starter' | 'basic' | 'pro' | 'premium' | 'unlimited'>('unlimited');
+  const [newTestMinutes, setNewTestMinutes] = useState('9999');
+  const [isCreatingTestAccount, setIsCreatingTestAccount] = useState(false);
+  const [deletingTestAccountId, setDeletingTestAccountId] = useState<string | null>(null);
+
+  const fetchTestAccounts = async () => {
+    setIsLoadingTestAccounts(true);
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/admin/test-accounts`);
+      if (res.ok) {
+        const json = await res.json();
+        setTestAccounts(Array.isArray(json) ? json : []);
+      }
+    } catch (err: any) {
+      console.warn('Failed to load test accounts:', err);
+    } finally {
+      setIsLoadingTestAccounts(false);
+    }
+  };
+
+  const handleSelectTestPlan = (p: 'starter' | 'basic' | 'pro' | 'premium' | 'unlimited') => {
+    setNewTestPlan(p);
+    if (p === 'starter') setNewTestMinutes('15');
+    else if (p === 'basic') setNewTestMinutes('45');
+    else if (p === 'pro') setNewTestMinutes('120');
+    else if (p === 'premium') setNewTestMinutes('300');
+    else if (p === 'unlimited') setNewTestMinutes('9999');
+  };
+
+  const handleCreateTestAccount = async () => {
+    if (!newTestName.trim()) {
+      await mayaAlert.error('Please enter a display name for the test account.', 'Missing Name');
+      return;
+    }
+    const cleanDigits = newTestPhone.replace(/\D/g, '');
+    if (!newTestPhone.trim() || cleanDigits.length < 9) {
+      await mayaAlert.error('Please enter a valid phone number with country code (e.g. +94771234567).', 'Invalid Phone');
+      return;
+    }
+
+    setIsCreatingTestAccount(true);
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/admin/test-accounts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newTestName.trim(),
+          phoneNumber: newTestPhone.trim(),
+          plan: newTestPlan,
+          minutesBalance: parseInt(newTestMinutes, 10) || (newTestPlan === 'unlimited' ? 9999 : 120),
+        }),
+      });
+
+      if (res.ok) {
+        await mayaAlert.success(
+          `Test account "${newTestName.trim()}" created! They will now automatically enter the dashboard with 0 OTP prompts.`,
+          'Test Account Created',
+        );
+        setNewTestName('');
+        setNewTestPhone('+94');
+        setNewTestPlan('unlimited');
+        setNewTestMinutes('9999');
+        fetchTestAccounts();
+        fetchUsers();
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        await mayaAlert.error(errJson.message || 'Failed to create test account.', 'Error');
+      }
+    } catch (err: any) {
+      await mayaAlert.error(err.message || 'Network error creating test account.', 'Error');
+    } finally {
+      setIsCreatingTestAccount(false);
+    }
+  };
+
+  const handleDeleteTestAccount = async (account: TestAccountItem) => {
+    const confirmed = await mayaAlert.confirm({
+      title: 'Remove Test Account',
+      message: `Remove test account "${account.name}" (${account.phoneNumber})? They will revert to normal SMS OTP login.`,
+      confirmText: 'Remove',
+      cancelText: 'Cancel',
+      isDestructive: true,
+    });
+    if (!confirmed) return;
+
+    setDeletingTestAccountId(account.id);
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/admin/test-accounts/${account.id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        await mayaAlert.success(`Test account "${account.name}" removed.`, 'Removed');
+        fetchTestAccounts();
+        fetchUsers();
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        await mayaAlert.error(errJson.message || 'Failed to remove test account.', 'Error');
+      }
+    } catch (err: any) {
+      await mayaAlert.error(err.message || 'Network error deleting test account.', 'Error');
+    } finally {
+      setDeletingTestAccountId(null);
+    }
+  };
+
+  const isTestAccount = (phone: string) => {
+    if (!phone) return false;
+    const cleanDigits = phone.replace(/\D/g, '');
+    return testAccounts.some((t) => (t.phoneNumber || '').replace(/\D/g, '') === cleanDigits);
+  };
+
   const fetchUsers = async () => {
     try {
       setIsLoading(true);
@@ -186,6 +315,7 @@ export default function AdminUsersScreen() {
 
   useEffect(() => {
     fetchUsers();
+    fetchTestAccounts();
   }, [selectedTier, selectedLevel, selectedStatus]);
 
   // Debounced search trigger
@@ -340,13 +470,25 @@ export default function AdminUsersScreen() {
             sidebarOpen={sidebarOpen}
             onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
             rightElement={
-              <Pressable
-                onPress={fetchUsers}
-                style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.8 }]}
-              >
-                <Feather name="refresh-cw" size={14} color="#0d9488" />
-                <Text style={styles.refreshBtnText}>Refresh</Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Pressable
+                  onPress={() => setIsTestAccountsModalOpen(true)}
+                  style={({ pressed }) => [styles.testAccountBtn, pressed && { opacity: 0.8 }]}
+                >
+                  <Text style={{ fontSize: 13 }}>🧪</Text>
+                  <Text style={styles.testAccountBtnText}>Test Accounts ({testAccounts.length})</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    fetchUsers();
+                    fetchTestAccounts();
+                  }}
+                  style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.8 }]}
+                >
+                  <Feather name="refresh-cw" size={14} color="#0d9488" />
+                  <Text style={styles.refreshBtnText}>Refresh</Text>
+                </Pressable>
+              </View>
             }
           />
 
@@ -561,9 +703,16 @@ export default function AdminUsersScreen() {
                             <Text style={styles.avatarText}>{getInitials(u.displayName, u.phoneNumber)}</Text>
                           </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={styles.userName} numberOfLines={1}>
-                              {u.displayName || 'Anonymous Student'}
-                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={styles.userName} numberOfLines={1}>
+                                {u.displayName || 'Anonymous Student'}
+                              </Text>
+                              {isTestAccount(u.phoneNumber) && (
+                                <View style={styles.testBadgePill}>
+                                  <Text style={styles.testBadgeText}>🧪 TEST</Text>
+                                </View>
+                              )}
+                            </View>
                             <Text style={styles.userPhone}>{u.phoneNumber || 'No phone'}</Text>
                           </View>
                         </View>
@@ -1236,6 +1385,185 @@ export default function AdminUsersScreen() {
                     </>
                   )}
                 </Pressable>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Test Accounts Management Modal */}
+      <Modal
+        visible={isTestAccountsModalOpen}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setIsTestAccountsModalOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.editModalContainer, { maxWidth: 680, maxHeight: '90%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={[styles.metricIconWrap, { backgroundColor: '#fef3c7', width: 38, height: 38 }]}>
+                  <Text style={{ fontSize: 18 }}>🧪</Text>
+                </View>
+                <View>
+                  <Text style={styles.modalTitle}>Test Accounts (Zero-OTP Bypass)</Text>
+                  <Text style={styles.modalSubtitle}>
+                    Numbers that skip SMS OTP verification and enter the dashboard instantly.
+                  </Text>
+                </View>
+              </View>
+              <Pressable
+                onPress={() => setIsTestAccountsModalOpen(false)}
+                style={({ pressed }) => [styles.modalCloseBtn, pressed && { opacity: 0.7 }]}
+              >
+                <Feather name="x" size={18} color="#64748b" />
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.modalBody} contentContainerStyle={{ padding: 20, gap: 16 }}>
+              {/* Form to Create Test Account */}
+              <View style={styles.testFormCard}>
+                <Text style={styles.testFormTitle}>Create New Test Account</Text>
+                <Text style={styles.testFormSubtitle}>
+                  This user will skip SMS verification on phone entry and immediately reach the dashboard.
+                </Text>
+
+                <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginTop: 12 }}>
+                  <View style={[styles.formGroup, { flex: 1, minWidth: 200, marginBottom: 0 }]}>
+                    <Text style={styles.formLabel}>User Name / Label *</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={newTestName}
+                      onChangeText={setNewTestName}
+                      placeholder="e.g. QA Tester 1, Apple Reviewer"
+                      placeholderTextColor="#94a3b8"
+                    />
+                  </View>
+
+                  <View style={[styles.formGroup, { flex: 1, minWidth: 200, marginBottom: 0 }]}>
+                    <Text style={styles.formLabel}>Mobile Number (with country code) *</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={newTestPhone}
+                      onChangeText={setNewTestPhone}
+                      placeholder="+94770000001"
+                      placeholderTextColor="#94a3b8"
+                      keyboardType="phone-pad"
+                    />
+                  </View>
+                </View>
+
+                {/* Plan Selection */}
+                <View style={{ marginTop: 12 }}>
+                  <Text style={styles.formLabel}>Assigned Plan Tier</Text>
+                  <View style={styles.tierSelectRow}>
+                    {(['starter', 'basic', 'pro', 'premium', 'unlimited'] as const).map((p) => {
+                      const isActive = newTestPlan === p;
+                      return (
+                        <Pressable
+                          key={p}
+                          onPress={() => handleSelectTestPlan(p)}
+                          style={[styles.tierOption, isActive && styles.tierOptionActive]}
+                        >
+                          <Text style={[styles.tierOptionText, isActive && styles.tierOptionTextActive]}>
+                            {p.toUpperCase()}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                {/* Minutes Allowance */}
+                <View style={{ marginTop: 12 }}>
+                  <Text style={styles.formLabel}>Practice Minutes Balance</Text>
+                  <TextInput
+                    style={[styles.formInput, { maxWidth: 200 }]}
+                    value={newTestMinutes}
+                    onChangeText={setNewTestMinutes}
+                    keyboardType="number-pad"
+                    placeholder="9999"
+                    placeholderTextColor="#94a3b8"
+                  />
+                  <Text style={styles.formHint}>Unlimited plans default to 9,999 practice minutes.</Text>
+                </View>
+
+                <View style={{ alignItems: 'flex-end', marginTop: 14 }}>
+                  <Pressable
+                    onPress={handleCreateTestAccount}
+                    disabled={isCreatingTestAccount}
+                    style={({ pressed }) => [
+                      styles.saveBtn,
+                      pressed && { opacity: 0.8 },
+                      isCreatingTestAccount && { opacity: 0.6 },
+                    ]}
+                  >
+                    {isCreatingTestAccount ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <>
+                        <Feather name="plus" size={16} color="#ffffff" />
+                        <Text style={styles.saveBtnText}>Add Test Account</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* List of Registered Test Accounts */}
+              <View style={styles.sectionCard}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <Text style={styles.sectionTitle}>Registered Test Accounts ({testAccounts.length})</Text>
+                  {isLoadingTestAccounts && <ActivityIndicator size="small" color="#0d9488" />}
+                </View>
+
+                {testAccounts.length === 0 ? (
+                  <View style={{ padding: 24, alignItems: 'center' }}>
+                    <Text style={{ ...fontStyle('inter', 'regular'), fontSize: 13, color: '#94a3b8' }}>
+                      No test accounts registered yet. Use the form above to add one.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ gap: 10 }}>
+                    {testAccounts.map((t) => (
+                      <View key={t.id} style={styles.testAccountCardItem}>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={styles.testAccountName}>{t.name}</Text>
+                            <View style={[styles.planBadge, { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }]}>
+                              <Text style={[styles.planBadgeText, { color: '#16a34a' }]}>
+                                {t.plan.toUpperCase()}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.testAccountPhone}>{t.phoneNumber}</Text>
+                          <Text style={styles.testAccountMins}>
+                            {t.minutesBalance.toLocaleString()} mins practice balance
+                          </Text>
+                        </View>
+
+                        <Pressable
+                          onPress={() => handleDeleteTestAccount(t)}
+                          disabled={deletingTestAccountId === t.id}
+                          style={({ pressed }) => [
+                            styles.deleteTestBtn,
+                            pressed && { opacity: 0.8 },
+                            deletingTestAccountId === t.id && { opacity: 0.5 },
+                          ]}
+                        >
+                          {deletingTestAccountId === t.id ? (
+                            <ActivityIndicator size="small" color="#ef4444" />
+                          ) : (
+                            <>
+                              <Feather name="trash-2" size={14} color="#ef4444" />
+                              <Text style={styles.deleteTestBtnText}>Remove</Text>
+                            </>
+                          )}
+                        </Pressable>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             </ScrollView>
           </View>
@@ -2172,5 +2500,97 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'semiBold'),
     fontSize: 13,
     color: '#ffffff',
+  },
+  // Test Account UI Styles
+  testAccountBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#fffbeb',
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  testAccountBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#b45309',
+  },
+  testBadgePill: {
+    backgroundColor: '#fef3c7',
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  testBadgeText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 10,
+    color: '#b45309',
+    letterSpacing: 0.5,
+  },
+  testFormCard: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  testFormTitle: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 15,
+    color: '#0f172a',
+  },
+  testFormSubtitle: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  testAccountCardItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ffffff',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  testAccountName: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#0f172a',
+  },
+  testAccountPhone: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  testAccountMins: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#0d9488',
+    marginTop: 2,
+  },
+  deleteTestBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  deleteTestBtnText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 12,
+    color: '#ef4444',
   },
 });
