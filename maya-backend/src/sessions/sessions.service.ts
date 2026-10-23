@@ -1644,11 +1644,22 @@ ${memoryPart}`;
 
     // Enterprise Security Guard: Verify user account exists & practice minutes balance
     if (this.supabase && resolvedUserId) {
-      const { data: userProfile, error: profileErr } = await this.supabase
+      let { data: userProfile, error: profileErr } = await this.supabase
         .from('profiles')
-        .select('minutes_balance, plan_tier, plan_status, telco_status, display_name')
+        .select('minutes_balance, plan_tier, plan_status, telco_subscriber_id, display_name')
         .eq('id', resolvedUserId)
         .maybeSingle();
+
+      if (profileErr) {
+        // Fallback: If telco_subscriber_id column has not been added to profiles table yet
+        const fallback = await this.supabase
+          .from('profiles')
+          .select('minutes_balance, plan_tier, plan_status, display_name')
+          .eq('id', resolvedUserId)
+          .maybeSingle();
+        userProfile = fallback.data as any;
+        profileErr = fallback.error;
+      }
 
       if (profileErr || !userProfile) {
         throw new UnauthorizedException(
@@ -1656,18 +1667,30 @@ ${memoryPart}`;
         );
       }
 
-      if (userProfile.telco_status === 'UNSUBSCRIBED') {
+      // 1. Telco user cancelled
+      if (userProfile.telco_subscriber_id && userProfile.plan_status === 'canceled') {
         throw new HttpException(
           'Your mobile airtime subscription is inactive. Please reactivate your subscription or upgrade to continue practicing.',
           HttpStatus.PAYMENT_REQUIRED,
         );
       }
 
-      if (userProfile.plan_status === 'expired') {
-        throw new HttpException(
-          'Your subscription has expired. Please reactivate or upgrade to continue practicing.',
-          HttpStatus.PAYMENT_REQUIRED,
-        );
+      // 2. Paid Pro user cancelled and grace period expired
+      if (userProfile.plan_tier !== 'starter' && userProfile.plan_status === 'canceled') {
+        const { data: sub } = await this.supabase
+          .from('subscriptions')
+          .select('next_billing_date')
+          .eq('user_id', resolvedUserId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!sub?.next_billing_date || new Date(sub.next_billing_date).getTime() <= Date.now()) {
+          throw new HttpException(
+            'Your subscription has expired. Please reactivate or upgrade to continue practicing.',
+            HttpStatus.PAYMENT_REQUIRED,
+          );
+        }
       }
 
       const isStarterUser = (userProfile.plan_tier || 'starter').toLowerCase() === 'starter';

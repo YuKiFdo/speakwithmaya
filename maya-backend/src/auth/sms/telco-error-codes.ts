@@ -543,9 +543,21 @@ export const TELCO_ERROR_DEFINITIONS: Record<string, TelcoErrorDefinition> = {
   },
   E1850: {
     officialDescription: 'Invalid OTP code entered by subscriber',
-    userMessage: 'Incorrect verification code. Please check the 6-digit code and try again.',
+    userMessage: 'Incorrect verification code. Please check the code sent to your phone and try again.',
     isSensitiveAdminError: false,
     httpStatus: HttpStatus.BAD_REQUEST,
+  },
+  E1851: {
+    officialDescription: 'OTP request has been expired',
+    userMessage: 'Verification code has expired. Please request a new code.',
+    isSensitiveAdminError: false,
+    httpStatus: HttpStatus.BAD_REQUEST,
+  },
+  E1852: {
+    officialDescription: 'Maximum number of OTP attempts had reached',
+    userMessage: 'Maximum verification attempts exceeded. Please request a new code.',
+    isSensitiveAdminError: false,
+    httpStatus: HttpStatus.TOO_MANY_REQUESTS,
   },
   E1853: {
     officialDescription: 'Maximum number of OTP requests reached',

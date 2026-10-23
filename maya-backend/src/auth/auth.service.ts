@@ -274,47 +274,110 @@ export class AuthService {
       }
     }
 
-    // 2. Generate 6-digit cryptographically secure OTP
-    const code = crypto.randomInt(100000, 999999).toString();
-    const otpHash = this.hashOtp(code, phone);
+    // 2. Dispatch via Active Configured SMS Gateway Provider (smsapi or telco carrier billing)
+    const gateway = config.smsGateway;
+    const isTelco = gateway === 'ideamart' || gateway === 'mspace';
     const expiresAt = new Date(now + 5 * 60 * 1000).toISOString(); // 5 minutes
 
-    // 3. Persist OTP verification row directly into database
-    const { error: insertError } = await this.supabase
-      .from('phone_verifications')
-      .insert({
-        phone_number: phone,
-        otp_hash: otpHash,
-        attempts: 0,
-        max_attempts: 3,
-        is_verified: false,
-        expires_at: expiresAt,
-      });
-
-    if (insertError) {
-      this.logger.error(`Failed to insert into phone_verifications: ${insertError.message}`);
-      throw new InternalServerErrorException('Failed to generate verification session in database.');
-    }
-
-    // 4. Dispatch via Active Configured SMS Gateway Provider (smsapi or telco carrier billing)
-    const gateway = config.smsGateway;
-    const messageTemplate = gateway === 'smsapi' ? config.smsTemplate : config.ideamartSmsTemplate;
-
-    if (gateway === 'ideamart' || gateway === 'mspace') {
+    if (isTelco) {
+      // Dispatch OTP request to IdeaMart (Dialog) or mSpace (Mobitel)
       const pinResult = await this.telcoService.requestPin(phone, config);
-      if (pinResult?.referenceNo) {
-        await this.supabase
+
+      if (pinResult?.status === 'ALREADY_REGISTERED') {
+        // User is already subscribed on mobile carrier; dispatch secure login code via SMS provider
+        const code = crypto.randomInt(100000, 999999).toString();
+        const otpHash = this.hashOtp(code, phone);
+        const { error: insertError } = await this.supabase
           .from('phone_verifications')
-          .update({
-            reference_no: pinResult.referenceNo,
-            telco_provider: pinResult.provider,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('phone_number', phone)
-          .eq('is_verified', false);
+          .insert({
+            phone_number: phone,
+            otp_hash: otpHash,
+            attempts: 0,
+            max_attempts: 3,
+            is_verified: false,
+            expires_at: expiresAt,
+          });
+
+        if (insertError) {
+          this.logger.error(`Failed to insert into phone_verifications: ${insertError.message}`);
+          throw new InternalServerErrorException('Failed to generate verification session in database.');
+        }
+
+        await this.smsProvider.sendOtp(phone, code, config.smsTemplate);
+
+        return {
+          success: true,
+          cooldownSeconds: 60,
+          expiresInSeconds: 300,
+          message: 'Verification code sent successfully.',
+        };
+      }
+
+      const referenceNo = pinResult?.referenceNo;
+      if (!referenceNo) {
+        throw new HttpException(
+          'Mobile operator verification service did not return a valid session. Please try again.',
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
+
+      // Store in otp_hash with TELCO: prefix to ensure it works even if migration 011 columns are not yet present in Supabase
+      const telcoOtpHash = `TELCO:${pinResult.provider}:${referenceNo}`;
+
+      // Try inserting with reference_no & telco_provider columns first (if migration 011 has been executed)
+      const { error: insertWithColsError } = await this.supabase
+        .from('phone_verifications')
+        .insert({
+          phone_number: phone,
+          otp_hash: telcoOtpHash,
+          reference_no: referenceNo,
+          telco_provider: pinResult.provider,
+          attempts: 0,
+          max_attempts: 3,
+          is_verified: false,
+          expires_at: expiresAt,
+        });
+
+      if (insertWithColsError) {
+        // Fallback: If reference_no column does not exist in schema cache, insert without extra columns
+        const { error: fallbackInsertError } = await this.supabase
+          .from('phone_verifications')
+          .insert({
+            phone_number: phone,
+            otp_hash: telcoOtpHash,
+            attempts: 0,
+            max_attempts: 3,
+            is_verified: false,
+            expires_at: expiresAt,
+          });
+
+        if (fallbackInsertError) {
+          this.logger.error(`Failed to insert into phone_verifications: ${fallbackInsertError.message}`);
+          throw new InternalServerErrorException('Failed to generate verification session in database.');
+        }
       }
     } else {
-      await this.smsProvider.sendOtp(phone, code, messageTemplate);
+      // Standard SMSAPI flow: generate local cryptographically secure OTP
+      const code = crypto.randomInt(100000, 999999).toString();
+      const otpHash = this.hashOtp(code, phone);
+
+      const { error: insertError } = await this.supabase
+        .from('phone_verifications')
+        .insert({
+          phone_number: phone,
+          otp_hash: otpHash,
+          attempts: 0,
+          max_attempts: 3,
+          is_verified: false,
+          expires_at: expiresAt,
+        });
+
+      if (insertError) {
+        this.logger.error(`Failed to insert into phone_verifications: ${insertError.message}`);
+        throw new InternalServerErrorException('Failed to generate verification session in database.');
+      }
+
+      await this.smsProvider.sendOtp(phone, code, config.smsTemplate);
     }
 
     return {
@@ -424,13 +487,23 @@ export class AuthService {
     // 4. Verify code via Telco Gateway or local hash
     let rawSubscriberId: string | null = null;
     let telcoProvider: 'ideamart' | 'mspace' | null = null;
+    let telcoReferenceNo: string | null = record.reference_no || null;
 
-    if (record.reference_no) {
+    if (record.otp_hash?.startsWith('TELCO:')) {
+      const parts = record.otp_hash.split(':');
+      telcoProvider = (parts[1] as any) || (record.telco_provider as any) || this.telcoService.detectProvider(phone);
+      telcoReferenceNo = parts.slice(2).join(':') || record.reference_no;
+    } else if (record.reference_no) {
       telcoProvider = (record.telco_provider as any) || this.telcoService.detectProvider(phone);
+      telcoReferenceNo = record.reference_no;
+    }
+
+    if (telcoReferenceNo) {
+      telcoProvider = telcoProvider || this.telcoService.detectProvider(phone);
       const telcoVerify = await this.telcoService.verifyPin(
         telcoProvider!,
         code,
-        record.reference_no,
+        telcoReferenceNo,
         phone,
         config,
       );
@@ -481,17 +554,28 @@ export class AuthService {
 
     // If Telco carrier billing was verified, save the raw unformatted subscriberId
     if (rawSubscriberId) {
-      await this.supabase
+      const { error: profileUpdateError } = await this.supabase
         .from('profiles')
         .update({
           telco_provider: telcoProvider,
           telco_subscriber_id: rawSubscriberId,
-          telco_reference_no: record.reference_no,
-          telco_status: 'ACTIVE',
+          telco_reference_no: telcoReferenceNo,
           plan_status: 'active',
           updated_at: new Date().toISOString(),
         })
         .eq('id', userProfile.id);
+
+      if (profileUpdateError) {
+        // Fallback: If migration 011 columns are not yet present in Supabase, update plan_status only
+        await this.supabase
+          .from('profiles')
+          .update({
+            plan_status: 'active',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', userProfile.id);
+      }
+
       userProfile.telco_provider = telcoProvider as any;
       userProfile.telco_subscriber_id = rawSubscriberId;
       userProfile.telco_status = 'ACTIVE';
@@ -1002,15 +1086,14 @@ export class AuthService {
     const profile = await this.checkAndResetMonthlyQuota(data as UserProfileData);
 
     const hasTelco = Boolean(profile.telco_subscriber_id);
-    const isTelcoUnsubscribed = profile.telco_status === 'UNSUBSCRIBED';
+    const isTelcoUnsubscribed = hasTelco && profile.plan_status === 'canceled';
+    const telcoStatus = hasTelco ? (isTelcoUnsubscribed ? 'UNSUBSCRIBED' : 'ACTIVE') : null;
 
     let isSubscriptionLocked = false;
     let isGracePeriodActive = false;
     let gracePeriodEnd: string | null = null;
 
     if (hasTelco && isTelcoUnsubscribed) {
-      isSubscriptionLocked = true;
-    } else if (profile.plan_status === 'expired') {
       isSubscriptionLocked = true;
     } else if (profile.plan_tier !== 'starter' && profile.plan_status === 'canceled') {
       // User cancelled a paid Pro/Premium subscription. Check if within grace period
@@ -1030,13 +1113,8 @@ export class AuthService {
             gracePeriodEnd = sub.next_billing_date;
             isSubscriptionLocked = false;
           } else {
-            // Period has expired! Mark plan_status as expired
+            // Period has expired!
             isSubscriptionLocked = true;
-            profile.plan_status = 'expired';
-            await this.supabase
-              .from('profiles')
-              .update({ plan_status: 'expired', updated_at: new Date().toISOString() })
-              .eq('id', userId);
           }
         } else {
           isSubscriptionLocked = true;
@@ -1046,6 +1124,7 @@ export class AuthService {
       }
     }
 
+    profile.telco_status = telcoStatus;
     profile.has_telco_subscription = hasTelco;
     profile.is_subscription_locked = isSubscriptionLocked;
     profile.is_grace_period_active = isGracePeriodActive;
@@ -1077,7 +1156,6 @@ export class AuthService {
     await this.supabase
       .from('profiles')
       .update({
-        telco_status: 'UNSUBSCRIBED',
         plan_status: 'canceled',
         updated_at: new Date().toISOString(),
       })
@@ -1105,7 +1183,6 @@ export class AuthService {
       await this.supabase
         .from('profiles')
         .update({
-          telco_status: 'ACTIVE',
           plan_status: 'active',
           updated_at: new Date().toISOString(),
         })
