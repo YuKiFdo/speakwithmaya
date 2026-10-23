@@ -191,9 +191,9 @@ export class AuthService {
 
     // Check if phone belongs to an authorized Admin Test Account (Bypass OTP verification directly into dashboard)
     const config = await this.getAppConfig();
-    const cleanPhoneDigits = phone.replace('+', '');
+    const cleanPhoneDigits = phone.replace(/\D/g, '');
     const testAccount = (config.testAccounts || []).find((t) => {
-      const tDigits = this.normalizePhoneNumber(t.phoneNumber).replace('+', '');
+      const tDigits = (t.phoneNumber || '').replace(/\D/g, '');
       return tDigits === cleanPhoneDigits;
     });
 
@@ -399,9 +399,9 @@ export class AuthService {
 
     // Test account fast-path: allow instant verification
     const config = await this.getAppConfig();
-    const cleanPhoneDigits = phone.replace('+', '');
+    const cleanPhoneDigits = phone.replace(/\D/g, '');
     const testAccount = (config.testAccounts || []).find((t) => {
-      const tDigits = this.normalizePhoneNumber(t.phoneNumber).replace('+', '');
+      const tDigits = (t.phoneNumber || '').replace(/\D/g, '');
       return tDigits === cleanPhoneDigits;
     });
 
@@ -1738,9 +1738,23 @@ export class AuthService {
    */
   async updateAppConfig(dto: UpdateAppConfigDto): Promise<{ success: boolean; config: AppConfigData }> {
     const currentConfig = await this.getAppConfig();
+
+    // Strip undefined keys so partial updates from settings page do NOT overwrite existing config fields
+    const cleanedDto: Partial<UpdateAppConfigDto> = {};
+    for (const [key, value] of Object.entries(dto)) {
+      if (value !== undefined) {
+        (cleanedDto as any)[key] = value;
+      }
+    }
+
     const newConfig: AppConfigData = {
       ...currentConfig,
-      ...dto,
+      ...cleanedDto,
+      // Ensure testAccounts is NEVER wiped out by updates that do not provide testAccounts
+      testAccounts:
+        cleanedDto.testAccounts !== undefined
+          ? cleanedDto.testAccounts
+          : currentConfig.testAccounts || [],
     };
 
     const { error } = await this.supabase
@@ -1767,11 +1781,51 @@ export class AuthService {
   }
 
   /**
-   * Admin: Retrieve all registered test accounts
+   * Admin: Retrieve all registered test accounts with auto-heal from profiles
    */
   async getTestAccounts(): Promise<TestAccountItem[]> {
     const config = await this.getAppConfig();
-    return config.testAccounts || [];
+    const testAccounts: TestAccountItem[] = [...(config.testAccounts || [])];
+
+    // Auto-heal: If profiles have accounts with unlimited allowance (>= 9000 mins) not yet in testAccounts, sync them
+    if (this.supabase) {
+      try {
+        const { data: unlimitedProfiles } = await this.supabase
+          .from('profiles')
+          .select('id, phone_number, display_name, plan_tier, minutes_balance, created_at')
+          .or('monthly_minutes_allowance.gte.9000,minutes_balance.gte.9000');
+
+        if (unlimitedProfiles && unlimitedProfiles.length > 0) {
+          let hasNew = false;
+          for (const p of unlimitedProfiles) {
+            const cleanDigits = (p.phone_number || '').replace(/\D/g, '');
+            const exists = testAccounts.some(
+              (t) => (t.phoneNumber || '').replace(/\D/g, '') === cleanDigits,
+            );
+            if (!exists && cleanDigits.length >= 9) {
+              testAccounts.push({
+                id: p.id,
+                name: p.display_name || 'Test Student',
+                phoneNumber: p.phone_number,
+                plan: 'unlimited',
+                minutesBalance: p.minutes_balance || 9999,
+                createdAt: p.created_at || new Date().toISOString(),
+              });
+              hasNew = true;
+            }
+          }
+
+          if (hasNew) {
+            await this.updateAppConfig({ testAccounts });
+            this.logger.log(`[Test Accounts] Auto-healed and synced ${testAccounts.length} test accounts from profiles.`);
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Could not auto-heal test accounts from profiles: ${err?.message}`);
+      }
+    }
+
+    return testAccounts;
   }
 
   /**
@@ -1788,6 +1842,20 @@ export class AuthService {
       throw new BadRequestException('Please provide a display name for the test account.');
     }
 
+    // 1. Strict validation: Ensure phone number is not already registered as a test account
+    const config = await this.getAppConfig();
+    const existingList = config.testAccounts || [];
+    const cleanPhoneDigits = phone.replace(/\D/g, '');
+
+    const duplicateExists = existingList.some(
+      (t) => (t.phoneNumber || '').replace(/\D/g, '') === cleanPhoneDigits,
+    );
+    if (duplicateExists) {
+      throw new BadRequestException(
+        `A test account with phone number ${phone} already exists. Please choose a different phone number or edit the existing account.`,
+      );
+    }
+
     let defaultMins = 120;
     if (dto.plan === 'starter') defaultMins = 15;
     else if (dto.plan === 'basic') defaultMins = 45;
@@ -1796,7 +1864,7 @@ export class AuthService {
     else if (dto.plan === 'unlimited') defaultMins = 9999;
     const mins = dto.minutesBalance ?? defaultMins;
 
-    // 1. Provision / update profile in Supabase
+    // 2. Provision / update profile in Supabase
     const userProfile = await this.findOrCreateProfileByPhone(phone);
     const planTier = (dto.plan === 'unlimited' ? 'pro' : dto.plan) as any;
 
@@ -1814,12 +1882,9 @@ export class AuthService {
       })
       .eq('id', userProfile.id);
 
-    // 2. Persist to sys_app_settings.testAccounts
-    const config = await this.getAppConfig();
-    const existingList = config.testAccounts || [];
-    const cleanPhoneDigits = phone.replace('+', '');
+    // 3. Persist to sys_app_settings.testAccounts
     const filtered = existingList.filter(
-      (t) => this.normalizePhoneNumber(t.phoneNumber).replace('+', '') !== cleanPhoneDigits,
+      (t) => (t.phoneNumber || '').replace(/\D/g, '') !== cleanPhoneDigits,
     );
 
     const testAccountItem: TestAccountItem = {

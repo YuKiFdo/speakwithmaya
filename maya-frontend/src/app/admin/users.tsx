@@ -214,6 +214,17 @@ export default function AdminUsersScreen() {
       return;
     }
 
+    const alreadyExists = testAccounts.some(
+      (t) => (t.phoneNumber || '').replace(/\D/g, '') === cleanDigits,
+    );
+    if (alreadyExists) {
+      await mayaAlert.error(
+        `A test account with phone number ${newTestPhone.trim()} already exists.`,
+        'Duplicate Account',
+      );
+      return;
+    }
+
     setIsCreatingTestAccount(true);
     try {
       const baseUrl = getBackendBaseUrl();
