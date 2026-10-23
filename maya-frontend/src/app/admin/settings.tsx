@@ -26,17 +26,7 @@ export interface AppConfigState {
   ideamartTermsDisclaimer: string;
   ideamartSmsTemplate: string;
   ideamartEnabled: boolean;
-  ideamartAppId: string;
-  ideamartPassword: string;
-  ideamartAppCode: string;
-  ideamartAppHash: string;
-  ideamartBaseUrl: string;
   mspaceEnabled: boolean;
-  mspaceAppId: string;
-  mspacePassword: string;
-  mspaceAppCode: string;
-  mspaceAppHash: string;
-  mspaceBaseUrl: string;
   telcoUnsubButtonEnabled: boolean;
 }
 
@@ -49,17 +39,7 @@ const DEFAULT_CONFIG: AppConfigState = {
   ideamartTermsDisclaimer: 'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog, Mobitel, or Hutch mobile balance.',
   ideamartSmsTemplate: 'Maya AI: Your OTP is {CODE}. Valid for 5 min. Do not share this code.',
   ideamartEnabled: true,
-  ideamartAppId: 'APP_000001',
-  ideamartPassword: '',
-  ideamartAppCode: 'https://speakwithmaya.com',
-  ideamartAppHash: '',
-  ideamartBaseUrl: 'https://api.dialog.lk',
   mspaceEnabled: true,
-  mspaceAppId: 'MSPACE_000001',
-  mspacePassword: '',
-  mspaceAppCode: 'https://speakwithmaya.com',
-  mspaceAppHash: '',
-  mspaceBaseUrl: 'https://api.mspace.lk',
   telcoUnsubButtonEnabled: true,
 };
 
@@ -80,21 +60,9 @@ export default function AdminSettingsScreen() {
   const [ideamartTermsDisclaimer, setIdeamartTermsDisclaimer] = useState(DEFAULT_CONFIG.ideamartTermsDisclaimer);
   const [ideamartSmsTemplate, setIdeamartSmsTemplate] = useState(DEFAULT_CONFIG.ideamartSmsTemplate);
 
-  // Ideamart Credential & Toggle State
+  // Telco Gateways Toggles
   const [ideamartEnabled, setIdeamartEnabled] = useState(true);
-  const [ideamartAppId, setIdeamartAppId] = useState('');
-  const [ideamartPassword, setIdeamartPassword] = useState('');
-  const [ideamartAppCode, setIdeamartAppCode] = useState('');
-  const [ideamartAppHash, setIdeamartAppHash] = useState('');
-  const [ideamartBaseUrl, setIdeamartBaseUrl] = useState('');
-
-  // mSpace Credential & Toggle State
   const [mspaceEnabled, setMspaceEnabled] = useState(true);
-  const [mspaceAppId, setMspaceAppId] = useState('');
-  const [mspacePassword, setMspacePassword] = useState('');
-  const [mspaceAppCode, setMspaceAppCode] = useState('');
-  const [mspaceAppHash, setMspaceAppHash] = useState('');
-  const [mspaceBaseUrl, setMspaceBaseUrl] = useState('');
   const [telcoUnsubButtonEnabled, setTelcoUnsubButtonEnabled] = useState(true);
 
   const getEffectiveTelcoPricingNotice = (ideaOn: boolean, mspaceOn: boolean, customVal?: string) => {
@@ -168,17 +136,6 @@ export default function AdminSettingsScreen() {
             : (data.ideamartSmsTemplate || DEFAULT_CONFIG.ideamartSmsTemplate)
         );
 
-        setIdeamartAppId(data.ideamartAppId || '');
-        setIdeamartPassword(data.ideamartPassword || '');
-        setIdeamartAppCode(data.ideamartAppCode || '');
-        setIdeamartAppHash(data.ideamartAppHash || '');
-        setIdeamartBaseUrl(data.ideamartBaseUrl || '');
-
-        setMspaceAppId(data.mspaceAppId || '');
-        setMspacePassword(data.mspacePassword || '');
-        setMspaceAppCode(data.mspaceAppCode || '');
-        setMspaceAppHash(data.mspaceAppHash || '');
-        setMspaceBaseUrl(data.mspaceBaseUrl || '');
         setTelcoUnsubButtonEnabled(data.telcoUnsubButtonEnabled ?? true);
       }
     } catch (err: any) {
@@ -207,17 +164,7 @@ export default function AdminSettingsScreen() {
         ideamartTermsDisclaimer,
         ideamartSmsTemplate,
         ideamartEnabled,
-        ideamartAppId,
-        ideamartPassword,
-        ideamartAppCode,
-        ideamartAppHash,
-        ideamartBaseUrl,
         mspaceEnabled,
-        mspaceAppId,
-        mspacePassword,
-        mspaceAppCode,
-        mspaceAppHash,
-        mspaceBaseUrl,
         telcoUnsubButtonEnabled,
       };
 
@@ -432,10 +379,10 @@ export default function AdminSettingsScreen() {
                     {/* Section Header */}
                     <View style={styles.groupHeaderRow}>
                       <Feather name="smartphone" size={18} color="#2563eb" />
-                      <Text style={[styles.groupHeaderTitle, { color: '#1e40af' }]}>Telco Gateways & Credentials</Text>
+                      <Text style={[styles.groupHeaderTitle, { color: '#1e40af' }]}>Telco Gateways & Options</Text>
                     </View>
                     <Text style={styles.sectionDesc}>
-                      Turn individual mobile network gateways on/off. When enabled, enter your credentials from the provider developer portal.
+                      Turn individual mobile network gateways on/off. Gateway API credentials and endpoints are securely configured on the server via environment variables (.env).
                     </Text>
 
                     {/* Provider 1: IdeaMart (Dialog & Hutch) */}
@@ -461,51 +408,6 @@ export default function AdminSettingsScreen() {
                           <View style={[styles.switchThumb, ideamartEnabled && styles.switchThumbActive]} />
                         </Pressable>
                       </View>
-
-                      {ideamartEnabled && (
-                        <View style={styles.credentialsForm}>
-                          <View style={styles.fieldItem}>
-                            <Text style={styles.fieldLabel}>IdeaMart Application ID:</Text>
-                            <TextInput
-                              style={styles.fieldInputMulti}
-                              value={ideamartAppId}
-                              onChangeText={setIdeamartAppId}
-                              placeholder="APP_000001"
-                            />
-                          </View>
-
-                          <View style={styles.fieldItem}>
-                            <Text style={styles.fieldLabel}>IdeaMart Password / Secret:</Text>
-                            <TextInput
-                              style={styles.fieldInputMulti}
-                              secureTextEntry
-                              value={ideamartPassword}
-                              onChangeText={setIdeamartPassword}
-                              placeholder="Enter IdeaMart password"
-                            />
-                          </View>
-
-                          <View style={styles.fieldItem}>
-                            <Text style={styles.fieldLabel}>IdeaMart App Code / Shortcode:</Text>
-                            <TextInput
-                              style={styles.fieldInputMulti}
-                              value={ideamartAppCode}
-                              onChangeText={setIdeamartAppCode}
-                              placeholder="77000"
-                            />
-                          </View>
-
-                          <View style={styles.fieldItem}>
-                            <Text style={styles.fieldLabel}>IdeaMart Base URL:</Text>
-                            <TextInput
-                              style={styles.fieldInputMulti}
-                              value={ideamartBaseUrl}
-                              onChangeText={setIdeamartBaseUrl}
-                              placeholder="https://api.dialog.lk"
-                            />
-                          </View>
-                        </View>
-                      )}
                     </View>
 
                     {/* Provider 2: mSpace (Mobitel) */}
@@ -531,51 +433,6 @@ export default function AdminSettingsScreen() {
                           <View style={[styles.switchThumb, mspaceEnabled && styles.switchThumbActive]} />
                         </Pressable>
                       </View>
-
-                      {mspaceEnabled && (
-                        <View style={styles.credentialsForm}>
-                          <View style={styles.fieldItem}>
-                            <Text style={styles.fieldLabel}>mSpace Application ID:</Text>
-                            <TextInput
-                              style={styles.fieldInputMulti}
-                              value={mspaceAppId}
-                              onChangeText={setMspaceAppId}
-                              placeholder="MSPACE_000001"
-                            />
-                          </View>
-
-                          <View style={styles.fieldItem}>
-                            <Text style={styles.fieldLabel}>mSpace Password / Secret:</Text>
-                            <TextInput
-                              style={styles.fieldInputMulti}
-                              secureTextEntry
-                              value={mspacePassword}
-                              onChangeText={setMspacePassword}
-                              placeholder="Enter mSpace password"
-                            />
-                          </View>
-
-                          <View style={styles.fieldItem}>
-                            <Text style={styles.fieldLabel}>mSpace App Code / Shortcode:</Text>
-                            <TextInput
-                              style={styles.fieldInputMulti}
-                              value={mspaceAppCode}
-                              onChangeText={setMspaceAppCode}
-                              placeholder="1234"
-                            />
-                          </View>
-
-                          <View style={styles.fieldItem}>
-                            <Text style={styles.fieldLabel}>mSpace Base URL:</Text>
-                            <TextInput
-                              style={styles.fieldInputMulti}
-                              value={mspaceBaseUrl}
-                              onChangeText={setMspaceBaseUrl}
-                              placeholder="https://api.mspace.lk"
-                            />
-                          </View>
-                        </View>
-                      )}
                     </View>
 
                     {/* Option 3: Telco In-App Unsubscribe Button Toggle */}
@@ -1037,11 +894,5 @@ const styles = StyleSheet.create({
   },
   switchThumbActive: {
     alignSelf: 'flex-end',
-  },
-  credentialsForm: {
-    gap: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
   },
 });

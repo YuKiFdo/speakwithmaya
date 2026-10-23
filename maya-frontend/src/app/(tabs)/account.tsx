@@ -23,7 +23,7 @@ import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CrownNavIcon } from '@/components/icons/nav-icons';
-import { useOnboardingStore } from '@/services/store/onboarding-store';
+import { useOnboardingStore, OnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
 import { useUserStats } from '@/hooks/useUserStats';
 import { paymentApi } from '@/services/payment/payment-api';
@@ -124,6 +124,21 @@ export default function AccountScreen() {
 
   const handleSupportEmail = () => {
     Linking.openURL('mailto:support@talkwithmaya.com').catch(() => {});
+  };
+
+  const handleLogout = async () => {
+    const confirmed = await mayaAlert.confirm({
+      title: 'Log Out',
+      message: 'Are you sure you want to log out of TalkWithMaya? You can sign back in anytime with your mobile number.',
+      confirmText: 'Log Out',
+      cancelText: 'Cancel',
+      type: 'warning',
+      isDestructive: true,
+    });
+    if (!confirmed) return;
+
+    OnboardingStore.clear();
+    router.replace('/onboarding/phone?mode=login');
   };
 
   const [isCancellingSub, setIsCancellingSub] = useState(false);
@@ -356,6 +371,7 @@ export default function AccountScreen() {
                     onEdit={handleOpenEditModal}
                     onTogglePlan={() => {}}
                     onCancelSubscription={handleCancelSubscription}
+                    onLogout={handleLogout}
                   />
 
                   <StatsCard
@@ -369,6 +385,8 @@ export default function AccountScreen() {
                     dailyGoal={stats.dailyGoalDisplay}
                     onRowPress={() => handleOpenEditModal()}
                   />
+
+                  <LogoutCard onLogout={handleLogout} />
                 </View>
 
                 {/* RIGHT COLUMN */}
@@ -405,6 +423,7 @@ export default function AccountScreen() {
                   onEdit={handleOpenEditModal}
                   onTogglePlan={() => {}}
                   onCancelSubscription={handleCancelSubscription}
+                  onLogout={handleLogout}
                 />
 
                 <StatsCard
@@ -439,6 +458,8 @@ export default function AccountScreen() {
                 <CustomerSupportCard onEmailPress={handleSupportEmail} />
 
                 <AboutCard />
+
+                <LogoutCard onLogout={handleLogout} />
               </View>
             )}
 
@@ -589,6 +610,7 @@ function ProfileCard({
   onEdit,
   onTogglePlan,
   onCancelSubscription,
+  onLogout,
 }: {
   name: string;
   initials?: string;
@@ -597,6 +619,7 @@ function ProfileCard({
   onEdit: () => void;
   onTogglePlan?: () => void;
   onCancelSubscription: () => void;
+  onLogout: () => void;
 }) {
   return (
     <View style={styles.cardContainer}>
@@ -609,15 +632,30 @@ function ProfileCard({
         {/* Profile Info */}
         <View style={styles.profileInfoCol}>
           <View style={styles.profileNameRow}>
-            <Text style={styles.profileNameText}>{name}</Text>
-            <Pressable
-              style={({ pressed }) => [styles.editBtn, pressed && styles.cardPressed]}
-              onPress={onEdit}
-              hitSlop={8}
-            >
-              <Feather name="edit-2" size={13} color="#2563EB" />
-              <Text style={styles.editBtnText}>Edit</Text>
-            </Pressable>
+            <Text style={styles.profileNameText} numberOfLines={1}>{name}</Text>
+            <View style={styles.profileHeaderActions}>
+              <Pressable
+                style={({ pressed }) => [styles.editBtn, pressed && styles.cardPressed]}
+                onPress={onEdit}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Edit Profile"
+              >
+                <Feather name="edit-2" size={13} color="#2563EB" />
+                <Text style={styles.editBtnText}>Edit</Text>
+              </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [styles.logoutHeaderBtn, pressed && styles.cardPressed]}
+                onPress={onLogout}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Log Out"
+              >
+                <Feather name="log-out" size={13} color="#DC2626" />
+                <Text style={styles.logoutHeaderText}>Log Out</Text>
+              </Pressable>
+            </View>
           </View>
 
           <Text style={styles.memberSinceText}>{memberSince}</Text>
@@ -1029,6 +1067,35 @@ function AboutCard() {
           </View>
         </View>
       </View>
+    </View>
+  );
+}
+
+/**
+ * 7. Log Out Card
+ */
+function LogoutCard({ onLogout }: { onLogout: () => void }) {
+  return (
+    <View style={styles.cardContainer}>
+      <Pressable
+        style={({ pressed }) => [styles.logoutRow, pressed && styles.cardPressed]}
+        onPress={onLogout}
+        accessibilityRole="button"
+        accessibilityLabel="Log Out"
+      >
+        <View style={styles.logoutIconCircle}>
+          <Feather name="log-out" size={20} color="#DC2626" />
+        </View>
+
+        <View style={styles.logoutTextCol}>
+          <Text style={styles.logoutTitle}>Log Out</Text>
+          <Text style={styles.logoutSubtitle}>
+            Sign out of your account on this device.
+          </Text>
+        </View>
+
+        <Feather name="chevron-right" size={18} color="#DC2626" />
+      </Pressable>
     </View>
   );
 }
@@ -1721,5 +1788,57 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#FFFFFF',
     ...fontStyle('inter', 'bold'),
+  },
+
+  /* Profile Header Actions (Edit & Logout) */
+  profileHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  logoutHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: '#FEF2F2',
+  },
+  logoutHeaderText: {
+    fontSize: 12,
+    color: '#DC2626',
+    ...fontStyle('inter', 'semiBold'),
+  },
+
+  /* Log Out Card */
+  logoutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logoutIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#FEF2F2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  logoutTextCol: {
+    flex: 1,
+    marginRight: 10,
+  },
+  logoutTitle: {
+    fontSize: 14,
+    color: '#DC2626',
+    marginBottom: 2,
+    ...fontStyle('inter', 'bold'),
+  },
+  logoutSubtitle: {
+    fontSize: 11.5,
+    color: '#64748B',
+    marginBottom: 1,
+    ...fontStyle('inter', 'regular'),
   },
 });

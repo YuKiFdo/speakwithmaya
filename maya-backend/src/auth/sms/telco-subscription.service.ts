@@ -172,19 +172,19 @@ export class TelcoSubscriptionService {
   private getProviderCredentials(provider: TelcoProviderType, config: TelcoGatewayConfig) {
     if (provider === 'mspace') {
       const baseUrl = (
-        config.mspaceBaseUrl ||
         process.env.MSPACE_BASE_URL ||
+        config.mspaceBaseUrl ||
         'https://api.mspace.lk'
       ).replace(/\/+$/, '');
       return {
         enabled: config.mspaceEnabled ?? true,
-        appId: config.mspaceAppId || process.env.MSPACE_APP_ID || '',
-        password: config.mspacePassword || process.env.MSPACE_PASSWORD || '',
+        appId: process.env.MSPACE_APP_ID || config.mspaceAppId || '',
+        password: process.env.MSPACE_PASSWORD || config.mspacePassword || '',
         appCode:
-          config.mspaceAppCode ||
           process.env.MSPACE_APP_CODE ||
-          'https://speakwithmaya.com',
-        appHash: config.mspaceAppHash || process.env.MSPACE_APP_HASH || 'abcdefgh',
+          config.mspaceAppCode ||
+          '1234',
+        appHash: process.env.MSPACE_APP_HASH || config.mspaceAppHash || 'abcdefgh',
         baseUrl,
         otpRequestUrl: `${baseUrl}/otp/request`,
         otpVerifyUrl: `${baseUrl}/otp/verify`,
@@ -194,19 +194,19 @@ export class TelcoSubscriptionService {
     }
 
     const baseUrl = (
-      config.ideamartBaseUrl ||
       process.env.IDEAMART_BASE_URL ||
+      config.ideamartBaseUrl ||
       'https://api.dialog.lk'
     ).replace(/\/+$/, '');
     return {
       enabled: config.ideamartEnabled ?? true,
-      appId: config.ideamartAppId || process.env.IDEAMART_APP_ID || '',
-      password: config.ideamartPassword || process.env.IDEAMART_PASSWORD || '',
+      appId: process.env.IDEAMART_APP_ID || config.ideamartAppId || '',
+      password: process.env.IDEAMART_PASSWORD || config.ideamartPassword || '',
       appCode:
-        config.ideamartAppCode ||
         process.env.IDEAMART_APP_CODE ||
-        'https://speakwithmaya.com',
-      appHash: config.ideamartAppHash || process.env.IDEAMART_APP_HASH || 'abcdefgh',
+        config.ideamartAppCode ||
+        '77000',
+      appHash: process.env.IDEAMART_APP_HASH || config.ideamartAppHash || 'abcdefgh',
       baseUrl,
       otpRequestUrl: `${baseUrl}/subscription/otp/request`,
       otpVerifyUrl: `${baseUrl}/subscription/otp/verify`,
