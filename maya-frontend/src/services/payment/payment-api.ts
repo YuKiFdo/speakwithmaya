@@ -151,6 +151,40 @@ class PaymentApiService {
   }
 
   /**
+   * User self-service cancellation of active mobile airtime carrier billing (Dialog / Mobitel).
+   */
+  async cancelTelcoSubscription(): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${this.baseUrl}/v1/auth/telco/unsubscribe`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to cancel mobile carrier subscription');
+    }
+
+    return data;
+  }
+
+  /**
+   * Reactivate mobile airtime carrier billing subscription.
+   */
+  async reactivateTelcoSubscription(): Promise<{ success: boolean; message: string; requiresPin?: boolean; referenceNo?: string }> {
+    const res = await fetch(`${this.baseUrl}/v1/auth/telco/reactivate`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to reactivate mobile subscription');
+    }
+
+    return data;
+  }
+
+  /**
    * Admin: List all subscribers and overall revenue stats.
    */
   async getAdminSubscriptions(): Promise<AdminSubscriptionsResponse> {

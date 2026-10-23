@@ -1646,13 +1646,27 @@ ${memoryPart}`;
     if (this.supabase && resolvedUserId) {
       const { data: userProfile, error: profileErr } = await this.supabase
         .from('profiles')
-        .select('minutes_balance, plan_tier, display_name')
+        .select('minutes_balance, plan_tier, plan_status, telco_status, display_name')
         .eq('id', resolvedUserId)
         .maybeSingle();
 
       if (profileErr || !userProfile) {
         throw new UnauthorizedException(
           'Your account has been deleted or deactivated. Please sign up or contact support.',
+        );
+      }
+
+      if (userProfile.telco_status === 'UNSUBSCRIBED') {
+        throw new HttpException(
+          'Your mobile airtime subscription is inactive. Please reactivate your subscription or upgrade to continue practicing.',
+          HttpStatus.PAYMENT_REQUIRED,
+        );
+      }
+
+      if (userProfile.plan_status === 'expired') {
+        throw new HttpException(
+          'Your subscription has expired. Please reactivate or upgrade to continue practicing.',
+          HttpStatus.PAYMENT_REQUIRED,
         );
       }
 

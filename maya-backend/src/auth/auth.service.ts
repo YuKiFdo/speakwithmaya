@@ -34,7 +34,7 @@ export interface UserProfileData {
   goal: string | null;
   challenge: string | null;
   plan_tier: 'starter' | 'basic' | 'pro' | 'premium';
-  plan_status: 'active' | 'trialing' | 'past_due' | 'canceled';
+  plan_status: 'active' | 'trialing' | 'past_due' | 'canceled' | 'expired';
   billing_cycle: 'daily' | 'monthly' | 'quarterly' | 'yearly';
   monthly_minutes_allowance: number;
   add_on_minutes_balance: number;
@@ -50,6 +50,14 @@ export interface UserProfileData {
   onboarding_completed_at: string | null;
   created_at: string;
   updated_at: string;
+  telco_provider?: 'ideamart' | 'mspace' | null;
+  telco_subscriber_id?: string | null;
+  telco_reference_no?: string | null;
+  telco_status?: 'ACTIVE' | 'UNSUBSCRIBED' | null;
+  has_telco_subscription?: boolean;
+  is_subscription_locked?: boolean;
+  is_grace_period_active?: boolean;
+  grace_period_end?: string | null;
 }
 
 const OTP_SECRET_SALT = process.env.OTP_SALT || 'maya_ai_secure_otp_salt_2026';
@@ -479,9 +487,15 @@ export class AuthService {
           telco_provider: telcoProvider,
           telco_subscriber_id: rawSubscriberId,
           telco_reference_no: record.reference_no,
+          telco_status: 'ACTIVE',
+          plan_status: 'active',
           updated_at: new Date().toISOString(),
         })
         .eq('id', userProfile.id);
+      userProfile.telco_provider = telcoProvider as any;
+      userProfile.telco_subscriber_id = rawSubscriberId;
+      userProfile.telco_status = 'ACTIVE';
+      userProfile.plan_status = 'active';
     }
 
     // 7. Generate bearer access token
@@ -510,6 +524,9 @@ export class AuthService {
       }
     }
 
+    const hasTelcoSub = Boolean(userProfile.telco_subscriber_id || rawSubscriberId);
+    const isTelcoLocked = userProfile.telco_status === 'UNSUBSCRIBED';
+
     return {
       success: true,
       accessToken,
@@ -534,6 +551,12 @@ export class AuthService {
         employmentStatus: userProfile.employment_status,
         dailyGoalMinutes: userProfile.daily_goal_minutes,
         isCompleted,
+        telcoProvider: userProfile.telco_provider || null,
+        telcoStatus: userProfile.telco_status || (hasTelcoSub ? 'ACTIVE' : null),
+        hasTelcoSubscription: hasTelcoSub,
+        isSubscriptionLocked: isTelcoLocked || userProfile.plan_status === 'expired',
+        isGracePeriodActive: false,
+        gracePeriodEndDate: null,
       },
     };
   }
@@ -976,7 +999,131 @@ export class AuthService {
         .then(() => {});
     }
 
-    return await this.checkAndResetMonthlyQuota(data as UserProfileData);
+    const profile = await this.checkAndResetMonthlyQuota(data as UserProfileData);
+
+    const hasTelco = Boolean(profile.telco_subscriber_id);
+    const isTelcoUnsubscribed = profile.telco_status === 'UNSUBSCRIBED';
+
+    let isSubscriptionLocked = false;
+    let isGracePeriodActive = false;
+    let gracePeriodEnd: string | null = null;
+
+    if (hasTelco && isTelcoUnsubscribed) {
+      isSubscriptionLocked = true;
+    } else if (profile.plan_status === 'expired') {
+      isSubscriptionLocked = true;
+    } else if (profile.plan_tier !== 'starter' && profile.plan_status === 'canceled') {
+      // User cancelled a paid Pro/Premium subscription. Check if within grace period
+      try {
+        const { data: sub } = await this.supabase
+          .from('subscriptions')
+          .select('next_billing_date, status')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (sub?.next_billing_date) {
+          const endDate = new Date(sub.next_billing_date).getTime();
+          if (endDate > Date.now()) {
+            isGracePeriodActive = true;
+            gracePeriodEnd = sub.next_billing_date;
+            isSubscriptionLocked = false;
+          } else {
+            // Period has expired! Mark plan_status as expired
+            isSubscriptionLocked = true;
+            profile.plan_status = 'expired';
+            await this.supabase
+              .from('profiles')
+              .update({ plan_status: 'expired', updated_at: new Date().toISOString() })
+              .eq('id', userId);
+          }
+        } else {
+          isSubscriptionLocked = true;
+        }
+      } catch {
+        // fallback safely
+      }
+    }
+
+    profile.has_telco_subscription = hasTelco;
+    profile.is_subscription_locked = isSubscriptionLocked;
+    profile.is_grace_period_active = isGracePeriodActive;
+    profile.grace_period_end = gracePeriodEnd;
+
+    return profile;
+  }
+
+  /**
+   * Cancels mobile airtime carrier billing subscription (IdeaMart / mSpace)
+   */
+  async unsubscribeTelco(userId: string): Promise<{ success: boolean; message: string }> {
+    const profile = await this.getProfile(userId);
+    if (!profile.telco_subscriber_id || !profile.telco_provider) {
+      throw new BadRequestException('No active mobile carrier subscription found for your account.');
+    }
+
+    const appConfig = await this.getAppConfig();
+    try {
+      await this.telcoService.unsubscribe(
+        profile.telco_provider as any,
+        profile.telco_subscriber_id,
+        appConfig,
+      );
+    } catch (err: any) {
+      this.logger.warn(`Telco unsubscribe gateway warning: ${err.message}`);
+    }
+
+    await this.supabase
+      .from('profiles')
+      .update({
+        telco_status: 'UNSUBSCRIBED',
+        plan_status: 'canceled',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    return {
+      success: true,
+      message: 'Your mobile airtime subscription has been cancelled.',
+    };
+  }
+
+  /**
+   * Reactivates mobile airtime carrier billing subscription
+   */
+  async reactivateTelco(
+    userId: string,
+  ): Promise<{ success: boolean; message: string; requiresPin?: boolean; referenceNo?: string }> {
+    const profile = await this.getProfile(userId);
+    const phone = profile.phone_number;
+    const appConfig = await this.getAppConfig();
+
+    const pinResult = await this.telcoService.requestPin(phone, appConfig);
+
+    if (pinResult.status === 'ALREADY_REGISTERED') {
+      await this.supabase
+        .from('profiles')
+        .update({
+          telco_status: 'ACTIVE',
+          plan_status: 'active',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      return {
+        success: true,
+        message: 'Your mobile subscription has been reactivated successfully!',
+        requiresPin: false,
+      };
+    }
+
+    return {
+      success: true,
+      message: 'A verification PIN has been sent to your mobile phone to reactivate your subscription.',
+      requiresPin: true,
+      referenceNo: pinResult.referenceNo,
+    };
   }
 
   /**

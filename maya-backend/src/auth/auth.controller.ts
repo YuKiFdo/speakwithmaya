@@ -94,6 +94,18 @@ export class AuthController {
     return this.authService.getPlansCatalog();
   }
 
+  @Post('auth/telco/unsubscribe')
+  @UseGuards(AuthGuard)
+  async unsubscribeTelco(@GetUser('id') userId: string) {
+    return this.authService.unsubscribeTelco(userId);
+  }
+
+  @Post('auth/telco/reactivate')
+  @UseGuards(AuthGuard)
+  async reactivateTelco(@GetUser('id') userId: string) {
+    return this.authService.reactivateTelco(userId);
+  }
+
   /**
    * Admin: List users with analytics and usage metrics
    */

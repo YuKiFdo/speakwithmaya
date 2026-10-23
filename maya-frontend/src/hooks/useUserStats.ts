@@ -17,6 +17,12 @@ export interface UserStats {
   planTier: 'starter' | 'basic' | 'pro' | 'premium';
   planStatus: string;
   isPastDue: boolean;
+  hasTelcoSubscription: boolean;
+  isTelcoUnsubscribed: boolean;
+  telcoProvider: 'ideamart' | 'mspace' | null;
+  isSubscriptionLocked: boolean;
+  isGracePeriodActive: boolean;
+  gracePeriodEndDate: string | null;
 
   // Level & XP
   completedLessonsCount: number;
@@ -364,6 +370,16 @@ export function useUserStats(): UserStats {
     planTier,
     planStatus: user?.planStatus || 'active',
     isPastDue: user?.planStatus === 'past_due',
+    hasTelcoSubscription: Boolean(user?.hasTelcoSubscription),
+    isTelcoUnsubscribed: user?.telcoStatus === 'UNSUBSCRIBED',
+    telcoProvider: user?.telcoProvider || null,
+    isSubscriptionLocked: Boolean(
+      user?.isSubscriptionLocked ||
+      (user?.hasTelcoSubscription && user?.telcoStatus === 'UNSUBSCRIBED') ||
+      user?.planStatus === 'expired'
+    ),
+    isGracePeriodActive: Boolean(user?.isGracePeriodActive),
+    gracePeriodEndDate: user?.gracePeriodEndDate || null,
     completedLessonsCount: statsState.completedLessonsCount,
     currentLevelNumber,
     levelLabel,

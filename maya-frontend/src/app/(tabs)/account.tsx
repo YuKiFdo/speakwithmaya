@@ -142,39 +142,114 @@ export default function AccountScreen() {
   };
 
   const [isCancellingSub, setIsCancellingSub] = useState(false);
+  const [isReactivatingSub, setIsReactivatingSub] = useState(false);
+
+  const handleReactivateSubscription = async () => {
+    if (stats.hasTelcoSubscription) {
+      setIsReactivatingSub(true);
+      try {
+        const res = await paymentApi.reactivateTelcoSubscription();
+        await stats.refreshStats();
+        if (res.requiresPin) {
+          await mayaAlert.alert(
+            res.message || 'A verification PIN has been sent to your mobile phone to reactivate your subscription.',
+            'Verification PIN Sent',
+            'info'
+          );
+        } else {
+          await mayaAlert.success(
+            res.message || 'Your mobile airtime subscription has been reactivated successfully!',
+            'Subscription Active'
+          );
+        }
+      } catch (err: any) {
+        await mayaAlert.error(err.message || 'Failed to reactivate subscription.', 'Reactivation Error');
+      } finally {
+        setIsReactivatingSub(false);
+      }
+    } else {
+      router.push('/upgrade');
+    }
+  };
 
   const handleCancelSubscription = async () => {
-    if (!isPro) {
-      await mayaAlert.alert(
-        'You are currently on the free Starter plan with no active recurring charges.',
-        'Starter Plan',
-        'info'
-      );
+    // If subscription is already cancelled or locked, direct to reactivate
+    if (stats.isSubscriptionLocked || stats.isTelcoUnsubscribed) {
+      await handleReactivateSubscription();
       return;
     }
 
-    const confirmed = await mayaAlert.confirm({
-      title: 'Cancel Subscription',
-      message:
-        'Are you sure you want to cancel your recurring subscription? Future renewals will be stopped on PayHere, and your plan will revert to Starter at the end of your billing cycle.',
-      confirmText: 'Cancel Subscription',
-      cancelText: 'Keep Plan',
-      type: 'warning',
-      isDestructive: true,
-    });
-    if (!confirmed) return;
+    // 1. Telco Carrier Billing cancellation (Dialog / Mobitel)
+    if (stats.hasTelcoSubscription) {
+      const providerName = stats.telcoProvider === 'mspace' ? 'Mobitel' : 'Dialog';
+      const confirmed = await mayaAlert.confirm({
+        title: 'Cancel Mobile Subscription',
+        message: `Are you sure you want to cancel your daily mobile airtime subscription with ${providerName}?\n\n• Daily airtime deductions (Rs. 5 + tax) from your mobile balance will be stopped.\n• Access to Maya practice sessions will be locked until you reactivate or choose a plan.`,
+        confirmText: 'Cancel Subscription',
+        cancelText: 'Keep Plan',
+        type: 'warning',
+        isDestructive: true,
+      });
+      if (!confirmed) return;
 
-    setIsCancellingSub(true);
-    try {
-      const res = await paymentApi.cancelSubscription();
-      await stats.refreshStats();
-      await mayaAlert.success(res.msg || 'Your subscription has been cancelled.', 'Subscription Cancelled');
-    } catch (err: any) {
-      const errMsg = err.message || 'Failed to cancel subscription.';
-      await mayaAlert.error(errMsg, 'Cancellation Error');
-    } finally {
-      setIsCancellingSub(false);
+      setIsCancellingSub(true);
+      try {
+        const res = await paymentApi.cancelTelcoSubscription();
+        await stats.refreshStats();
+        await mayaAlert.success(
+          res.message || 'Your mobile airtime subscription has been cancelled.',
+          'Subscription Cancelled'
+        );
+      } catch (err: any) {
+        const errMsg = err.message || 'Failed to cancel mobile carrier subscription.';
+        await mayaAlert.error(errMsg, 'Cancellation Error');
+      } finally {
+        setIsCancellingSub(false);
+      }
+      return;
     }
+
+    // 2. Pro/Premium recurring PayHere card cancellation
+    if (isPro) {
+      const nextDate = subscription?.next_billing_date
+        ? formatBillingDate(subscription.next_billing_date)
+        : stats.gracePeriodEndDate
+        ? formatBillingDate(stats.gracePeriodEndDate)
+        : 'the end of your billing cycle';
+
+      const confirmed = await mayaAlert.confirm({
+        title: 'Cancel Subscription',
+        message: `Are you sure you want to cancel your recurring subscription?\n\n• Future automatic renewals on PayHere will be stopped.\n• You can continue practicing with your remaining minutes until ${nextDate}.\n• After ${nextDate}, your plan will expire.`,
+        confirmText: 'Cancel Subscription',
+        cancelText: 'Keep Plan',
+        type: 'warning',
+        isDestructive: true,
+      });
+      if (!confirmed) return;
+
+      setIsCancellingSub(true);
+      try {
+        const res = await paymentApi.cancelSubscription();
+        await stats.refreshStats();
+        await mayaAlert.success(
+          res.msg || `Your subscription has been cancelled. You can continue practicing until ${nextDate}.`,
+          'Subscription Cancelled'
+        );
+      } catch (err: any) {
+        const errMsg = err.message || 'Failed to cancel subscription.';
+        await mayaAlert.error(errMsg, 'Cancellation Error');
+      } finally {
+        setIsCancellingSub(false);
+      }
+      return;
+    }
+
+    // 3. Free Starter user with no active billing
+    await mayaAlert.alert(
+      'You are currently on the free Starter plan with no active recurring charges.',
+      'Starter Plan',
+      'info'
+    );
   };
 
   const searchParams = useLocalSearchParams<{ card_update?: string; payment?: string; order_id?: string }>();
@@ -368,6 +443,7 @@ export default function AccountScreen() {
                     initials={stats.initials}
                     memberSince={stats.memberSinceText}
                     isPro={isPro}
+                    isLocked={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
                     onEdit={handleOpenEditModal}
                     onTogglePlan={() => {}}
                     onCancelSubscription={handleCancelSubscription}
@@ -403,9 +479,15 @@ export default function AccountScreen() {
                     nextBillingDate={subscription?.next_billing_date}
                     cardMasked={subscription?.card_masked}
                     isUpdatingPayment={isUpdatingCard}
+                    hasTelcoSubscription={stats.hasTelcoSubscription}
+                    isTelcoUnsubscribed={stats.isTelcoUnsubscribed}
+                    isSubscriptionLocked={stats.isSubscriptionLocked}
+                    isGracePeriodActive={stats.isGracePeriodActive}
+                    gracePeriodEndDate={stats.gracePeriodEndDate}
                     onUpgrade={() => router.push('/upgrade')}
                     onGetExtraTime={() => setActivePopup('get-extra-time')}
                     onChangePayment={handleChangePayment}
+                    onReactivate={handleReactivateSubscription}
                   />
 
                   <CustomerSupportCard onEmailPress={handleSupportEmail} />
@@ -420,6 +502,7 @@ export default function AccountScreen() {
                   initials={stats.initials}
                   memberSince={stats.memberSinceText}
                   isPro={isPro}
+                  isLocked={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
                   onEdit={handleOpenEditModal}
                   onTogglePlan={() => {}}
                   onCancelSubscription={handleCancelSubscription}
@@ -444,9 +527,15 @@ export default function AccountScreen() {
                   nextBillingDate={subscription?.next_billing_date}
                   cardMasked={subscription?.card_masked}
                   isUpdatingPayment={isUpdatingCard}
+                  hasTelcoSubscription={stats.hasTelcoSubscription}
+                  isTelcoUnsubscribed={stats.isTelcoUnsubscribed}
+                  isSubscriptionLocked={stats.isSubscriptionLocked}
+                  isGracePeriodActive={stats.isGracePeriodActive}
+                  gracePeriodEndDate={stats.gracePeriodEndDate}
                   onUpgrade={() => router.push('/upgrade')}
                   onGetExtraTime={() => setActivePopup('get-extra-time')}
                   onChangePayment={handleChangePayment}
+                  onReactivate={handleReactivateSubscription}
                 />
 
                 <PreferencesCard
@@ -607,6 +696,7 @@ function ProfileCard({
   initials = 'M',
   memberSince = 'Member since 2026',
   isPro,
+  isLocked = false,
   onEdit,
   onTogglePlan,
   onCancelSubscription,
@@ -616,6 +706,7 @@ function ProfileCard({
   initials?: string;
   memberSince?: string;
   isPro: boolean;
+  isLocked?: boolean;
   onEdit: () => void;
   onTogglePlan?: () => void;
   onCancelSubscription: () => void;
@@ -676,7 +767,9 @@ function ProfileCard({
               hitSlop={8}
               style={({ pressed }) => [pressed && styles.cardPressed]}
             >
-              <Text style={styles.cancelSubText}>Cancel Subscription</Text>
+              <Text style={[styles.cancelSubText, isLocked && { color: '#2563EB' }]}>
+                {isLocked ? 'Reactivate Subscription' : 'Cancel Subscription'}
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -829,9 +922,15 @@ function CurrentPlanCard({
   nextBillingDate,
   cardMasked,
   isUpdatingPayment = false,
+  hasTelcoSubscription = false,
+  isTelcoUnsubscribed = false,
+  isSubscriptionLocked = false,
+  isGracePeriodActive = false,
+  gracePeriodEndDate = null,
   onUpgrade,
   onGetExtraTime,
   onChangePayment,
+  onReactivate,
 }: {
   planTier: string;
   planStatus?: string;
@@ -844,9 +943,15 @@ function CurrentPlanCard({
   nextBillingDate?: string | null;
   cardMasked?: string;
   isUpdatingPayment?: boolean;
+  hasTelcoSubscription?: boolean;
+  isTelcoUnsubscribed?: boolean;
+  isSubscriptionLocked?: boolean;
+  isGracePeriodActive?: boolean;
+  gracePeriodEndDate?: string | null;
   onUpgrade: () => void;
   onGetExtraTime: () => void;
   onChangePayment: () => void;
+  onReactivate?: () => void;
 }) {
   const isPro = planTier === 'pro' || planTier === 'premium' || planTier === 'basic';
   const planDisplayName = planTier.charAt(0).toUpperCase() + planTier.slice(1) + ' Plan';
@@ -874,7 +979,11 @@ function CurrentPlanCard({
         <View
           style={[
             styles.starterBadgePill,
-            isPastDue
+            isSubscriptionLocked
+              ? { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }
+              : isGracePeriodActive
+              ? { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }
+              : isPastDue
               ? { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }
               : isTimeExpired && { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
           ]}
@@ -882,18 +991,60 @@ function CurrentPlanCard({
           <Text
             style={[
               styles.starterBadgeText,
-              isPastDue
+              isSubscriptionLocked
+                ? { color: '#DC2626' }
+                : isGracePeriodActive
+                ? { color: '#B45309' }
+                : isPastDue
                 ? { color: '#B45309' }
                 : isTimeExpired && { color: '#DC2626' },
             ]}
           >
-            {isPastDue ? 'Payment Past Due' : isTimeExpired ? 'Time Expired' : planDisplayName}
+            {isSubscriptionLocked
+              ? 'Subscription Inactive'
+              : isGracePeriodActive
+              ? `Cancels on ${formatBillingDate(gracePeriodEndDate)}`
+              : isPastDue
+              ? 'Payment Past Due'
+              : isTimeExpired
+              ? 'Time Expired'
+              : planDisplayName}
           </Text>
         </View>
       </View>
 
+      {/* Inactive / Locked Subscription Banner */}
+      {isSubscriptionLocked && (
+        <View style={[styles.pastDueBanner, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
+          <Feather name="lock" size={18} color="#DC2626" style={{ marginTop: 2 }} />
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={[styles.pastDueBannerTitle, { color: '#B91C1C' }]}>
+              {hasTelcoSubscription ? 'Mobile Subscription Cancelled' : 'Subscription Expired'}
+            </Text>
+            <Text style={[styles.pastDueBannerSubtitle, { color: '#991B1B' }]}>
+              {hasTelcoSubscription
+                ? 'Your daily mobile airtime subscription was cancelled. Reactivate your mobile plan or upgrade to continue speaking with Maya.'
+                : 'Your subscription billing period has ended. Reactivate or choose a plan to continue speaking with Maya.'}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Grace Period Active Banner */}
+      {isGracePeriodActive && !isSubscriptionLocked && (
+        <View style={[styles.pastDueBanner, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+          <Feather name="clock" size={18} color="#D97706" style={{ marginTop: 2 }} />
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={[styles.pastDueBannerTitle, { color: '#B45309' }]}>Cancellation Scheduled</Text>
+            <Text style={[styles.pastDueBannerSubtitle, { color: '#92400E' }]}>
+              Future automatic renewals have been stopped. You can continue speaking with Maya until {formatBillingDate(gracePeriodEndDate)}.
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* Warning banner if payment deduction failed */}
-      {isPastDue && (
+      {isPastDue && !isSubscriptionLocked && (
         <View style={styles.pastDueBanner}>
           <Feather name="alert-triangle" size={18} color="#D97706" style={{ marginTop: 2 }} />
           <View style={{ flex: 1, marginLeft: 10 }}>
@@ -907,10 +1058,14 @@ function CurrentPlanCard({
 
       {/* Main Title & Subtitle */}
       <Text style={styles.planMainTitle}>
-        {planDisplayName} ({isPro ? 'Monthly' : '5 Min/Day'})
+        {planDisplayName} {isSubscriptionLocked ? '(Inactive)' : isPro ? '(Monthly)' : '(5 Min/Day)'}
       </Text>
       <Text style={styles.planMainSubtitle}>
-        {isPastDue
+        {isSubscriptionLocked
+          ? 'Reactivate your subscription or upgrade to Pro to unlock voice practice sessions.'
+          : isGracePeriodActive
+          ? `Your plan remains active until ${formatBillingDate(gracePeriodEndDate)}.`
+          : isPastDue
           ? 'Payment retry in progress. Paid features are frozen until payment settles.'
           : isTimeExpired
           ? (isPro ? 'You have used all available minutes for this cycle. Get extra time to continue.' : "You've reached your daily limit! Continue your practice with Premium.")
@@ -923,15 +1078,25 @@ function CurrentPlanCard({
         <View style={styles.planInfoRow}>
           <Text style={styles.planInfoLabel}>Current Plan</Text>
           <View style={styles.planInfoValueCol}>
-            <Text style={styles.planInfoValue}>{planDisplayName}</Text>
+            <Text style={styles.planInfoValue}>
+              {planDisplayName} {isSubscriptionLocked ? '(Inactive)' : ''}
+            </Text>
           </View>
         </View>
 
-        {/* Row 2: Next Billing Date */}
+        {/* Row 2: Next Billing Date / Expiry */}
         <View style={styles.planInfoRow}>
-          <Text style={styles.planInfoLabel}>Next Billing Date</Text>
+          <Text style={styles.planInfoLabel}>
+            {isGracePeriodActive ? 'Access Expires' : 'Next Billing Date'}
+          </Text>
           <View style={styles.planInfoValueCol}>
-            <Text style={styles.planInfoValue}>{nextBillingDateText}</Text>
+            <Text style={styles.planInfoValue}>
+              {isGracePeriodActive
+                ? formatBillingDate(gracePeriodEndDate)
+                : isSubscriptionLocked
+                ? 'Cancelled'
+                : nextBillingDateText}
+            </Text>
           </View>
         </View>
 
@@ -940,23 +1105,32 @@ function CurrentPlanCard({
           <Text style={styles.planInfoLabel}>Payment Method</Text>
           <View style={styles.paymentMethodRow}>
             <View style={styles.paymentCardInfo}>
-              <Ionicons name="card-outline" size={17} color="#2563EB" style={{ marginRight: 8 }} />
-              <Text style={styles.planInfoValue}>{cardDisplayText}</Text>
+              <Ionicons
+                name={hasTelcoSubscription ? 'phone-portrait-outline' : 'card-outline'}
+                size={17}
+                color="#2563EB"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.planInfoValue}>
+                {hasTelcoSubscription ? 'Mobile Carrier Billing' : cardDisplayText}
+              </Text>
             </View>
-            <Pressable
-              onPress={onChangePayment}
-              disabled={isUpdatingPayment}
-              hitSlop={8}
-              style={({ pressed }) => [pressed && { opacity: 0.7 }]}
-              accessibilityRole="button"
-              accessibilityLabel="Change payment card"
-            >
-              {isUpdatingPayment ? (
-                <ActivityIndicator size="small" color="#2563EB" />
-              ) : (
-                <Text style={styles.changePaymentText}>Change</Text>
-              )}
-            </Pressable>
+            {!hasTelcoSubscription && (
+              <Pressable
+                onPress={onChangePayment}
+                disabled={isUpdatingPayment}
+                hitSlop={8}
+                style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Change payment card"
+              >
+                {isUpdatingPayment ? (
+                  <ActivityIndicator size="small" color="#2563EB" />
+                ) : (
+                  <Text style={styles.changePaymentText}>Change</Text>
+                )}
+              </Pressable>
+            )}
           </View>
         </View>
       </View>
@@ -964,9 +1138,25 @@ function CurrentPlanCard({
       {/* Thin Horizontal Divider Line above button */}
       <View style={styles.planCardDivider} />
 
-      {/* Action Buttons: Get Extra Time & Upgrade */}
+      {/* Action Buttons: Reactivate, Get Extra Time & Upgrade */}
       <View style={{ gap: 10 }}>
-        {isPastDue && (
+        {isSubscriptionLocked && (
+          <Pressable
+            onPress={onReactivate || onUpgrade}
+            style={({ pressed }) => [
+              styles.planUpgradeBtn,
+              { backgroundColor: '#2563EB' },
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Feather name="refresh-cw" size={18} color="#FFFFFF" />
+            <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>
+              {hasTelcoSubscription ? 'Reactivate Mobile Plan (Rs. 5/day)' : 'Reactivate Pro Plan'}
+            </Text>
+          </Pressable>
+        )}
+
+        {isPastDue && !isSubscriptionLocked && (
           <Pressable
             onPress={onUpgrade}
             style={({ pressed }) => [
@@ -980,7 +1170,7 @@ function CurrentPlanCard({
           </Pressable>
         )}
 
-        {isPro && isTimeExpired && !isPastDue && (
+        {isPro && isTimeExpired && !isPastDue && !isSubscriptionLocked && (
           <Pressable
             onPress={onGetExtraTime}
             style={({ pressed }) => [
@@ -998,12 +1188,15 @@ function CurrentPlanCard({
           onPress={onUpgrade}
           style={({ pressed }) => [
             styles.planUpgradeBtn,
+            isSubscriptionLocked && { backgroundColor: '#0F172A' },
             pressed && styles.buttonPressed,
           ]}
         >
           <CrownNavIcon color="#FFFFFF" size={19} />
           <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>
-            {isPro
+            {isSubscriptionLocked
+              ? 'Upgrade to Pro / Premium'
+              : isPro
               ? planTier === 'premium'
                 ? 'Manage Subscription Plan'
                 : 'Upgrade to Premium'

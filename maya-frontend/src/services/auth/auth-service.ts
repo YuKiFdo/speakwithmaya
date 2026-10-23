@@ -208,6 +208,12 @@ class AuthService {
             lastActiveStep: data.profile.last_active_step,
             createdAt: data.profile.created_at,
             isCompleted: Boolean(data.profile.onboarding_completed_at),
+            telcoProvider: data.profile.telco_provider || null,
+            telcoStatus: data.profile.telco_status || null,
+            hasTelcoSubscription: Boolean(data.profile.has_telco_subscription ?? data.profile.telco_subscriber_id),
+            isSubscriptionLocked: Boolean(data.profile.is_subscription_locked),
+            isGracePeriodActive: Boolean(data.profile.is_grace_period_active),
+            gracePeriodEndDate: data.profile.grace_period_end || null,
           };
           OnboardingStore.setAuthSession(token, user);
           return user;

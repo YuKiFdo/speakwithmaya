@@ -20,6 +20,12 @@ export interface UserSessionData {
   lastActiveStep?: string | null;
   isCompleted?: boolean;
   createdAt?: string;
+  telcoProvider?: 'ideamart' | 'mspace' | null;
+  telcoStatus?: 'ACTIVE' | 'UNSUBSCRIBED' | null;
+  hasTelcoSubscription?: boolean;
+  isSubscriptionLocked?: boolean;
+  isGracePeriodActive?: boolean;
+  gracePeriodEndDate?: string | null;
 }
 
 export interface BaselineScores {

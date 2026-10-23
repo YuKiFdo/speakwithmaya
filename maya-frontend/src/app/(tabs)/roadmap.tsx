@@ -45,6 +45,8 @@ import { ScenarioBriefingModal, resolveScenarioBriefingData } from '@/components
 import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { CallSessionStore } from '@/services/store/call-session-store';
 import { useUserStats } from '@/hooks/useUserStats';
+import { paymentApi } from '@/services/payment/payment-api';
+import { mayaAlert } from '@/components/ui/alert-modal';
 import {
   RoadmapGlowParticles,
   buildDesktopPathSegments,
@@ -527,6 +529,11 @@ export default function RoadmapScreen() {
 
   const handleStartMission = (item: MilestoneItem) => {
     setSelectedMission(null);
+
+    if (stats.isSubscriptionLocked) {
+      setActivePopup('reactivate-plan');
+      return;
+    }
 
     const isStarter = (stats.planTier || 'starter').toLowerCase() === 'starter';
     const minutesBalance = onboardingState.user?.minutesBalance ?? stats.minutesBalance ?? 5;
@@ -1053,14 +1060,20 @@ export default function RoadmapScreen() {
               ? 'Level Locked'
               : activePopup === 'level-up'
               ? 'Your Level Progress'
+              : activePopup === 'reactivate-plan'
+              ? 'Reactivate Maya to Continue'
               : undefined
           }
-          titleHighlight={isLevelLocked ? 'Locked' : undefined}
+          titleHighlight={isLevelLocked ? 'Locked' : activePopup === 'reactivate-plan' ? 'Reactivate' : undefined}
           subtitle={
             isLevelLocked && effectiveLockedLevel
               ? `Complete Level ${Math.max(1, (effectiveLockedLevel.levelNumber ?? 2) - 1)} first to unlock this session and keep moving forward on your journey.`
               : activePopup === 'level-up'
               ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep completing lessons on your roadmap to reach Level ${stats.currentLevelNumber + 1}!`
+              : activePopup === 'reactivate-plan'
+              ? stats.hasTelcoSubscription
+                ? 'Your daily mobile airtime subscription was cancelled. Reactivate your mobile plan or upgrade to continue practicing on the roadmap.'
+                : 'Your subscription billing period has ended. Reactivate your plan or upgrade to Pro to continue practicing on the roadmap.'
               : undefined
           }
           primaryButtonText={
@@ -1070,9 +1083,13 @@ export default function RoadmapScreen() {
                 : 'Got It'
               : activePopup === 'level-up'
               ? 'Keep Learning'
+              : activePopup === 'reactivate-plan'
+              ? stats.hasTelcoSubscription
+                ? 'Reactivate Mobile Plan (Rs. 5/day)'
+                : 'Reactivate Pro Plan'
               : undefined
           }
-          primaryButtonIcon={isLevelLocked ? 'play' : undefined}
+          primaryButtonIcon={isLevelLocked ? 'play' : activePopup === 'reactivate-plan' ? 'play' : undefined}
           showPrimaryArrow={true}
           footerText={
             isLevelLocked
@@ -1082,16 +1099,40 @@ export default function RoadmapScreen() {
           onClose={() => {
             setActivePopup(null);
           }}
-          onPrimaryPress={() => {
+          onPrimaryPress={async () => {
             const popupToActOn = activePopup || lastActivePopupRef.current;
-            if (popupToActOn === 'unlock-premium' || popupToActOn === 'daily-limit') {
+            setActivePopup(null);
+
+            if (popupToActOn === 'reactivate-plan') {
+              if (stats.hasTelcoSubscription) {
+                try {
+                  const res = await paymentApi.reactivateTelcoSubscription();
+                  await stats.refreshStats();
+                  if (res.requiresPin) {
+                    await mayaAlert.alert(
+                      res.message || 'A verification PIN has been sent to your mobile phone to reactivate your subscription.',
+                      'Verification PIN Sent',
+                      'info'
+                    );
+                  } else {
+                    await mayaAlert.success(
+                      res.message || 'Your mobile airtime subscription has been reactivated successfully!',
+                      'Subscription Active'
+                    );
+                  }
+                } catch (err: any) {
+                  await mayaAlert.error(err.message || 'Failed to reactivate subscription.', 'Reactivation Error');
+                }
+              } else {
+                router.push('/upgrade');
+              }
+            } else if (popupToActOn === 'unlock-premium' || popupToActOn === 'daily-limit') {
               router.push('/upgrade');
             } else if (popupToActOn === 'level-locked') {
               if (currentActiveLevel) {
                 setSelectedMission(currentActiveLevel);
               }
             }
-            setActivePopup(null);
           }}
           onFooterButtonPress={() => {
             router.push('/upgrade');

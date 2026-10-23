@@ -39,6 +39,7 @@ export type PopupPreset =
   | 'get-extra-time'
   | 'level-locked'
   | 'hint-limit'
+  | 'reactivate-plan'
   | 'custom';
 
 export interface CommonPopupProps {
@@ -93,6 +94,7 @@ const PRESET_IMAGES = {
   'practice-complete': require('@/assets/images/mayathumb.png'),
   'level-locked': require('@/assets/images/mayalocked.png'),
   'hint-limit': require('@/assets/images/mayacrown.png'),
+  'reactivate-plan': require('@/assets/images/mayacrown.png'),
 };
 
 /**
@@ -317,6 +319,21 @@ export function CommonPopup({
     if (finalShowArrow === undefined) finalShowArrow = true;
     if (finalFooterText === undefined) {
       finalFooterText = 'Get unlimited hints, full conversation memory, and extended practice with Pro.';
+    }
+    if (finalShowClose === undefined) finalShowClose = true;
+  } else if (resolvedPreset === 'reactivate-plan') {
+    if (!finalTitle) {
+      finalTitle = 'Reactivate Maya to Continue';
+      finalHighlight = 'Reactivate';
+    }
+    if (!finalSubtitle) {
+      finalSubtitle = 'Your subscription is currently inactive. Reactivate your plan or upgrade to continue practicing with Maya.';
+    }
+    if (!finalBtnText) finalBtnText = 'Reactivate Plan';
+    if (finalBtnIcon === undefined) finalBtnIcon = 'play';
+    if (finalShowArrow === undefined) finalShowArrow = true;
+    if (finalFooterBtn === undefined) {
+      finalFooterBtn = 'View All Upgrade Plans →';
     }
     if (finalShowClose === undefined) finalShowClose = true;
   }

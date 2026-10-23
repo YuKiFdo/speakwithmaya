@@ -34,6 +34,8 @@ import { useUserStats } from '@/hooks/useUserStats';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { useActiveConversation, ActiveConversationStore, isRoadmapOrIntroTopic } from '@/services/store/active-conversation-store';
 import { fetchAllPracticeSessions } from '@/services/supabase';
+import { paymentApi } from '@/services/payment/payment-api';
+import { mayaAlert } from '@/components/ui/alert-modal';
 
 interface ScenarioItem {
   id: string;
@@ -148,6 +150,8 @@ export default function DashboardScreen() {
   const displayName = stats.displayName || params.name || '';
   const minutesBalance = stats.minutesBalance;
   const isTimeExpired = stats.isTimeExpired;
+  const isSubscriptionLocked = stats.isSubscriptionLocked;
+  const hasTelcoSubscription = stats.hasTelcoSubscription;
   const planTier = stats.planTier;
   const isPro = stats.isPro;
   const usedMinutes = stats.usedMinutes;
@@ -282,12 +286,21 @@ export default function DashboardScreen() {
   }, []);
 
   const handleOpenCreateSession = (scenario?: { id: string; title: string }) => {
+    if (isSubscriptionLocked) {
+      setActivePopup('reactivate-plan');
+      return;
+    }
     setSelectedScenario(scenario || null);
     setCreateSessionVisible(true);
   };
 
   const handleStartSession = (config: CreateSessionConfig) => {
     setCreateSessionVisible(false);
+
+    if (isSubscriptionLocked) {
+      setActivePopup('reactivate-plan');
+      return;
+    }
 
     if (isTimeExpired) {
       if (!isPro) {
@@ -320,6 +333,10 @@ export default function DashboardScreen() {
   };
 
   const handleStartTalking = () => {
+    if (isSubscriptionLocked) {
+      setActivePopup('reactivate-plan');
+      return;
+    }
     if (isTimeExpired) {
       if (!isPro) {
         setActivePopup('daily-limit');
@@ -332,6 +349,10 @@ export default function DashboardScreen() {
   };
 
   const handleResumeTalking = () => {
+    if (isSubscriptionLocked) {
+      setActivePopup('reactivate-plan');
+      return;
+    }
     if (isTimeExpired) {
       if (!isPro) {
         setActivePopup('daily-limit');
@@ -824,25 +845,70 @@ export default function DashboardScreen() {
           visible={activePopup !== null}
           preset={activePopup || 'custom'}
           levelNumber={stats.currentLevelNumber}
-          title={activePopup === 'level-up' ? 'Your Level Progress' : undefined}
+          title={
+            activePopup === 'level-up'
+              ? 'Your Level Progress'
+              : activePopup === 'reactivate-plan'
+              ? 'Reactivate Maya to Continue'
+              : undefined
+          }
           subtitle={
             activePopup === 'level-up'
               ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep completing speaking lessons to reach Level ${stats.currentLevelNumber + 1}!`
+              : activePopup === 'reactivate-plan'
+              ? hasTelcoSubscription
+                ? 'Your daily mobile airtime subscription was cancelled. Reactivate your mobile plan or upgrade to Pro to unlock voice practice sessions.'
+                : 'Your subscription billing cycle has ended. Reactivate your plan or upgrade to Pro to continue practicing with Maya.'
               : undefined
           }
-          primaryButtonText={activePopup === 'level-up' ? 'View Learning Roadmap' : undefined}
-          primaryButtonIcon={activePopup === 'level-up' ? 'arrow' : undefined}
-          showPrimaryArrow={activePopup === 'level-up' ? true : undefined}
+          primaryButtonText={
+            activePopup === 'level-up'
+              ? 'View Learning Roadmap'
+              : activePopup === 'reactivate-plan'
+              ? hasTelcoSubscription
+                ? 'Reactivate Mobile Plan (Rs. 5/day)'
+                : 'Reactivate Pro Plan'
+              : undefined
+          }
+          primaryButtonIcon={
+            activePopup === 'level-up' ? 'arrow' : activePopup === 'reactivate-plan' ? 'play' : undefined
+          }
+          showPrimaryArrow={activePopup === 'level-up' || activePopup === 'reactivate-plan'}
           onClose={() => setActivePopup(null)}
-          onPrimaryPress={() => {
-            if (activePopup === 'level-up') {
+          onPrimaryPress={async () => {
+            const currentPop = activePopup;
+            setActivePopup(null);
+
+            if (currentPop === 'level-up') {
               router.push('/(tabs)/roadmap');
-            } else if (activePopup === 'unlock-premium' || activePopup === 'daily-limit') {
+            } else if (currentPop === 'reactivate-plan') {
+              if (hasTelcoSubscription) {
+                try {
+                  const res = await paymentApi.reactivateTelcoSubscription();
+                  await stats.refreshStats();
+                  if (res.requiresPin) {
+                    await mayaAlert.alert(
+                      res.message || 'A verification PIN has been sent to your mobile phone to reactivate your subscription.',
+                      'Verification PIN Sent',
+                      'info'
+                    );
+                  } else {
+                    await mayaAlert.success(
+                      res.message || 'Your mobile airtime subscription has been reactivated successfully!',
+                      'Subscription Active'
+                    );
+                  }
+                } catch (err: any) {
+                  await mayaAlert.error(err.message || 'Failed to reactivate subscription.', 'Reactivation Error');
+                }
+              } else {
+                router.push('/upgrade');
+              }
+            } else if (currentPop === 'unlock-premium' || currentPop === 'daily-limit') {
               router.push('/upgrade');
-            } else if (activePopup === 'practice-complete') {
+            } else if (currentPop === 'practice-complete') {
               handleStartTalking();
             }
-            setActivePopup(null);
           }}
           onFooterButtonPress={() => {
             router.push('/upgrade');
