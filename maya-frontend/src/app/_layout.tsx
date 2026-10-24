@@ -6,7 +6,7 @@ if (typeof window !== 'undefined' && !(window as any).Buffer) {
   (window as any).Buffer = Buffer;
 }
 
-import { DarkTheme, DefaultTheme, ThemeProvider, Stack } from 'expo-router';
+import { DarkTheme, DefaultTheme, ThemeProvider, Stack, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
@@ -49,6 +49,31 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function RouteGuard() {
   useRouteGuard();
+  return null;
+}
+
+function WebDocumentTitle() {
+  const pathname = usePathname();
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+
+    let pageName = '';
+    const cleanPath = pathname?.toLowerCase() || '';
+    if (cleanPath.includes('/account')) pageName = 'Account';
+    else if (cleanPath.includes('/dashboard')) pageName = 'Home';
+    else if (cleanPath.includes('/roadmap')) pageName = 'Roadmap';
+    else if (cleanPath.includes('/history')) pageName = 'History';
+    else if (cleanPath.includes('/upgrade')) pageName = 'Upgrade to Pro';
+    else if (cleanPath.includes('/call/feedback')) pageName = 'Call Feedback';
+    else if (cleanPath.includes('/call')) pageName = 'Practice Call';
+    else if (cleanPath.includes('/onboarding')) pageName = 'Get Started';
+
+    const baseTitle = 'SpeakwithMaya · Practice · Improve · Be Confident';
+    const newTitle = pageName ? `${pageName} · SpeakwithMaya` : baseTitle;
+    document.title = newTitle;
+  }, [pathname]);
+
   return null;
 }
 
@@ -154,6 +179,7 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <RouteGuard />
+      <WebDocumentTitle />
       <StatusBar style="dark" />
       <Stack
         screenOptions={{
@@ -164,7 +190,7 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: '#ffffff' },
         }}
       >
-        <Stack.Screen name="index" />
+        <Stack.Screen name="index" options={{ title: 'SpeakwithMaya' }} />
         <Stack.Screen name="onboarding/name" />
         <Stack.Screen name="onboarding/phone" />
         <Stack.Screen name="onboarding/otp" />

@@ -404,10 +404,12 @@ export default function DashboardScreen() {
             onSelectTab={handleSelectTab}
             isPro={isPro}
             planTier={stats.planTier}
+            isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             usedMinutes={usedMinutes}
             totalMinutes={totalMinutes}
             resetsInText={resetsInText}
             onUpgrade={() => router.push('/upgrade')}
+            onReactivate={() => router.push('/(tabs)/account')}
             onGetExtraTime={() => setActivePopup('get-extra-time')}
           />
         )}
@@ -455,6 +457,7 @@ export default function DashboardScreen() {
                     progress={stats.progress}
                     isPro={isPro}
                     planTier={stats.planTier}
+                    isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
                     avatarSource={require('@/assets/images/maya-avatar.png')}
                     onPress={() => setActivePopup('level-up')}
                   />

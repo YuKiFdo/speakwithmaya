@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, useWindowDimensions, Platform } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
 import {
@@ -18,10 +19,12 @@ export interface DesktopSidebarProps {
   onSelectTab: (tab: DashboardTab) => void;
   isPro?: boolean;
   planTier?: string;
+  isInactive?: boolean;
   usedMinutes?: number;
   totalMinutes?: number;
   resetsInText?: string;
   onUpgrade?: () => void;
+  onReactivate?: () => void;
   onGetExtraTime?: () => void;
 }
 
@@ -104,10 +107,12 @@ export function DesktopSidebar({
   onSelectTab,
   isPro = false,
   planTier,
+  isInactive = false,
   usedMinutes,
   totalMinutes,
   resetsInText,
   onUpgrade,
+  onReactivate,
   onGetExtraTime,
 }: DesktopSidebarProps) {
   const { height: windowHeight } = useWindowDimensions();
@@ -213,27 +218,58 @@ export function DesktopSidebar({
       </View>
 
       {/* Talk Time Card at bottom */}
-      <View style={[styles.talkTimeCard, isCompact && styles.talkTimeCardCompact]}>
+      <View style={[
+        styles.talkTimeCard,
+        isInactive && styles.talkTimeCardInactive,
+        isCompact && styles.talkTimeCardCompact,
+      ]}>
         <View style={styles.talkTimeHeader}>
           <Text style={[styles.talkTimeTitle, isCompact && styles.talkTimeTitleCompact]}>Your Talk Time</Text>
-          <Text style={[styles.talkTimeReset, isCompact && styles.talkTimeResetCompact]}>{currentResetsIn}</Text>
+          {isInactive ? (
+            <View style={[styles.inactiveResetBadge, isCompact && styles.inactiveResetBadgeCompact]}>
+              <View style={styles.inactiveResetDot} />
+              <Text style={styles.inactiveResetText}>Inactive</Text>
+            </View>
+          ) : (
+            <Text style={[styles.talkTimeReset, isCompact && styles.talkTimeResetCompact]}>{currentResetsIn}</Text>
+          )}
         </View>
 
-        <Text style={[styles.talkTimeMinutes, isCompact && styles.talkTimeMinutesCompact]}>
-          {displayMinutes}{' '}
-          <Text style={[styles.talkTimeTotal, isCompact && styles.talkTimeTotalCompact]}>/ {currentTotal} minutes</Text>
+        <Text style={[styles.talkTimeMinutes, isInactive && styles.talkTimeMinutesInactive, isCompact && styles.talkTimeMinutesCompact]}>
+          {isInactive ? '00' : displayMinutes}{' '}
+          <Text style={[styles.talkTimeTotal, isCompact && styles.talkTimeTotalCompact]}>
+            / {isInactive ? '0' : currentTotal} minutes
+          </Text>
         </Text>
 
         <View style={[styles.progressBarTrack, isCompact && styles.progressBarTrackCompact]}>
-          <View style={[styles.progressBarFill, { width: `${percentFilled}%` }]} />
+          <View style={[
+            styles.progressBarFill,
+            isInactive ? styles.progressBarFillInactive : { width: `${percentFilled}%` },
+          ]} />
         </View>
 
         <Pressable
-          style={[styles.extraTimeButton, isCompact && styles.extraTimeButtonCompact]}
-          onPress={isPro ? onGetExtraTime : onUpgrade}
+          style={[
+            styles.extraTimeButton,
+            isInactive && styles.extraTimeButtonInactive,
+            isCompact && styles.extraTimeButtonCompact,
+          ]}
+          onPress={isInactive ? (onReactivate || onUpgrade) : (isPro ? onGetExtraTime : onUpgrade)}
           accessibilityRole="button"
         >
-          {isPro ? (
+          {isInactive ? (
+            <>
+              <Feather name="refresh-cw" size={isCompact ? 13 : 15} color="#DC2626" />
+              <Text style={[
+                styles.extraTimeButtonText,
+                styles.extraTimeButtonTextInactive,
+                isCompact && styles.extraTimeButtonTextCompact,
+              ]}>
+                Reactivate Maya →
+              </Text>
+            </>
+          ) : isPro ? (
             <>
               <HistoryNavIcon color="#2B5BFF" size={isCompact ? 15 : 17} />
               <Text style={[styles.extraTimeButtonText, isCompact && styles.extraTimeButtonTextCompact]}>
@@ -497,6 +533,50 @@ const styles = StyleSheet.create({
   },
   extraTimeButtonTextCompact: {
     fontSize: 12.5,
+  },
+  talkTimeCardInactive: {
+    backgroundColor: '#FFF8F8',
+    borderColor: '#FECACA',
+  },
+  inactiveResetBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: Radii.pill,
+  },
+  inactiveResetBadgeCompact: {
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  inactiveResetDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#EF4444',
+  },
+  inactiveResetText: {
+    ...fontStyle('inter', 'bold'),
+    color: '#DC2626',
+    fontSize: 10.5,
+  },
+  talkTimeMinutesInactive: {
+    color: '#64748B',
+  },
+  progressBarFillInactive: {
+    width: '0%',
+    backgroundColor: '#CBD5E1',
+  },
+  extraTimeButtonInactive: {
+    borderColor: '#FCA5A5',
+    backgroundColor: '#FEF2F2',
+  },
+  extraTimeButtonTextInactive: {
+    color: '#DC2626',
   },
   /* Compact & Very Compact Height Overrides */
   desktopSidebarCompact: {

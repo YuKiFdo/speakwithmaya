@@ -606,10 +606,12 @@ export default function UpgradeScreen() {
             onSelectTab={handleSelectTab}
             isPro={stats.isPro}
             planTier={stats.planTier}
+            isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             usedMinutes={stats.usedMinutes}
             totalMinutes={stats.totalMinutes}
             resetsInText={stats.resetsInText}
             onUpgrade={() => {}}
+            onReactivate={() => router.push('/(tabs)/account')}
             onGetExtraTime={() => {}}
           />
         )}
@@ -656,6 +658,7 @@ export default function UpgradeScreen() {
                   progress={stats.progress}
                   isPro={stats.isPro}
                   planTier={stats.planTier}
+                  isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
                   avatarSource={require('@/assets/images/maya-avatar.png')}
                 />
               </View>

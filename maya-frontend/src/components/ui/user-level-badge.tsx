@@ -17,6 +17,8 @@ export interface UserLevelBadgeProps {
   isPro?: boolean;
   /** Specific active plan tier: 'starter' | 'basic' | 'pro' | 'premium' */
   planTier?: 'starter' | 'basic' | 'pro' | 'premium' | string;
+  /** Whether the user subscription is currently inactive / locked */
+  isInactive?: boolean;
   /** Avatar image source */
   avatarSource?: any;
   /** Called when the badge is pressed */
@@ -37,6 +39,7 @@ export function UserLevelBadge({
   progress = 0,
   isPro = false,
   planTier,
+  isInactive = false,
   avatarSource,
   onPress,
   accessibilityLabel = 'View level progress',
@@ -90,20 +93,25 @@ export function UserLevelBadge({
       <View style={styles.levelProgressCol}>
         <View style={styles.levelNameRow}>
           <Text style={styles.levelName}>{levelLabel}</Text>
-          {badgeConfig.show && (
+          {isInactive ? (
+            <View style={styles.inactiveBadge}>
+              <View style={styles.inactiveDot} />
+              <Text style={styles.inactiveBadgeText}>INACTIVE</Text>
+            </View>
+          ) : badgeConfig.show ? (
             <View style={[styles.proBadge, { backgroundColor: badgeConfig.bgColor }]}>
               {badgeConfig.icon}
               <Text style={styles.proBadgeText}>{badgeConfig.label}</Text>
             </View>
-          )}
+          ) : null}
         </View>
-        <Text style={styles.xpText}>{xpLabel}</Text>
+        <Text style={[styles.xpText, isInactive && styles.xpTextInactive]}>{xpLabel}</Text>
         <View style={styles.miniProgressTrack}>
           <View style={[styles.miniProgressFill, { width: progressWidth }]} />
         </View>
       </View>
       {avatarSource && (
-        <View style={styles.userAvatarWrapper}>
+        <View style={[styles.userAvatarWrapper, isInactive && styles.userAvatarWrapperInactive]}>
           <Image
             source={avatarSource}
             style={styles.userAvatarImage}
@@ -154,6 +162,32 @@ const styles = StyleSheet.create({
     fontSize: 9.5,
     letterSpacing: 0.5,
   },
+  inactiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: Radii.pill,
+  },
+  inactiveDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#EF4444',
+  },
+  inactiveBadgeText: {
+    ...fontStyle('inter', 'extraBold'),
+    color: '#DC2626',
+    fontSize: 9,
+    letterSpacing: 0.5,
+  },
+  xpTextInactive: {
+    color: '#94a3b8',
+  },
   xpText: {
     fontFamily: Fonts.inter.medium,
     fontSize: 10.5,
@@ -180,6 +214,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#e2e8f0',
     overflow: 'hidden',
+  },
+  userAvatarWrapperInactive: {
+    borderColor: '#FECACA',
   },
   userAvatarImage: {
     width: '100%',

@@ -459,10 +459,12 @@ export default function AccountScreen() {
             onSelectTab={handleSelectTab}
             isPro={isPro}
             planTier={stats.planTier}
+            isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             usedMinutes={usedMinutes}
             totalMinutes={totalMinutes}
             resetsInText={resetsInText}
             onUpgrade={() => router.push('/upgrade')}
+            onReactivate={() => setIsReactivateSelectionModalOpen(true)}
             onGetExtraTime={() => setActivePopup('get-extra-time')}
           />
         )}
@@ -500,6 +502,7 @@ export default function AccountScreen() {
                   progress={stats.progress}
                   isPro={isPro}
                   planTier={stats.planTier}
+                  isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
                   avatarSource={require('@/assets/images/maya-avatar.png')}
                   onPress={() => setActivePopup('level-up')}
                 />
@@ -1030,10 +1033,16 @@ function ProfileCard({
             <Pressable
               onPress={onTogglePlan}
               hitSlop={8}
-              style={({ pressed }) => [styles.proPlanPill, pressed && styles.cardPressed]}
+              style={({ pressed }) => [
+                styles.proPlanPill,
+                isLocked && styles.inactivePlanPill,
+                pressed && styles.cardPressed,
+              ]}
             >
-              <Text style={styles.proPlanPillText}>
-                {isPro ? 'Pro Plan' : 'Starter Plan'}
+              <Text style={[styles.proPlanPillText, isLocked && styles.inactivePlanPillText]}>
+                {isPro
+                  ? (isLocked ? 'Pro Plan (Inactive)' : 'Pro Plan')
+                  : (isLocked ? 'Starter Plan (Inactive)' : 'Starter Plan')}
               </Text>
             </Pressable>
 
@@ -1772,10 +1781,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 3,
   },
+  inactivePlanPill: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
   proPlanPillText: {
     fontSize: 11.5,
     color: '#2563EB',
     ...fontStyle('inter', 'bold'),
+  },
+  inactivePlanPillText: {
+    color: '#DC2626',
   },
   cancelSubText: {
     fontSize: 11.5,

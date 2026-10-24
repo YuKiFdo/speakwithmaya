@@ -583,10 +583,12 @@ export default function RoadmapScreen() {
             onSelectTab={handleSelectTab}
             isPro={isPro}
             planTier={stats.planTier}
+            isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             usedMinutes={stats.usedMinutes}
             totalMinutes={stats.totalMinutes}
             resetsInText={stats.resetsInText}
             onUpgrade={() => router.push('/upgrade')}
+            onReactivate={() => router.push('/(tabs)/account')}
             onGetExtraTime={() => setActivePopup('get-extra-time')}
           />
         )}
@@ -627,6 +629,7 @@ export default function RoadmapScreen() {
                   progress={stats.progress}
                   isPro={isPro}
                   planTier={stats.planTier}
+                  isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
                   avatarSource={require('@/assets/images/maya-avatar.png')}
                   onPress={() => setActivePopup('level-up')}
                 />

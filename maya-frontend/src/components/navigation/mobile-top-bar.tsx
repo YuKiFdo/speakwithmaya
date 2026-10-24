@@ -58,6 +58,9 @@ export interface MobileTopBarProps {
   /** Override planTier ('starter' | 'basic' | 'pro' | 'premium'). Defaults to live stats.planTier. */
   planTier?: 'starter' | 'basic' | 'pro' | 'premium' | string;
 
+  /** Override isInactive status. Defaults to live stats.isSubscriptionLocked || stats.isTelcoUnsubscribed. */
+  isInactive?: boolean;
+
   /** Custom avatar image source. Defaults to require('@/assets/images/maya-avatar.png'). */
   avatarSource?: any;
 
@@ -94,6 +97,7 @@ export function MobileTopBar({
   progress,
   isPro,
   planTier,
+  isInactive,
   avatarSource,
   pinned = true,
   phoneOnly = true,
@@ -113,6 +117,7 @@ export function MobileTopBar({
   const resolvedProgress = progress ?? stats.progress;
   const resolvedIsPro = isPro ?? stats.isPro;
   const resolvedPlanTier = planTier ?? stats.planTier;
+  const resolvedIsInactive = isInactive ?? (stats.isSubscriptionLocked || stats.isTelcoUnsubscribed);
   const resolvedLevelNumber = stats.currentLevelNumber;
 
   const handleLevelBadgePress = () => {
@@ -177,6 +182,7 @@ export function MobileTopBar({
         progress={resolvedProgress}
         isPro={resolvedIsPro}
         planTier={resolvedPlanTier}
+        isInactive={resolvedIsInactive}
         avatarSource={avatarSource ?? require('@/assets/images/maya-avatar.png')}
         onPress={handleLevelBadgePress}
       />

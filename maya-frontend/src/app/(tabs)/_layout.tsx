@@ -27,19 +27,19 @@ export default function TabsLayout() {
     >
       <Tabs.Screen
         name="dashboard"
-        options={{ title: 'Home' }}
+        options={{ title: 'Home · SpeakwithMaya' }}
       />
       <Tabs.Screen
         name="roadmap"
-        options={{ title: 'Roadmap' }}
+        options={{ title: 'Roadmap · SpeakwithMaya' }}
       />
       <Tabs.Screen
         name="history"
-        options={{ title: 'History' }}
+        options={{ title: 'History · SpeakwithMaya' }}
       />
       <Tabs.Screen
         name="account"
-        options={{ title: 'Account' }}
+        options={{ title: 'Account · SpeakwithMaya' }}
       />
     </Tabs>
   );
