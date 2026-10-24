@@ -23,6 +23,7 @@ import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CrownNavIcon } from '@/components/icons/nav-icons';
+import { MayaPrimaryButton } from '@/components/ui/maya-primary-button';
 import { useOnboardingStore, OnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
 import { useUserStats } from '@/hooks/useUserStats';
@@ -143,6 +144,7 @@ export default function AccountScreen() {
 
   const [isCancellingSub, setIsCancellingSub] = useState(false);
   const [isReactivatingSub, setIsReactivatingSub] = useState(false);
+  const [isReactivateSelectionModalOpen, setIsReactivateSelectionModalOpen] = useState(false);
   const [isReactivateOtpModalOpen, setIsReactivateOtpModalOpen] = useState(false);
   const [reactivateOtpDigits, setReactivateOtpDigits] = useState<string[]>(Array(6).fill(''));
   const [isVerifyingReactivateOtp, setIsVerifyingReactivateOtp] = useState(false);
@@ -568,7 +570,7 @@ export default function AccountScreen() {
                     onUpgrade={() => router.push('/upgrade')}
                     onGetExtraTime={() => setActivePopup('get-extra-time')}
                     onChangePayment={handleChangePayment}
-                    onReactivate={handleReactivateSubscription}
+                    onReactivate={() => setIsReactivateSelectionModalOpen(true)}
                   />
 
                   <CustomerSupportCard onEmailPress={handleSupportEmail} />
@@ -616,7 +618,7 @@ export default function AccountScreen() {
                   onUpgrade={() => router.push('/upgrade')}
                   onGetExtraTime={() => setActivePopup('get-extra-time')}
                   onChangePayment={handleChangePayment}
-                  onReactivate={handleReactivateSubscription}
+                  onReactivate={() => setIsReactivateSelectionModalOpen(true)}
                 />
 
                 <PreferencesCard
@@ -826,6 +828,104 @@ export default function AccountScreen() {
                   <Text style={styles.otpCancelBtnText}>Cancel</Text>
                 </Pressable>
               </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* REACTIVATE MAYA SELECTION MODAL */}
+        <Modal
+          visible={isReactivateSelectionModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsReactivateSelectionModalOpen(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.selectionModalCard}>
+              {/* Header */}
+              <View style={styles.modalHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.selectionModalTitle}>Reactivate Maya</Text>
+                  <Text style={styles.selectionModalSubtitle}>
+                    Choose how you would like to continue practicing
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => setIsReactivateSelectionModalOpen(false)}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.modalCloseBtn, pressed && { opacity: 0.6 }]}
+                >
+                  <Feather name="x" size={20} color="#64748B" />
+                </Pressable>
+              </View>
+
+              {/* Selection Options List */}
+              <View style={styles.selectionOptionsContainer}>
+                {/* Option 1: Daily Subscription */}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.selectionOptionCard,
+                    pressed && styles.selectionOptionCardPressed,
+                  ]}
+                  onPress={() => {
+                    setIsReactivateSelectionModalOpen(false);
+                    handleReactivateSubscription();
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reactivate Daily Subscription"
+                >
+                  <View style={[styles.selectionIconBox, { backgroundColor: '#EFF6FF' }]}>
+                    <Ionicons name="phone-portrait-outline" size={24} color="#2563EB" />
+                  </View>
+                  <View style={styles.selectionContentCol}>
+                    <View style={styles.selectionTitleRow}>
+                      <Text style={styles.selectionOptionTitle}>Daily Subscription</Text>
+                    </View>
+                    <Text style={styles.selectionOptionDesc}>
+                      Renew your daily subscription directly with your mobile balance.
+                    </Text>
+                  </View>
+                  <Feather name="chevron-right" size={20} color="#94A3B8" />
+                </Pressable>
+
+                {/* Option 2: Upgrade to Pro Plan */}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.selectionOptionCard,
+                    styles.selectionOptionCardFeatured,
+                    pressed && styles.selectionOptionCardPressed,
+                  ]}
+                  onPress={() => {
+                    setIsReactivateSelectionModalOpen(false);
+                    router.push('/upgrade');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Upgrade to Pro Plan"
+                >
+                  <View style={[styles.selectionIconBox, { backgroundColor: '#FEF3C7' }]}>
+                    <CrownNavIcon color="#D97706" size={24} />
+                  </View>
+                  <View style={styles.selectionContentCol}>
+                    <View style={styles.selectionTitleRow}>
+                      <Text style={styles.selectionOptionTitle}>Upgrade to Pro</Text>
+                      <View style={styles.selectionBadge}>
+                        <Text style={styles.selectionBadgeText}>Best Value</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.selectionOptionDesc}>
+                      Unlock unlimited speaking, all lessons, detailed feedback & monthly minutes.
+                    </Text>
+                  </View>
+                  <Feather name="chevron-right" size={20} color="#2563EB" />
+                </Pressable>
+              </View>
+
+              {/* Cancel Button */}
+              <Pressable
+                style={styles.selectionCancelBtn}
+                onPress={() => setIsReactivateSelectionModalOpen(false)}
+              >
+                <Text style={styles.selectionCancelBtnText}>Cancel</Text>
+              </Pressable>
             </View>
           </View>
         </Modal>
@@ -1316,72 +1416,65 @@ function CurrentPlanCard({
       {/* Thin Horizontal Divider Line above button */}
       <View style={styles.planCardDivider} />
 
-      {/* Action Buttons: Reactivate, Get Extra Time & Upgrade */}
+      {/* Action Buttons: Reactivate Maya (Single Primary Button) or Upgrade */}
       <View style={{ gap: 10 }}>
-        {isSubscriptionLocked && (
-          <Pressable
-            onPress={onReactivate || onUpgrade}
-            style={({ pressed }) => [
-              styles.planUpgradeBtn,
-              { backgroundColor: '#2563EB' },
-              pressed && styles.buttonPressed,
-            ]}
-          >
-            <Feather name="refresh-cw" size={18} color="#FFFFFF" />
-            <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>
-              {hasTelcoSubscription ? 'Reactivate Daily Subscription' : 'Reactivate Pro Plan'}
-            </Text>
-          </Pressable>
-        )}
+        {isSubscriptionLocked ? (
+          <MayaPrimaryButton
+            label="Reactivate Maya"
+            onPress={onReactivate}
+            height={52}
+            borderRadius={16}
+            showArrow
+          />
+        ) : (
+          <>
+            {isPastDue && (
+              <Pressable
+                onPress={onUpgrade}
+                style={({ pressed }) => [
+                  styles.planUpgradeBtn,
+                  { backgroundColor: '#D97706' },
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <Feather name="credit-card" size={18} color="#FFFFFF" />
+                <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>Update Payment / Retry Now</Text>
+              </Pressable>
+            )}
 
-        {isPastDue && !isSubscriptionLocked && (
-          <Pressable
-            onPress={onUpgrade}
-            style={({ pressed }) => [
-              styles.planUpgradeBtn,
-              { backgroundColor: '#D97706' },
-              pressed && styles.buttonPressed,
-            ]}
-          >
-            <Feather name="credit-card" size={18} color="#FFFFFF" />
-            <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>Update Payment / Retry Now</Text>
-          </Pressable>
-        )}
+            {isPro && isTimeExpired && !isPastDue && (
+              <Pressable
+                onPress={onGetExtraTime}
+                style={({ pressed }) => [
+                  styles.planUpgradeBtn,
+                  { backgroundColor: '#0284C7' },
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <Feather name="clock" size={18} color="#FFFFFF" />
+                <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>Get Extra Time (+30 / +120 Min)</Text>
+              </Pressable>
+            )}
 
-        {isPro && isTimeExpired && !isPastDue && !isSubscriptionLocked && (
-          <Pressable
-            onPress={onGetExtraTime}
-            style={({ pressed }) => [
-              styles.planUpgradeBtn,
-              { backgroundColor: '#0284C7' },
-              pressed && styles.buttonPressed,
-            ]}
-          >
-            <Feather name="clock" size={18} color="#FFFFFF" />
-            <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>Get Extra Time (+30 / +120 Min)</Text>
-          </Pressable>
+            <Pressable
+              onPress={onUpgrade}
+              style={({ pressed }) => [
+                styles.planUpgradeBtn,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <CrownNavIcon color="#FFFFFF" size={19} />
+              <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>
+                {isPro
+                  ? planTier === 'premium'
+                    ? 'Manage Subscription Plan'
+                    : 'Upgrade to Premium'
+                  : 'Upgrade to Pro'}
+              </Text>
+              <Feather name="chevron-right" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
+            </Pressable>
+          </>
         )}
-
-        <Pressable
-          onPress={onUpgrade}
-          style={({ pressed }) => [
-            styles.planUpgradeBtn,
-            isSubscriptionLocked && { backgroundColor: '#0F172A' },
-            pressed && styles.buttonPressed,
-          ]}
-        >
-          <CrownNavIcon color="#FFFFFF" size={19} />
-          <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>
-            {isSubscriptionLocked
-              ? 'Upgrade to Pro / Premium'
-              : isPro
-              ? planTier === 'premium'
-                ? 'Manage Subscription Plan'
-                : 'Upgrade to Premium'
-              : 'Upgrade to Pro'}
-          </Text>
-          <Feather name="chevron-right" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
-        </Pressable>
       </View>
     </View>
   );
@@ -2344,6 +2437,108 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   otpCancelBtnText: {
+    fontSize: 14,
+    color: '#64748B',
+    ...fontStyle('inter', 'medium'),
+  },
+
+  /* Selection Modal Styles */
+  selectionModalCard: {
+    width: '100%',
+    maxWidth: 440,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 24,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+      } as any,
+      default: {
+        elevation: 10,
+      },
+    }),
+  },
+  selectionModalTitle: {
+    fontSize: 20,
+    color: '#0F172A',
+    ...fontStyle('outfit', 'bold'),
+  },
+  selectionModalSubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 2,
+    ...fontStyle('inter', 'regular'),
+  },
+  selectionOptionsContainer: {
+    gap: 12,
+    marginVertical: 18,
+  },
+  selectionOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    gap: 14,
+  },
+  selectionOptionCardFeatured: {
+    borderColor: '#BFDBFE',
+    backgroundColor: '#F8FAFC',
+  },
+  selectionOptionCardPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.99 }],
+  },
+  selectionIconBox: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectionContentCol: {
+    flex: 1,
+  },
+  selectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  selectionOptionTitle: {
+    fontSize: 15.5,
+    color: '#0F172A',
+    ...fontStyle('outfit', 'bold'),
+  },
+  selectionOptionDesc: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#64748B',
+    ...fontStyle('inter', 'regular'),
+  },
+  selectionBadge: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+    borderRadius: 12,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  selectionBadgeText: {
+    fontSize: 10.5,
+    color: '#2563EB',
+    ...fontStyle('inter', 'bold'),
+  },
+  selectionCancelBtn: {
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectionCancelBtnText: {
     fontSize: 14,
     color: '#64748B',
     ...fontStyle('inter', 'medium'),
