@@ -1,6 +1,7 @@
 {
   "expo": {
-    "name": "maya-frontend",
+    "name": "SpeakwithMaya",
+    "description": "SpeakwithMaya is your real-time AI English speaking coach. Practice conversational English with voice feedback, improve fluency, and gain confidence.",
     "slug": "maya-frontend",
     "version": "1.0.0",
     "orientation": "portrait",

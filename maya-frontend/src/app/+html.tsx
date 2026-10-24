@@ -15,8 +15,87 @@ export default function RootHtml({ children }: PropsWithChildren) {
           name="viewport"
           content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1.00001, viewport-fit=cover"
         />
-        <meta name="theme-color" content="#FFFFFF" />
-        <title>SpeakwithMaya — Practice · Improve · Be Confident</title>
+        <meta name="theme-color" content="#0D4EFD" />
+        <title>SpeakwithMaya — Your Personal AI English Speaking Coach</title>
+
+        {/* Favicons & Brand Icons matching maya-landing */}
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/icon-192.png" />
+        <link rel="shortcut icon" href="/favicon.ico" />
+
+        {/* Primary SEO Meta Tags */}
+        <meta
+          name="description"
+          content="Practice real spoken English conversations with Maya. Gain fluency, get instant sentence corrections, and speak with confidence without fear of judgment. Try it free today."
+        />
+        <meta
+          name="keywords"
+          content="SpeakwithMaya, AI English speaking coach, learn spoken English Sri Lanka, spoken English practice, English conversation practice app, AI English tutor, IELTS speaking practice AI, English fluency trainer"
+        />
+        <meta name="author" content="IDEACIPHER (PVT) LTD" />
+        <meta name="robots" content="index, follow" />
+        <link rel="canonical" href="https://app.speakwithmaya.com" />
+
+        {/* Open Graph / Facebook */}
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://app.speakwithmaya.com" />
+        <meta property="og:title" content="SpeakwithMaya — Your Personal AI English Speaking Coach" />
+        <meta
+          property="og:description"
+          content="Practice real spoken English conversations with Maya. Gain fluency, get instant sentence corrections, and speak naturally without fear. Join thousands practicing in Sri Lanka."
+        />
+        <meta property="og:image" content="https://app.speakwithmaya.com/og-image.png" />
+        <meta property="og:site_name" content="SpeakwithMaya" />
+        <meta property="og:locale" content="en_US" />
+
+        {/* Twitter Cards */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:url" content="https://app.speakwithmaya.com" />
+        <meta name="twitter:title" content="SpeakwithMaya — Your Personal AI English Speaking Coach" />
+        <meta
+          name="twitter:description"
+          content="Practice real spoken English conversations with Maya. Improve your fluency, build confidence, and speak naturally."
+        />
+        <meta name="twitter:image" content="https://app.speakwithmaya.com/og-image.png" />
+
+        {/* Mobile App & PWA Meta */}
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="SpeakwithMaya" />
+        <meta name="format-detection" content="telephone=no" />
+
+        {/* Google Rich Snippet Structured Data (JSON-LD) */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'SoftwareApplication',
+              name: 'SpeakwithMaya',
+              applicationCategory: 'EducationalApplication',
+              operatingSystem: 'Web, iOS, Android',
+              url: 'https://app.speakwithmaya.com',
+              image: 'https://app.speakwithmaya.com/maya-avatar.png',
+              description:
+                'Real-time AI voice coach for practicing English conversation, grammar, and pronunciation.',
+              inLanguage: ['en', 'si', 'ta'],
+              offers: {
+                '@type': 'Offer',
+                price: '0',
+                priceCurrency: 'LKR',
+              },
+              author: {
+                '@type': 'Organization',
+                name: 'SpeakwithMaya',
+                url: 'https://app.speakwithmaya.com',
+              },
+            }),
+          }}
+        />
 
         {/* Preconnect & High-Speed Google Fonts CDN (WOFF2 instant browser caching) */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />

@@ -3,10 +3,12 @@ import {
   Logger,
   BadRequestException,
   InternalServerErrorException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import crypto from 'node:crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { TelcoSubscriptionService } from '../auth/sms/telco-subscription.service.js';
 import {
   PayHereCheckoutParams,
   PayHereWebhookPayload,
@@ -30,7 +32,10 @@ export class PayHereService {
 
   private cachedToken: { token: string; expiresAt: number } | null = null;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    @Optional() private readonly telcoService?: TelcoSubscriptionService,
+  ) {
     const supabaseUrl =
       this.config.get<string>('SUPABASE_URL') ||
       process.env.SUPABASE_URL ||
@@ -58,6 +63,70 @@ export class PayHereService {
     return this.isSandbox
       ? 'https://sandbox.payhere.lk'
       : 'https://www.payhere.lk';
+  }
+
+  /**
+   * Automatically cancels existing mobile carrier billing (IdeaMart / mSpace)
+   * when a user on Starter/Telco upgrades to a paid plan (Pro/Premium) via PayHere.
+   */
+  private async autoUnsubscribeTelcoIfActive(userId: string, newPlanTier: string): Promise<void> {
+    if (!userId || newPlanTier === 'starter') return;
+
+    try {
+      const { data: profile, error } = await this.supabase
+        .from('profiles')
+        .select('id, phone_number, telco_subscriber_id, telco_provider')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (error || !profile?.telco_subscriber_id || !profile?.telco_provider) {
+        return;
+      }
+
+      const provider = profile.telco_provider as 'ideamart' | 'mspace';
+      const subscriberId = profile.telco_subscriber_id;
+
+      this.logger.log(
+        `[TelcoAutoUnsub] User ${userId} upgraded to ${newPlanTier}. Automatically canceling existing ${provider.toUpperCase()} carrier subscription...`,
+      );
+
+      // Load active telco configuration
+      let telcoConfig: any = {};
+      try {
+        const { data: settings } = await this.supabase
+          .from('roadmap_levels')
+          .select('canonical_content')
+          .eq('id', 'sys_app_settings')
+          .maybeSingle();
+        if (settings?.canonical_content) {
+          telcoConfig = JSON.parse(settings.canonical_content);
+        }
+      } catch (err: any) {
+        this.logger.warn(`[TelcoAutoUnsub] Could not load sys_app_settings: ${err?.message}`);
+      }
+
+      // Dispatch unsubscribe request to IdeaMart or mSpace API
+      if (this.telcoService) {
+        await this.telcoService.unsubscribe(provider, subscriberId, telcoConfig);
+        this.logger.log(
+          `[TelcoAutoUnsub] ✅ Successfully unsubscribed ${provider.toUpperCase()} carrier subscription for user ${userId}.`,
+        );
+      }
+
+      // Clear telco subscriber tracking on profile so mobile billing is detached
+      await this.supabase
+        .from('profiles')
+        .update({
+          telco_subscriber_id: null,
+          telco_reference_no: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+    } catch (unsubErr: any) {
+      this.logger.warn(
+        `[TelcoAutoUnsub] ⚠️ Warning auto-unsubscribing telco for user ${userId}: ${unsubErr?.message}`,
+      );
+    }
   }
 
   /**
@@ -528,6 +597,9 @@ export class PayHereService {
             })
             .eq('id', userId);
 
+          // Automatically cancel any active mobile carrier billing (IdeaMart / mSpace)
+          await this.autoUnsubscribeTelcoIfActive(userId, planTier);
+
           // Update Preauth Order
           await this.supabase
             .from('orders')
@@ -752,6 +824,9 @@ export class PayHereService {
         } else {
           this.logger.log(`[PayHereWebhook] 👤 Updated user profile ${userId}: tier=${planTier}, balance=${minutesAllowance}m, reset_at=${nextBillingDate}`);
         }
+
+        // Automatically cancel any active mobile carrier billing (IdeaMart / mSpace)
+        await this.autoUnsubscribeTelcoIfActive(userId, planTier);
 
         // Update Order
         const { error: orderErr } = await this.supabase
@@ -1447,6 +1522,9 @@ export class PayHereService {
         })
         .eq('id', userId);
 
+      // Automatically cancel any active mobile carrier billing (IdeaMart / mSpace)
+      await this.autoUnsubscribeTelcoIfActive(userId, dto.planTier || sub.plan_tier || 'pro');
+
       await this.supabase
         .from('subscriptions')
         .update({
@@ -1896,6 +1974,9 @@ export class PayHereService {
         updated_at: new Date().toISOString(),
       })
       .eq('id', userId);
+
+    // Automatically cancel any active mobile carrier billing (IdeaMart / mSpace)
+    await this.autoUnsubscribeTelcoIfActive(userId, planTier);
 
     // Update Order
     await this.supabase

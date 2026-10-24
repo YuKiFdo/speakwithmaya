@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -143,32 +143,113 @@ export default function AccountScreen() {
 
   const [isCancellingSub, setIsCancellingSub] = useState(false);
   const [isReactivatingSub, setIsReactivatingSub] = useState(false);
+  const [isReactivateOtpModalOpen, setIsReactivateOtpModalOpen] = useState(false);
+  const [reactivateOtpDigits, setReactivateOtpDigits] = useState<string[]>(Array(6).fill(''));
+  const [isVerifyingReactivateOtp, setIsVerifyingReactivateOtp] = useState(false);
+  const [reactivateOtpError, setReactivateOtpError] = useState<string | null>(null);
+  const [isResendingOtp, setIsResendingOtp] = useState(false);
+  const reactivateInputRefs = useRef<(TextInput | null)[]>([]);
 
   const handleReactivateSubscription = async () => {
     if (stats.hasTelcoSubscription) {
       setIsReactivatingSub(true);
       try {
         const res = await paymentApi.reactivateTelcoSubscription();
-        await stats.refreshStats();
         if (res.requiresPin) {
-          await mayaAlert.alert(
-            res.message || 'A verification PIN has been sent to your mobile phone to reactivate your subscription.',
-            'Verification PIN Sent',
-            'info'
-          );
+          setReactivateOtpDigits(Array(6).fill(''));
+          setReactivateOtpError(null);
+          setIsReactivateOtpModalOpen(true);
         } else {
+          await stats.refreshStats();
           await mayaAlert.success(
-            res.message || 'Your mobile airtime subscription has been reactivated successfully!',
+            res.message || 'Your daily subscription has been reactivated successfully!',
             'Subscription Active'
           );
         }
       } catch (err: any) {
-        await mayaAlert.error(err.message || 'Failed to reactivate subscription.', 'Reactivation Error');
+        await mayaAlert.error(err.message || 'Failed to reactivate daily subscription.', 'Reactivation Error');
       } finally {
         setIsReactivatingSub(false);
       }
     } else {
       router.push('/upgrade');
+    }
+  };
+
+  const handleReactivateDigitChange = (text: string, index: number) => {
+    setReactivateOtpError(null);
+    const cleaned = text.replace(/[^0-9]/g, '');
+    if (!cleaned) {
+      const updated = [...reactivateOtpDigits];
+      updated[index] = '';
+      setReactivateOtpDigits(updated);
+      return;
+    }
+
+    if (cleaned.length > 1) {
+      // Pasted full OTP code
+      const pasted = cleaned.slice(0, 6).split('');
+      const updated = [...reactivateOtpDigits];
+      pasted.forEach((char, i) => {
+        updated[i] = char;
+      });
+      setReactivateOtpDigits(updated);
+      const targetIdx = Math.min(pasted.length, 5);
+      reactivateInputRefs.current[targetIdx]?.focus();
+      return;
+    }
+
+    const updated = [...reactivateOtpDigits];
+    updated[index] = cleaned;
+    setReactivateOtpDigits(updated);
+
+    if (index < 5 && cleaned) {
+      reactivateInputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleReactivateKeyPress = (e: any, index: number) => {
+    if (e.nativeEvent.key === 'Backspace' && !reactivateOtpDigits[index] && index > 0) {
+      reactivateInputRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const handleVerifyReactivateOtp = async () => {
+    const code = reactivateOtpDigits.join('').trim();
+    if (code.length < 6 || isVerifyingReactivateOtp) return;
+
+    setIsVerifyingReactivateOtp(true);
+    setReactivateOtpError(null);
+    try {
+      const res = await paymentApi.verifyReactivateTelcoPin(code);
+      setIsReactivateOtpModalOpen(false);
+      setReactivateOtpDigits(Array(6).fill(''));
+      await stats.refreshStats();
+      await fetchSubscription();
+      await mayaAlert.success(
+        res.message || 'Your daily subscription has been reactivated successfully!',
+        'Subscription Active'
+      );
+    } catch (err: any) {
+      setReactivateOtpError(err.message || 'Invalid verification PIN. Please check and try again.');
+    } finally {
+      setIsVerifyingReactivateOtp(false);
+    }
+  };
+
+  const handleResendReactivateOtp = async () => {
+    if (isResendingOtp) return;
+    setIsResendingOtp(true);
+    setReactivateOtpError(null);
+    try {
+      await paymentApi.reactivateTelcoSubscription();
+      setReactivateOtpDigits(Array(6).fill(''));
+      reactivateInputRefs.current[0]?.focus();
+      await mayaAlert.alert('A new verification PIN has been sent via SMS to your mobile phone.', 'PIN Sent', 'info');
+    } catch (err: any) {
+      setReactivateOtpError(err.message || 'Failed to resend PIN.');
+    } finally {
+      setIsResendingOtp(false);
     }
   };
 
@@ -179,12 +260,12 @@ export default function AccountScreen() {
       return;
     }
 
-    // 1. Telco Carrier Billing cancellation (Dialog / Mobitel)
+    // 1. Daily Subscription cancellation
     if (stats.hasTelcoSubscription) {
-      const providerName = stats.telcoProvider === 'mspace' ? 'Mobitel' : 'Dialog';
       const confirmed = await mayaAlert.confirm({
-        title: 'Cancel Mobile Subscription',
-        message: `Are you sure you want to cancel your daily mobile airtime subscription with ${providerName}?\n\n• Daily airtime deductions (Rs. 5 + tax) from your mobile balance will be stopped.\n• Access to Maya practice sessions will be locked until you reactivate or choose a plan.`,
+        title: 'Cancel Daily Subscription',
+        message:
+          'Are you sure you want to cancel your daily subscription?\n\n• Daily renewal from your mobile balance will be stopped.\n• Access to Maya practice sessions will be locked until you reactivate or choose a plan.',
         confirmText: 'Cancel Subscription',
         cancelText: 'Keep Plan',
         type: 'warning',
@@ -197,11 +278,11 @@ export default function AccountScreen() {
         const res = await paymentApi.cancelTelcoSubscription();
         await stats.refreshStats();
         await mayaAlert.success(
-          res.message || 'Your mobile airtime subscription has been cancelled.',
+          res.message || 'Your daily subscription has been cancelled.',
           'Subscription Cancelled'
         );
       } catch (err: any) {
-        const errMsg = err.message || 'Failed to cancel mobile carrier subscription.';
+        const errMsg = err.message || 'Failed to cancel daily subscription.';
         await mayaAlert.error(errMsg, 'Cancellation Error');
       } finally {
         setIsCancellingSub(false);
@@ -655,6 +736,100 @@ export default function AccountScreen() {
           </View>
         </Modal>
 
+        {/* REACTIVATE DAILY SUBSCRIPTION OTP MODAL */}
+        <Modal
+          visible={isReactivateOtpModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsReactivateOtpModalOpen(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.otpModalCard}>
+              {/* Header Icon */}
+              <View style={styles.otpIconCircle}>
+                <Feather name="shield" size={28} color="#2563EB" />
+              </View>
+
+              {/* Title & Subtitle */}
+              <Text style={styles.otpModalTitle}>Verify Daily Subscription</Text>
+              <Text style={styles.otpModalSubtitle}>
+                Enter the 6-digit verification PIN sent via SMS to your mobile phone ({phoneNumber}) to reactivate your subscription.
+              </Text>
+
+              {/* 6 OTP Input Boxes */}
+              <View style={styles.otpBoxesRow}>
+                {reactivateOtpDigits.map((digit, idx) => (
+                  <TextInput
+                    key={idx}
+                    ref={(el) => {
+                      reactivateInputRefs.current[idx] = el;
+                    }}
+                    style={[styles.otpBox, digit ? styles.otpBoxFilled : null]}
+                    value={digit}
+                    onChangeText={(text) => handleReactivateDigitChange(text, idx)}
+                    onKeyPress={(e) => handleReactivateKeyPress(e, idx)}
+                    keyboardType="number-pad"
+                    maxLength={idx === 0 ? 6 : 1}
+                    selectTextOnFocus
+                    autoFocus={idx === 0}
+                    accessibilityLabel={`OTP digit ${idx + 1}`}
+                  />
+                ))}
+              </View>
+
+              {/* Error Message */}
+              {reactivateOtpError ? (
+                <Text style={styles.otpErrorText}>{reactivateOtpError}</Text>
+              ) : null}
+
+              {/* Action Buttons */}
+              <View style={styles.otpModalActions}>
+                <Pressable
+                  style={[
+                    styles.otpVerifyBtn,
+                    (reactivateOtpDigits.join('').trim().length < 6 || isVerifyingReactivateOtp) && {
+                      opacity: 0.6,
+                    },
+                  ]}
+                  onPress={handleVerifyReactivateOtp}
+                  disabled={reactivateOtpDigits.join('').trim().length < 6 || isVerifyingReactivateOtp}
+                >
+                  {isVerifyingReactivateOtp ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.otpVerifyBtnText}>Verify & Reactivate</Text>
+                  )}
+                </Pressable>
+
+                {/* Resend Code Action */}
+                <Pressable
+                  style={styles.otpResendRow}
+                  onPress={handleResendReactivateOtp}
+                  disabled={isResendingOtp || isVerifyingReactivateOtp}
+                >
+                  {isResendingOtp ? (
+                    <ActivityIndicator size="small" color="#2563EB" />
+                  ) : (
+                    <>
+                      <Text style={styles.otpResendText}>Didn't receive code?</Text>
+                      <Text style={styles.otpResendActionText}>Resend PIN</Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {/* Cancel Button */}
+                <Pressable
+                  style={styles.otpCancelBtn}
+                  onPress={() => setIsReactivateOtpModalOpen(false)}
+                  disabled={isVerifyingReactivateOtp}
+                >
+                  <Text style={styles.otpCancelBtnText}>Cancel</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         {/* POPUP MODAL */}
         <CommonPopup
           visible={activePopup !== null}
@@ -1019,11 +1194,11 @@ function CurrentPlanCard({
           <Feather name="lock" size={18} color="#DC2626" style={{ marginTop: 2 }} />
           <View style={{ flex: 1, marginLeft: 10 }}>
             <Text style={[styles.pastDueBannerTitle, { color: '#B91C1C' }]}>
-              {hasTelcoSubscription ? 'Mobile Subscription Cancelled' : 'Subscription Expired'}
+              {hasTelcoSubscription ? 'Daily Subscription Inactive' : 'Subscription Expired'}
             </Text>
             <Text style={[styles.pastDueBannerSubtitle, { color: '#991B1B' }]}>
               {hasTelcoSubscription
-                ? 'Your daily mobile airtime subscription was cancelled. Reactivate your mobile plan or upgrade to continue speaking with Maya.'
+                ? 'Your daily subscription was cancelled. Reactivate your daily subscription or upgrade to Pro to continue speaking with Maya.'
                 : 'Your subscription billing period has ended. Reactivate or choose a plan to continue speaking with Maya.'}
             </Text>
           </View>
@@ -1112,7 +1287,7 @@ function CurrentPlanCard({
                 style={{ marginRight: 8 }}
               />
               <Text style={styles.planInfoValue}>
-                {hasTelcoSubscription ? 'Mobile Carrier Billing' : cardDisplayText}
+                {hasTelcoSubscription ? 'Daily Subscription' : cardDisplayText}
               </Text>
             </View>
             {!hasTelcoSubscription && (
@@ -1151,7 +1326,7 @@ function CurrentPlanCard({
           >
             <Feather name="refresh-cw" size={18} color="#FFFFFF" />
             <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>
-              {hasTelcoSubscription ? 'Reactivate Mobile Plan (Rs. 5/day)' : 'Reactivate Pro Plan'}
+              {hasTelcoSubscription ? 'Reactivate Daily Subscription' : 'Reactivate Pro Plan'}
             </Text>
           </Pressable>
         )}
@@ -2033,5 +2208,125 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginBottom: 1,
     ...fontStyle('inter', 'regular'),
+  },
+
+  /* Reactivate OTP Modal Styles */
+  otpModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 24,
+    alignItems: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+      } as any,
+      default: {
+        elevation: 10,
+      },
+    }),
+  },
+  otpIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  otpModalTitle: {
+    fontSize: 20,
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 8,
+    ...fontStyle('outfit', 'bold'),
+  },
+  otpModalSubtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#64748B',
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 8,
+    ...fontStyle('inter', 'regular'),
+  },
+  otpBoxesRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 18,
+    width: '100%',
+  },
+  otpBox: {
+    width: 44,
+    height: 52,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#F8FAFC',
+    textAlign: 'center',
+    fontSize: 22,
+    color: '#0F172A',
+    ...fontStyle('outfit', 'bold'),
+  },
+  otpBoxFilled: {
+    borderColor: '#2563EB',
+    backgroundColor: '#EFF6FF',
+  },
+  otpErrorText: {
+    fontSize: 13,
+    color: '#DC2626',
+    textAlign: 'center',
+    marginBottom: 14,
+    ...fontStyle('inter', 'medium'),
+  },
+  otpModalActions: {
+    width: '100%',
+    gap: 10,
+    marginTop: 6,
+  },
+  otpVerifyBtn: {
+    backgroundColor: '#2563EB',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  otpVerifyBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    ...fontStyle('outfit', 'bold'),
+  },
+  otpResendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  otpResendText: {
+    fontSize: 13,
+    color: '#64748B',
+    ...fontStyle('inter', 'regular'),
+  },
+  otpResendActionText: {
+    fontSize: 13,
+    color: '#2563EB',
+    marginLeft: 4,
+    ...fontStyle('inter', 'semiBold'),
+  },
+  otpCancelBtn: {
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  otpCancelBtnText: {
+    fontSize: 14,
+    color: '#64748B',
+    ...fontStyle('inter', 'medium'),
   },
 });

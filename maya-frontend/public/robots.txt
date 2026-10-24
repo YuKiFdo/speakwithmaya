@@ -1,0 +1,9 @@
+# SpeakwithMaya Robots File
+User-agent: *
+Allow: /
+Allow: /onboarding/
+Allow: /upgrade
+Disallow: /admin/
+Disallow: /api/
+
+Sitemap: https://app.speakwithmaya.com/sitemap.xml

@@ -10,6 +10,7 @@ import {
   UsePipes,
   UseGuards,
   ValidationPipe,
+  BadRequestException,
 } from '@nestjs/common';
 import { AuthService, type UserProfileData } from './auth.service.js';
 import { AuthGuard } from './guards/auth.guard.js';
@@ -104,6 +105,18 @@ export class AuthController {
   @UseGuards(AuthGuard)
   async reactivateTelco(@GetUser('id') userId: string) {
     return this.authService.reactivateTelco(userId);
+  }
+
+  @Post('auth/telco/reactivate-verify')
+  @UseGuards(AuthGuard)
+  async verifyReactivateTelco(
+    @GetUser('id') userId: string,
+    @Body() body: { code: string },
+  ) {
+    if (!body?.code || !body.code.trim()) {
+      throw new BadRequestException('Verification code is required.');
+    }
+    return this.authService.verifyReactivateTelco(userId, body.code.trim());
   }
 
   /**

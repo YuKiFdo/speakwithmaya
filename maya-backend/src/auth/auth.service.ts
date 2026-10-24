@@ -1190,9 +1190,47 @@ export class AuthService {
 
       return {
         success: true,
-        message: 'Your mobile subscription has been reactivated successfully!',
+        message: 'Your daily subscription has been reactivated successfully!',
         requiresPin: false,
       };
+    }
+
+    const referenceNo = pinResult?.referenceNo;
+    if (!referenceNo) {
+      throw new HttpException(
+        'Mobile operator verification service did not return a valid session. Please try again.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    const telcoOtpHash = `TELCO:${pinResult.provider}:${referenceNo}`;
+    const now = Date.now();
+    const expiresAt = new Date(now + 5 * 60 * 1000).toISOString();
+
+    const { error: insertWithColsError } = await this.supabase
+      .from('phone_verifications')
+      .insert({
+        phone_number: phone,
+        otp_hash: telcoOtpHash,
+        reference_no: referenceNo,
+        telco_provider: pinResult.provider,
+        attempts: 0,
+        max_attempts: 3,
+        is_verified: false,
+        expires_at: expiresAt,
+      });
+
+    if (insertWithColsError) {
+      await this.supabase
+        .from('phone_verifications')
+        .insert({
+          phone_number: phone,
+          otp_hash: telcoOtpHash,
+          attempts: 0,
+          max_attempts: 3,
+          is_verified: false,
+          expires_at: expiresAt,
+        });
     }
 
     return {
@@ -1200,6 +1238,33 @@ export class AuthService {
       message: 'A verification PIN has been sent to your mobile phone to reactivate your subscription.',
       requiresPin: true,
       referenceNo: pinResult.referenceNo,
+    };
+  }
+
+  /**
+   * Verifies OTP PIN for reactivating daily mobile subscription.
+   */
+  async verifyReactivateTelco(userId: string, code: string) {
+    const profile = await this.getProfile(userId);
+    const phone = profile.phone_number;
+    if (!phone) {
+      throw new BadRequestException('No phone number found for this user account.');
+    }
+
+    const verifyRes = await this.verifyOtp({ phoneNumber: phone, code });
+
+    await this.supabase
+      .from('profiles')
+      .update({
+        plan_status: 'active',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    return {
+      success: true,
+      message: 'Your daily subscription has been reactivated successfully!',
+      user: (verifyRes as any).user,
     };
   }
 

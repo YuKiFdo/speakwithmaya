@@ -185,6 +185,24 @@ class PaymentApiService {
   }
 
   /**
+   * Verifies OTP PIN for reactivating daily mobile subscription.
+   */
+  async verifyReactivateTelcoPin(code: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${this.baseUrl}/v1/auth/telco/reactivate-verify`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ code }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to verify verification code.');
+    }
+
+    return data;
+  }
+
+  /**
    * Admin: List all subscribers and overall revenue stats.
    */
   async getAdminSubscriptions(): Promise<AdminSubscriptionsResponse> {
