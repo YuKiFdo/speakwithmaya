@@ -1128,6 +1128,7 @@ function CurrentPlanCard({
   onChangePayment: () => void;
   onReactivate?: () => void;
 }) {
+  const { isPhone } = useBreakpoint();
   const isPro = planTier === 'pro' || planTier === 'premium' || planTier === 'basic';
   const planDisplayName = planTier.charAt(0).toUpperCase() + planTier.slice(1) + ' Plan';
   const nextBillingDateText = formatBillingDate(nextBillingDate, renewalDate || '25 Jun 2026');
@@ -1138,7 +1139,7 @@ function CurrentPlanCard({
   const cardDisplayText = last4 ? `···· ${last4}` : '—';
 
   return (
-    <View style={styles.currentPlanCardContainer}>
+    <View style={[styles.currentPlanCardContainer, isPhone && styles.currentPlanCardContainerPhone]}>
       {/* Top Header Tag Row */}
       <View style={styles.planHeaderRow}>
         <View style={styles.planHeaderLeft}>
@@ -1147,7 +1148,9 @@ function CurrentPlanCard({
             style={styles.planCrownImg}
             resizeMode="contain"
           />
-          <Text style={styles.planHeaderLeftText}>Your Current Plan</Text>
+          <Text style={styles.planHeaderLeftText} numberOfLines={1}>
+            Your Current Plan
+          </Text>
         </View>
 
         {/* Top-Right Badge */}
@@ -1176,11 +1179,11 @@ function CurrentPlanCard({
             ]}
           >
             {isSubscriptionLocked
-              ? 'Subscription Inactive'
+              ? 'Inactive'
               : isGracePeriodActive
               ? `Cancels on ${formatBillingDate(gracePeriodEndDate)}`
               : isPastDue
-              ? 'Payment Past Due'
+              ? 'Past Due'
               : isTimeExpired
               ? 'Time Expired'
               : planDisplayName}
@@ -1772,9 +1775,9 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 1,
     borderColor: '#EDF2F7',
-    paddingHorizontal: 28,
-    paddingTop: 24,
-    paddingBottom: 24,
+    paddingHorizontal: 26,
+    paddingTop: 22,
+    paddingBottom: 22,
     ...Platform.select({
       web: {
         boxShadow: '0px 3px 12px 0px #1A366906',
@@ -1788,6 +1791,12 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  currentPlanCardContainerPhone: {
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 18,
+    borderRadius: 18,
+  },
   planCrownImg: {
     width: 22,
     height: 22,
@@ -1796,16 +1805,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 14,
+    gap: 8,
   },
   planHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 1,
+    minWidth: 0,
   },
   planHeaderLeftText: {
     fontSize: 14,
     color: '#0055FF',
+    flexShrink: 1,
     ...fontStyle('inter', 'bold'),
   },
   starterBadgePill: {
@@ -1813,11 +1826,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#DBEAFE',
     borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 3.5,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   starterBadgeText: {
-    fontSize: 12,
+    fontSize: 11.5,
     color: '#2563EB',
     ...fontStyle('inter', 'semiBold'),
   },
@@ -1831,30 +1847,33 @@ const styles = StyleSheet.create({
   planMainSubtitle: {
     fontSize: 14,
     color: '#64748B',
-    marginBottom: 24,
+    marginBottom: 20,
     ...fontStyle('inter', 'regular'),
   },
   planInfoTable: {
-    gap: 16,
+    gap: 14,
   },
   planInfoRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   planInfoLabel: {
-    width: 140,
     fontSize: 13.5,
     color: '#64748B',
     ...fontStyle('inter', 'regular'),
   },
   planInfoValueCol: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexShrink: 1,
   },
   planInfoValue: {
     fontSize: 14,
     color: '#0F172A',
+    textAlign: 'right',
     ...fontStyle('inter', 'bold'),
   },
   paymentMethodRow: {
@@ -1877,22 +1896,22 @@ const styles = StyleSheet.create({
     borderColor: '#FDE68A',
     borderWidth: 1,
     borderRadius: 14,
-    padding: 12,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginTop: 14,
-    marginBottom: 6,
+    marginTop: 0,
+    marginBottom: 16,
   },
   pastDueBannerTitle: {
-    fontSize: 13,
+    fontSize: 13.5,
     color: '#92400E',
     ...fontStyle('inter', 'bold'),
-    marginBottom: 2,
+    marginBottom: 3,
   },
   pastDueBannerSubtitle: {
-    fontSize: 11.5,
+    fontSize: 12,
     color: '#B45309',
-    lineHeight: 16,
+    lineHeight: 17,
     ...fontStyle('inter', 'regular'),
   },
   planCardDivider: {

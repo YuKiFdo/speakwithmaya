@@ -436,404 +436,404 @@ export default function DashboardScreen() {
           >
             {/* TOP SECTION: Header + Hero Banner paired together on desktop */}
             <View style={isDesktop ? styles.desktopTopGroup : undefined}>
-            {/* DESKTOP TOP HEADER */}
-            {isDesktop && (
-              <View style={styles.desktopTopHeader}>
-                <View>
-                  <Text style={styles.greetingTitle}>
+              {/* DESKTOP TOP HEADER */}
+              {isDesktop && (
+                <View style={styles.desktopTopHeader}>
+                  <View>
+                    <Text style={styles.greetingTitle}>
+                      Hello, {displayName}! 👋
+                    </Text>
+                    <Text style={styles.greetingSubtitle}>
+                      Ready to practice English today?
+                    </Text>
+                  </View>
+
+                  {/* User Level Badge */}
+                  <UserLevelBadge
+                    levelLabel={stats.levelLabel}
+                    xpLabel={stats.xpLabel}
+                    progress={stats.progress}
+                    isPro={isPro}
+                    planTier={stats.planTier}
+                    avatarSource={require('@/assets/images/maya-avatar.png')}
+                    onPress={() => setActivePopup('level-up')}
+                  />
+                </View>
+              )}
+
+              {/* GREETING ON MOBILE */}
+              {!isDesktop && (
+                <View style={styles.mobileGreetingSection}>
+                  <Text style={styles.greetingTitleMobile}>
                     Hello, {displayName}! 👋
                   </Text>
-                  <Text style={styles.greetingSubtitle}>
+                  <Text style={styles.greetingSubtitleMobile}>
                     Ready to practice English today?
                   </Text>
                 </View>
-
-                {/* User Level Badge */}
-                <UserLevelBadge
-                  levelLabel={stats.levelLabel}
-                  xpLabel={stats.xpLabel}
-                  progress={stats.progress}
-                  isPro={isPro}
-                  planTier={stats.planTier}
-                  avatarSource={require('@/assets/images/maya-avatar.png')}
-                  onPress={() => setActivePopup('level-up')}
-                />
-              </View>
-            )}
-
-            {/* GREETING ON MOBILE */}
-            {!isDesktop && (
-              <View style={styles.mobileGreetingSection}>
-                <Text style={styles.greetingTitleMobile}>
-                  Hello, {displayName}! 👋
-                </Text>
-                <Text style={styles.greetingSubtitleMobile}>
-                  Ready to practice English today?
-                </Text>
-              </View>
-            )}
-
-            {/* HERO BANNER: "Start a conversation" OR "Resume Practice" */}
-            <View style={[
-              styles.heroCard,
-              isDesktop && [
-                styles.heroCardDesktop,
-                {
-                  minHeight: desktopHeroMinHeight,
-                  paddingVertical: desktopHeroPaddingV,
-                  marginTop: desktopHeroMarginTop,
-                },
-              ],
-            ]}>
-              <View style={[styles.heroLeft, isDesktop && styles.heroLeftDesktop]}>
-                {activeConversation &&
-              !isRoadmapOrIntroTopic(
-                activeConversation.topic,
-                activeConversation.scenarioTitle,
-                activeConversation.scenarioId,
-                (activeConversation as any).roadmapLevelId,
-                activeConversation.summary
-              ) ? (
-                <>
-                  <Text style={[
-                    styles.heroTitle,
-                    isDesktop && styles.heroTitleDesktop,
-                  ]}>
-                    Start a{isDesktop ? ' ' : '\n'}
-                    <Text style={styles.heroTitleHighlight}>conversation</Text>
-                  </Text>
-                  <Text
-                    style={[
-                      styles.heroSubtitle,
-                      styles.resumeSummarySubtitle,
-                      isDesktop && styles.heroSubtitleDesktop,
-                    ]}
-                    numberOfLines={isDesktop ? 4 : 3}
-                  >
-                    {activeConversation.summary
-                      ? `"${activeConversation.summary}"`
-                      : activeConversation.topic
-                      ? `Topic: ${activeConversation.topic}`
-                      : 'Jump into a real-time conversation with your AI English partner.'}
-                  </Text>
-
-                  <View style={styles.resumeButtonRow}>
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.startTalkingButton,
-                        styles.resumeActionButton,
-                        isDesktop && styles.startTalkingButtonDesktop,
-                        pressed && styles.startTalkingPressed,
-                      ]}
-                      onPress={handleResumeTalking}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Resume ${activeConversation.scenarioTitle} with Maya`}
-                    >
-                      <Text style={[styles.startTalkingText, isDesktop && styles.startTalkingTextDesktop]}>
-                        Resume Practice
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.resumeStartNewButton,
-                        pressed && { opacity: 0.7 },
-                      ]}
-                      onPress={handleStartTalking}
-                      accessibilityRole="button"
-                      accessibilityLabel="Start fresh conversation"
-                    >
-                      <Text style={styles.resumeStartNewText}>New Conversation</Text>
-                    </Pressable>
-                  </View>
-                </>
-              ) : (
-                <>
-                  <Text style={[
-                    styles.heroTitle,
-                    isDesktop && styles.heroTitleDesktop,
-                  ]}>
-                    Start a{' '}
-                    <Text style={styles.heroTitleHighlight}>conversation</Text>
-                  </Text>
-                  <Text style={[
-                    styles.heroSubtitle,
-                    isDesktop && styles.heroSubtitleDesktop,
-                  ]}>
-                    Jump into a real-time conversation with your AI English partner.
-                  </Text>
-
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.startTalkingButton,
-                      isDesktop && styles.startTalkingButtonDesktop,
-                      pressed && styles.startTalkingPressed,
-                    ]}
-                    onPress={handleStartTalking}
-                    accessibilityRole="button"
-                    accessibilityLabel="Start Talking with Maya"
-                  >
-                    <Text style={[styles.startTalkingText, isDesktop && styles.startTalkingTextDesktop]}>
-                      Start Talking
-                    </Text>
-                  </Pressable>
-                </>
               )}
-            </View>
 
-            {/* Maya Waving Avatar Illustration */}
-            <View style={[styles.heroRight, isDesktop && styles.heroRightDesktop]}>
-              <Image
-                source={require('@/assets/images/maya-waving.png')}
-                style={[
-                  styles.mayaWavingImg,
-                  isDesktop && [
-                    styles.mayaWavingImgDesktop,
-                    {
-                      height: desktopMayaImgHeight,
-                      width: Math.round(desktopMayaImgHeight * 1.18),
-                    },
-                  ],
-                ]}
-                resizeMode="contain"
-                accessibilityLabel="Maya waving"
-              />
-            </View>
-          </View>
-          </View>
-
-          {/* LOWER SECTION: Scenarios + Bottom Banner grouped together on desktop */}
-          <View style={isDesktop ? styles.desktopLowerGroup : undefined}>
-            {/* SECTION: "Maya can help you with" */}
-            <View style={styles.scenariosSection}>
-              <Text style={styles.sectionHeading}>
-                Maya can help you with
-              </Text>
-              <Text style={styles.sectionSubheading}>
-                Choose what you want to practice today
-              </Text>
-
-              {/* Grid of Scenarios */}
-              <View
-                style={[
-                  styles.scenariosGrid,
-                  isDesktop ? styles.scenariosGridDesktop : styles.scenariosGridMobile,
-                ]}
-              >
-                {SCENARIOS.map((item) => {
-                  const isLocked = !isPro && item.id !== 'casual-chat';
-
-                  return (
-                    <Pressable
-                      key={item.id}
-                      style={({ pressed }) => [
-                        styles.scenarioCard,
-                        isDesktop && [
-                          styles.scenarioCardDesktop,
-                          {
-                            minHeight: desktopCardMinHeight,
-                            paddingVertical: desktopCardPaddingV,
-                          },
-                        ],
-                        pressed && styles.cardPressed,
-                      ]}
-                      onPress={() => {
-                        if (isLocked) {
-                          setActivePopup('unlock-premium');
-                        } else {
-                          ActiveConversationStore.setActive({
-                            scenarioId: item.id,
-                            scenarioTitle: item.title,
-                            topic: item.title,
-                          });
-                          handleOpenCreateSession({ id: item.id, title: item.title });
-                        }
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        isLocked
-                          ? `${item.title} (Locked, upgrade to Pro to unlock)`
-                          : `Practice ${item.title}`
-                      }
-                    >
-                      <View
+              {/* HERO BANNER: "Start a conversation" OR "Resume Practice" */}
+              <View style={[
+                styles.heroCard,
+                isDesktop && [
+                  styles.heroCardDesktop,
+                  {
+                    minHeight: desktopHeroMinHeight,
+                    paddingVertical: desktopHeroPaddingV,
+                    marginTop: desktopHeroMarginTop,
+                  },
+                ],
+              ]}>
+                <View style={[styles.heroLeft, isDesktop && styles.heroLeftDesktop]}>
+                  {activeConversation &&
+                    !isRoadmapOrIntroTopic(
+                      activeConversation.topic,
+                      activeConversation.scenarioTitle,
+                      activeConversation.scenarioId,
+                      (activeConversation as any).roadmapLevelId,
+                      activeConversation.summary
+                    ) ? (
+                    <>
+                      <Text style={[
+                        styles.heroTitle,
+                        isDesktop && styles.heroTitleDesktop,
+                      ]}>
+                        Start a{isDesktop ? ' ' : '\n'}
+                        <Text style={styles.heroTitleHighlight}>conversation</Text>
+                      </Text>
+                      <Text
                         style={[
-                          styles.scenarioIconBadge,
-                          isDesktop && styles.scenarioIconBadgeDesktop,
-                          { backgroundColor: isLocked ? '#F3F4F6' : item.iconBg },
+                          styles.heroSubtitle,
+                          styles.resumeSummarySubtitle,
+                          isDesktop && styles.heroSubtitleDesktop,
                         ]}
+                        numberOfLines={isDesktop ? 4 : 3}
                       >
-                        <Image
-                          source={item.image}
-                          style={[
-                            styles.scenarioImage,
-                            isDesktop && styles.scenarioImageDesktop,
-                            isLocked && styles.scenarioImageLocked,
-                          ]}
-                          resizeMode="contain"
-                        />
-                      </View>
+                        {activeConversation.summary
+                          ? `"${activeConversation.summary}"`
+                          : activeConversation.topic
+                            ? `Topic: ${activeConversation.topic}`
+                            : 'Jump into a real-time conversation with your AI English partner.'}
+                      </Text>
 
-                      <View style={styles.scenarioContent}>
-                        <Text
-                          style={[
-                            styles.scenarioTitle,
-                            isDesktop && styles.scenarioTitleDesktop,
-                            isLocked && styles.scenarioTitleLocked,
+                      <View style={styles.resumeButtonRow}>
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.startTalkingButton,
+                            styles.resumeActionButton,
+                            isDesktop && styles.startTalkingButtonDesktop,
+                            pressed && styles.startTalkingPressed,
                           ]}
+                          onPress={handleResumeTalking}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Resume ${activeConversation.scenarioTitle} with Maya`}
                         >
-                          {item.title}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.scenarioSubtitle,
-                            isDesktop && styles.scenarioSubtitleDesktop,
-                            isLocked && styles.scenarioSubtitleLocked,
+                          <Text style={[styles.startTalkingText, isDesktop && styles.startTalkingTextDesktop]}>
+                            Resume Practice
+                          </Text>
+                        </Pressable>
+
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.resumeStartNewButton,
+                            pressed && { opacity: 0.7 },
                           ]}
+                          onPress={handleStartTalking}
+                          accessibilityRole="button"
+                          accessibilityLabel="Start fresh conversation"
                         >
-                          {item.subtitle}
-                        </Text>
+                          <Text style={styles.resumeStartNewText}>New Conversation</Text>
+                        </Pressable>
                       </View>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={[
+                        styles.heroTitle,
+                        isDesktop && styles.heroTitleDesktop,
+                      ]}>
+                        Start a{' '}
+                        <Text style={styles.heroTitleHighlight}>conversation</Text>
+                      </Text>
+                      <Text style={[
+                        styles.heroSubtitle,
+                        isDesktop && styles.heroSubtitleDesktop,
+                      ]}>
+                        Jump into a real-time conversation with your AI English partner.
+                      </Text>
 
-                      {isLocked ? (
-                        <View style={styles.lockIconContainer}>
-                          <LockIcon color="#94A3B8" size={16} />
-                        </View>
-                      ) : (
-                        <Text style={styles.scenarioArrow}>›</Text>
-                      )}
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* MOBILE: Talk Time Card */}
-            {!isDesktop && (
-              <View style={styles.talkTimeCardMobile}>
-                <View style={styles.talkTimeHeader}>
-                  <Text style={styles.talkTimeTitle}>Your Talk Time</Text>
-                  <Text style={styles.talkTimeReset}>
-                    {resetsInText}
-                  </Text>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.startTalkingButton,
+                          isDesktop && styles.startTalkingButtonDesktop,
+                          pressed && styles.startTalkingPressed,
+                        ]}
+                        onPress={handleStartTalking}
+                        accessibilityRole="button"
+                        accessibilityLabel="Start Talking with Maya"
+                      >
+                        <Text style={[styles.startTalkingText, isDesktop && styles.startTalkingTextDesktop]}>
+                          Start Talking
+                        </Text>
+                      </Pressable>
+                    </>
+                  )}
                 </View>
 
-                <Text style={styles.talkTimeMinutes}>
-                  {String(usedMinutes).padStart(2, '0')}{' '}
-                  <Text style={styles.talkTimeTotal}>
-                    / {totalMinutes} minutes
-                  </Text>
+                {/* Maya Waving Avatar Illustration */}
+                <View style={[styles.heroRight, isDesktop && styles.heroRightDesktop]}>
+                  <Image
+                    source={require('@/assets/images/maya-waving.png')}
+                    style={[
+                      styles.mayaWavingImg,
+                      isDesktop && [
+                        styles.mayaWavingImgDesktop,
+                        {
+                          height: desktopMayaImgHeight,
+                          width: Math.round(desktopMayaImgHeight * 1.18),
+                        },
+                      ],
+                    ]}
+                    resizeMode="contain"
+                    accessibilityLabel="Maya waving"
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* LOWER SECTION: Scenarios + Bottom Banner grouped together on desktop */}
+            <View style={isDesktop ? styles.desktopLowerGroup : undefined}>
+              {/* SECTION: "Maya can help you with" */}
+              <View style={styles.scenariosSection}>
+                <Text style={styles.sectionHeading}>
+                  Maya can help you with
+                </Text>
+                <Text style={styles.sectionSubheading}>
+                  Choose what you want to practice today
                 </Text>
 
-                <View style={styles.progressBarTrack}>
-                  <View
-                    style={[
-                      styles.progressBarFill,
-                      {
-                        width: `${Math.min(
-                          100,
-                          Math.round((usedMinutes / Math.max(1, totalMinutes)) * 100)
-                        )}%`,
-                      },
-                    ]}
-                  />
+                {/* Grid of Scenarios */}
+                <View
+                  style={[
+                    styles.scenariosGrid,
+                    isDesktop ? styles.scenariosGridDesktop : styles.scenariosGridMobile,
+                  ]}
+                >
+                  {SCENARIOS.map((item) => {
+                    const isLocked = !isPro && item.id !== 'casual-chat';
+
+                    return (
+                      <Pressable
+                        key={item.id}
+                        style={({ pressed }) => [
+                          styles.scenarioCard,
+                          isDesktop && [
+                            styles.scenarioCardDesktop,
+                            {
+                              minHeight: desktopCardMinHeight,
+                              paddingVertical: desktopCardPaddingV,
+                            },
+                          ],
+                          pressed && styles.cardPressed,
+                        ]}
+                        onPress={() => {
+                          if (isLocked) {
+                            setActivePopup('unlock-premium');
+                          } else {
+                            ActiveConversationStore.setActive({
+                              scenarioId: item.id,
+                              scenarioTitle: item.title,
+                              topic: item.title,
+                            });
+                            handleOpenCreateSession({ id: item.id, title: item.title });
+                          }
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isLocked
+                            ? `${item.title} (Locked, upgrade to Pro to unlock)`
+                            : `Practice ${item.title}`
+                        }
+                      >
+                        <View
+                          style={[
+                            styles.scenarioIconBadge,
+                            isDesktop && styles.scenarioIconBadgeDesktop,
+                            { backgroundColor: isLocked ? '#F3F4F6' : item.iconBg },
+                          ]}
+                        >
+                          <Image
+                            source={item.image}
+                            style={[
+                              styles.scenarioImage,
+                              isDesktop && styles.scenarioImageDesktop,
+                              isLocked && styles.scenarioImageLocked,
+                            ]}
+                            resizeMode="contain"
+                          />
+                        </View>
+
+                        <View style={styles.scenarioContent}>
+                          <Text
+                            style={[
+                              styles.scenarioTitle,
+                              isDesktop && styles.scenarioTitleDesktop,
+                              isLocked && styles.scenarioTitleLocked,
+                            ]}
+                          >
+                            {item.title}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.scenarioSubtitle,
+                              isDesktop && styles.scenarioSubtitleDesktop,
+                              isLocked && styles.scenarioSubtitleLocked,
+                            ]}
+                          >
+                            {item.subtitle}
+                          </Text>
+                        </View>
+
+                        {isLocked ? (
+                          <View style={styles.lockIconContainer}>
+                            <LockIcon color="#94A3B8" size={16} />
+                          </View>
+                        ) : (
+                          <Text style={styles.scenarioArrow}>›</Text>
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* MOBILE: Talk Time Card */}
+              {!isDesktop && (
+                <View style={styles.talkTimeCardMobile}>
+                  <View style={styles.talkTimeHeader}>
+                    <Text style={styles.talkTimeTitle}>Your Talk Time</Text>
+                    <Text style={styles.talkTimeReset}>
+                      {resetsInText}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.talkTimeMinutes}>
+                    {String(usedMinutes).padStart(2, '0')}{' '}
+                    <Text style={styles.talkTimeTotal}>
+                      / {totalMinutes} minutes
+                    </Text>
+                  </Text>
+
+                  <View style={styles.progressBarTrack}>
+                    <View
+                      style={[
+                        styles.progressBarFill,
+                        {
+                          width: `${Math.min(
+                            100,
+                            Math.round((usedMinutes / Math.max(1, totalMinutes)) * 100)
+                          )}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+
+                  <Pressable
+                    style={styles.extraTimeButton}
+                    onPress={() => {
+                      if (!isPro) {
+                        setActivePopup('daily-limit');
+                      } else {
+                        setActivePopup('get-extra-time');
+                      }
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      isPro ? 'Get Extra Talk Time' : 'Upgrade to premium'
+                    }
+                  >
+                    {isPro ? (
+                      <>
+                        <HistoryNavIcon color="#2B5BFF" size={17} />
+                        <Text style={styles.extraTimeButtonText}>
+                          Get Extra Talk Time →
+                        </Text>
+                      </>
+                    ) : (
+                      <>
+                        <CrownSolidIcon color="#2B5BFF" size={18} />
+                        <Text style={styles.extraTimeButtonText}>
+                          Upgrade to premium →
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+              )}
+
+              {/* Bottom Banner (Desktop & Mobile) */}
+              <View style={[
+                styles.roadmapBanner,
+                isDesktop && [
+                  styles.roadmapBannerDesktop,
+                  {
+                    minHeight: desktopBannerMinHeight,
+                    paddingVertical: desktopBannerPaddingV,
+                  },
+                ],
+                !isDesktop && styles.roadmapBannerMobile,
+              ]}>
+                <View style={[styles.roadmapLeft, !isDesktop && styles.roadmapLeftMobile]}>
+                  <View style={styles.roadmapIconWrapper}>
+                    {isPro ? (
+                      <BannerRoadmapIcon width={28} height={28} color="#2B7FFF" />
+                    ) : (
+                      <BannerCrownIcon width={30} height={24} color="#0D4EFD" />
+                    )}
+                  </View>
+                  <View style={styles.roadmapTextCol}>
+                    {isPro ? (
+                      <>
+                        <Text style={styles.roadmapTitle}>Your Learning Roadmap</Text>
+                        <Text style={styles.roadmapSubtitle}>
+                          Follow a structured path, build your skills step by step and become fluent.
+                        </Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.unlockProTitle}>Unlock All Conversation With Pro</Text>
+                        <Text style={styles.unlockProSubtitle}>
+                          More conversations, AI feedback, advanced lessons & more!
+                        </Text>
+                      </>
+                    )}
+                  </View>
                 </View>
 
                 <Pressable
-                  style={styles.extraTimeButton}
+                  style={({ pressed }) => [
+                    styles.roadmapButton,
+                    !isDesktop && styles.roadmapButtonMobile,
+                    pressed && styles.buttonPressed,
+                  ]}
                   onPress={() => {
-                    if (!isPro) {
-                      setActivePopup('daily-limit');
+                    if (isPro) {
+                      router.push({ pathname: '/roadmap', params });
                     } else {
-                      setActivePopup('get-extra-time');
+                      router.push('/upgrade');
                     }
                   }}
                   accessibilityRole="button"
-                  accessibilityLabel={
-                    isPro ? 'Get Extra Talk Time' : 'Upgrade to premium'
-                  }
+                  accessibilityLabel={isPro ? 'View Roadmap' : 'Upgrade to Pro'}
                 >
-                  {isPro ? (
-                    <>
-                      <HistoryNavIcon color="#2B5BFF" size={17} />
-                      <Text style={styles.extraTimeButtonText}>
-                        Get Extra Talk Time →
-                      </Text>
-                    </>
-                  ) : (
-                    <>
-                      <CrownSolidIcon color="#2B5BFF" size={18} />
-                      <Text style={styles.extraTimeButtonText}>
-                        Upgrade to premium →
-                      </Text>
-                    </>
-                  )}
+                  <Text style={styles.roadmapButtonText}>
+                    {isPro ? 'View Roadmap →' : 'Upgrade to Pro →'}
+                  </Text>
                 </Pressable>
               </View>
-            )}
-
-            {/* Bottom Banner (Desktop & Mobile) */}
-            <View style={[
-              styles.roadmapBanner,
-              isDesktop && [
-                styles.roadmapBannerDesktop,
-                {
-                  minHeight: desktopBannerMinHeight,
-                  paddingVertical: desktopBannerPaddingV,
-                },
-              ],
-              !isDesktop && styles.roadmapBannerMobile,
-            ]}>
-              <View style={[styles.roadmapLeft, !isDesktop && styles.roadmapLeftMobile]}>
-                <View style={styles.roadmapIconWrapper}>
-                  {isPro ? (
-                    <BannerRoadmapIcon width={28} height={28} color="#2B7FFF" />
-                  ) : (
-                    <BannerCrownIcon width={30} height={24} color="#0D4EFD" />
-                  )}
-                </View>
-                <View style={styles.roadmapTextCol}>
-                  {isPro ? (
-                    <>
-                      <Text style={styles.roadmapTitle}>Your Learning Roadmap</Text>
-                      <Text style={styles.roadmapSubtitle}>
-                        Follow a structured path, build your skills step by step and become fluent.
-                      </Text>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.unlockProTitle}>Unlock All Conversation With Pro</Text>
-                      <Text style={styles.unlockProSubtitle}>
-                        More conversations, AI feedback, advanced lessons & more!
-                      </Text>
-                    </>
-                  )}
-                </View>
-              </View>
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.roadmapButton,
-                  !isDesktop && styles.roadmapButtonMobile,
-                  pressed && styles.buttonPressed,
-                ]}
-                onPress={() => {
-                  if (isPro) {
-                    router.push({ pathname: '/roadmap', params });
-                  } else {
-                    router.push('/upgrade');
-                  }
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={isPro ? 'View Roadmap' : 'Upgrade to Pro'}
-              >
-                <Text style={styles.roadmapButtonText}>
-                  {isPro ? 'View Roadmap →' : 'Upgrade to Pro →'}
-                </Text>
-              </Pressable>
             </View>
-          </View>
-        </ScrollView>
+          </ScrollView>
         </View>
 
 
@@ -849,26 +849,26 @@ export default function DashboardScreen() {
             activePopup === 'level-up'
               ? 'Your Level Progress'
               : activePopup === 'reactivate-plan'
-              ? 'Reactivate Maya to Continue'
-              : undefined
+                ? 'Reactivate Maya to Continue'
+                : undefined
           }
           subtitle={
             activePopup === 'level-up'
               ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep completing speaking lessons to reach Level ${stats.currentLevelNumber + 1}!`
               : activePopup === 'reactivate-plan'
-              ? hasTelcoSubscription
-                ? 'Your daily mobile airtime subscription was cancelled. Reactivate your mobile plan or upgrade to Pro to unlock voice practice sessions.'
-                : 'Your subscription billing cycle has ended. Reactivate your plan or upgrade to Pro to continue practicing with Maya.'
-              : undefined
+                ? hasTelcoSubscription
+                  ? 'Your daily mobile subscription was cancelled. Reactivate your mobile plan or upgrade to Pro to unlock voice practice sessions.'
+                  : 'Your subscription billing cycle has ended. Reactivate your plan or upgrade to Pro to continue practicing with Maya.'
+                : undefined
           }
           primaryButtonText={
             activePopup === 'level-up'
               ? 'View Learning Roadmap'
               : activePopup === 'reactivate-plan'
-              ? hasTelcoSubscription
-                ? 'Reactivate Mobile Plan (Rs. 5/day)'
-                : 'Reactivate Pro Plan'
-              : undefined
+                ? hasTelcoSubscription
+                  ? 'Reactivate Mobile Plan (Rs. 5/day)'
+                  : 'Reactivate Pro Plan'
+                : undefined
           }
           primaryButtonIcon={
             activePopup === 'level-up' ? 'arrow' : activePopup === 'reactivate-plan' ? 'play' : undefined
@@ -1233,12 +1233,12 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? ({ boxShadow: '0px 3px 10px rgba(0, 82, 255, 0.28)' } as any)
       : {
-          shadowColor: '#0052FF',
-          shadowOffset: { width: 0, height: 3 },
-          shadowOpacity: 0.28,
-          shadowRadius: 8,
-          elevation: 3,
-        }),
+        shadowColor: '#0052FF',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.28,
+        shadowRadius: 8,
+        elevation: 3,
+      }),
   },
   startTalkingButtonDesktop: {
     paddingHorizontal: 32,
@@ -1316,7 +1316,7 @@ const styles = StyleSheet.create({
   /* Scenarios Section */
   scenariosSection: {
     marginTop: 6,
-    
+
   },
   sectionHeading: {
     ...fontStyle('outfit', 'extraBold'),
@@ -1360,12 +1360,12 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? ({ boxShadow: '0px 2px 6px rgba(0, 0, 0, 0.02)' } as any)
       : {
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.02,
-          shadowRadius: 6,
-          elevation: 1,
-        }),
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.02,
+        shadowRadius: 6,
+        elevation: 1,
+      }),
   },
   scenarioCardDesktop: {
     ...Platform.select({

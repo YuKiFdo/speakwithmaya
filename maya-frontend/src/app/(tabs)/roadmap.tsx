@@ -1072,7 +1072,7 @@ export default function RoadmapScreen() {
               ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep completing lessons on your roadmap to reach Level ${stats.currentLevelNumber + 1}!`
               : activePopup === 'reactivate-plan'
               ? stats.hasTelcoSubscription
-                ? 'Your daily mobile airtime subscription was cancelled. Reactivate your mobile plan or upgrade to continue practicing on the roadmap.'
+                ? 'Your daily mobile subscription was cancelled. Reactivate your mobile plan or upgrade to continue practicing on the roadmap.'
                 : 'Your subscription billing period has ended. Reactivate your plan or upgrade to Pro to continue practicing on the roadmap.'
               : undefined
           }
