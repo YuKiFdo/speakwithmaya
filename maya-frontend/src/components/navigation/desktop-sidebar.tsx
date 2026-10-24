@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, useWindowDimensions, Platform } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { View, Text, StyleSheet, Pressable, useWindowDimensions, Platform, DimensionValue } from 'react-native';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
 import {
@@ -130,6 +130,41 @@ export function DesktopSidebar({
   const percentFilled = Math.min(100, Math.round((currentUsed / currentTotal) * 100));
   const displayMinutes = isPaid ? String(currentUsed) : String(currentUsed).padStart(2, '0');
 
+  // Usage States matching design: Normal (In Progress), Near Limit (>=80%), Exceeded Limit (>=100%)
+  const isExceeded = !isInactive && currentTotal > 0 && currentUsed >= currentTotal;
+  const isNearLimit = !isInactive && !isExceeded && percentFilled >= 80;
+
+  const buttonBorderColor = isInactive
+    ? '#FCA5A5'
+    : isExceeded
+    ? '#EF4444'
+    : isNearLimit
+    ? '#F59E0B'
+    : '#2B5BFF';
+
+  const buttonTextColor = isInactive
+    ? '#DC2626'
+    : isExceeded
+    ? '#EF4444'
+    : isNearLimit
+    ? '#D97706'
+    : '#2B5BFF';
+
+  const progressFillWidth: DimensionValue = isInactive ? '0%' : isExceeded ? '100%' : `${percentFilled}%`;
+  const progressFillColor = isInactive
+    ? '#CBD5E1'
+    : isExceeded
+    ? '#EF4444'
+    : isNearLimit
+    ? '#F59E0B'
+    : '#2B5BFF';
+
+  const progressTrackColor = isExceeded
+    ? '#FEE2E2'
+    : isNearLimit
+    ? '#FEF3C7'
+    : '#f1f5f9';
+
   return (
     <View style={[
       styles.desktopSidebar,
@@ -221,6 +256,8 @@ export function DesktopSidebar({
       <View style={[
         styles.talkTimeCard,
         isInactive && styles.talkTimeCardInactive,
+        isNearLimit && styles.talkTimeCardNearLimit,
+        isExceeded && styles.talkTimeCardExceeded,
         isCompact && styles.talkTimeCardCompact,
       ]}>
         <View style={styles.talkTimeHeader}>
@@ -235,23 +272,33 @@ export function DesktopSidebar({
           )}
         </View>
 
-        <Text style={[styles.talkTimeMinutes, isInactive && styles.talkTimeMinutesInactive, isCompact && styles.talkTimeMinutesCompact]}>
+        <Text style={[
+          styles.talkTimeMinutes,
+          isInactive && styles.talkTimeMinutesInactive,
+          isExceeded && styles.talkTimeMinutesExceeded,
+          isCompact && styles.talkTimeMinutesCompact,
+        ]}>
           {isInactive ? '00' : displayMinutes}{' '}
           <Text style={[styles.talkTimeTotal, isCompact && styles.talkTimeTotalCompact]}>
             / {isInactive ? '0' : currentTotal} minutes
           </Text>
         </Text>
 
-        <View style={[styles.progressBarTrack, isCompact && styles.progressBarTrackCompact]}>
+        <View style={[
+          styles.progressBarTrack,
+          { backgroundColor: progressTrackColor },
+          isCompact && styles.progressBarTrackCompact,
+        ]}>
           <View style={[
             styles.progressBarFill,
-            isInactive ? styles.progressBarFillInactive : { width: `${percentFilled}%` },
+            { width: progressFillWidth, backgroundColor: progressFillColor },
           ]} />
         </View>
 
         <Pressable
           style={[
             styles.extraTimeButton,
+            { borderColor: buttonBorderColor },
             isInactive && styles.extraTimeButtonInactive,
             isCompact && styles.extraTimeButtonCompact,
           ]}
@@ -271,20 +318,45 @@ export function DesktopSidebar({
             </>
           ) : isPro ? (
             <>
-              <HistoryNavIcon color="#2B5BFF" size={isCompact ? 15 : 17} />
-              <Text style={[styles.extraTimeButtonText, isCompact && styles.extraTimeButtonTextCompact]}>
+              <HistoryNavIcon color={buttonTextColor} size={isCompact ? 15 : 17} />
+              <Text style={[
+                styles.extraTimeButtonText,
+                { color: buttonTextColor },
+                isCompact && styles.extraTimeButtonTextCompact,
+              ]}>
                 Get Extra Talk Time →
               </Text>
             </>
           ) : (
             <>
-              <CrownSolidIcon color="#2B5BFF" size={isCompact ? 16 : 18} />
-              <Text style={[styles.extraTimeButtonText, isCompact && styles.extraTimeButtonTextCompact]}>
+              <CrownSolidIcon color={buttonTextColor} size={isCompact ? 16 : 18} />
+              <Text style={[
+                styles.extraTimeButtonText,
+                { color: buttonTextColor },
+                isCompact && styles.extraTimeButtonTextCompact,
+              ]}>
                 Upgrade to premium →
               </Text>
             </>
           )}
         </Pressable>
+
+        {/* Exceeded limit alert notice matching user design */}
+        {isExceeded && (
+          <View style={[styles.exceededAlertBox, isCompact && styles.exceededAlertBoxCompact]}>
+            <Ionicons name="alert-circle" size={isCompact ? 16 : 18} color="#EF4444" style={styles.alertIcon} />
+            <View style={styles.alertTextCol}>
+              <Text style={[styles.alertTitle, isCompact && styles.alertTitleCompact]}>
+                {isPaid ? "You've exceeded your monthly talk time." : "You've exceeded your daily talk time."}
+              </Text>
+              <Text style={[styles.alertSubtitle, isCompact && styles.alertSubtitleCompact]}>
+                {isPaid
+                  ? "Get extra minutes or upgrade your plan to continue."
+                  : "Upgrade your plan or get extra minutes to continue."}
+              </Text>
+            </View>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -577,6 +649,62 @@ const styles = StyleSheet.create({
   },
   extraTimeButtonTextInactive: {
     color: '#DC2626',
+  },
+  talkTimeCardNearLimit: {
+    borderColor: '#F59E0B',
+    backgroundColor: '#ffffff',
+  },
+  talkTimeCardExceeded: {
+    borderColor: '#FECACA',
+    backgroundColor: '#FFF8F8',
+  },
+  talkTimeMinutesExceeded: {
+    color: '#EF4444',
+  },
+  exceededAlertBox: {
+    marginTop: 14,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+    borderRadius: 14,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  exceededAlertBoxCompact: {
+    marginTop: 8,
+    padding: 9,
+    gap: 6,
+    borderRadius: 10,
+  },
+  alertIcon: {
+    marginTop: 1,
+  },
+  alertTextCol: {
+    flex: 1,
+  },
+  alertTitle: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 12,
+    color: '#B91C1C',
+    lineHeight: 16,
+  },
+  alertTitleCompact: {
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  alertSubtitle: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#DC2626',
+    marginTop: 3,
+    lineHeight: 15,
+  },
+  alertSubtitleCompact: {
+    fontSize: 10,
+    lineHeight: 13,
+    marginTop: 2,
   },
   /* Compact & Very Compact Height Overrides */
   desktopSidebarCompact: {
