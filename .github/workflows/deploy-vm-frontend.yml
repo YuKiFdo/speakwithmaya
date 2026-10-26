@@ -46,16 +46,18 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "$VM_IP" >> ~/.ssh/known_hosts
 
-          # Ensure app directory exists
-          ssh "$VM_USER@$VM_IP" "mkdir -p /home/$VM_USER/apps/maya-frontend/dist"
+          # Ensure app directories exist
+          ssh "$VM_USER@$VM_IP" "mkdir -p /home/$VM_USER/apps/maya-frontend/dist /home/$VM_USER/apps/maya-frontend/web-server"
 
-          # Sync exported dist directory and PM2 config
+          # Sync exported dist directory, custom SPA server, and PM2 config
           rsync -avz --delete ./maya-frontend/dist/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/"
+          rsync -avz --delete ./maya-frontend/web-server/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/web-server/"
           rsync -avz ./maya-frontend/ecosystem.config.cjs "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/"
 
-          # Start or reload PM2
+          # Recreate PM2 process so it switches cleanly from built-in `pm2 serve` to `./web-server/server.js`
           ssh "$VM_USER@$VM_IP" "bash -l -c '
             cd /home/$VM_USER/apps/maya-frontend
-            pm2 startOrReload ecosystem.config.cjs --update-env
+            pm2 delete maya-frontend || true
+            pm2 start ecosystem.config.cjs --update-env
             pm2 save
           '"

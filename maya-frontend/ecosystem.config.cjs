@@ -2,16 +2,15 @@ module.exports = {
   apps: [
     {
       name: 'maya-frontend',
-      script: 'serve',
+      script: './web-server/server.js',
       cwd: '/home/speakwithmaya/apps/maya-frontend',
       instances: 1,
       autorestart: true,
       watch: false,
       env: {
-        PM2_SERVE_PATH: '/home/speakwithmaya/apps/maya-frontend/dist',
-        PM2_SERVE_PORT: 8080,
-        PM2_SERVE_SPA: 'true',
-        PM2_SERVE_HOMEPAGE: '/index.html',
+        NODE_ENV: 'production',
+        PORT: 8080,
+        STATIC_ROOT: '/home/speakwithmaya/apps/maya-frontend/dist',
       },
     },
   ],

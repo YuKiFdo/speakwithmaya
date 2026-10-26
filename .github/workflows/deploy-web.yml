@@ -39,6 +39,7 @@ jobs:
       - name: Package web bundle with server
         working-directory: ./maya-frontend
         run: |
+          cp web-server/server.js dist/server.js
           cd dist
           zip -r ../deploy.zip .
 
