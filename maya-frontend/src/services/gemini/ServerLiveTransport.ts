@@ -1,5 +1,6 @@
 import { Buffer } from 'buffer';
 import { getLogTimestamp } from '@/utils/time';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 import type {
   ILiveTransport,
   LiveTransportCallbacks,
@@ -90,11 +91,12 @@ export class ServerLiveTransport implements ILiveTransport {
         console.log(`[${getLogTimestamp()}] ✅ [ServerLiveTransport:${this.clientSessionId}] WebSocket connected to NestJS Backend`);
         this.isOpen = true;
 
-        // Start Gemini session on backend with Opus capability flag
+        // Start Gemini session on backend with Opus capability flag and authenticated token
         this.ws?.send(
           JSON.stringify({
             type: 'start_session',
             sessionId: config.sessionOptions?.sessionId || this.clientSessionId,
+            accessToken: OnboardingStore.getState().accessToken || config.token || undefined,
             supportsOpus: !!this.opusDecoder,
             options: config.sessionOptions || {
               languageMode: config.languageMode,

@@ -138,7 +138,7 @@ export default function AccountScreen() {
     });
     if (!confirmed) return;
 
-    OnboardingStore.clear();
+    await authService.logout();
     router.replace('/onboarding/phone?mode=login');
   };
 

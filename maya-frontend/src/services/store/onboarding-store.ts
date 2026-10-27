@@ -434,6 +434,8 @@ export const OnboardingStore = {
    * Clears state for logout or testing reset.
    */
   clear() {
+    // Invalidate any in-flight async encryptData writes so they cannot re-populate localStorage after logout
+    ++persistVersion;
     if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
       try {
         window.localStorage.removeItem(STORAGE_KEY);

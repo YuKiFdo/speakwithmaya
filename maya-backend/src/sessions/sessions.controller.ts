@@ -14,7 +14,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { SessionsService } from './sessions.service.js';
-import { AuthGuard, GetUser } from '../auth/index.js';
+import { AuthGuard, AdminGuard, GetUser } from '../auth/index.js';
 import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto, AnalyzeSessionDto, SessionTtsDto, SessionReviewDto } from './dto/session.dto.js';
 
 @Controller('v1')
@@ -188,17 +188,20 @@ export class SessionsController {
   }
 
   @Get('admin/diagnostics')
+  @UseGuards(AdminGuard)
   async getRecentDiagnostics() {
     return this.sessionsService.getAllRecentDiagnostics();
   }
 
   @Get('admin/usage')
+  @UseGuards(AdminGuard)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async getUsage(@Query() query: QueryUsageDto) {
     return this.sessionsService.getUsageData(query);
   }
 
   @Get('admin/usage/sessions/:id')
+  @UseGuards(AdminGuard)
   async getSessionDetail(@Param('id') sessionId: string) {
     return this.sessionsService.getSessionDetail(sessionId);
   }

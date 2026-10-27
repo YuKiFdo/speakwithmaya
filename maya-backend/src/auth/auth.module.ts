@@ -5,6 +5,7 @@ import { SmsApiLkProvider } from './sms/smsapi-lk.provider.js';
 import { IdeamartSmsProvider } from './sms/ideamart-sms.provider.js';
 import { TelcoSubscriptionService } from './sms/telco-subscription.service.js';
 import { AuthGuard } from './guards/auth.guard.js';
+import { AdminGuard } from './guards/admin.guard.js';
 
 @Module({
   controllers: [AuthController],
@@ -14,8 +15,9 @@ import { AuthGuard } from './guards/auth.guard.js';
     IdeamartSmsProvider,
     TelcoSubscriptionService,
     AuthGuard,
+    AdminGuard,
   ],
-  exports: [AuthService, TelcoSubscriptionService, AuthGuard],
+  exports: [AuthService, TelcoSubscriptionService, AuthGuard, AdminGuard],
 })
 export class AuthModule {}
 

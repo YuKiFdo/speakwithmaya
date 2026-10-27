@@ -8,6 +8,7 @@ import {
   Req,
   Logger,
   UsePipes,
+  UseGuards,
   ValidationPipe,
   UnauthorizedException,
   HttpCode,
@@ -18,6 +19,7 @@ import {
 import { PayHereService } from './payhere.service.js';
 import { SubscriptionReconciliationService } from './subscription-reconciliation.service.js';
 import { AuthService } from '../auth/auth.service.js';
+import { AdminGuard } from '../auth/guards/admin.guard.js';
 import {
   GenerateCheckoutParamsDto,
   CancelSubscriptionDto,
@@ -141,6 +143,7 @@ export class PayHereController {
    * Admin: List all subscribers with overview metrics (MRR, active, churned).
    */
   @Get('admin/subscriptions')
+  @UseGuards(AdminGuard)
   async getAdminSubscriptions() {
     return this.payHereService.getAdminSubscriptions();
   }
@@ -149,6 +152,7 @@ export class PayHereController {
    * Admin: List orders with filters (subscription renewals, talk-time top-ups, initial subscriptions).
    */
   @Get('admin/orders')
+  @UseGuards(AdminGuard)
   async getAdminOrders(
     @Query('type') type?: string,
     @Query('limit') limit?: string,
@@ -161,6 +165,7 @@ export class PayHereController {
    * Admin: View payment history / installments for a subscription.
    */
   @Get('admin/subscriptions/:id/payments')
+  @UseGuards(AdminGuard)
   async getSubscriptionPayments(@Param('id') subscriptionId: string) {
     const payments = await this.payHereService.getSubscriptionPayments(subscriptionId);
     return { success: true, payments };
@@ -170,6 +175,7 @@ export class PayHereController {
    * Admin: Retry failed subscription charge.
    */
   @Post('admin/subscriptions/:id/retry')
+  @UseGuards(AdminGuard)
   async retrySubscription(@Param('id') subscriptionId: string) {
     return this.payHereService.retrySubscription(subscriptionId);
   }
@@ -178,6 +184,7 @@ export class PayHereController {
    * Admin: Cancel user subscription.
    */
   @Post('admin/subscriptions/:id/cancel')
+  @UseGuards(AdminGuard)
   async cancelAdminSubscription(@Param('id') subscriptionId: string) {
     return this.payHereService.cancelSubscription(subscriptionId);
   }
@@ -186,6 +193,7 @@ export class PayHereController {
    * Admin / Automation: Run on-demand reconciliation of subscriptions and quotas.
    */
   @Post('admin/subscriptions/reconcile')
+  @UseGuards(AdminGuard)
   async triggerReconciliation() {
     return this.reconciliationService.reconcileSubscriptions();
   }
@@ -210,6 +218,7 @@ export class PayHereController {
    * Admin: Verify and sync a specific order with PayHere Gateway.
    */
   @Post('admin/orders/:id/verify')
+  @UseGuards(AdminGuard)
   async adminVerifyOrder(@Param('id') orderId: string) {
     return this.payHereService.reconcilePendingOrder(orderId);
   }

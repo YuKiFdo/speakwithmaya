@@ -8,6 +8,7 @@ import { Logger } from '@nestjs/common';
 import { WebSocket, RawData } from 'ws';
 import { GoogleGenAI, Modality, ActivityHandling } from '@google/genai';
 import { SessionsService, toValidUuid } from '../sessions/sessions.service.js';
+import { AuthService } from '../auth/auth.service.js';
 import { CreateSessionTokenDto } from '../sessions/dto/session.dto.js';
 import { randomUUID } from 'node:crypto';
 
@@ -67,6 +68,7 @@ interface ClientSessionState {
 
   // Heartbeat
   heartbeatInterval: ReturnType<typeof setInterval> | null;
+  maxDurationTimer?: ReturnType<typeof setTimeout> | null;
   lastPongAt: number;
 
   // Backpressure tracking
@@ -111,7 +113,10 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly ai: GoogleGenAI;
   private readonly liveModel: string;
 
-  constructor(private readonly sessionsService: SessionsService) {
+  constructor(
+    private readonly sessionsService: SessionsService,
+    private readonly authService: AuthService,
+  ) {
     const apiKey = process.env.GEMINI_API_KEY || '';
     this.ai = new GoogleGenAI({ apiKey });
     this.liveModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
@@ -223,8 +228,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(`[${sid}] Client disconnected`);
 
     if (state) {
-      // Stop heartbeat
+      // Stop heartbeat and max duration timer
       this.stopHeartbeat(state);
+      if (state.maxDurationTimer) {
+        clearTimeout(state.maxDurationTimer);
+        state.maxDurationTimer = null;
+      }
 
       // Print session diagnostics summary
       this.printSessionSummary(state);
@@ -457,6 +466,44 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           state.sessionId = toValidUuid(message.options.sessionId);
         }
         state.dto = dto;
+
+        // Verify user token & quota balance if token is provided
+        if (message.accessToken) {
+          try {
+            const userId = this.authService.validateAuthToken(message.accessToken);
+            const profile = await this.authService.getProfile(userId);
+            if (!dto.isIntroCall && (profile.minutes_balance ?? 0) <= 0) {
+              this.logger.warn(`[${state.sessionId}] ⛔ Blocking live session for user ${userId}: 0 minutes remaining`);
+              this.safeSendToClient(
+                state,
+                JSON.stringify({
+                  type: 'error',
+                  message: 'Your practice minutes balance is 0. Please top up or upgrade your plan.',
+                }),
+              );
+              client.close(1008, 'Insufficient practice minutes');
+              return;
+            }
+          } catch (authErr: any) {
+            this.logger.warn(`[${state.sessionId}] Token check note in start_session: ${authErr?.message}`);
+          }
+        }
+
+        // Enforce server-side max session duration timer (+90s grace for intro guide & farewell wrap-up, max 30 min)
+        if (state.maxDurationTimer) {
+          clearTimeout(state.maxDurationTimer);
+        }
+        const requestedSec = Number(dto.durationSeconds) || 300;
+        const maxAllowedMs = Math.min(requestedSec + 90, 1800) * 1000;
+        state.maxDurationTimer = setTimeout(() => {
+          this.logger.warn(`[${state.sessionId}] ⏰ Server max session duration (${Math.round(maxAllowedMs / 1000)}s) reached — closing live session`);
+          try {
+            state.geminiSession?.close?.();
+          } catch {}
+          try {
+            client.close(1000, 'Max session duration reached');
+          } catch {}
+        }, maxAllowedMs);
 
         // Initialize Opus compression if client supports it (cuts downlink bandwidth from 512kbps to ~24kbps)
         state.supportsOpus = !!message.supportsOpus;

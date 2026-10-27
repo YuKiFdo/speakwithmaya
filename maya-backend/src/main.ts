@@ -17,7 +17,7 @@ async function bootstrap() {
   // Enable CORS for web clients (Expo web, admin.speakwithmaya.com, speakwithmaya.com)
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (mobile apps, server-to-server) or any valid origin
+      // Allow requests with no origin (mobile apps, server-to-server)
       if (!origin) return callback(null, true);
       const allowedOrigins = [
         'https://admin.speakwithmaya.com',
@@ -27,14 +27,23 @@ async function bootstrap() {
         'http://localhost:3000',
         'http://localhost:19006',
       ];
-      if (allowedOrigins.includes(origin) || origin.endsWith('.speakwithmaya.com') || origin.includes('localhost')) {
+      const isAllowed =
+        allowedOrigins.includes(origin) ||
+        origin.endsWith('.speakwithmaya.com') ||
+        origin.includes('azurecontainerapps.io') ||
+        origin.includes('azurewebsites.net') ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1') ||
+        /^https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(origin);
+
+      if (isAllowed) {
         return callback(null, true);
       }
-      return callback(null, true);
+      return callback(new Error('Origin not allowed by CORS'), false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-requested-with', 'Accept', 'Range', 'Cache-Control', 'pragma'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-token', 'x-requested-with', 'Accept', 'Range', 'Cache-Control', 'pragma'],
     exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'Content-Type'],
   });
 

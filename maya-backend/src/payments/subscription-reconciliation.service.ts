@@ -63,20 +63,29 @@ export class SubscriptionReconciliationService {
   /**
    * Pending Orders Recovery Sweeper:
    * Executes every 10 minutes.
-   * Sweeps orders that are pending, created between 5 minutes and 24 hours ago.
-   * Automatically queries PayHere Gateway Retrieval API to recover from server downtime or dropped webhooks.
+   * 1. Marks abandoned pending orders older than 60 minutes as 'expired' so they are not polled indefinitely.
+   * 2. Sweeps recent pending orders created between 5 minutes and 60 minutes ago against PayHere Retrieval API.
    */
   @Cron(CronExpression.EVERY_10_MINUTES)
   async handlePendingOrdersReconciliation(): Promise<{ swept: number; recovered: number }> {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const sixtyMinutesAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+    // Auto-expire stale abandoned pending checkouts older than 60 minutes
+    try {
+      await this.supabase
+        .from('orders')
+        .update({ status: 'expired' })
+        .eq('status', 'pending')
+        .lt('created_at', sixtyMinutesAgo);
+    } catch {}
 
     const { data: pendingOrders, error } = await this.supabase
       .from('orders')
       .select('*')
       .eq('status', 'pending')
       .lte('created_at', fiveMinutesAgo)
-      .gte('created_at', twentyFourHoursAgo)
+      .gte('created_at', sixtyMinutesAgo)
       .limit(20);
 
     if (error) {

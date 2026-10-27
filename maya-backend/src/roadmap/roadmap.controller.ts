@@ -11,6 +11,7 @@ import {
   Req,
   Res,
   UsePipes,
+  UseGuards,
   ValidationPipe,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -27,6 +28,7 @@ import {
 } from './dto/roadmap.dto.js';
 import { RecordUserRoadmapProgressDto } from './dto/user-roadmap-progress.dto.js';
 import { AuthService } from '../auth/auth.service.js';
+import { AdminGuard } from '../auth/guards/admin.guard.js';
 
 @Controller('v1')
 export class RoadmapController {
@@ -47,6 +49,7 @@ export class RoadmapController {
 
   // 2. Admin: Get all levels (draft + published)
   @Get('admin/roadmap')
+  @UseGuards(AdminGuard)
   async getAdminRoadmap() {
     const levels = await this.roadmapService.getAllLevels(true);
     return {
@@ -57,12 +60,14 @@ export class RoadmapController {
 
   // 3. Admin: Get single level details
   @Get('admin/roadmap/:id')
+  @UseGuards(AdminGuard)
   async getLevelById(@Param('id') id: string) {
     return this.roadmapService.getLevelById(id);
   }
 
   // 4. Admin: Create new level
   @Post('admin/roadmap')
+  @UseGuards(AdminGuard)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async createLevel(@Body() dto: CreateRoadmapLevelDto) {
     return this.roadmapService.createLevel(dto);
@@ -70,6 +75,7 @@ export class RoadmapController {
 
   // 5. Admin: Reorder levels
   @Put('admin/roadmap/reorder')
+  @UseGuards(AdminGuard)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async reorderLevels(@Body() dto: ReorderRoadmapLevelsDto) {
     return this.roadmapService.reorderLevels(dto.levels);
@@ -77,6 +83,7 @@ export class RoadmapController {
 
   // 6. Admin: Update level
   @Put('admin/roadmap/:id')
+  @UseGuards(AdminGuard)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async updateLevel(
     @Param('id') id: string,
@@ -87,12 +94,14 @@ export class RoadmapController {
 
   // 7. Admin: Delete level
   @Delete('admin/roadmap/:id')
+  @UseGuards(AdminGuard)
   async deleteLevel(@Param('id') id: string) {
     return this.roadmapService.deleteLevel(id);
   }
 
   // 8. Admin: Test / Simulate a level turn in the Playground
   @Post('admin/roadmap/simulate')
+  @UseGuards(AdminGuard)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async simulateLevelTurn(@Body() dto: SimulateLevelTurnDto) {
     return this.roadmapService.simulateTurn(dto);
@@ -100,6 +109,7 @@ export class RoadmapController {
 
   // 8b. Admin: Generate AI Persona, Emotion, Opening Protocol, and Directive
   @Post('admin/roadmap/generate-prompt')
+  @UseGuards(AdminGuard)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async generateScenarioPrompt(@Body() dto: GenerateScenarioPromptDto) {
     return this.roadmapService.generateScenarioPrompt(dto);
@@ -107,6 +117,7 @@ export class RoadmapController {
 
   // 8c. Admin: Synthesize Expressive Scenario TTS Preview
   @Post('admin/roadmap/synthesize-tts')
+  @UseGuards(AdminGuard)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async synthesizeScenarioTts(
     @Body() dto: SynthesizeScenarioTtsDto,
@@ -145,6 +156,7 @@ export class RoadmapController {
 
   // 8e. Admin: Upload Custom Pre-Recorded Audio WAV File
   @Post('admin/roadmap/upload-audio')
+  @UseGuards(AdminGuard)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async uploadScenarioAudio(@Body() dto: UploadScenarioAudioDto) {
     return this.roadmapService.uploadScenarioAudio(dto);

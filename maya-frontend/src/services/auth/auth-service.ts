@@ -273,6 +273,24 @@ class AuthService {
     } catch {}
     return OnboardingStore.getState().user;
   }
+
+  /**
+   * Revokes the current access token on the backend and purges all local session caches and cookies.
+   */
+  async logout(): Promise<void> {
+    const token = OnboardingStore.getState().accessToken;
+    OnboardingStore.clear();
+    if (token) {
+      try {
+        await fetch(`${this.baseUrl}/v1/auth/logout`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      } catch {}
+    }
+  }
 }
 
 export const authService = new AuthService();
