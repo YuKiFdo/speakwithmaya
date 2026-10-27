@@ -1063,20 +1063,14 @@ export default function RoadmapScreen() {
               ? 'Level Locked'
               : activePopup === 'level-up'
               ? 'Your Level Progress'
-              : activePopup === 'reactivate-plan'
-              ? 'Reactivate Maya to Continue'
               : undefined
           }
-          titleHighlight={isLevelLocked ? 'Locked' : activePopup === 'reactivate-plan' ? 'Reactivate' : undefined}
+          titleHighlight={isLevelLocked ? 'Locked' : undefined}
           subtitle={
             isLevelLocked && effectiveLockedLevel
               ? `Complete Level ${Math.max(1, (effectiveLockedLevel.levelNumber ?? 2) - 1)} first to unlock this session and keep moving forward on your journey.`
               : activePopup === 'level-up'
               ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep completing lessons on your roadmap to reach Level ${stats.currentLevelNumber + 1}!`
-              : activePopup === 'reactivate-plan'
-              ? stats.hasTelcoSubscription
-                ? 'Your daily mobile subscription was cancelled. Reactivate your mobile plan or upgrade to continue practicing on the roadmap.'
-                : 'Your subscription billing period has ended. Reactivate your plan or upgrade to Pro to continue practicing on the roadmap.'
               : undefined
           }
           primaryButtonText={
@@ -1086,13 +1080,9 @@ export default function RoadmapScreen() {
                 : 'Got It'
               : activePopup === 'level-up'
               ? 'Keep Learning'
-              : activePopup === 'reactivate-plan'
-              ? stats.hasTelcoSubscription
-                ? 'Reactivate Mobile Plan (Rs. 5/day)'
-                : 'Reactivate Pro Plan'
               : undefined
           }
-          primaryButtonIcon={isLevelLocked ? 'play' : activePopup === 'reactivate-plan' ? 'play' : undefined}
+          primaryButtonIcon={isLevelLocked ? 'play' : undefined}
           showPrimaryArrow={true}
           footerText={
             isLevelLocked
@@ -1106,17 +1096,25 @@ export default function RoadmapScreen() {
             const popupToActOn = activePopup || lastActivePopupRef.current;
             setActivePopup(null);
 
+            if (popupToActOn === 'reactivate-plan' || popupToActOn === 'unlock-premium' || popupToActOn === 'daily-limit') {
+              router.push('/upgrade');
+            } else if (popupToActOn === 'level-locked') {
+              if (currentActiveLevel) {
+                setSelectedMission(currentActiveLevel);
+              }
+            }
+          }}
+          onFooterButtonPress={async () => {
+            const popupToActOn = activePopup || lastActivePopupRef.current;
+            setActivePopup(null);
+
             if (popupToActOn === 'reactivate-plan') {
               if (stats.hasTelcoSubscription) {
                 try {
                   const res = await paymentApi.reactivateTelcoSubscription();
                   await stats.refreshStats();
                   if (res.requiresPin) {
-                    await mayaAlert.alert(
-                      res.message || 'A verification PIN has been sent to your mobile phone to reactivate your subscription.',
-                      'Verification PIN Sent',
-                      'info'
-                    );
+                    router.push('/(tabs)/account?reactivatePin=1' as any);
                   } else {
                     await mayaAlert.success(
                       res.message || 'Your mobile airtime subscription has been reactivated successfully!',
@@ -1127,19 +1125,12 @@ export default function RoadmapScreen() {
                   await mayaAlert.error(err.message || 'Failed to reactivate subscription.', 'Reactivation Error');
                 }
               } else {
-                router.push('/upgrade');
+                router.push('/(tabs)/account?reactivate=1' as any);
               }
-            } else if (popupToActOn === 'unlock-premium' || popupToActOn === 'daily-limit') {
-              router.push('/upgrade');
-            } else if (popupToActOn === 'level-locked') {
-              if (currentActiveLevel) {
-                setSelectedMission(currentActiveLevel);
-              }
+              return;
             }
-          }}
-          onFooterButtonPress={() => {
+
             router.push('/upgrade');
-            setActivePopup(null);
           }}
         />
 

@@ -258,7 +258,7 @@ export default function AccountScreen() {
   const handleCancelSubscription = async () => {
     // If subscription is already cancelled or locked, direct to reactivate
     if (stats.isSubscriptionLocked || stats.isTelcoUnsubscribed) {
-      await handleReactivateSubscription();
+      setActivePopup('reactivate-plan');
       return;
     }
 
@@ -335,7 +335,13 @@ export default function AccountScreen() {
     );
   };
 
-  const searchParams = useLocalSearchParams<{ card_update?: string; payment?: string; order_id?: string }>();
+  const searchParams = useLocalSearchParams<{
+    card_update?: string;
+    payment?: string;
+    order_id?: string;
+    reactivatePin?: string;
+    reactivate?: string;
+  }>();
   const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
   const [isUpdatingCard, setIsUpdatingCard] = useState(false);
 
@@ -351,6 +357,16 @@ export default function AccountScreen() {
   useEffect(() => {
     fetchSubscription();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.reactivatePin === '1') {
+      setReactivateOtpDigits(Array(6).fill(''));
+      setReactivateOtpError(null);
+      setIsReactivateOtpModalOpen(true);
+    } else if (searchParams.reactivate === '1') {
+      setActivePopup('reactivate-plan');
+    }
+  }, [searchParams.reactivatePin, searchParams.reactivate]);
 
   // Handle PayHere Preapproval redirect returns for card updates & plan payments
   useEffect(() => {
@@ -464,7 +480,7 @@ export default function AccountScreen() {
             totalMinutes={totalMinutes}
             resetsInText={resetsInText}
             onUpgrade={() => router.push('/upgrade')}
-            onReactivate={() => setIsReactivateSelectionModalOpen(true)}
+            onReactivate={() => setActivePopup('reactivate-plan')}
             onGetExtraTime={() => setActivePopup('get-extra-time')}
           />
         )}
@@ -573,7 +589,7 @@ export default function AccountScreen() {
                     onUpgrade={() => router.push('/upgrade')}
                     onGetExtraTime={() => setActivePopup('get-extra-time')}
                     onChangePayment={handleChangePayment}
-                    onReactivate={() => setIsReactivateSelectionModalOpen(true)}
+                    onReactivate={() => setActivePopup('reactivate-plan')}
                   />
 
                   <CustomerSupportCard onEmailPress={handleSupportEmail} />
@@ -621,7 +637,7 @@ export default function AccountScreen() {
                   onUpgrade={() => router.push('/upgrade')}
                   onGetExtraTime={() => setActivePopup('get-extra-time')}
                   onChangePayment={handleChangePayment}
-                  onReactivate={() => setIsReactivateSelectionModalOpen(true)}
+                  onReactivate={() => setActivePopup('reactivate-plan')}
                 />
 
                 <PreferencesCard
@@ -949,16 +965,26 @@ export default function AccountScreen() {
           showPrimaryArrow={activePopup === 'level-up' ? true : undefined}
           onClose={() => setActivePopup(null)}
           onPrimaryPress={() => {
-            if (activePopup === 'level-up') {
+            const currentPop = activePopup;
+            setActivePopup(null);
+            if (currentPop === 'level-up') {
               router.push('/(tabs)/roadmap');
-            } else if (activePopup === 'unlock-premium' || activePopup === 'daily-limit') {
+            } else if (
+              currentPop === 'reactivate-plan' ||
+              currentPop === 'unlock-premium' ||
+              currentPop === 'daily-limit'
+            ) {
               router.push('/upgrade');
             }
-            setActivePopup(null);
           }}
           onFooterButtonPress={() => {
-            router.push('/upgrade');
+            const currentPop = activePopup;
             setActivePopup(null);
+            if (currentPop === 'reactivate-plan') {
+              handleReactivateSubscription();
+              return;
+            }
+            router.push('/upgrade');
           }}
         />
       </View>
@@ -978,7 +1004,6 @@ function ProfileCard({
   onEdit,
   onTogglePlan,
   onCancelSubscription,
-  onLogout,
 }: {
   name: string;
   initials?: string;
@@ -998,65 +1023,66 @@ function ProfileCard({
           <Text style={styles.avatarInitialsText}>{initials}</Text>
         </View>
 
-        {/* Profile Info */}
+        {/* Profile Name & Member Since */}
         <View style={styles.profileInfoCol}>
-          <View style={styles.profileNameRow}>
-            <Text style={styles.profileNameText} numberOfLines={1}>{name}</Text>
-            <View style={styles.profileHeaderActions}>
-              <Pressable
-                style={({ pressed }) => [styles.editBtn, pressed && styles.cardPressed]}
-                onPress={onEdit}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Edit Profile"
-              >
-                <Feather name="edit-2" size={13} color="#2563EB" />
-                <Text style={styles.editBtnText}>Edit</Text>
-              </Pressable>
-
-              <Pressable
-                style={({ pressed }) => [styles.logoutHeaderBtn, pressed && styles.cardPressed]}
-                onPress={onLogout}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Log Out"
-              >
-                <Feather name="log-out" size={13} color="#DC2626" />
-                <Text style={styles.logoutHeaderText}>Log Out</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <Text style={styles.memberSinceText}>{memberSince}</Text>
-
-          <View style={styles.profileBadgesRow}>
-            <Pressable
-              onPress={onTogglePlan}
-              hitSlop={8}
-              style={({ pressed }) => [
-                styles.proPlanPill,
-                isLocked && styles.inactivePlanPill,
-                pressed && styles.cardPressed,
-              ]}
-            >
-              <Text style={[styles.proPlanPillText, isLocked && styles.inactivePlanPillText]}>
-                {isPro
-                  ? (isLocked ? 'Pro Plan (Inactive)' : 'Pro Plan')
-                  : (isLocked ? 'Starter Plan (Inactive)' : 'Starter Plan')}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={onCancelSubscription}
-              hitSlop={8}
-              style={({ pressed }) => [pressed && styles.cardPressed]}
-            >
-              <Text style={[styles.cancelSubText, isLocked && { color: '#2563EB' }]}>
-                {isLocked ? 'Reactivate Subscription' : 'Cancel Subscription'}
-              </Text>
-            </Pressable>
-          </View>
+          <Text style={styles.profileNameText} numberOfLines={1}>
+            {name}
+          </Text>
+          <Text style={styles.memberSinceText} numberOfLines={1}>
+            {memberSince}
+          </Text>
         </View>
+
+        {/* Clean Edit Action Pill */}
+        <Pressable
+          style={({ pressed }) => [styles.editBtn, pressed && styles.cardPressed]}
+          onPress={onEdit}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Edit Profile"
+        >
+          <Feather name="edit-2" size={13} color="#2563EB" />
+          <Text style={styles.editBtnText}>Edit</Text>
+        </Pressable>
+      </View>
+
+      {/* Bottom Plan Status & Action Footer Row (Full Width — Zero Overflow) */}
+      <View style={styles.profileFooterBar}>
+        <Pressable
+          onPress={onTogglePlan}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.proPlanPill,
+            isLocked && styles.inactivePlanPill,
+            pressed && styles.cardPressed,
+          ]}
+        >
+          <View
+            style={[
+              styles.planStatusDot,
+              { backgroundColor: isLocked ? '#EF4444' : '#2563EB' },
+            ]}
+          />
+          <Text style={[styles.proPlanPillText, isLocked && styles.inactivePlanPillText]}>
+            {isPro
+              ? isLocked
+                ? 'Pro Plan · Inactive'
+                : 'Pro Plan'
+              : isLocked
+              ? 'Starter Plan · Inactive'
+              : 'Starter Plan'}
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={onCancelSubscription}
+          hitSlop={8}
+          style={({ pressed }) => [styles.profileActionLinkBtn, pressed && styles.cardPressed]}
+        >
+          <Text style={[styles.cancelSubText, isLocked && styles.reactivateSubText]}>
+            {isLocked ? 'Reactivate →' : 'Cancel Plan'}
+          </Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -1267,7 +1293,7 @@ function CurrentPlanCard({
           style={[
             styles.starterBadgePill,
             isSubscriptionLocked
-              ? { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }
+              ? { backgroundColor: '#FEF2F2', borderColor: '#FECACA', flexDirection: 'row', gap: 5 }
               : isGracePeriodActive
               ? { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }
               : isPastDue
@@ -1275,6 +1301,9 @@ function CurrentPlanCard({
               : isTimeExpired && { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
           ]}
         >
+          {isSubscriptionLocked && (
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#EF4444' }} />
+          )}
           <Text
             style={[
               styles.starterBadgeText,
@@ -1299,23 +1328,6 @@ function CurrentPlanCard({
           </Text>
         </View>
       </View>
-
-      {/* Inactive / Locked Subscription Banner */}
-      {isSubscriptionLocked && (
-        <View style={[styles.pastDueBanner, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
-          <Feather name="lock" size={18} color="#DC2626" style={{ marginTop: 2 }} />
-          <View style={{ flex: 1, marginLeft: 10 }}>
-            <Text style={[styles.pastDueBannerTitle, { color: '#B91C1C' }]}>
-              {hasTelcoSubscription ? 'Daily Subscription Inactive' : 'Subscription Expired'}
-            </Text>
-            <Text style={[styles.pastDueBannerSubtitle, { color: '#991B1B' }]}>
-              {hasTelcoSubscription
-                ? 'Your daily subscription was cancelled. Reactivate your daily subscription or upgrade to Pro to continue speaking with Maya.'
-                : 'Your subscription billing period has ended. Reactivate or choose a plan to continue speaking with Maya.'}
-            </Text>
-          </View>
-        </View>
-      )}
 
       {/* Grace Period Active Banner */}
       {isGracePeriodActive && !isSubscriptionLocked && (
@@ -1345,11 +1357,11 @@ function CurrentPlanCard({
 
       {/* Main Title & Subtitle */}
       <Text style={styles.planMainTitle}>
-        {planDisplayName} {isSubscriptionLocked ? '(Inactive)' : isPro ? '(Monthly)' : '(5 Min/Day)'}
+        {planDisplayName} {!isSubscriptionLocked ? (isPro ? '· Monthly' : '· 5 Min/Day') : ''}
       </Text>
       <Text style={styles.planMainSubtitle}>
         {isSubscriptionLocked
-          ? 'Reactivate your subscription or upgrade to Pro to unlock voice practice sessions.'
+          ? 'Your subscription is paused. Upgrade to Pro or reactivate your plan to continue practicing with Maya.'
           : isGracePeriodActive
           ? `Your plan remains active until ${formatBillingDate(gracePeriodEndDate)}.`
           : isPastDue
@@ -1359,25 +1371,34 @@ function CurrentPlanCard({
           : 'Perfect for getting started with Maya.'}
       </Text>
 
-      {/* Table Information Rows */}
+      {/* Table Information Rows inside sleek surface container */}
       <View style={styles.planInfoTable}>
         {/* Row 1: Current Plan */}
         <View style={styles.planInfoRow}>
-          <Text style={styles.planInfoLabel}>Current Plan</Text>
+          <Text style={styles.planInfoLabel}>Plan</Text>
           <View style={styles.planInfoValueCol}>
-            <Text style={styles.planInfoValue}>
-              {planDisplayName} {isSubscriptionLocked ? '(Inactive)' : ''}
-            </Text>
+            <Text style={styles.planInfoValue}>{planDisplayName}</Text>
           </View>
         </View>
 
-        {/* Row 2: Next Billing Date / Expiry */}
+        <View style={styles.planInfoRowDivider} />
+
+        {/* Row 2: Next Billing Date / Status */}
         <View style={styles.planInfoRow}>
           <Text style={styles.planInfoLabel}>
-            {isGracePeriodActive ? 'Access Expires' : 'Next Billing Date'}
+            {isGracePeriodActive
+              ? 'Access Expires'
+              : isSubscriptionLocked
+              ? 'Billing Status'
+              : 'Next Billing Date'}
           </Text>
           <View style={styles.planInfoValueCol}>
-            <Text style={styles.planInfoValue}>
+            <Text
+              style={[
+                styles.planInfoValue,
+                isSubscriptionLocked && { color: '#DC2626' },
+              ]}
+            >
               {isGracePeriodActive
                 ? formatBillingDate(gracePeriodEndDate)
                 : isSubscriptionLocked
@@ -1387,6 +1408,8 @@ function CurrentPlanCard({
           </View>
         </View>
 
+        <View style={styles.planInfoRowDivider} />
+
         {/* Row 3: Payment Method */}
         <View style={styles.planInfoRow}>
           <Text style={styles.planInfoLabel}>Payment Method</Text>
@@ -1394,12 +1417,12 @@ function CurrentPlanCard({
             <View style={styles.paymentCardInfo}>
               <Ionicons
                 name={hasTelcoSubscription ? 'phone-portrait-outline' : 'card-outline'}
-                size={17}
+                size={16}
                 color="#2563EB"
-                style={{ marginRight: 8 }}
+                style={{ marginRight: 6 }}
               />
               <Text style={styles.planInfoValue}>
-                {hasTelcoSubscription ? 'Daily Subscription' : cardDisplayText}
+                {hasTelcoSubscription ? 'Mobile Balance' : cardDisplayText}
               </Text>
             </View>
             {!hasTelcoSubscription && (
@@ -1407,7 +1430,7 @@ function CurrentPlanCard({
                 onPress={onChangePayment}
                 disabled={isUpdatingPayment}
                 hitSlop={8}
-                style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+                style={({ pressed }) => [{ marginLeft: 10 }, pressed && { opacity: 0.7 }]}
                 accessibilityRole="button"
                 accessibilityLabel="Change payment card"
               >
@@ -1656,17 +1679,19 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'regular'),
   },
   mobileHeadingSection: {
-    marginTop: 8,
+    marginTop: 12,
     marginBottom: 16,
   },
   headingTitleMobile: {
-    fontSize: 26,
-    color: '#10213D',
-    letterSpacing: -0.3,
-    ...fontStyle('inter', 'bold'),
+    fontSize: 24,
+    lineHeight: 32,
+    color: '#0F172A',
+    letterSpacing: -0.4,
+    ...fontStyle('outfit', 'bold'),
   },
   headingSubtitleMobile: {
     fontSize: 13,
+    lineHeight: 19,
     color: '#64748B',
     marginTop: 3,
     ...fontStyle('inter', 'regular'),
@@ -1695,18 +1720,18 @@ const styles = StyleSheet.create({
   /* Common Card Container */
   cardContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    padding: 20,
+    padding: 18,
     ...Platform.select({
       web: {
-        boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.02)',
+        boxShadow: '0px 2px 8px rgba(15, 23, 42, 0.03)',
       } as any,
       default: {
         elevation: 1,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.03,
         shadowRadius: 6,
       },
@@ -1724,23 +1749,25 @@ const styles = StyleSheet.create({
   profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 14,
   },
   avatarInitialsCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   avatarInitialsText: {
-    fontSize: 20,
+    fontSize: 18,
     color: '#FFFFFF',
-    ...fontStyle('inter', 'extraBold'),
+    ...fontStyle('outfit', 'bold'),
   },
   profileInfoCol: {
     flex: 1,
+    minWidth: 0,
   },
   profileNameRow: {
     flexDirection: 'row',
@@ -1748,19 +1775,23 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   profileNameText: {
-    fontSize: 17,
-    color: '#10213D',
-    ...fontStyle('inter', 'bold'),
+    fontSize: 17.5,
+    lineHeight: 23,
+    color: '#0F172A',
+    ...fontStyle('outfit', 'bold'),
   },
   editBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
+    gap: 5,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 6.5,
+    flexShrink: 0,
   },
   editBtnText: {
-    fontSize: 13,
+    fontSize: 12.5,
     color: '#2563EB',
     ...fontStyle('inter', 'semiBold'),
   },
@@ -1768,37 +1799,61 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     color: '#64748B',
     marginTop: 2,
-    marginBottom: 8,
     ...fontStyle('inter', 'regular'),
+  },
+  profileFooterBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 8,
   },
   profileBadgesRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   proPlanPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     backgroundColor: '#EFF6FF',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 4.5,
   },
   inactivePlanPill: {
     backgroundColor: '#FEF2F2',
-    borderWidth: 1,
     borderColor: '#FECACA',
   },
+  planStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
   proPlanPillText: {
-    fontSize: 11.5,
+    fontSize: 12,
     color: '#2563EB',
-    ...fontStyle('inter', 'bold'),
+    ...fontStyle('inter', 'semiBold'),
   },
   inactivePlanPillText: {
     color: '#DC2626',
   },
+  profileActionLinkBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
   cancelSubText: {
-    fontSize: 11.5,
-    color: '#EF4444',
-    marginLeft: 14,
+    fontSize: 12.5,
+    color: '#64748B',
     ...fontStyle('inter', 'semiBold'),
+  },
+  reactivateSubText: {
+    color: '#2563EB',
   },
 
   /* Stats Card */
@@ -1948,20 +2003,32 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'semiBold'),
   },
   planMainTitle: {
-    fontSize: 24,
+    fontSize: 21,
+    lineHeight: 27,
     color: '#0F172A',
     letterSpacing: -0.4,
-    marginBottom: 6,
-    ...fontStyle('inter', 'bold'),
+    marginBottom: 4,
+    ...fontStyle('outfit', 'bold'),
   },
   planMainSubtitle: {
-    fontSize: 14,
+    fontSize: 13.5,
+    lineHeight: 20,
     color: '#64748B',
-    marginBottom: 20,
+    marginBottom: 16,
     ...fontStyle('inter', 'regular'),
   },
   planInfoTable: {
-    gap: 14,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  planInfoRowDivider: {
+    height: 1,
+    backgroundColor: '#EDF2F7',
   },
   planInfoRow: {
     flexDirection: 'row',
@@ -1970,7 +2037,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   planInfoLabel: {
-    fontSize: 13.5,
+    fontSize: 13,
     color: '#64748B',
     ...fontStyle('inter', 'regular'),
   },
@@ -1981,16 +2048,15 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   planInfoValue: {
-    fontSize: 14,
+    fontSize: 13.5,
     color: '#0F172A',
     textAlign: 'right',
-    ...fontStyle('inter', 'bold'),
+    ...fontStyle('inter', 'semiBold'),
   },
   paymentMethodRow: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
   },
   paymentCardInfo: {
     flexDirection: 'row',

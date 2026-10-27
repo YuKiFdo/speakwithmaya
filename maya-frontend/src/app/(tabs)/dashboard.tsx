@@ -889,32 +889,22 @@ export default function DashboardScreen() {
           title={
             activePopup === 'level-up'
               ? 'Your Level Progress'
-              : activePopup === 'reactivate-plan'
-                ? 'Reactivate Maya to Continue'
-                : undefined
+              : undefined
           }
           subtitle={
             activePopup === 'level-up'
               ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep completing speaking lessons to reach Level ${stats.currentLevelNumber + 1}!`
-              : activePopup === 'reactivate-plan'
-                ? hasTelcoSubscription
-                  ? 'Your daily mobile subscription was cancelled. Reactivate your mobile plan or upgrade to Pro to unlock voice practice sessions.'
-                  : 'Your subscription billing cycle has ended. Reactivate your plan or upgrade to Pro to continue practicing with Maya.'
-                : undefined
+              : undefined
           }
           primaryButtonText={
             activePopup === 'level-up'
               ? 'View Learning Roadmap'
-              : activePopup === 'reactivate-plan'
-                ? hasTelcoSubscription
-                  ? 'Reactivate Mobile Plan (Rs. 5/day)'
-                  : 'Reactivate Pro Plan'
-                : undefined
+              : undefined
           }
           primaryButtonIcon={
-            activePopup === 'level-up' ? 'arrow' : activePopup === 'reactivate-plan' ? 'play' : undefined
+            activePopup === 'level-up' ? 'arrow' : undefined
           }
-          showPrimaryArrow={activePopup === 'level-up' || activePopup === 'reactivate-plan'}
+          showPrimaryArrow={activePopup === 'level-up' ? true : undefined}
           onClose={() => setActivePopup(null)}
           onPrimaryPress={async () => {
             const currentPop = activePopup;
@@ -922,17 +912,23 @@ export default function DashboardScreen() {
 
             if (currentPop === 'level-up') {
               router.push('/(tabs)/roadmap');
-            } else if (currentPop === 'reactivate-plan') {
+            } else if (currentPop === 'reactivate-plan' || currentPop === 'unlock-premium' || currentPop === 'daily-limit') {
+              router.push('/upgrade');
+            } else if (currentPop === 'practice-complete') {
+              handleStartTalking();
+            }
+          }}
+          onFooterButtonPress={async () => {
+            const currentPop = activePopup;
+            setActivePopup(null);
+
+            if (currentPop === 'reactivate-plan') {
               if (hasTelcoSubscription) {
                 try {
                   const res = await paymentApi.reactivateTelcoSubscription();
                   await stats.refreshStats();
                   if (res.requiresPin) {
-                    await mayaAlert.alert(
-                      res.message || 'A verification PIN has been sent to your mobile phone to reactivate your subscription.',
-                      'Verification PIN Sent',
-                      'info'
-                    );
+                    router.push('/(tabs)/account?reactivatePin=1' as any);
                   } else {
                     await mayaAlert.success(
                       res.message || 'Your mobile airtime subscription has been reactivated successfully!',
@@ -943,17 +939,12 @@ export default function DashboardScreen() {
                   await mayaAlert.error(err.message || 'Failed to reactivate subscription.', 'Reactivation Error');
                 }
               } else {
-                router.push('/upgrade');
+                router.push('/(tabs)/account?reactivate=1' as any);
               }
-            } else if (currentPop === 'unlock-premium' || currentPop === 'daily-limit') {
-              router.push('/upgrade');
-            } else if (currentPop === 'practice-complete') {
-              handleStartTalking();
+              return;
             }
-          }}
-          onFooterButtonPress={() => {
+
             router.push('/upgrade');
-            setActivePopup(null);
           }}
         />
 

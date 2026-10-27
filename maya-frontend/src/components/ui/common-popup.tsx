@@ -94,7 +94,7 @@ const PRESET_IMAGES = {
   'practice-complete': require('@/assets/images/mayathumb.png'),
   'level-locked': require('@/assets/images/mayalocked.png'),
   'hint-limit': require('@/assets/images/mayacrown.png'),
-  'reactivate-plan': require('@/assets/images/mayacrown.png'),
+  'reactivate-plan': require('@/assets/images/mayalocked.png'),
 };
 
 /**
@@ -323,17 +323,17 @@ export function CommonPopup({
     if (finalShowClose === undefined) finalShowClose = true;
   } else if (resolvedPreset === 'reactivate-plan') {
     if (!finalTitle) {
-      finalTitle = 'Reactivate Maya to Continue';
-      finalHighlight = 'Reactivate';
+      finalTitle = 'Upgrade Your Plan\nto Continue';
+      finalHighlight = 'to Continue';
     }
     if (!finalSubtitle) {
-      finalSubtitle = 'Your subscription is currently inactive. Reactivate your plan or upgrade to continue practicing with Maya.';
+      finalSubtitle = 'Your subscription was cancelled. Upgrade your plan to continue practicing with Maya.';
     }
-    if (!finalBtnText) finalBtnText = 'Reactivate Plan';
-    if (finalBtnIcon === undefined) finalBtnIcon = 'play';
+    if (!finalBtnText) finalBtnText = 'Upgrade Your Plan';
+    if (finalBtnIcon === undefined) finalBtnIcon = 'crown';
     if (finalShowArrow === undefined) finalShowArrow = true;
     if (finalFooterBtn === undefined) {
-      finalFooterBtn = 'View All Upgrade Plans →';
+      finalFooterBtn = 'Reactivate Starter Plan →';
     }
     if (finalShowClose === undefined) finalShowClose = true;
   }
