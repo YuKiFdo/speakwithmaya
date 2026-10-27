@@ -156,20 +156,20 @@ export class PayHereService {
         name: 'Maya AI Pro (3 Months)',
         tier: 'pro',
         amount: 8640.0,
-        allowance: 600,
+        allowance: 1800,
         isPreapproval: true,
       },
       basic: {
         name: 'Maya AI Basic Monthly',
         tier: 'basic',
-        amount: 2700.0,
+        amount: 3600.0,
         allowance: 450,
         isPreapproval: true,
       },
       pro: {
         name: 'Maya AI Pro Monthly',
         tier: 'pro',
-        amount: 3600.0,
+        amount: 5400.0,
         allowance: 600,
         isPreapproval: true,
       },
@@ -485,8 +485,8 @@ export class PayHereService {
         const customerToken = payload.customer_token || (payload as any).card_token;
         const planTier = planTierKey === '3-months-pro' ? 'pro' : planTierKey;
         const isQuarterly = planTierKey === '3-months-pro';
-        const amount = isQuarterly ? 8640 : planTier === 'basic' ? 2700 : planTier === 'premium' ? 7200 : 3600;
-        const allowance = planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
+        const amount = isQuarterly ? 8640 : planTier === 'basic' ? 3600 : planTier === 'premium' ? 7200 : 5400;
+        const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
         const cycleDays = isQuarterly ? 90 : 30;
 
         // Determine if PayHere captured Month 1 upfront in preapproval or if we charge via token
@@ -583,6 +583,14 @@ export class PayHereService {
             subId = newSub?.id;
           }
 
+          // Preserve user's existing add-on top-up minutes when activating/upgrading plan
+          const { data: existingProfile } = await this.supabase
+            .from('profiles')
+            .select('add_on_minutes_balance')
+            .eq('id', userId)
+            .maybeSingle();
+          const retainedAddOn = existingProfile?.add_on_minutes_balance || 0;
+
           // Update User Profile Quotas & Plan Tier
           await this.supabase
             .from('profiles')
@@ -591,7 +599,7 @@ export class PayHereService {
               plan_status: 'active',
               billing_cycle: isQuarterly ? 'quarterly' : 'monthly',
               monthly_minutes_allowance: allowance,
-              minutes_balance: allowance,
+              minutes_balance: allowance + retainedAddOn,
               minutes_reset_at: new Date(nextBillingDate).toISOString(),
               updated_at: new Date().toISOString(),
             })
@@ -720,8 +728,14 @@ export class PayHereService {
     }
 
     const planTier = planTierKey === '3-months-pro' ? 'pro' : planTierKey;
-    const minutesAllowance =
-      planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
+    const isQuarterlySub = planTierKey === '3-months-pro' || Boolean(payload.item_recurrence?.includes('3'));
+    const minutesAllowance = isQuarterlySub
+      ? 1800
+      : planTier === 'basic'
+      ? 450
+      : planTier === 'premium'
+      ? 1200
+      : 600;
 
     this.logger.log(`[PayHereWebhook] 📦 Subscription Plan: tier=${planTier}, minutes_allowance=${minutesAllowance} min/mo`);
 
@@ -805,15 +819,23 @@ export class PayHereService {
           }
         }
 
+        // Preserve user's existing add-on top-up minutes
+        const { data: existingProfile } = await this.supabase
+          .from('profiles')
+          .select('add_on_minutes_balance')
+          .eq('id', userId)
+          .maybeSingle();
+        const retainedAddOn = existingProfile?.add_on_minutes_balance || 0;
+
         // Update User Profile Quotas & Plan Tier
         const { error: profileErr } = await this.supabase
           .from('profiles')
           .update({
             plan_tier: planTier,
             plan_status: 'active',
-            billing_cycle: payload.item_recurrence?.includes('3') ? 'quarterly' : 'monthly',
+            billing_cycle: isQuarterlySub ? 'quarterly' : 'monthly',
             monthly_minutes_allowance: minutesAllowance,
-            minutes_balance: minutesAllowance,
+            minutes_balance: minutesAllowance + retainedAddOn,
             minutes_reset_at: new Date(nextBillingDate).toISOString(),
             updated_at: new Date().toISOString(),
           })
@@ -889,12 +911,20 @@ export class PayHereService {
           }
         }
 
-        // Reset user's monthly practice minutes allowance
+        // Reset user's practice minutes allowance while preserving add-on minutes
+        const { data: existingRenewalProfile } = await this.supabase
+          .from('profiles')
+          .select('add_on_minutes_balance')
+          .eq('id', userId)
+          .maybeSingle();
+        const retainedRenewalAddOn = existingRenewalProfile?.add_on_minutes_balance || 0;
+
         const { error: profResetErr } = await this.supabase
           .from('profiles')
           .update({
             plan_status: 'active',
-            minutes_balance: minutesAllowance,
+            monthly_minutes_allowance: minutesAllowance,
+            minutes_balance: minutesAllowance + retainedRenewalAddOn,
             minutes_reset_at: new Date(nextBillingDate).toISOString(),
             updated_at: new Date().toISOString(),
           })
@@ -1136,10 +1166,11 @@ export class PayHereService {
     // 2. If subscription has preapproved token, charge via PayHere Automated Charging API
     if (sub.customer_token && String(sub.customer_token).trim().length > 0) {
       const planTier = sub.plan_tier || 'pro';
-      const amount = parseFloat(sub.amount_lkr || '3600');
       const isQuarterly = sub.billing_cycle === '3 Month';
+      const defaultAmount = isQuarterly ? 8640 : planTier === 'basic' ? 3600 : planTier === 'premium' ? 7200 : 5400;
+      const amount = parseFloat(sub.amount_lkr || String(defaultAmount));
       const cycleDays = isQuarterly ? 90 : 30;
-      const allowance = planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
+      const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
       const retryOrderId = `MAYA-RENEW-RETRY-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
       this.logger.log(`[PayHereRetry] ⚡ Executing token charge retry for user ${sub.user_id}, plan=${planTier}, amount=${amount} LKR...`);
@@ -1170,11 +1201,19 @@ export class PayHereService {
           })
           .eq('id', sub.id);
 
+        const { data: retryProfile } = await this.supabase
+          .from('profiles')
+          .select('add_on_minutes_balance')
+          .eq('id', sub.user_id)
+          .maybeSingle();
+        const retryAddOn = retryProfile?.add_on_minutes_balance || 0;
+
         await this.supabase
           .from('profiles')
           .update({
             plan_status: 'active',
-            minutes_balance: allowance,
+            monthly_minutes_allowance: allowance,
+            minutes_balance: allowance + retryAddOn,
             minutes_reset_at: nextBilling.toISOString(),
             updated_at: new Date().toISOString(),
           })
@@ -1310,12 +1349,13 @@ export class PayHereService {
     if (!data) return null;
 
     const hasCustomerToken = Boolean(data.customer_token && String(data.customer_token).trim().length > 0);
+    const isSubActive = data.status === 'ACTIVE' || data.status === 'PAST_DUE';
 
     return {
       ...data,
       has_saved_card: Boolean(data.card_masked),
-      can_auto_charge: hasCustomerToken,
-      customer_token: data.customer_token || null,
+      can_auto_charge: hasCustomerToken && isSubActive,
+      customer_token: isSubActive ? data.customer_token || null : null,
     };
   }
 
@@ -1377,7 +1417,11 @@ export class PayHereService {
    * Automated Charging: Programmatically charges a customer's pre-approved saved card on demand.
    * Can be used for extra talk-time packages (+30 min, +120 min, +300 min) or plan upgrades without re-entering card.
    */
-  async chargeSavedCard(userId: string, dto: ChargeSavedCardDto) {
+  async chargeSavedCard(
+    userId: string,
+    dto: ChargeSavedCardDto,
+    auditMeta?: { clientIp?: string; userAgent?: string },
+  ) {
     this.logger.log(`[PayHereAutoCharge] ⚡ Request to charge saved card for user ${userId}: ${JSON.stringify(dto)}`);
 
     // 1. Fetch user's active or recent subscription record
@@ -1393,9 +1437,9 @@ export class PayHereService {
       this.logger.error(`[PayHereAutoCharge] Error looking up user subscription: ${subErr.message}`);
     }
 
-    if (!sub || !sub.customer_token || !String(sub.customer_token).trim()) {
+    if (!sub || !sub.customer_token || !String(sub.customer_token).trim() || sub.status === 'CANCELLED') {
       throw new BadRequestException(
-        'No pre-approved card token found on file for 1-click charging. Please complete payment via standard PayHere checkout.'
+        'No active pre-approved card token found on file for 1-click charging. Please complete payment via standard PayHere checkout.'
       );
     }
 
@@ -1407,6 +1451,9 @@ export class PayHereService {
     let allowance = 0;
     let itemName = '';
     let isTopup = false;
+    const isQuarterly = dto.planTier === '3-months-pro';
+    const normalizedPlanTier = isQuarterly ? 'pro' : dto.planTier;
+    const cycleDays = isQuarterly ? 90 : 30;
 
     if (dto.packageId) {
       isTopup = true;
@@ -1427,12 +1474,16 @@ export class PayHereService {
       }
     } else if (dto.planTier) {
       isTopup = false;
-      if (dto.planTier === 'basic') {
-        amount = 2700;
+      if (dto.planTier === '3-months-pro') {
+        amount = 8640;
+        allowance = 1800;
+        itemName = 'Maya AI Pro Plan (3 Months)';
+      } else if (dto.planTier === 'basic') {
+        amount = 3600;
         allowance = 450;
         itemName = 'Maya Basic Plan (Monthly)';
       } else if (dto.planTier === 'pro') {
-        amount = 3600;
+        amount = 5400;
         allowance = 600;
         itemName = 'Maya Pro Plan (Monthly)';
       } else if (dto.planTier === 'premium') {
@@ -1442,6 +1493,53 @@ export class PayHereService {
       } else {
         throw new BadRequestException(`Invalid plan tier: ${dto.planTier}`);
       }
+
+      // Check if user is switching to a lower plan (downgrade) while their current subscription period is still active.
+      // Per PayHere tokenization best practices, NEVER double-charge immediately on a downgrade or wipe already-paid minutes!
+      const tierWeights: Record<string, number> = { starter: 0, basic: 1, pro: 2, premium: 3 };
+      const { data: currentProfile } = await this.supabase
+        .from('profiles')
+        .select('plan_tier, plan_status, minutes_balance')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const currentTier = (currentProfile?.plan_tier || sub.plan_tier || 'starter').toLowerCase();
+      const currentWeight = tierWeights[currentTier] ?? 0;
+      const targetWeight = tierWeights[normalizedPlanTier || 'pro'] ?? 0;
+      const hasFutureBillingDate =
+        sub.next_billing_date && new Date(sub.next_billing_date).getTime() > Date.now();
+
+      if (
+        !isQuarterly &&
+        sub.status === 'ACTIVE' &&
+        currentProfile?.plan_status === 'active' &&
+        hasFutureBillingDate &&
+        targetWeight > 0 &&
+        targetWeight < currentWeight
+      ) {
+        await this.supabase
+          .from('subscriptions')
+          .update({
+            plan_tier: normalizedPlanTier,
+            billing_cycle: '1 Month',
+            amount_lkr: amount,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', sub.id);
+
+        this.logger.log(
+          `[PayHereAutoCharge] 📅 Scheduled downgrade for user ${userId} from ${currentTier} to ${normalizedPlanTier} effective on next billing date (${sub.next_billing_date}). No immediate charge.`,
+        );
+
+        return {
+          success: true,
+          message: `Your plan switch to ${normalizedPlanTier?.toUpperCase()} (LKR ${amount.toLocaleString()}/month) is scheduled for your next billing date (${sub.next_billing_date}). You keep all your current minutes until then!`,
+          newBalance: currentProfile?.minutes_balance,
+          planTier: currentTier,
+          scheduledPlanTier: normalizedPlanTier,
+          cardMasked,
+        };
+      }
     } else {
       throw new BadRequestException('Either packageId or planTier must be specified.');
     }
@@ -1449,6 +1547,18 @@ export class PayHereService {
     const orderId = isTopup
       ? `MAYA-TOPUP-AUTO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`
       : `MAYA-SUB-AUTO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const authorizationAudit = {
+      consentTimestamp: new Date().toISOString(),
+      clientIp: auditMeta?.clientIp || 'unknown',
+      userAgent: auditMeta?.userAgent || 'unknown',
+      authorizedAmountLkr: amount,
+      requestedItem: itemName,
+      planTier: dto.planTier || dto.packageId,
+      billingCycle: isQuarterly ? '3 Month' : isTopup ? 'one_time' : '1 Month',
+      cardMasked,
+      merchant: 'IDEACIPHER PVT LTD',
+    };
 
     // 3. Trigger PayHere Automated Charging API via centralized executor
     const chargeResult = await this.executeTokenCharge({
@@ -1469,13 +1579,16 @@ export class PayHereService {
       await this.supabase.from('orders').insert({
         user_id: userId,
         order_type: isTopup ? 'add_on_topup' : 'subscription_renewal',
-        plan_tier: dto.planTier || sub.plan_tier,
+        plan_tier: normalizedPlanTier || sub.plan_tier,
         amount_lkr: amount,
         minutes_credited: 0,
         payment_gateway: 'payhere_token',
         gateway_payment_id: orderId,
         status: 'failed',
-        raw_payload: chargeResult.data,
+        raw_payload: {
+          gatewayResponse: chargeResult.data,
+          authorizationAudit,
+        },
       });
 
       throw new BadRequestException(`Payment failed: ${errorMsg}`);
@@ -1506,60 +1619,75 @@ export class PayHereService {
 
       this.logger.log(`[PayHereAutoCharge] ⏱️ Credited +${allowance}m top-up to user ${userId}. New balance: ${newBalance}m (add-on total: ${newAddOn}m)`);
     } else {
-      const nextMonth = new Date();
-      nextMonth.setDate(nextMonth.getDate() + 30);
-      newBalance = allowance;
+      const { data: userProfile } = await this.supabase
+        .from('profiles')
+        .select('add_on_minutes_balance')
+        .eq('id', userId)
+        .maybeSingle();
+      const retainedAddOn = userProfile?.add_on_minutes_balance || 0;
+
+      const nextCycleDate = new Date();
+      nextCycleDate.setDate(nextCycleDate.getDate() + cycleDays);
+      newBalance = allowance + retainedAddOn;
 
       await this.supabase
         .from('profiles')
         .update({
-          plan_tier: dto.planTier,
+          plan_tier: normalizedPlanTier,
           plan_status: 'active',
+          billing_cycle: isQuarterly ? 'quarterly' : 'monthly',
           monthly_minutes_allowance: allowance,
-          minutes_balance: allowance,
-          minutes_reset_at: nextMonth.toISOString(),
+          minutes_balance: newBalance,
+          minutes_reset_at: nextCycleDate.toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId);
 
       // Automatically cancel any active mobile carrier billing (IdeaMart / mSpace)
-      await this.autoUnsubscribeTelcoIfActive(userId, dto.planTier || sub.plan_tier || 'pro');
+      await this.autoUnsubscribeTelcoIfActive(userId, normalizedPlanTier || sub.plan_tier || 'pro');
 
       await this.supabase
         .from('subscriptions')
         .update({
-          plan_tier: dto.planTier,
+          plan_tier: normalizedPlanTier,
+          billing_cycle: isQuarterly ? '3 Month' : '1 Month',
           amount_lkr: amount,
           status: 'ACTIVE',
-          next_billing_date: nextMonth.toISOString().split('T')[0],
+          next_billing_date: nextCycleDate.toISOString().split('T')[0],
           installments_paid: 1,
           updated_at: new Date().toISOString(),
         })
         .eq('id', sub.id);
 
-      this.logger.log(`[PayHereAutoCharge] 👑 Upgraded user ${userId} to ${dto.planTier}. Monthly balance reset to ${allowance}m.`);
+      this.logger.log(`[PayHereAutoCharge] 👑 Upgraded user ${userId} to ${dto.planTier}. Balance set to ${newBalance}m (allowance=${allowance}m + addOn=${retainedAddOn}m).`);
     }
 
-    // 5. Record order entry
+    // 5. Record order entry with complete dispute-proof customer authorization audit payload
     await this.supabase.from('orders').insert({
       user_id: userId,
+      subscription_id: sub.id,
       order_type: isTopup ? 'topup_minutes' : 'subscription_upgrade',
-      plan_tier: dto.planTier || sub.plan_tier,
+      plan_tier: normalizedPlanTier || sub.plan_tier,
       amount_lkr: amount,
       minutes_credited: allowance,
       payment_gateway: 'payhere_token',
       gateway_payment_id: orderId,
+      payhere_payment_id: chargeResult.data?.data?.payment_id || orderId,
       status: 'completed',
+      raw_payload: {
+        gatewayResponse: chargeResult.data,
+        authorizationAudit,
+      },
     });
 
     return {
       success: true,
       message: isTopup
         ? `Successfully charged Rs. ${amount.toLocaleString()} to your card (${cardMasked}). +${allowance} minutes added!`
-        : `Successfully upgraded to ${dto.planTier?.toUpperCase()} Plan! Rs. ${amount.toLocaleString()} charged to your card (${cardMasked}).`,
+        : `Successfully activated ${isQuarterly ? '3 Months Pro' : normalizedPlanTier?.toUpperCase()} Plan! Rs. ${amount.toLocaleString()} charged to your card (${cardMasked}).`,
       orderId,
       newBalance,
-      planTier: dto.planTier || sub.plan_tier,
+      planTier: normalizedPlanTier || sub.plan_tier,
       cardMasked,
     };
   }
@@ -1901,10 +2029,10 @@ export class PayHereService {
 
     // Case 3: Subscription / Preauth Plan Activation
     const rawTier = order.plan_tier || 'pro';
-    const isQuarterly = rawTier === '3-months-pro';
+    const isQuarterly = rawTier === '3-months-pro' || Number(order.amount_lkr) === 8640;
     const planTier = isQuarterly ? 'pro' : rawTier;
-    const amount = order.amount_lkr || (isQuarterly ? 8640 : planTier === 'basic' ? 2700 : planTier === 'premium' ? 7200 : 3600);
-    const allowance = planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
+    const amount = order.amount_lkr || (isQuarterly ? 8640 : planTier === 'basic' ? 3600 : planTier === 'premium' ? 7200 : 5400);
+    const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
     const cycleDays = isQuarterly ? 90 : 30;
     const nextBillingDate = new Date(Date.now() + cycleDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
@@ -1961,6 +2089,14 @@ export class PayHereService {
       subId = newSub?.id;
     }
 
+    // Preserve user's existing add-on top-up minutes
+    const { data: recovProfile } = await this.supabase
+      .from('profiles')
+      .select('add_on_minutes_balance')
+      .eq('id', userId)
+      .maybeSingle();
+    const recovAddOn = recovProfile?.add_on_minutes_balance || 0;
+
     // Update User Profile
     await this.supabase
       .from('profiles')
@@ -1969,7 +2105,7 @@ export class PayHereService {
         plan_status: 'active',
         billing_cycle: isQuarterly ? 'quarterly' : 'monthly',
         monthly_minutes_allowance: allowance,
-        minutes_balance: allowance,
+        minutes_balance: allowance + recovAddOn,
         minutes_reset_at: new Date(nextBillingDate).toISOString(),
         updated_at: new Date().toISOString(),
       })

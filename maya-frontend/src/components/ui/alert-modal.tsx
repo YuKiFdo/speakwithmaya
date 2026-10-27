@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Modal,
   View,
@@ -6,11 +6,21 @@ import {
   Pressable,
   StyleSheet,
   Platform,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 
 export type AlertType = 'success' | 'error' | 'warning' | 'info';
+
+export interface ToastConfig {
+  id: number;
+  visible: boolean;
+  type: AlertType;
+  message: string;
+  durationMs: number;
+}
 
 export interface AlertConfig {
   visible: boolean;
@@ -24,9 +34,11 @@ export interface AlertConfig {
   resolve?: (value: boolean) => void;
 }
 
-// Global alert controller listeners
+// Global alert & toast controller listeners
 type AlertListener = (config: AlertConfig) => void;
+type ToastListener = (toast: ToastConfig) => void;
 const alertListeners = new Set<AlertListener>();
+const toastListeners = new Set<ToastListener>();
 
 const DEFAULT_CONFIG: AlertConfig = {
   visible: false,
@@ -39,11 +51,29 @@ const DEFAULT_CONFIG: AlertConfig = {
 };
 
 let currentConfig: AlertConfig = { ...DEFAULT_CONFIG };
+let currentToast: ToastConfig = {
+  id: 0,
+  visible: false,
+  type: 'info',
+  message: '',
+  durationMs: 4000,
+};
 
 /**
- * Programmatic controller to trigger alerts/confirms anywhere in the application
+ * Programmatic controller to trigger alerts/confirms/toasts anywhere in the application
  */
 export const mayaAlert = {
+  toast: (message: string, type: AlertType = 'info', durationMs: number = 4000): void => {
+    currentToast = {
+      id: Date.now() + Math.random(),
+      visible: true,
+      type,
+      message,
+      durationMs,
+    };
+    toastListeners.forEach((l) => l(currentToast));
+  },
+
   alert: (message: string, title?: string, type: AlertType = 'info'): Promise<void> => {
     return new Promise((resolve) => {
       currentConfig = {
@@ -103,6 +133,11 @@ export const mayaAlert = {
  */
 export function AlertHost() {
   const [config, setConfig] = useState<AlertConfig>(currentConfig);
+  const [toast, setToast] = useState<ToastConfig>(currentToast);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const toastTranslateY = useRef(new Animated.Value(-24)).current;
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const useNative = Platform.OS !== 'web';
 
   useEffect(() => {
     const listener: AlertListener = (newConfig) => {
@@ -120,7 +155,115 @@ export function AlertHost() {
     };
   }, []);
 
-  if (!config.visible) return null;
+  useEffect(() => {
+    const dismissToast = () => {
+      Animated.parallel([
+        Animated.timing(toastOpacity, {
+          toValue: 0,
+          duration: 200,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(toastTranslateY, {
+          toValue: -20,
+          duration: 200,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: useNative,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) {
+          currentToast = { ...currentToast, visible: false };
+          setToast((prev) => ({ ...prev, visible: false }));
+        }
+      });
+    };
+
+    const listener: ToastListener = (newToast) => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+      setToast({ ...newToast });
+      toastOpacity.setValue(0);
+      toastTranslateY.setValue(-24);
+
+      Animated.parallel([
+        Animated.timing(toastOpacity, {
+          toValue: 1,
+          duration: 240,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: useNative,
+        }),
+        Animated.spring(toastTranslateY, {
+          toValue: 0,
+          tension: 90,
+          friction: 9,
+          useNativeDriver: useNative,
+        }),
+      ]).start();
+
+      toastTimerRef.current = setTimeout(dismissToast, newToast.durationMs || 4000);
+    };
+
+    toastListeners.add(listener);
+    return () => {
+      toastListeners.delete(listener);
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, [toastOpacity, toastTranslateY, useNative]);
+
+  const toastElement = toast.visible ? (
+    <View pointerEvents="box-none" style={styles.toastViewport}>
+      <Animated.View
+        style={[
+          styles.toastBanner,
+          toast.type === 'error' && styles.toastBannerError,
+          toast.type === 'success' && styles.toastBannerSuccess,
+          toast.type === 'warning' && styles.toastBannerWarning,
+          {
+            opacity: toastOpacity,
+            transform: [{ translateY: toastTranslateY }],
+          },
+        ]}
+      >
+        <Ionicons
+          name={
+            toast.type === 'error'
+              ? 'alert-circle'
+              : toast.type === 'success'
+              ? 'checkmark-circle'
+              : toast.type === 'warning'
+              ? 'warning'
+              : 'information-circle'
+          }
+          size={20}
+          color={
+            toast.type === 'error'
+              ? '#FCA5A5'
+              : toast.type === 'success'
+              ? '#86EFAC'
+              : toast.type === 'warning'
+              ? '#FDE047'
+              : '#93C5FD'
+          }
+        />
+        <Text style={styles.toastText}>{toast.message}</Text>
+        <Pressable
+          onPress={() => {
+            if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+            currentToast = { ...currentToast, visible: false };
+            setToast((prev) => ({ ...prev, visible: false }));
+          }}
+          hitSlop={8}
+        >
+          <Ionicons name="close" size={16} color="#94A3B8" />
+        </Pressable>
+      </Animated.View>
+    </View>
+  ) : null;
+
+  if (!config.visible) return toastElement;
 
   const handleConfirm = () => {
     const res = config.resolve;
@@ -173,12 +316,14 @@ export function AlertHost() {
   };
 
   return (
-    <Modal
-      transparent
-      visible={config.visible}
-      animationType="fade"
-      onRequestClose={handleCancel}
-    >
+    <>
+      {toastElement}
+      <Modal
+        transparent
+        visible={config.visible}
+        animationType="fade"
+        onRequestClose={handleCancel}
+      >
       <View style={styles.backdrop}>
         <Pressable
           style={styles.backdropTouch}
@@ -240,11 +385,61 @@ export function AlertHost() {
           )}
         </View>
       </View>
-    </Modal>
+      </Modal>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
+  toastViewport: {
+    position: 'absolute',
+    top: Platform.OS === 'web' ? 20 : 52,
+    left: 16,
+    right: 16,
+    zIndex: 99999,
+    alignItems: 'center',
+  },
+  toastBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    borderRadius: 14,
+    maxWidth: 420,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 10px 28px rgba(15, 23, 42, 0.22)',
+      } as any,
+      default: {
+        elevation: 8,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.22,
+        shadowRadius: 14,
+      },
+    }),
+  },
+  toastBannerError: {
+    borderColor: '#7F1D1D',
+  },
+  toastBannerSuccess: {
+    borderColor: '#14532D',
+  },
+  toastBannerWarning: {
+    borderColor: '#713F12',
+  },
+  toastText: {
+    flex: 1,
+    ...fontStyle('inter', 'medium'),
+    fontSize: 13.5,
+    lineHeight: 19,
+    color: '#F8FAFC',
+  },
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',

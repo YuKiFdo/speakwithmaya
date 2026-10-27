@@ -44,6 +44,6 @@ export class ChargeSavedCardDto {
 
   @IsString()
   @IsOptional()
-  @IsIn(['basic', 'pro', 'premium'])
-  planTier?: 'basic' | 'pro' | 'premium';
+  @IsIn(['basic', 'pro', 'premium', '3-months-pro'])
+  planTier?: 'basic' | 'pro' | 'premium' | '3-months-pro';
 }

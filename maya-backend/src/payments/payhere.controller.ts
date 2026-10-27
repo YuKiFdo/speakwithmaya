@@ -63,13 +63,22 @@ export class PayHereController {
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async chargeSavedCard(
     @Body() dto: ChargeSavedCardDto,
+    @Req() req: any,
     @Headers('authorization') authHeader?: string
   ) {
     if (!authHeader) {
       throw new UnauthorizedException('Missing Authorization header');
     }
     const userId = this.authService.validateAuthToken(authHeader);
-    const result = await this.payHereService.chargeSavedCard(userId, dto);
+    const clientIp =
+      req?.headers?.['x-forwarded-for'] ||
+      req?.socket?.remoteAddress ||
+      'unknown';
+    const userAgent = req?.headers?.['user-agent'] || 'unknown';
+    const result = await this.payHereService.chargeSavedCard(userId, dto, {
+      clientIp: String(clientIp),
+      userAgent: String(userAgent),
+    });
     return result;
   }
 

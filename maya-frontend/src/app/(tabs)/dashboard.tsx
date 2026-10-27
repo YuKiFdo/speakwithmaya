@@ -712,68 +712,106 @@ export default function DashboardScreen() {
               </View>
 
               {/* MOBILE: Talk Time Card */}
-              {!isDesktop && (
-                <View style={styles.talkTimeCardMobile}>
-                  <View style={styles.talkTimeHeader}>
-                    <Text style={styles.talkTimeTitle}>Your Talk Time</Text>
-                    <Text style={styles.talkTimeReset}>
-                      {resetsInText}
-                    </Text>
-                  </View>
-
-                  <Text style={styles.talkTimeMinutes}>
-                    {String(usedMinutes).padStart(2, '0')}{' '}
-                    <Text style={styles.talkTimeTotal}>
-                      / {totalMinutes} minutes
-                    </Text>
-                  </Text>
-
-                  <View style={styles.progressBarTrack}>
-                    <View
-                      style={[
-                        styles.progressBarFill,
-                        {
-                          width: `${Math.min(
-                            100,
-                            Math.round((usedMinutes / Math.max(1, totalMinutes)) * 100)
-                          )}%`,
-                        },
-                      ]}
-                    />
-                  </View>
-
-                  <Pressable
-                    style={styles.extraTimeButton}
-                    onPress={() => {
-                      if (!isPro) {
-                        setActivePopup('daily-limit');
-                      } else {
-                        setActivePopup('get-extra-time');
-                      }
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      isPro ? 'Get Extra Talk Time' : 'Upgrade to premium'
-                    }
+              {!isDesktop && (() => {
+                const isInactiveMobile = Boolean(stats.isSubscriptionLocked || stats.isTelcoUnsubscribed);
+                return (
+                  <View
+                    style={[
+                      styles.talkTimeCardMobile,
+                      isInactiveMobile && styles.talkTimeCardMobileInactive,
+                    ]}
                   >
-                    {isPro ? (
-                      <>
-                        <HistoryNavIcon color="#2B5BFF" size={17} />
-                        <Text style={styles.extraTimeButtonText}>
-                          Get Extra Talk Time →
+                    <View style={styles.talkTimeHeader}>
+                      <Text style={styles.talkTimeTitle}>Your Talk Time</Text>
+                      {isInactiveMobile ? (
+                        <View style={styles.inactiveResetBadgeMobile}>
+                          <View style={styles.inactiveResetDotMobile} />
+                          <Text style={styles.inactiveResetTextMobile}>Inactive</Text>
+                        </View>
+                      ) : (
+                        <Text style={styles.talkTimeReset}>
+                          {resetsInText}
                         </Text>
-                      </>
-                    ) : (
-                      <>
-                        <CrownSolidIcon color="#2B5BFF" size={18} />
-                        <Text style={styles.extraTimeButtonText}>
-                          Upgrade to premium →
-                        </Text>
-                      </>
-                    )}
-                  </Pressable>
-                </View>
-              )}
+                      )}
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.talkTimeMinutes,
+                        isInactiveMobile && styles.talkTimeMinutesInactive,
+                      ]}
+                    >
+                      {isInactiveMobile ? '00' : String(usedMinutes).padStart(2, '0')}{' '}
+                      <Text style={styles.talkTimeTotal}>
+                        / {isInactiveMobile ? '0' : totalMinutes} minutes
+                      </Text>
+                    </Text>
+
+                    <View style={styles.progressBarTrack}>
+                      <View
+                        style={[
+                          styles.progressBarFill,
+                          isInactiveMobile
+                            ? { width: '0%', backgroundColor: '#CBD5E1' }
+                            : {
+                                width: `${Math.min(
+                                  100,
+                                  Math.round((usedMinutes / Math.max(1, totalMinutes)) * 100)
+                                )}%`,
+                              },
+                        ]}
+                      />
+                    </View>
+
+                    <Pressable
+                      style={[
+                        styles.extraTimeButton,
+                        isInactiveMobile && styles.extraTimeButtonInactiveMobile,
+                      ]}
+                      onPress={() => {
+                        if (isInactiveMobile) {
+                          router.push('/(tabs)/account');
+                        } else if (!isPro) {
+                          setActivePopup('daily-limit');
+                        } else {
+                          setActivePopup('get-extra-time');
+                        }
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        isInactiveMobile
+                          ? 'Reactivate Maya'
+                          : isPro
+                          ? 'Get Extra Talk Time'
+                          : 'Upgrade to premium'
+                      }
+                    >
+                      {isInactiveMobile ? (
+                        <>
+                          <Feather name="refresh-cw" size={15} color="#DC2626" />
+                          <Text style={[styles.extraTimeButtonText, styles.extraTimeButtonTextInactiveMobile]}>
+                            Reactivate Maya →
+                          </Text>
+                        </>
+                      ) : isPro ? (
+                        <>
+                          <HistoryNavIcon color="#2B5BFF" size={17} />
+                          <Text style={styles.extraTimeButtonText}>
+                            Get Extra Talk Time →
+                          </Text>
+                        </>
+                      ) : (
+                        <>
+                          <CrownSolidIcon color="#2B5BFF" size={18} />
+                          <Text style={styles.extraTimeButtonText}>
+                            Upgrade to premium →
+                          </Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                );
+              })()}
 
               {/* Bottom Banner (Desktop & Mobile) */}
               <View style={[
@@ -1018,6 +1056,42 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'bold'),
     color: '#2B5BFF',
     fontSize: 13.5,
+  },
+  talkTimeCardMobileInactive: {
+    backgroundColor: '#FFF8F8',
+    borderColor: '#FECACA',
+  },
+  inactiveResetBadgeMobile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: Radii.pill,
+  },
+  inactiveResetDotMobile: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#EF4444',
+  },
+  inactiveResetTextMobile: {
+    ...fontStyle('inter', 'bold'),
+    color: '#DC2626',
+    fontSize: 10.5,
+  },
+  talkTimeMinutesInactive: {
+    color: '#64748B',
+  },
+  extraTimeButtonInactiveMobile: {
+    borderColor: '#FCA5A5',
+    backgroundColor: '#FEF2F2',
+  },
+  extraTimeButtonTextInactiveMobile: {
+    color: '#DC2626',
   },
   /* Main Content Area */
   mainScroll: {

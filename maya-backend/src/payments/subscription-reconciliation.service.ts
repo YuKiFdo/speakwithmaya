@@ -199,13 +199,22 @@ export class SubscriptionReconciliationService {
               .eq('id', sub.id);
 
             if (sub.user_id) {
+              const { data: downProf } = await this.supabase
+                .from('profiles')
+                .select('add_on_minutes_balance')
+                .eq('id', sub.user_id)
+                .maybeSingle();
+              const downAddOn = downProf?.add_on_minutes_balance || 0;
+
               await this.supabase
                 .from('profiles')
                 .update({
                   plan_tier: 'starter',
                   plan_status: 'canceled',
-                  monthly_minutes_allowance: 10,
-                  minutes_balance: 10,
+                  billing_cycle: 'daily',
+                  monthly_minutes_allowance: 5,
+                  minutes_balance: 5 + downAddOn,
+                  minutes_reset_at: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
                   updated_at: new Date().toISOString(),
                 })
                 .eq('id', sub.user_id);
@@ -222,10 +231,10 @@ export class SubscriptionReconciliationService {
       }
     }
 
-    // 2. Proactive quota refresh for users who reached their monthly reset date
+    // 2. Proactive quota refresh for users who reached their reset date
     const { data: expiredProfiles, error: profileErr } = await this.supabase
       .from('profiles')
-      .select('id, plan_tier, plan_status, monthly_minutes_allowance, add_on_minutes_balance, minutes_reset_at')
+      .select('id, plan_tier, plan_status, billing_cycle, monthly_minutes_allowance, add_on_minutes_balance, minutes_reset_at')
       .lte('minutes_reset_at', now.toISOString())
       .limit(200);
 
@@ -235,20 +244,28 @@ export class SubscriptionReconciliationService {
     } else if (expiredProfiles && expiredProfiles.length > 0) {
       for (const p of expiredProfiles) {
         try {
-          const nextResetIso = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
-          let newBalance = 10;
+          const isStarterTier = (p.plan_tier || 'starter') === 'starter' || p.plan_status === 'canceled';
+          const isQuarterlyCycle = p.billing_cycle === 'quarterly';
+          const cycleMs = isStarterTier
+            ? 24 * 60 * 60 * 1000
+            : isQuarterlyCycle
+            ? 90 * 24 * 60 * 60 * 1000
+            : 30 * 24 * 60 * 60 * 1000;
+          const nextResetIso = new Date(now.getTime() + cycleMs).toISOString();
+          let newBalance = 5;
           let tier = p.plan_tier;
           let status = p.plan_status;
 
           if (p.plan_tier !== 'starter' && p.plan_status !== 'active') {
             if (p.plan_status === 'canceled') {
               tier = 'starter';
-              newBalance = 10 + (p.add_on_minutes_balance || 0);
+              newBalance = 5 + (p.add_on_minutes_balance || 0);
             } else if (p.plan_status === 'past_due') {
               newBalance = 0 + (p.add_on_minutes_balance || 0);
             }
           } else {
-            newBalance = (p.monthly_minutes_allowance || 10) + (p.add_on_minutes_balance || 0);
+            const baseMins = isStarterTier ? 5 : (p.monthly_minutes_allowance || 5);
+            newBalance = baseMins + (p.add_on_minutes_balance || 0);
           }
 
           await this.supabase
@@ -317,10 +334,11 @@ export class SubscriptionReconciliationService {
         const userId = sub.user_id;
         const planTier = sub.plan_tier;
         const customerToken = sub.customer_token;
-        const amount = parseFloat(sub.amount_lkr || '3600');
         const isQuarterly = sub.billing_cycle === '3 Month';
+        const defaultAmount = isQuarterly ? 8640 : planTier === 'basic' ? 3600 : planTier === 'premium' ? 7200 : 5400;
+        const amount = parseFloat(sub.amount_lkr || String(defaultAmount));
         const cycleDays = isQuarterly ? 90 : 30;
-        const allowance = planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
+        const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
 
         const renewalOrderId = `MAYA-RENEW-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -330,10 +348,10 @@ export class SubscriptionReconciliationService {
           userId,
           customerToken,
           amount,
-          itemName: `Maya AI ${planTier.toUpperCase()} Plan Renewal`,
+          itemName: `Maya AI ${isQuarterly ? '3 Months Pro' : planTier.toUpperCase()} Plan Renewal`,
           orderId: renewalOrderId,
           custom1: userId,
-          custom2: planTier,
+          custom2: isQuarterly ? '3-months-pro' : planTier,
         });
 
         if (chargeResult.success) {
@@ -352,18 +370,29 @@ export class SubscriptionReconciliationService {
             })
             .eq('id', sub.id);
 
+          // Preserve user's add-on top-up minutes on renewal
+          const { data: userProf } = await this.supabase
+            .from('profiles')
+            .select('add_on_minutes_balance')
+            .eq('id', userId)
+            .maybeSingle();
+          const retainedAddOn = userProf?.add_on_minutes_balance || 0;
+
           // Refresh user profile minutes allowance
           await this.supabase
             .from('profiles')
             .update({
+              plan_tier: planTier,
               plan_status: 'active',
-              minutes_balance: allowance,
+              billing_cycle: isQuarterly ? 'quarterly' : 'monthly',
+              monthly_minutes_allowance: allowance,
+              minutes_balance: allowance + retainedAddOn,
               minutes_reset_at: nextBilling.toISOString(),
               updated_at: new Date().toISOString(),
             })
             .eq('id', userId);
 
-          // Record renewal order entry
+          // Record renewal order entry with full audit payload
           await this.supabase.from('orders').insert({
             user_id: userId,
             subscription_id: sub.id,
@@ -373,8 +402,20 @@ export class SubscriptionReconciliationService {
             minutes_credited: allowance,
             payment_gateway: 'payhere_token',
             gateway_payment_id: renewalOrderId,
+            payhere_payment_id: chargeResult.data?.data?.payment_id || renewalOrderId,
             status: 'completed',
-            raw_payload: chargeResult.data,
+            raw_payload: {
+              gatewayResponse: chargeResult.data,
+              authorizationAudit: {
+                consentTimestamp: new Date().toISOString(),
+                renewalType: 'automated_scheduled_renewal',
+                authorizedAmountLkr: amount,
+                planTier: isQuarterly ? '3-months-pro' : planTier,
+                billingCycle: isQuarterly ? '3 Month' : '1 Month',
+                cardMasked: sub.card_masked || '···· Card',
+                merchant: 'IDEACIPHER PVT LTD',
+              },
+            },
           });
 
           results.renewalsSucceeded++;

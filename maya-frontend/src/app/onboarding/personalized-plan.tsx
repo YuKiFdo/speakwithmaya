@@ -49,8 +49,8 @@ const ALL_PLANS: PlanItem[] = [
   {
     id: '3-months-pro',
     name: '3 Months Pro',
-    minutes: '600 AI conversation minutes',
-    minutesSubtext: 'per month',
+    minutes: '1,800 AI conversation minutes',
+    minutesSubtext: 'for 3 months',
     pricePerMonth: 'LKR 2,880',
     billedInfo: 'Billed as LKR 8,640 for 3 months',
     saveBadge: 'Save 20%',
@@ -61,16 +61,16 @@ const ALL_PLANS: PlanItem[] = [
     name: 'Basic',
     minutes: '450 AI conversation minutes',
     minutesSubtext: 'per month',
-    pricePerMonth: 'LKR 2,700',
-    billedInfo: 'Billed as LKR 2,700 monthly',
+    pricePerMonth: 'LKR 3,600',
+    billedInfo: 'Billed as LKR 3,600 monthly',
   },
   {
     id: 'pro',
     name: 'Pro',
     minutes: '600 AI conversation minutes',
     minutesSubtext: 'per month',
-    pricePerMonth: 'LKR 3,600',
-    billedInfo: 'Billed as LKR 3,600 monthly',
+    pricePerMonth: 'LKR 5,400',
+    billedInfo: 'Billed as LKR 5,400 monthly',
   },
   {
     id: 'premium',
@@ -390,9 +390,13 @@ export default function PersonalizedPlanScreen() {
       const sub = await paymentApi.getMySubscription();
       if (sub?.can_auto_charge && sub?.customer_token) {
         const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
+        const chargeText =
+          selectedPlanId === '3-months-pro'
+            ? 'LKR 8,640 (for 3 months)'
+            : `${selectedPlan?.pricePerMonth || 'LKR 5,400'}/month`;
         const confirmed = await mayaAlert.confirm({
           title: '1-Click Activation',
-          message: `Deduct ${selectedPlan?.pricePerMonth || 'LKR 3,600'}/month from ${cardDisplay} and activate ${selectedPlan?.name} immediately?`,
+          message: `Deduct ${chargeText} from ${cardDisplay} and activate ${selectedPlan?.name} immediately?`,
           confirmText: 'Confirm & Activate',
           cancelText: 'Cancel',
           type: 'info',

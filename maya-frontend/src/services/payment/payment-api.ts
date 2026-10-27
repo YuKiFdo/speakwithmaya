@@ -109,13 +109,14 @@ class PaymentApiService {
    */
   async chargeSavedCard(payload: {
     packageId?: '30-min' | '120-min' | '300-min';
-    planTier?: 'basic' | 'pro' | 'premium';
+    planTier?: 'basic' | 'pro' | 'premium' | '3-months-pro';
   }): Promise<{
     success: boolean;
     message: string;
     orderId?: string;
     newBalance?: number;
     planTier?: string;
+    scheduledPlanTier?: string;
     cardMasked?: string;
   }> {
     const res = await fetch(`${this.baseUrl}/v1/payments/payhere/charge-saved-card`, {

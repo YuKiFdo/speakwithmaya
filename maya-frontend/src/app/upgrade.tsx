@@ -508,15 +508,24 @@ export default function UpgradeScreen() {
   };
 
   const handleSelectPlan = async (planId: string) => {
-    const planWeight = TIER_ORDER[planId] ?? 0;
-    const isDowngrade = planWeight < currentWeight;
+    const normalizedTier = planId === '3-months-pro' ? 'pro' : planId;
+    const planWeight = TIER_ORDER[normalizedTier] ?? 0;
+    const isDowngrade = planId !== '3-months-pro' && planWeight < currentWeight;
+
+    const targetPlan = PLANS.find((p) => p.id === planId);
+    const planName =
+      planId === '3-months-pro'
+        ? '3 Months Pro'
+        : targetPlan?.name || planId.toUpperCase();
+    const chargeDescription =
+      planId === '3-months-pro'
+        ? 'LKR 8,640 for 3 months'
+        : `${targetPlan?.price || 'LKR 5,400'}${targetPlan?.period || ' / month'}`;
 
     if (isDowngrade) {
-      const targetPlan = PLANS.find((p) => p.id === planId);
-      const planName = targetPlan?.name || planId.toUpperCase();
       const confirmed = await mayaAlert.confirm({
         title: 'Confirm Plan Switch',
-        message: `Are you sure you want to switch to the ${planName} plan? Your subscription benefits and talk time will adjust accordingly.`,
+        message: `Switch to the ${planName} plan (${chargeDescription}) starting on your next billing date? You will keep all of your current plan minutes until your current billing period ends.`,
         confirmText: 'Switch Plan',
         cancelText: 'Cancel',
         type: 'warning',
@@ -526,16 +535,21 @@ export default function UpgradeScreen() {
 
     setLoadingPlanId(planId);
     try {
-      // 1. Check if user already has a pre-approved token on file for 1-click upgrade
+      // 1. Check if user already has a pre-approved token on file for 1-click upgrade or scheduled switch
       const sub = await paymentApi.getMySubscription();
       if (sub?.can_auto_charge && sub?.customer_token) {
-        const targetPlan = PLANS.find((p) => p.id === planId);
-        const planName = targetPlan?.name || planId.toUpperCase();
+        if (isDowngrade) {
+          const res = await paymentApi.chargeSavedCard({ planTier: planId as any });
+          await stats.refreshStats();
+          await mayaAlert.success(res.message || `Scheduled switch to ${planName}!`, 'Plan Switch Scheduled');
+          router.replace('/(tabs)/account');
+          return;
+        }
+
         const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
-        
         const confirmed = await mayaAlert.confirm({
           title: '1-Click Upgrade',
-          message: `Deduct ${targetPlan?.price}/${targetPlan?.period} from ${cardDisplay} and activate ${planName} immediately?`,
+          message: `Deduct ${chargeDescription} from ${cardDisplay} and activate ${planName} immediately?`,
           confirmText: 'Confirm & Upgrade',
           cancelText: 'Cancel',
           type: 'info',

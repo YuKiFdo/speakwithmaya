@@ -25,6 +25,7 @@ import {
   stopMayaPhonePromptVoice,
 } from '@/services/sound/sound-service';
 import { MayaPrimaryButton } from '@/components/ui';
+import { mayaAlert } from '@/components/ui/alert-modal';
 import { authService } from '@/services/auth/auth-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
@@ -43,21 +44,7 @@ export default function PhoneScreen() {
   const [showSubtitle, setShowSubtitle] = useState(isEditing || isLoginMode);
   const [showInput, setShowInput] = useState(isEditing || isLoginMode);
   const [isLoading, setIsLoading] = useState(false);
-  const [errorText, setErrorText] = useState('');
-  const [infoText, setInfoText] = useState(
-    params.registered === '1'
-      ? 'This phone number is already registered. Switched to Login mode - tap Log In to receive your code.'
-      : '',
-  );
   const { isDesktop, isTablet } = useBreakpoint();
-
-  useEffect(() => {
-    if (params.registered === '1') {
-      setInfoText(
-        'This phone number is already registered. Switched to Login mode - tap Log In to receive your code.',
-      );
-    }
-  }, [params.registered]);
 
   // Dynamic CMS Text & SMS Gateway Settings
   const [activeGateway, setActiveGateway] = useState<'smsapi' | 'ideamart' | 'mspace' | 'telco'>('smsapi');
@@ -291,8 +278,6 @@ export default function PhoneScreen() {
 
   const handleSendCode = async () => {
     if (!phone.trim() || isLoading) return;
-    setErrorText('');
-    setInfoText('');
     stopMayaPhonePromptVoice();
     setIsSpeaking(false);
 
@@ -312,30 +297,39 @@ export default function PhoneScreen() {
       const isDialogOrHutch = ['77', '76', '74', '78', '72', '75'].includes(prefix);
 
       if (isMobitel && !mspaceEnabled) {
-        setErrorText('Mobile balance billing is currently unavailable for Mobitel numbers. Please enter a Dialog or Hutch number.');
+        mayaAlert.toast(
+          'Mobile balance billing is currently unavailable for Mobitel numbers. Please enter a Dialog or Hutch number.',
+          'error',
+        );
         return;
       }
 
       if (isDialogOrHutch && !ideamartEnabled) {
-        setErrorText('Mobile balance billing is currently unavailable for Dialog and Hutch numbers. Please enter a Mobitel number.');
+        mayaAlert.toast(
+          'Mobile balance billing is currently unavailable for Dialog and Hutch numbers. Please enter a Mobitel number.',
+          'error',
+        );
         return;
       }
 
       if (!isMobitel && !isDialogOrHutch) {
         if (ideamartEnabled && mspaceEnabled) {
-          setErrorText(
-            'Mobile balance billing is available for Dialog, Mobitel, and Hutch numbers. Please enter a valid mobile number.'
+          mayaAlert.toast(
+            'Mobile balance billing is available for Dialog, Mobitel, and Hutch numbers. Please enter a valid mobile number.',
+            'error',
           );
         } else if (ideamartEnabled) {
-          setErrorText(
-            'Mobile balance billing is currently available for Dialog and Hutch numbers. Please enter a valid mobile number.'
+          mayaAlert.toast(
+            'Mobile balance billing is currently available for Dialog and Hutch numbers. Please enter a valid mobile number.',
+            'error',
           );
         } else if (mspaceEnabled) {
-          setErrorText(
-            'Mobile balance billing is currently available for Mobitel numbers. Please enter a valid mobile number.'
+          mayaAlert.toast(
+            'Mobile balance billing is currently available for Mobitel numbers. Please enter a valid mobile number.',
+            'error',
           );
         } else {
-          setErrorText('Mobile balance billing is currently unavailable. Please try again later.');
+          mayaAlert.toast('Mobile balance billing is currently unavailable. Please try again later.', 'error');
         }
         return;
       }
@@ -356,14 +350,16 @@ export default function PhoneScreen() {
       setPhone(digits);
 
       // If phone number is already registered while on the Register screen,
-      // show notice and switch to Login mode with the phone number pre-filled
+      // show toast notice and switch to Login mode with the phone number pre-filled
       if (res.alreadyRegistered) {
         setForcedLoginMode(true);
-        setInfoText(
+        mayaAlert.toast(
           res.message ||
-            'This phone number is already registered. Switched to Login mode - tap Log In to receive your code.',
+            'This phone number is already registered. Switched to Login mode — tap Log In to receive your code.',
+          'info',
+          4500,
         );
-        router.replace('/onboarding/phone?mode=login&registered=1' as any);
+        router.replace('/onboarding/phone?mode=login' as any);
         return;
       }
 
@@ -376,7 +372,10 @@ export default function PhoneScreen() {
       const otpUrl = isLoginMode ? '/onboarding/otp?mode=login' : '/onboarding/otp';
       router.replace(otpUrl as any);
     } catch (err: any) {
-      setErrorText(err.message || 'Failed to send verification code. Please check your number.');
+      mayaAlert.toast(
+        err.message || 'Failed to send verification code. Please check your number.',
+        'error',
+      );
     } finally {
       setIsLoading(false);
     }
@@ -528,22 +527,6 @@ export default function PhoneScreen() {
                   },
                 ]}
               >
-                {!!infoText && (
-                  <View style={{ marginBottom: 12, padding: 12, backgroundColor: '#EFF6FF', borderRadius: 12, borderWidth: 1, borderColor: '#93C5FD', width: '100%' }}>
-                    <Text style={{ color: '#1D4ED8', fontSize: 13, textAlign: 'center', ...fontStyle('inter', 'medium') }}>
-                      {infoText}
-                    </Text>
-                  </View>
-                )}
-
-                {!!errorText && (
-                  <View style={{ marginBottom: 12, padding: 12, backgroundColor: '#FEF2F2', borderRadius: 12, borderWidth: 1, borderColor: '#FCA5A5', width: '100%' }}>
-                    <Text style={{ color: '#DC2626', fontSize: 13, textAlign: 'center', ...fontStyle('inter', 'medium') }}>
-                      {errorText}
-                    </Text>
-                  </View>
-                )}
-
                 <MayaPrimaryButton
                   label={isLoading ? "Sending..." : isLoginMode ? "Log In" : "Send Verification Code"}
                   showArrow={false}
@@ -565,8 +548,6 @@ export default function PhoneScreen() {
                   onPress={() => {
                     stopMayaPhonePromptVoice();
                     setIsSpeaking(false);
-                    setErrorText('');
-                    setInfoText('');
                     setForcedLoginMode(false);
                     if (isLoginMode) {
                       router.replace('/onboarding/name');

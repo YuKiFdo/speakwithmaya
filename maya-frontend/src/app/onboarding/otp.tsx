@@ -19,6 +19,7 @@ import { StepTransition } from '@/components/onboarding/step-transition';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { fontStyle } from '@/theme/fonts';
 import { MayaPrimaryButton } from '@/components/ui';
+import { mayaAlert } from '@/components/ui/alert-modal';
 import { authService } from '@/services/auth/auth-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 
@@ -36,7 +37,6 @@ export default function OtpScreen() {
   const [canResend, setCanResend] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
-  const [errorText, setErrorText] = useState('');
 
   const inputRefs = useRef<(TextInput | null)[]>([]);
   const { isDesktop, isTablet } = useBreakpoint();
@@ -183,7 +183,6 @@ export default function OtpScreen() {
 
   const handleResend = async () => {
     if (!canResend || isResending) return;
-    setErrorText('');
     setIsResending(true);
     try {
       await authService.sendOtp(displayPhone, { isLoginMode });
@@ -191,8 +190,9 @@ export default function OtpScreen() {
       setCanResend(false);
       setOtp(Array(OTP_LENGTH).fill(''));
       inputRefs.current[0]?.focus();
+      mayaAlert.toast('Verification code resent!', 'info');
     } catch (err: any) {
-      setErrorText(err.message || 'Failed to resend code');
+      mayaAlert.toast(err.message || 'Failed to resend code', 'error');
     } finally {
       setIsResending(false);
     }
@@ -201,7 +201,6 @@ export default function OtpScreen() {
   const handleVerify = async () => {
     const code = otp.join('').trim();
     if (code.length < OTP_LENGTH || isVerifying) return;
-    setErrorText('');
     setIsVerifying(true);
 
     try {
@@ -232,7 +231,7 @@ export default function OtpScreen() {
       authService.syncStep(nextRoute);
       router.replace(nextRoute as any);
     } catch (err: any) {
-      setErrorText(err.message || 'Invalid verification code. Please try again.');
+      mayaAlert.toast(err.message || 'Invalid verification code. Please try again.', 'error');
     } finally {
       setIsVerifying(false);
     }
@@ -370,14 +369,6 @@ export default function OtpScreen() {
                   },
                 ]}
               >
-                {!!errorText && (
-                  <View style={{ marginBottom: 12, padding: 12, backgroundColor: '#FEF2F2', borderRadius: 12, borderWidth: 1, borderColor: '#FCA5A5' }}>
-                    <Text style={{ color: '#DC2626', fontSize: 13, textAlign: 'center', ...fontStyle('inter', 'medium') }}>
-                      {errorText}
-                    </Text>
-                  </View>
-                )}
-
                 <MayaPrimaryButton
                   label={isVerifying ? "Verifying..." : "Verify and Continue"}
                   showArrow={false}

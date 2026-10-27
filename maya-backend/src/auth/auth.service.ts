@@ -878,8 +878,13 @@ export class AuthService {
     const now = Date.now();
 
     if (now >= resetDate) {
-      // 24 hours for daily starter, 30 days for monthly paid plans
-      const intervalMs = isStarter ? 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+      // 24 hours for daily starter, 90 days for quarterly 3-months-pro, 30 days for monthly paid plans
+      const isQuarterly = profile.billing_cycle === 'quarterly';
+      const intervalMs = isStarter
+        ? 24 * 60 * 60 * 1000
+        : isQuarterly
+        ? 90 * 24 * 60 * 60 * 1000
+        : 30 * 24 * 60 * 60 * 1000;
       const nextResetIso = new Date(now + intervalMs).toISOString();
 
       // If user's recurring subscription failed (past_due) or was canceled:
@@ -1575,7 +1580,7 @@ export class AuthService {
       user_id: userId,
       order_type: 'subscription_new',
       plan_tier: dto.planTier,
-      amount_lkr: dto.planTier === 'basic' ? 2700 : dto.planTier === 'pro' ? 3600 : 7200,
+      amount_lkr: dto.planTier === 'basic' ? 3600 : dto.planTier === 'pro' ? 5400 : 7200,
       minutes_credited: allowance,
       payment_gateway: 'mock',
       status: 'completed',
@@ -1660,7 +1665,7 @@ export class AuthService {
         {
           id: 'basic',
           name: 'Basic',
-          priceLkr: 2700,
+          priceLkr: 3600,
           period: '/ month',
           minutes: 450,
           features: ['450 AI conversation minutes', 'AI partner', 'Grammar corrections', 'Session transcript'],
@@ -1668,7 +1673,7 @@ export class AuthService {
         {
           id: 'pro',
           name: 'Pro',
-          priceLkr: 3600,
+          priceLkr: 5400,
           period: '/ month',
           minutes: 600,
           highlighted: true,
