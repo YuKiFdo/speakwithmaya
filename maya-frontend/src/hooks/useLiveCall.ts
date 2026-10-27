@@ -145,6 +145,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   // Connection gate and greeting audio hold
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const isInitialGreetingHeldRef = useRef<boolean>(true);
+  const isInitialGreetingTurnCompleteRef = useRef<boolean>(false);
   const initialGreetingBufferRef = useRef<
     Array<{ type: 'samples'; data: Float32Array } | { type: 'chunk'; data: string }>
   >([]);
@@ -306,7 +307,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       const interval = setInterval(() => {
         const now = Date.now();
         const timeSinceLastChunk = now - lastModelAudioChunkTimeRef.current;
-        if (timeSinceLastChunk > 3500 && modelVolume === 0) {
+        if (timeSinceLastChunk > 3500 && modelVolume === 0 && !playerRef.current.isPlaying()) {
           console.warn('[useLiveCall] ⚠️ Model speaking watchdog elapsed: no audio received for 3.5s -> auto-recovering to listening');
           isModelSpeakingRef.current = false;
           isFirstGreetingPendingRef.current = false;
@@ -352,6 +353,12 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       if (isReconnect) {
         setStatus('reconnecting');
         transportRef.current.close();
+        if (turnsRef.current.length === 0) {
+          isFirstGreetingPendingRef.current = true;
+          isInitialGreetingTurnCompleteRef.current = false;
+          initialGreetingBufferRef.current = [];
+          initialGreetingTranscriptRef.current = '';
+        }
       } else {
         setStatus('connecting');
         sessionIdRef.current = `session-${Date.now()}`;
@@ -375,12 +382,14 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         // Fresh session: gate microphone and initial greeting audio until Maya finishes speaking her opening turn greeting
         isFirstGreetingPendingRef.current = true;
         isInitialGreetingHeldRef.current = true;
+        isInitialGreetingTurnCompleteRef.current = false;
         initialGreetingBufferRef.current = [];
+        initialGreetingTranscriptRef.current = '';
         greetingAudioChunksCountRef.current = 0;
         greetingAudioBytesCountRef.current = 0;
         setIsConnected(false);
         setTimeout(() => {
-          if (isFirstGreetingPendingRef.current && !isInitialGreetingHeldRef.current) {
+          if (isFirstGreetingPendingRef.current && !isInitialGreetingHeldRef.current && !playerRef.current.isPlaying()) {
             console.warn('[useLiveCall] Initial greeting safety timeout expired (7s) — unlocking mic');
             isFirstGreetingPendingRef.current = false;
             if (modelVolume === 0) {
@@ -394,6 +403,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       // 1. Initialize Audio Player
       await playerRef.current.init({
         onPlaybackStateChange: (pState: 'idle' | 'speaking') => {
+          if (isInitialGreetingHeldRef.current && pState === 'idle') {
+            return;
+          }
           const isSpeaking = pState === 'speaking';
           isModelSpeakingRef.current = isSpeaking;
           if (!isSpeaking) {
@@ -646,7 +658,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               reconnectTimerRef.current = null;
             }
             if (statusRef.current === 'reconnecting') {
-              setStatus('listening');
+              setStatus(isInitialGreetingHeldRef.current ? 'connecting' : 'listening');
             }
           },
           onSessionResumptionUpdate: (handle: string) => {
@@ -660,7 +672,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               clearTimeout(reconnectTimerRef.current);
               reconnectTimerRef.current = null;
             }
-            setStatus('listening');
+            setStatus(isInitialGreetingHeldRef.current ? 'connecting' : 'listening');
           },
           onGoAway: (timeLeft: string) => {
             console.warn('[useLiveCall] Received server GoAway notice (timeLeft:', timeLeft, '). Proactively preparing reconnect...');
@@ -856,6 +868,17 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               : text;
           },
           onTurnComplete: (data?: { userText?: string; modelText?: string }) => {
+            if (isInitialGreetingHeldRef.current) {
+              isInitialGreetingTurnCompleteRef.current = true;
+              if (data?.modelText && !initialGreetingTranscriptRef.current) {
+                initialGreetingTranscriptRef.current = data.modelText;
+              }
+              console.log(
+                `[useLiveCall] ⏳ [Greeting Turn Complete While Held] Buffered ${initialGreetingBufferRef.current.length} audio chunks & transcript ("${(initialGreetingTranscriptRef.current || '').slice(0, 60)}") until releaseGreeting()`,
+              );
+              return;
+            }
+
             playerRef.current.flush();
 
             // Commit any verified student turn text from this exchange
@@ -899,7 +922,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               console.log(
                 `[useLiveCall] 🏁 [Greeting Turn Complete] Total greeting audio received: ${greetingAudioChunksCountRef.current} chunks (${(greetingAudioBytesCountRef.current / 1024).toFixed(1)} KB), text: "${(currentModelTextRef.current || initialGreetingTranscriptRef.current).slice(0, 60)}"`,
               );
-              isFirstGreetingPendingRef.current = false;
+              if (!playerRef.current.isPlaying()) {
+                isFirstGreetingPendingRef.current = false;
+              }
             }
 
             // If Gemini called conclude_call:
@@ -1624,16 +1649,33 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const releaseGreeting = useCallback(() => {
     if (!isInitialGreetingHeldRef.current) return;
     console.log(
-      `[useLiveCall] 🚀 [Greeting Release] Unlocking initial greeting (${initialGreetingBufferRef.current.length} buffered audio chunks, transcript: "${initialGreetingTranscriptRef.current.slice(0, 60)}")`,
+      `[useLiveCall] 🚀 [Greeting Release] Unlocking initial greeting (${initialGreetingBufferRef.current.length} buffered audio chunks, turnComplete=${isInitialGreetingTurnCompleteRef.current}, transcript: "${initialGreetingTranscriptRef.current.slice(0, 60)}")`,
     );
     isInitialGreetingHeldRef.current = false;
 
+    // Ensure WebAudio context is resumed on user gesture (e.g. "Got it" button in intro guide)
+    playerRef.current.resume().catch(() => {});
+
     // Release buffered transcript to subtitles
     if (initialGreetingTranscriptRef.current) {
-      currentModelTextRef.current = initialGreetingTranscriptRef.current;
+      const cleanTranscript = sanitizeModelText(initialGreetingTranscriptRef.current.trim());
+      currentModelTextRef.current = cleanTranscript;
       initialGreetingTranscriptRef.current = '';
       activeRoleRef.current = 'model';
-      setSubtitles(sanitizeModelText(currentModelTextRef.current));
+      setSubtitles(cleanTranscript);
+
+      if (isInitialGreetingTurnCompleteRef.current && cleanTranscript) {
+        const lastTurn = turnsRef.current[turnsRef.current.length - 1];
+        if (!lastTurn || lastTurn.role !== 'model' || lastTurn.text !== cleanTranscript) {
+          turnsRef.current.push({
+            role: 'model',
+            text: cleanTranscript,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        currentModelTextRef.current = '';
+        activeRoleRef.current = null;
+      }
     }
 
     const buffered = [...initialGreetingBufferRef.current];
@@ -1641,7 +1683,16 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
     if (buffered.length > 0) {
       isModelSpeakingRef.current = true;
-      lastModelAudioChunkTimeRef.current = Date.now();
+      let totalSamples = 0;
+      buffered.forEach((item) => {
+        if (item.type === 'samples') {
+          totalSamples += item.data.length;
+        } else {
+          totalSamples += Math.floor((item.data.length * 3) / 8);
+        }
+      });
+      const bufferedDurationMs = Math.round((totalSamples / 24000) * 1000);
+      lastModelAudioChunkTimeRef.current = Date.now() + bufferedDurationMs;
       setStatus('speaking');
       buffered.forEach((item) => {
         if (item.type === 'samples') {
@@ -1650,9 +1701,30 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           playerRef.current.playPcmChunk(item.data);
         }
       });
-    } else if (statusRef.current === 'connecting') {
-      setStatus('listening');
+      if (isInitialGreetingTurnCompleteRef.current) {
+        playerRef.current.flush();
+      }
+    } else {
+      if (isInitialGreetingTurnCompleteRef.current) {
+        isFirstGreetingPendingRef.current = false;
+      }
+      if (statusRef.current === 'connecting') {
+        setStatus('listening');
+      }
     }
+
+    // Post-release safety timer: guarantee microphone is unlocked within 7s after greeting release
+    // even if greeting audio failed or was skipped during reconnect
+    setTimeout(() => {
+      if (isFirstGreetingPendingRef.current && !playerRef.current.isPlaying()) {
+        console.warn('[useLiveCall] Post-release greeting safety timeout expired (7s) — unlocking mic');
+        isFirstGreetingPendingRef.current = false;
+        isModelSpeakingRef.current = false;
+        if (statusRef.current === 'connecting' || statusRef.current === 'speaking') {
+          setStatus('listening');
+        }
+      }
+    }, 7000);
   }, []);
 
   return {

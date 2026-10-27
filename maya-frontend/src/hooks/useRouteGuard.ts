@@ -16,12 +16,10 @@ const ONBOARDING_STEP_CHAIN: {
   /** Returns true if the user has completed enough prior steps to be here */
   canAccess: (s: OnboardingState) => boolean;
 }[] = [
-  // Step 1: Name — always accessible (first step after welcome)
-  { route: 'onboarding/name',         canAccess: () => true },
-  // Step 2: Phone — accessible for login as well as registration
-  { route: 'onboarding/phone',        canAccess: () => true },
-  // Step 3: OTP — requires phone
-  { route: 'onboarding/otp',          canAccess: (s) => !!s.phone },
+  // Step 1-3: Pre-auth screens — only for unauthenticated visitors
+  { route: 'onboarding/name',         canAccess: (s) => !s.isAuthenticated },
+  { route: 'onboarding/phone',        canAccess: (s) => !s.isAuthenticated },
+  { route: 'onboarding/otp',          canAccess: (s) => !s.isAuthenticated && !!s.phone },
   // Step 4+: Post-auth steps — require authentication
   { route: 'onboarding/goal',         canAccess: (s) => s.isAuthenticated },
   { route: 'onboarding/challenge',    canAccess: (s) => s.isAuthenticated && !!s.goal },
@@ -47,14 +45,25 @@ const ONBOARDING_STEP_CHAIN: {
  * when they try to access a route they haven't earned yet.
  */
 function findEarliestAllowedStep(state: OnboardingState): string {
+  // Authenticated user with a valid token: NEVER send back to name/phone/otp registration!
+  if (state.isAuthenticated) {
+    if (state.isCompleted) return '/(tabs)/dashboard';
+    if (!state.goal) return '/onboarding/goal';
+    if (
+      state.lastActiveRoute &&
+      state.lastActiveRoute !== '/' &&
+      !state.lastActiveRoute.startsWith('/onboarding/name') &&
+      !state.lastActiveRoute.startsWith('/onboarding/phone') &&
+      !state.lastActiveRoute.startsWith('/onboarding/otp')
+    ) {
+      return state.lastActiveRoute;
+    }
+    return '/onboarding/goal';
+  }
+
   // If not authenticated and no name, start from scratch
   if (!state.name) return '/onboarding/name';
-  if (!state.phone) return '/onboarding/phone';
-  if (!state.isAuthenticated) return '/onboarding/phone';
-  // Authenticated but missing goal — go to goal
-  if (!state.goal) return '/onboarding/goal';
-  // Default: resume at lastActiveRoute or goal
-  return state.lastActiveRoute || '/onboarding/goal';
+  return '/onboarding/phone';
 }
 
 /**
@@ -126,28 +135,37 @@ export function useRouteGuard() {
     }
 
     const state = OnboardingStore.getState();
+    const isGuestAuthScreen =
+      routePath === 'index' ||
+      routePath === '' ||
+      routePath === 'onboarding/phone' ||
+      routePath === 'onboarding/otp' ||
+      routePath === 'onboarding/name';
 
     // Real-time check: If user claims to be authenticated, verify account is not deleted in DB
     if (state.isAuthenticated) {
       authService.fetchUserProfile().then((profile) => {
-        if (!profile && !OnboardingStore.getState().isAuthenticated) {
+        const latestState = OnboardingStore.getState();
+        if (!profile && !latestState.isAuthenticated) {
           router.replace('/onboarding/phone');
+          return;
+        }
+        if (profile && isGuestAuthScreen) {
+          const target = latestState.isCompleted
+            ? '/(tabs)/dashboard'
+            : findEarliestAllowedStep(latestState);
+          router.replace(target as any);
         }
       });
     }
 
-    // 2. Fully onboarded user visiting guest/login screens → dashboard
-    if (state.isAuthenticated && state.isCompleted) {
-      if (
-        routePath === 'index' ||
-        routePath === '' ||
-        routePath === 'onboarding/phone' ||
-        routePath === 'onboarding/otp' ||
-        routePath === 'onboarding/name'
-      ) {
-        router.replace('/(tabs)/dashboard');
-        return;
-      }
+    // 2. Any authenticated user visiting guest/register/login screens → dashboard or active post-auth step
+    if (state.isAuthenticated && isGuestAuthScreen) {
+      const target = state.isCompleted
+        ? '/(tabs)/dashboard'
+        : findEarliestAllowedStep(state);
+      router.replace(target as any);
+      return;
     }
 
     // 3. Onboarding step prerequisite enforcement

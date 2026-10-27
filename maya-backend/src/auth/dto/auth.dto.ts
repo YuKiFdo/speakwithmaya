@@ -21,6 +21,10 @@ export class SendOtpDto {
     message: 'Invalid phone number format. Please provide a valid phone number with country code.',
   })
   phoneNumber!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isLoginMode?: boolean;
 }
 
 export class VerifyOtpDto {
@@ -36,6 +40,14 @@ export class VerifyOtpDto {
   @Length(6, 6, { message: 'OTP must be exactly 6 digits.' })
   @Matches(/^[0-9]{6}$/, { message: 'OTP must contain only numbers.' })
   code!: string;
+
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isLoginMode?: boolean;
 }
 
 export class BaselineScoresDto {
@@ -127,6 +139,38 @@ export class UpdateStepDto {
   @IsString()
   @IsNotEmpty()
   step!: string;
+
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
+  @IsOptional()
+  @IsString()
+  nativeLanguage?: string;
+
+  @IsOptional()
+  @IsString()
+  level?: string;
+
+  @IsOptional()
+  @IsString()
+  goal?: string;
+
+  @IsOptional()
+  @IsString()
+  challenge?: string;
+
+  @IsOptional()
+  @IsString()
+  employmentStatus?: string;
+
+  @IsOptional()
+  @IsNumber()
+  dailyGoalMinutes?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  markCompleted?: boolean;
 }
 
 export class AdminUsersQueryDto {

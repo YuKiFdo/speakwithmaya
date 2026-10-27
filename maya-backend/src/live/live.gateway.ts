@@ -549,6 +549,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 : `[SYSTEM TIME NOTICE - INTRO CALL WRAP-UP]: The 2-minute introductory call is now complete. In your very next spoken turn: warmly praise ${studentName} for speaking with you today, let them know their personalized daily learning roadmap is now ready, speak an enthusiastic goodbye, and call tool conclude_call. Deliver this in under 15 seconds with zero test scoring.`
               : `[SYSTEM TIME NOTICE: The practice session time has ended. Right now, in your current spoken turn, wrap up naturally: share 1 short encouraging observation about how they did today, thank them warmly, speak your cheerful goodbye aloud, and then call conclude_call. Keep your farewell brief (under 15 seconds of speech).]`;
 
+            if (state.userSpeechActive) {
+              try {
+                state.geminiSession.sendRealtimeInput({ activityEnd: {} });
+              } catch {}
+              state.userSpeechActive = false;
+            }
             state.geminiSession.sendClientContent({
               turns: [
                 {
@@ -562,9 +568,6 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
               ],
               turnComplete: true,
             });
-            try {
-              state.geminiSession.sendRealtimeInput({ activityEnd: {} });
-            } catch {}
             this.logger.log(`[${state.sessionId}] ⏰ Time wrapup cue dispatched to Gemini Live (isIntro: ${isIntro})`);
           } catch (e: any) {
             this.logger.warn(`[${state.sessionId}] Failed to send time wrapup cue to Gemini: ${e?.message}`);
@@ -580,6 +583,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.addSessionLog(state, 'curriculum_pacing_cue', `${nextTitle} (${nextId})`);
         if (state.geminiSession && state.isConnectedToGemini) {
           try {
+            if (state.userSpeechActive) {
+              try {
+                state.geminiSession.sendRealtimeInput({ activityEnd: {} });
+              } catch {}
+              state.userSpeechActive = false;
+            }
             state.geminiSession.sendClientContent({
               turns: [
                 {
@@ -856,9 +865,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }));
       }
 
-      // Dispatch opening turn greeting prompt if fresh session
-      const isFreshSession = !dto.isReconnect && !dto.memory;
-      if (isFreshSession && greetingPrompt && !state.hasDispatchedGreeting) {
+      // Dispatch opening turn greeting prompt if no prior conversation turns exist (including early reconnects before any turn completed)
+      const hasExistingConversation = Boolean(dto.memory && dto.memory.trim().length > 0);
+      if (!hasExistingConversation && greetingPrompt && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         state.isGreetingInProgress = true;
         state.greetingAudioChunksReceived = 0;
@@ -894,17 +903,22 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           }
         }, 8000);
 
-        // Acoustic greeting dispatch:
-        // Because manual VAD (automaticActivityDetection: { disabled: true }) is configured,
-        // Gemini Live requires an acoustic turn boundary (activityStart -> audio frame -> activityEnd)
-        // to engage its server-side neural audio vocoder and synthesize 24kHz native audio frames.
         const scenarioEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : '').trim();
         const voiceDirective = isScenarioRoleplay
           ? `[ACTING & PROSODY DIRECTIVE: Perform this opening line with 100% vocal emotion (${scenarioEmotion || 'Angry, impatient, sharp, fast pace'}). Do NOT sound like a polite AI assistant. Speak immediately in character!]`
           : `[SYSTEM VOICE DIRECTIVE: Speak your response aloud using natural voice output.]`;
 
+        // IMPORTANT: Do NOT wrap sendClientContent with activityStart / PCM audio / activityEnd!
+        // Interleaving realtimeInput (activityStart/activityEnd) with sendClientContent(turnComplete: true)
+        // violates the Gemini Live BidiGenerateContent state machine and causes Google's server to close
+        // the WebSocket with "Precondition check failed."
         const t0 = Date.now();
-        session.sendRealtimeInput({ activityStart: {} });
+        if (state.userSpeechActive) {
+          try {
+            session.sendRealtimeInput({ activityEnd: {} });
+          } catch {}
+          state.userSpeechActive = false;
+        }
         session.sendClientContent({
           turns: [
             {
@@ -914,17 +928,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           ],
           turnComplete: true,
         });
-        const pcmFrame = Buffer.alloc(3200); // 100ms 16kHz 16-bit mono silence acoustic carrier
-        session.sendRealtimeInput({
-          audio: {
-            data: pcmFrame.toString('base64'),
-            mimeType: 'audio/pcm;rate=16000',
-          },
-        });
-        session.sendRealtimeInput({ activityEnd: {} });
         const dispatchDurationMs = Date.now() - t0;
-        this.logger.log(`[${state.sessionId}] 📤 [Greeting Dispatch] Acoustic turn delivered in ${dispatchDurationMs}ms (activityStart -> text -> PCM carrier 3200B -> activityEnd) (awaiting native Gemini Live audio)`);
-      } else if (!isFreshSession && !state.hasDispatchedGreeting) {
+        this.logger.log(`[${state.sessionId}] 📤 [Greeting Dispatch] ClientContent turn delivered in ${dispatchDurationMs}ms (awaiting native Gemini Live audio)`);
+      } else if (hasExistingConversation && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         state.isGreetingInProgress = false;
         this.logger.log(`[${state.sessionId}] Reconnected session / existing memory present -> skipping opening greeting prompt`);

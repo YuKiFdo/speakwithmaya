@@ -30,17 +30,34 @@ import { OnboardingStore } from '@/services/store/onboarding-store';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 
 export default function PhoneScreen() {
-  const params = useLocalSearchParams<{ edit?: string; mode?: string }>();
+  const params = useLocalSearchParams<{ edit?: string; mode?: string; registered?: string }>();
   const isEditing = params.edit === '1' || params.edit === 'true';
-  const isLoginMode = params.mode === 'login';
+  const [forcedLoginMode, setForcedLoginMode] = useState(false);
+  const isLoginMode = params.mode === 'login' || forcedLoginMode;
 
-  const [phone, setPhone] = useState(OnboardingStore.getState().phone || '');
+  const [phone, setPhone] = useState(() => {
+    const stored = OnboardingStore.getState().phone || '';
+    return stored.startsWith('+94') ? stored.slice(3) : stored;
+  });
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [showSubtitle, setShowSubtitle] = useState(isEditing || isLoginMode);
   const [showInput, setShowInput] = useState(isEditing || isLoginMode);
   const [isLoading, setIsLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
+  const [infoText, setInfoText] = useState(
+    params.registered === '1'
+      ? 'This phone number is already registered. Switched to Login mode — tap Log In to receive your code.'
+      : '',
+  );
   const { isDesktop, isTablet } = useBreakpoint();
+
+  useEffect(() => {
+    if (params.registered === '1') {
+      setInfoText(
+        'This phone number is already registered. Switched to Login mode — tap Log In to receive your code.',
+      );
+    }
+  }, [params.registered]);
 
   // Dynamic CMS Text & SMS Gateway Settings
   const [activeGateway, setActiveGateway] = useState<'smsapi' | 'ideamart' | 'mspace' | 'telco'>('smsapi');
@@ -211,7 +228,7 @@ export default function PhoneScreen() {
       clearTimeout(inputTimer);
       stopMayaPhonePromptVoice();
     };
-  }, [isEditing]);
+  }, [isEditing, isLoginMode]);
 
   // iOS-compatible auto-focus: Triggers immediately when showInput switches to true
   // with a slight tick to allow iOS UIKit responder chain & pointerEvents to settle
@@ -275,6 +292,7 @@ export default function PhoneScreen() {
   const handleSendCode = async () => {
     if (!phone.trim() || isLoading) return;
     setErrorText('');
+    setInfoText('');
     stopMayaPhonePromptVoice();
     setIsSpeaking(false);
 
@@ -287,8 +305,8 @@ export default function PhoneScreen() {
       ? cleanInput.slice(1)
       : cleanInput;
 
-    // Operator Carrier validation for Telco Mobile Balance Billing
-    if (activeGateway === 'ideamart' || activeGateway === 'mspace' || activeGateway === 'telco') {
+    // Operator Carrier validation for Telco Mobile Balance Billing (ONLY during new registration, NEVER in Login mode)
+    if (!isLoginMode && (activeGateway === 'ideamart' || activeGateway === 'mspace' || activeGateway === 'telco')) {
       const prefix = digits.slice(0, 2);
       const isMobitel = ['70', '71'].includes(prefix);
       const isDialogOrHutch = ['77', '76', '74', '78', '72', '75'].includes(prefix);
@@ -333,8 +351,21 @@ export default function PhoneScreen() {
 
     setIsLoading(true);
     try {
-      const res = await authService.sendOtp(formattedPhone);
+      const res = await authService.sendOtp(formattedPhone, { isLoginMode });
       OnboardingStore.updateField('phone', formattedPhone);
+      setPhone(digits);
+
+      // If phone number is already registered while on the Register screen,
+      // show notice and switch to Login mode with the phone number pre-filled
+      if (res.alreadyRegistered) {
+        setForcedLoginMode(true);
+        setInfoText(
+          res.message ||
+            'This phone number is already registered. Switched to Login mode — tap Log In to receive your code.',
+        );
+        router.replace('/onboarding/phone?mode=login&registered=1' as any);
+        return;
+      }
 
       // If this is a registered test account, bypass OTP verification directly into the dashboard
       if (res.isTestAccount) {
@@ -342,7 +373,6 @@ export default function PhoneScreen() {
         return;
       }
 
-      OnboardingStore.setLastActiveRoute('/onboarding/otp');
       const otpUrl = isLoginMode ? '/onboarding/otp?mode=login' : '/onboarding/otp';
       router.replace(otpUrl as any);
     } catch (err: any) {
@@ -498,8 +528,16 @@ export default function PhoneScreen() {
                   },
                 ]}
               >
+                {!!infoText && (
+                  <View style={{ marginBottom: 12, padding: 12, backgroundColor: '#EFF6FF', borderRadius: 12, borderWidth: 1, borderColor: '#93C5FD', width: '100%' }}>
+                    <Text style={{ color: '#1D4ED8', fontSize: 13, textAlign: 'center', ...fontStyle('inter', 'medium') }}>
+                      {infoText}
+                    </Text>
+                  </View>
+                )}
+
                 {!!errorText && (
-                  <View style={{ marginBottom: 12, padding: 12, backgroundColor: '#FEF2F2', borderRadius: 12, borderWidth: 1, borderColor: '#FCA5A5' }}>
+                  <View style={{ marginBottom: 12, padding: 12, backgroundColor: '#FEF2F2', borderRadius: 12, borderWidth: 1, borderColor: '#FCA5A5', width: '100%' }}>
                     <Text style={{ color: '#DC2626', fontSize: 13, textAlign: 'center', ...fontStyle('inter', 'medium') }}>
                       {errorText}
                     </Text>
@@ -521,6 +559,34 @@ export default function PhoneScreen() {
                     {disclaimerTextContent}
                   </Text>
                 )}
+
+                {/* Switch between Login and Registration */}
+                <Pressable
+                  onPress={() => {
+                    stopMayaPhonePromptVoice();
+                    setIsSpeaking(false);
+                    setErrorText('');
+                    setInfoText('');
+                    setForcedLoginMode(false);
+                    if (isLoginMode) {
+                      router.replace('/onboarding/name');
+                    } else {
+                      router.replace('/onboarding/phone?mode=login' as any);
+                    }
+                  }}
+                  style={({ pressed }) => [
+                    styles.modeSwitchRow,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.modeSwitchNormal}>
+                    {isLoginMode ? "Don't have an account? " : 'Already have an account? '}
+                  </Text>
+                  <Text style={styles.modeSwitchBold}>
+                    {isLoginMode ? 'Get Started' : 'Login'}
+                  </Text>
+                </Pressable>
               </Animated.View>
             </StepTransition>
           </View>
@@ -731,5 +797,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 14,
     paddingHorizontal: 8,
+  },
+  modeSwitchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+    paddingVertical: 8,
+  },
+  modeSwitchNormal: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 14.5,
+    color: '#64748B',
+  },
+  modeSwitchBold: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 14.5,
+    color: '#0F172A',
   },
 });

@@ -10,7 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, usePathname } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { AmbientGlow } from '@/components/call/ambient-glow';
@@ -76,6 +76,9 @@ export default function CallScreen() {
     goalDescription?: string;
   }>();
 
+  const pathname = usePathname();
+  const isOnboardingCallRoute = Boolean(pathname?.includes('/onboarding/call'));
+
   const storeConfig = CallSessionStore.getConfig();
   const onboardingState = OnboardingStore.getState();
 
@@ -86,8 +89,8 @@ export default function CallScreen() {
   // Real-time network & connection monitor
   const connection = useConnectionMonitor();
 
-  const isIntro = storeConfig?.isIntroCall ?? (params.isIntroCall === 'true');
-  const durationSec = storeConfig?.durationSeconds || (params.duration ? parseInt(params.duration, 10) : 300);
+  const isIntro = storeConfig?.isIntroCall ?? (params.isIntroCall === 'true' || isOnboardingCallRoute);
+  const durationSec = storeConfig?.durationSeconds || (params.duration ? parseInt(params.duration, 10) : (isIntro ? 180 : 300));
   const targetDuration = isNaN(durationSec) ? 300 : durationSec;
   const aiSug = isIntro ? false : (storeConfig?.aiSuggestions ?? (params.aiSuggestions !== 'false'));
   const langMode = isIntro ? 'sinhala' : (storeConfig?.languageMode || (params.languageMode === 'english' ? 'english' : 'sinhala'));
@@ -236,6 +239,18 @@ export default function CallScreen() {
 
   // Auto-start Gemini Live call session on component mount with cleanup on unmount
   useEffect(() => {
+    // If user closed and reopened the app at /onboarding/call (in-memory CallSessionStore was cleared),
+    // skip the intro call and route directly to the dashboard using their authenticated token.
+    if (isOnboardingCallRoute && !storeConfig && onboardingState.isAuthenticated) {
+      OnboardingStore.setOnboardingCompleted();
+      router.replace('/(tabs)/dashboard');
+      return;
+    }
+
+    if (isIntro && onboardingState.isAuthenticated && !onboardingState.isCompleted) {
+      OnboardingStore.setOnboardingCompleted();
+    }
+
     liveCall.startCall();
     return () => {
       liveCallRef.current.endCall(false);

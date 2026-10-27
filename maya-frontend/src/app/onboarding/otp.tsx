@@ -186,7 +186,7 @@ export default function OtpScreen() {
     setErrorText('');
     setIsResending(true);
     try {
-      await authService.sendOtp(displayPhone);
+      await authService.sendOtp(displayPhone, { isLoginMode });
       setResendTimer(60);
       setCanResend(false);
       setOtp(Array(OTP_LENGTH).fill(''));
@@ -205,7 +205,7 @@ export default function OtpScreen() {
     setIsVerifying(true);
 
     try {
-      const res = await authService.verifyOtp(displayPhone, code);
+      const res = await authService.verifyOtp(displayPhone, code, { isLoginMode });
 
       // If user had finished onboarding or logged in as existing user:
       // When isLoginMode or isCompleted is true, direct straight to dashboard.
@@ -213,17 +213,23 @@ export default function OtpScreen() {
       let nextRoute = '/onboarding/goal';
       if (res.isCompleted || isLoginMode) {
         nextRoute = '/(tabs)/dashboard';
+        OnboardingStore.setOnboardingCompleted();
       } else if (
         res.lastActiveRoute &&
         res.lastActiveRoute !== '/' &&
         res.lastActiveRoute !== '/onboarding/name' &&
         res.lastActiveRoute !== '/onboarding/phone' &&
-        res.lastActiveRoute !== '/onboarding/otp'
+        res.lastActiveRoute !== '/onboarding/otp' &&
+        !res.lastActiveRoute.startsWith('/onboarding/phone') &&
+        !res.lastActiveRoute.startsWith('/onboarding/otp')
       ) {
         nextRoute = res.lastActiveRoute;
+        OnboardingStore.setLastActiveRoute(nextRoute);
+      } else {
+        OnboardingStore.setLastActiveRoute('/onboarding/goal');
       }
 
-      OnboardingStore.setLastActiveRoute(nextRoute);
+      authService.syncStep(nextRoute);
       router.replace(nextRoute as any);
     } catch (err: any) {
       setErrorText(err.message || 'Invalid verification code. Please try again.');
@@ -277,7 +283,6 @@ export default function OtpScreen() {
                     <Text style={styles.phoneNumber}>{displayPhone}</Text>
                     <Pressable
                       onPress={() => {
-                        OnboardingStore.setLastActiveRoute('/onboarding/phone');
                         const editUrl = isLoginMode
                           ? '/onboarding/phone?edit=1&mode=login'
                           : '/onboarding/phone?edit=1';

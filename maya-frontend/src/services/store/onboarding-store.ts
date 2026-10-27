@@ -111,6 +111,79 @@ function markHydrated() {
   notify();
 }
 
+const PRE_AUTH_ROUTES = ['/', '/onboarding/name', '/onboarding/phone', '/onboarding/otp'];
+const POST_INTRO_COMPLETION_ROUTES = [
+  '/onboarding/call',
+  '/onboarding/connecting',
+  '/onboarding/building-plan',
+  '/onboarding/special-offer',
+  '/onboarding/claim-discount',
+  '/onboarding/personalized-plan',
+  '/onboarding/complete',
+  '/(tabs)/dashboard',
+];
+
+function isPreAuthRoute(route?: string | null): boolean {
+  if (!route) return true;
+  if (PRE_AUTH_ROUTES.includes(route)) return true;
+  return (
+    route.startsWith('/onboarding/name') ||
+    route.startsWith('/onboarding/phone') ||
+    route.startsWith('/onboarding/otp')
+  );
+}
+
+function sanitizePersistedState(parsed: any): OnboardingState {
+  const cookieToken = CookieStorage.get('maya_auth_token');
+  const accessToken = parsed?.accessToken || cookieToken || null;
+  const isAuthenticated = Boolean(accessToken);
+
+  // Prefer a valid post-auth route; if lastActiveRoute was polluted with a pre-auth route
+  // (e.g. '/onboarding/phone?mode=login'), fall back to user.lastActiveStep
+  const rawLastRoute: string | null = !isPreAuthRoute(parsed?.lastActiveRoute)
+    ? parsed.lastActiveRoute
+    : !isPreAuthRoute(parsed?.user?.lastActiveStep)
+    ? parsed.user.lastActiveStep
+    : null;
+
+  const reachedPostIntro = Boolean(
+    (rawLastRoute && POST_INTRO_COMPLETION_ROUTES.includes(rawLastRoute)) ||
+    (parsed?.lastActiveRoute && POST_INTRO_COMPLETION_ROUTES.includes(parsed.lastActiveRoute)) ||
+    (parsed?.user?.lastActiveStep && POST_INTRO_COMPLETION_ROUTES.includes(parsed.user.lastActiveStep)) ||
+    rawLastRoute === '/onboarding/social-proof',
+  );
+
+  // Also heal legacy cached users who already completed all onboarding questions in localStorage
+  const hasAnsweredAllOnboardingQuestions = Boolean(
+    isAuthenticated && parsed?.goal && parsed?.challenge && parsed?.employment,
+  );
+
+  const isCompleted = Boolean(
+    parsed?.isCompleted ||
+    parsed?.user?.isCompleted ||
+    (isAuthenticated && (reachedPostIntro || hasAnsweredAllOnboardingQuestions)),
+  );
+
+  let lastActiveRoute: string | null = null;
+  if (isCompleted && isAuthenticated) {
+    lastActiveRoute = '/(tabs)/dashboard';
+  } else if (rawLastRoute && !isPreAuthRoute(rawLastRoute)) {
+    lastActiveRoute = rawLastRoute;
+  }
+
+  return {
+    ...defaultState,
+    ...parsed,
+    accessToken,
+    isAuthenticated,
+    isCompleted,
+    lastActiveRoute,
+    isHydrated: true,
+  };
+}
+
+let persistVersion = 0;
+
 // Cross-platform persistence adapter with AES-GCM encryption & tamper detection
 function loadPersistedState(): OnboardingState {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
@@ -120,15 +193,14 @@ function loadPersistedState(): OnboardingState {
         // If legacy cleartext JSON, parse immediately and queue encrypted migration
         if (raw.startsWith('{')) {
           const parsed = JSON.parse(raw);
-          const state: OnboardingState = {
-            ...defaultState,
-            ...parsed,
-            isAuthenticated: !!parsed.accessToken,
-            isHydrated: true,
-          };
+          const state = sanitizePersistedState(parsed);
           // Migrate to encrypted payload in background
-          encryptData(JSON.stringify(state)).then((enc) => {
-            window.localStorage.setItem(STORAGE_KEY, enc);
+          const currentVersion = ++persistVersion;
+          const { isHydrated, ...persistable } = state;
+          encryptData(JSON.stringify(persistable)).then((enc) => {
+            if (currentVersion === persistVersion) {
+              window.localStorage.setItem(STORAGE_KEY, enc);
+            }
           });
           // Resolve hydration immediately for legacy cleartext
           setTimeout(() => { hydrationResolve?.(); hydrationResolve = null; }, 0);
@@ -141,12 +213,16 @@ function loadPersistedState(): OnboardingState {
             if (decrypted) {
               try {
                 const parsed = JSON.parse(decrypted);
-                memoryState = {
-                  ...defaultState,
-                  ...parsed,
-                  isAuthenticated: !!parsed.accessToken,
-                  isHydrated: true,
-                };
+                const sanitized = sanitizePersistedState(parsed);
+                memoryState = sanitized;
+
+                // If legacy cache had polluted lastActiveRoute or unhealed completion state, persist cleaned state immediately
+                if (
+                  sanitized.lastActiveRoute !== parsed?.lastActiveRoute ||
+                  sanitized.isCompleted !== Boolean(parsed?.isCompleted)
+                ) {
+                  persistState(sanitized);
+                }
               } catch {
                 memoryState = { ...defaultState, isHydrated: true };
               }
@@ -168,6 +244,19 @@ function loadPersistedState(): OnboardingState {
         // Return default (not yet hydrated) state — guard will wait for hydration
         return memoryState;
       }
+
+      // Fallback: if localStorage entry was cleared but auth cookie still exists, recover token
+      const fallbackCookieToken = CookieStorage.get('maya_auth_token');
+      if (fallbackCookieToken) {
+        const recovered: OnboardingState = {
+          ...defaultState,
+          accessToken: fallbackCookieToken,
+          isAuthenticated: true,
+          isHydrated: true,
+        };
+        setTimeout(() => { hydrationResolve?.(); hydrationResolve = null; }, 0);
+        return recovered;
+      }
     } catch {}
   }
 
@@ -181,12 +270,15 @@ function persistState(state: OnboardingState) {
   memoryState = state;
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
     try {
+      const currentVersion = ++persistVersion;
       // Don't persist the isHydrated flag — it's runtime-only
       const { isHydrated, ...persistable } = state;
       const json = JSON.stringify(persistable);
-      // Save encrypted envelope into localStorage
+      // Save encrypted envelope into localStorage in strict version order
       encryptData(json).then((encrypted) => {
-        window.localStorage.setItem(STORAGE_KEY, encrypted);
+        if (currentVersion === persistVersion) {
+          window.localStorage.setItem(STORAGE_KEY, encrypted);
+        }
       });
 
       // Also sync secure cookie for web
@@ -232,10 +324,27 @@ export const OnboardingStore = {
    * Ensures the user never has to log in again.
    */
   setAuthSession(token: string, user: UserSessionData) {
+    const reachedPostIntro = Boolean(
+      user.lastActiveStep && POST_INTRO_COMPLETION_ROUTES.includes(user.lastActiveStep),
+    );
+    const isCompleted = Boolean(user.isCompleted || memoryState.isCompleted || reachedPostIntro);
+    let nextLastActiveRoute = memoryState.lastActiveRoute;
+    if (isCompleted) {
+      nextLastActiveRoute = '/(tabs)/dashboard';
+    } else if (user.lastActiveStep && !isPreAuthRoute(user.lastActiveStep)) {
+      nextLastActiveRoute = user.lastActiveStep;
+    } else if (isPreAuthRoute(nextLastActiveRoute)) {
+      nextLastActiveRoute = '/onboarding/goal';
+    }
+
     const updated: OnboardingState = {
       ...memoryState,
       accessToken: token,
-      user,
+      user: {
+        ...user,
+        isCompleted,
+        lastActiveStep: nextLastActiveRoute,
+      },
       isAuthenticated: true,
       phone: user.phoneNumber || memoryState.phone,
       name: user.displayName !== undefined && user.displayName !== null && user.displayName !== '' ? user.displayName : memoryState.name,
@@ -245,7 +354,8 @@ export const OnboardingStore = {
       employment: user.employmentStatus || memoryState.employment,
       dailyGoalMinutes: user.dailyGoalMinutes || memoryState.dailyGoalMinutes,
       nativeLanguage: (user.nativeLanguage as any) || memoryState.nativeLanguage,
-      isCompleted: user.isCompleted ?? memoryState.isCompleted,
+      isCompleted,
+      lastActiveRoute: nextLastActiveRoute,
     };
     persistState(updated);
   },
@@ -265,7 +375,18 @@ export const OnboardingStore = {
    * so that if they close the browser or app, they resume right back here without restarting.
    */
   setLastActiveRoute(route: string) {
-    // Never overwrite with initial screens if already past phone verification
+    // Never pollute persistent storage with pre-auth routes (/onboarding/name, /onboarding/phone?mode=login, /onboarding/otp)
+    if (isPreAuthRoute(route)) {
+      return;
+    }
+
+    // Once user reaches the intro call (or any post-call step) or has completed onboarding,
+    // mark onboarding completed so closing and reopening skips the intro call straight to dashboard.
+    if (memoryState.isCompleted || POST_INTRO_COMPLETION_ROUTES.includes(route)) {
+      this.setOnboardingCompleted();
+      return;
+    }
+
     const updated: OnboardingState = {
       ...memoryState,
       lastActiveRoute: route,

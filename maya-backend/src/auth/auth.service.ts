@@ -17,6 +17,7 @@ import {
   SavePreferencesDto,
   UpgradePlanDto,
   AddOnTopUpDto,
+  UpdateStepDto,
   AdminUsersQueryDto,
   AdminUpdateUserDto,
   CreateTestAccountDto,
@@ -247,6 +248,28 @@ export class AuthService {
     }
 
     const now = Date.now();
+    const isLoginMode = Boolean(dto.isLoginMode);
+
+    // If user is on the Register page (!isLoginMode), check if this phone number is already registered in profiles
+    if (!isLoginMode) {
+      const rawPhone = phone.replace('+', '');
+      const { data: existingProfile } = await this.supabase
+        .from('profiles')
+        .select('id, phone_number')
+        .or(`phone_number.eq.${phone},phone_number.eq.${rawPhone}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingProfile) {
+        this.logger.log(`[sendOtp] Phone ${phone} is already registered in profiles -> prompting client to switch to Login mode.`);
+        return {
+          success: false,
+          alreadyRegistered: true,
+          phoneNumber: phone,
+          message: 'This phone number is already registered. Please log in to continue.',
+        };
+      }
+    }
 
     // 1. Check cooldown (60 seconds) strictly against database
     const { data: recent, error: checkError } = await this.supabase
@@ -274,9 +297,10 @@ export class AuthService {
       }
     }
 
-    // 2. Dispatch via Active Configured SMS Gateway Provider (smsapi or telco carrier billing)
+    // 2. Dispatch via Active Configured SMS Gateway Provider
+    // IMPORTANT: In Login mode (isLoginMode === true), ALWAYS use normal SMS OTP (smsProvider) without Telco!
     const gateway = config.smsGateway;
-    const isTelco = gateway === 'ideamart' || gateway === 'mspace';
+    const isTelco = !isLoginMode && (gateway === 'ideamart' || gateway === 'mspace');
     const expiresAt = new Date(now + 5 * 60 * 1000).toISOString(); // 5 minutes
 
     if (isTelco) {
@@ -284,32 +308,12 @@ export class AuthService {
       const pinResult = await this.telcoService.requestPin(phone, config);
 
       if (pinResult?.status === 'ALREADY_REGISTERED') {
-        // User is already subscribed on mobile carrier; dispatch secure login code via SMS provider
-        const code = crypto.randomInt(100000, 999999).toString();
-        const otpHash = this.hashOtp(code, phone);
-        const { error: insertError } = await this.supabase
-          .from('phone_verifications')
-          .insert({
-            phone_number: phone,
-            otp_hash: otpHash,
-            attempts: 0,
-            max_attempts: 3,
-            is_verified: false,
-            expires_at: expiresAt,
-          });
-
-        if (insertError) {
-          this.logger.error(`Failed to insert into phone_verifications: ${insertError.message}`);
-          throw new InternalServerErrorException('Failed to generate verification session in database.');
-        }
-
-        await this.smsProvider.sendOtp(phone, code, config.smsTemplate);
-
+        this.logger.log(`[sendOtp] Telco reported ${phone} is ALREADY_REGISTERED -> prompting client to switch to Login mode.`);
         return {
-          success: true,
-          cooldownSeconds: 60,
-          expiresInSeconds: 300,
-          message: 'Verification code sent successfully.',
+          success: false,
+          alreadyRegistered: true,
+          phoneNumber: phone,
+          message: 'This phone number is already registered. Please log in to continue.',
         };
       }
 
@@ -585,13 +589,52 @@ export class AuthService {
     // 7. Generate bearer access token
     const accessToken = this.generateTokenForUser(userProfile);
 
+    // Persist display_name if provided from registration step
+    if (dto.displayName && dto.displayName.trim() && !userProfile.display_name) {
+      userProfile.display_name = dto.displayName.trim();
+      this.supabase
+        .from('profiles')
+        .update({ display_name: userProfile.display_name, updated_at: new Date().toISOString() })
+        .eq('id', userProfile.id)
+        .then(() => {});
+    }
+
+    const postIntroSteps = [
+      '/onboarding/call',
+      '/onboarding/connecting',
+      '/onboarding/building-plan',
+      '/onboarding/special-offer',
+      '/onboarding/claim-discount',
+      '/onboarding/personalized-plan',
+      '/onboarding/complete',
+      '/(tabs)/dashboard',
+    ];
+    const reachedIntroOrLogin =
+      Boolean(dto.isLoginMode) ||
+      Boolean(userProfile.last_active_step && postIntroSteps.includes(userProfile.last_active_step));
+
+    if (!userProfile.onboarding_completed_at && reachedIntroOrLogin) {
+      const nowIso = new Date().toISOString();
+      userProfile.onboarding_completed_at = nowIso;
+      userProfile.last_active_step = '/(tabs)/dashboard';
+      this.supabase
+        .from('profiles')
+        .update({
+          onboarding_completed_at: nowIso,
+          last_active_step: '/(tabs)/dashboard',
+          updated_at: nowIso,
+        })
+        .eq('id', userProfile.id)
+        .then(() => {});
+    }
+
     const isCompleted = !!userProfile.onboarding_completed_at;
     let lastActiveRoute = '/(tabs)/dashboard';
 
     if (!isCompleted) {
       const step = userProfile.last_active_step;
       const initialSteps = ['/', '/onboarding/name', '/onboarding/phone', '/onboarding/otp'];
-      if (step && !initialSteps.includes(step)) {
+      if (step && !initialSteps.includes(step) && !step.startsWith('/onboarding/phone') && !step.startsWith('/onboarding/otp')) {
         lastActiveRoute = step;
       } else {
         lastActiveRoute = '/onboarding/goal';
@@ -1025,10 +1068,56 @@ export class AuthService {
   /**
    * Tracks user's progress through onboarding screens so logging in from another device resumes seamlessly.
    */
-  async updateStep(userId: string, step: string) {
+  async updateStep(userId: string, stepOrDto: string | UpdateStepDto) {
+    const dto: UpdateStepDto = typeof stepOrDto === 'string' ? { step: stepOrDto } : stepOrDto;
+    const step = dto.step;
+    const nowIso = new Date().toISOString();
+
+    const postIntroSteps = [
+      '/onboarding/call',
+      '/onboarding/connecting',
+      '/onboarding/building-plan',
+      '/onboarding/special-offer',
+      '/onboarding/claim-discount',
+      '/onboarding/personalized-plan',
+      '/onboarding/complete',
+      '/(tabs)/dashboard',
+    ];
+    const shouldMarkCompleted = Boolean(dto.markCompleted || postIntroSteps.includes(step));
+
+    const updates: Record<string, any> = {
+      last_active_step: shouldMarkCompleted ? '/(tabs)/dashboard' : step,
+      updated_at: nowIso,
+    };
+
+    if (shouldMarkCompleted) {
+      updates.onboarding_completed_at = nowIso;
+    }
+    if (dto.displayName && dto.displayName.trim()) {
+      updates.display_name = dto.displayName.trim();
+    }
+    if (dto.nativeLanguage) {
+      updates.native_language = dto.nativeLanguage;
+    }
+    if (dto.level) {
+      updates.level = dto.level;
+    }
+    if (dto.goal) {
+      updates.goal = dto.goal;
+    }
+    if (dto.challenge) {
+      updates.challenge = dto.challenge;
+    }
+    if (dto.employmentStatus) {
+      updates.employment_status = dto.employmentStatus;
+    }
+    if (typeof dto.dailyGoalMinutes === 'number' && dto.dailyGoalMinutes > 0) {
+      updates.daily_goal_minutes = dto.dailyGoalMinutes;
+    }
+
     const { error } = await this.supabase
       .from('profiles')
-      .update({ last_active_step: step, updated_at: new Date().toISOString() })
+      .update(updates)
       .eq('id', userId);
 
     if (error) {
@@ -1036,7 +1125,7 @@ export class AuthService {
       throw new InternalServerErrorException('Failed to update step in database.');
     }
 
-    return { success: true, step };
+    return { success: true, step: updates.last_active_step, isCompleted: shouldMarkCompleted };
   }
 
   /**
@@ -1058,12 +1147,32 @@ export class AuthService {
       throw new NotFoundException('User profile not found in database.');
     }
 
-    // Auto-heal: If user completed onboarding, ensure last_active_step in DB is dashboard
-    if (data.onboarding_completed_at && data.last_active_step !== '/(tabs)/dashboard') {
+    const postIntroSteps = [
+      '/onboarding/call',
+      '/onboarding/connecting',
+      '/onboarding/building-plan',
+      '/onboarding/special-offer',
+      '/onboarding/claim-discount',
+      '/onboarding/personalized-plan',
+      '/onboarding/complete',
+      '/(tabs)/dashboard',
+    ];
+
+    // Auto-heal: If user already reached intro call or completed onboarding, ensure onboarding_completed_at and last_active_step in DB are set to dashboard
+    if (
+      (data.onboarding_completed_at || (data.last_active_step && postIntroSteps.includes(data.last_active_step))) &&
+      (!data.onboarding_completed_at || data.last_active_step !== '/(tabs)/dashboard')
+    ) {
+      const nowIso = new Date().toISOString();
+      data.onboarding_completed_at = data.onboarding_completed_at || nowIso;
       data.last_active_step = '/(tabs)/dashboard';
       this.supabase
         .from('profiles')
-        .update({ last_active_step: '/(tabs)/dashboard', updated_at: new Date().toISOString() })
+        .update({
+          onboarding_completed_at: data.onboarding_completed_at,
+          last_active_step: '/(tabs)/dashboard',
+          updated_at: nowIso,
+        })
         .eq('id', userId)
         .then(() => {});
     }

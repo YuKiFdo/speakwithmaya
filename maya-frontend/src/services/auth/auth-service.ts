@@ -3,6 +3,8 @@ import { OnboardingStore } from '../store/onboarding-store';
 
 export interface SendOtpResponse {
   success: boolean;
+  alreadyRegistered?: boolean;
+  phoneNumber?: string;
   cooldownSeconds?: number;
   expiresInSeconds?: number;
   message?: string;
@@ -78,16 +80,26 @@ class AuthService {
   /**
    * Request OTP code to be sent to mobile number.
    */
-  async sendOtp(phoneNumber: string): Promise<SendOtpResponse> {
+  async sendOtp(
+    phoneNumber: string,
+    options?: { isLoginMode?: boolean },
+  ): Promise<SendOtpResponse> {
     const res = await fetch(`${this.baseUrl}/v1/auth/otp/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phoneNumber }),
+      body: JSON.stringify({
+        phoneNumber,
+        isLoginMode: Boolean(options?.isLoginMode),
+      }),
     });
 
     const data = await res.json();
     if (!res.ok) {
       throw new Error(data.message || 'Failed to send verification code');
+    }
+
+    if (data.alreadyRegistered) {
+      return data;
     }
 
     // If test account was authenticated directly without OTP, set the session immediately
@@ -106,11 +118,21 @@ class AuthService {
    * Verify OTP and receive auth token with Starter Plan (10 min).
    * Persists database session so user never has to log in again.
    */
-  async verifyOtp(phoneNumber: string, code: string): Promise<VerifyOtpResponse> {
+  async verifyOtp(
+    phoneNumber: string,
+    code: string,
+    options?: { isLoginMode?: boolean },
+  ): Promise<VerifyOtpResponse> {
+    const currentState = OnboardingStore.getState();
     const res = await fetch(`${this.baseUrl}/v1/auth/otp/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phoneNumber, code }),
+      body: JSON.stringify({
+        phoneNumber,
+        code,
+        displayName: currentState.name ? currentState.name.trim() : undefined,
+        isLoginMode: options?.isLoginMode,
+      }),
     });
 
     const data = await res.json();
@@ -124,7 +146,7 @@ class AuthService {
       if (data.lastActiveRoute) {
         OnboardingStore.setLastActiveRoute(data.lastActiveRoute);
       }
-      if (data.isCompleted) {
+      if (data.isCompleted || options?.isLoginMode) {
         OnboardingStore.setOnboardingCompleted();
       }
     }
@@ -157,11 +179,13 @@ class AuthService {
   }
 
   /**
-   * Syncs the current onboarding step to the backend so logging in from another device resumes seamlessly.
+   * Syncs the current onboarding step and accumulated preferences to the backend
+   * so refreshing or logging in from another device resumes seamlessly.
    */
   async syncStep(step: string) {
     OnboardingStore.setLastActiveRoute(step);
-    const token = OnboardingStore.getState().accessToken;
+    const state = OnboardingStore.getState();
+    const token = state.accessToken;
     if (!token) return;
     try {
       await fetch(`${this.baseUrl}/v1/users/step`, {
@@ -170,7 +194,17 @@ class AuthService {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ step }),
+        body: JSON.stringify({
+          step,
+          displayName: state.name ? state.name.trim() : undefined,
+          nativeLanguage: state.nativeLanguage || undefined,
+          level: state.level || undefined,
+          goal: state.goal || undefined,
+          challenge: state.challenge || undefined,
+          employmentStatus: state.employment || undefined,
+          dailyGoalMinutes: state.dailyGoalMinutes || undefined,
+          markCompleted: state.isCompleted || undefined,
+        }),
       });
     } catch {}
   }
@@ -216,6 +250,18 @@ class AuthService {
             gracePeriodEndDate: data.profile.grace_period_end || null,
           };
           OnboardingStore.setAuthSession(token, user);
+
+          // Auto-heal legacy cached users: if local store has preferences/completion that were never synced to DB in older builds, backfill them now
+          const latestLocal = OnboardingStore.getState();
+          const needsDbBackfill =
+            (latestLocal.name && !data.profile.display_name) ||
+            (latestLocal.goal && !data.profile.goal) ||
+            (latestLocal.isCompleted && !data.profile.onboarding_completed_at);
+
+          if (needsDbBackfill) {
+            this.syncStep(latestLocal.isCompleted ? '/(tabs)/dashboard' : (latestLocal.lastActiveRoute || '/onboarding/goal'));
+          }
+
           return user;
         }
       } else if (res.status === 401 || res.status === 404) {

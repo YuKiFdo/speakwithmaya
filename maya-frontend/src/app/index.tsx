@@ -49,21 +49,22 @@ export default function WelcomeScreen() {
       if (!mounted) return;
       const state = OnboardingStore.getState();
 
-      if (state.isCompleted && state.isAuthenticated) {
-        router.replace('/(tabs)/dashboard');
-        return;
-      }
-
-      if (state.lastActiveRoute && state.lastActiveRoute !== '/' && state.lastActiveRoute !== '/onboarding/name') {
-        // If resuming to a post-auth route, verify we actually have a valid token
-        const isPostAuth = POST_AUTH_ROUTES.includes(state.lastActiveRoute) ||
-          state.lastActiveRoute.startsWith('/(tabs)');
-        if (isPostAuth && !state.isAuthenticated) {
-          // Auth was lost — restart from phone verification
-          router.replace('/onboarding/phone');
+      if (state.isAuthenticated) {
+        if (state.isCompleted) {
+          router.replace('/(tabs)/dashboard');
           return;
         }
-        router.replace(state.lastActiveRoute as any);
+
+        if (
+          state.lastActiveRoute &&
+          (POST_AUTH_ROUTES.includes(state.lastActiveRoute) ||
+            state.lastActiveRoute.startsWith('/(tabs)'))
+        ) {
+          router.replace(state.lastActiveRoute as any);
+          return;
+        }
+
+        router.replace('/onboarding/goal');
         return;
       }
     });

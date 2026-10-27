@@ -317,6 +317,19 @@ export default function SocialProofScreen() {
       languageMode: 'sinhala',
       sinhalaStyle: 'balanced',
     });
+
+    // Save preferences and mark onboarding completed as soon as user enters the intro call,
+    // so if they close the app during the call and come back later, their token takes them straight to dashboard.
+    OnboardingStore.setOnboardingCompleted();
+    authService.savePreferences({
+      displayName: state.name || undefined,
+      nativeLanguage: state.nativeLanguage,
+      level: state.level,
+      goal: state.goal,
+      challenge: state.challenge,
+      employmentStatus: state.employment,
+      dailyGoalMinutes: state.dailyGoalMinutes,
+    }).catch(() => {});
     authService.syncStep('/onboarding/call');
     router.replace('/onboarding/call');
   };

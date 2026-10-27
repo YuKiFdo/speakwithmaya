@@ -67,7 +67,7 @@ export class AuthController {
     @Body() dto: UpdateStepDto,
     @GetUser('id') userId: string,
   ) {
-    return this.authService.updateStep(userId, dto.step);
+    return this.authService.updateStep(userId, dto);
   }
 
   @Post('plans/upgrade')
