@@ -325,7 +325,7 @@ export class LiveTransport implements ILiveTransport {
     this.lastTurnDispatchedAt = Date.now();
     this.hasReceivedAudioThisTurn = false;
     this.currentTurnSubtitles = '';
-    console.log(`[${getLogTimestamp()}] 🚀 [Turn Dispatch] User speech ended — streaming acoustic flush & signaling turnComplete to Gemini`);
+    console.log(`[${getLogTimestamp()}] 🚀 [Turn Dispatch] User speech ended - streaming acoustic flush & signaling turnComplete to Gemini`);
 
     // If user speaks during coaching pause, cancel any pending timers
     if (this.feedbackNudgeTimer) {
@@ -427,7 +427,7 @@ export class LiveTransport implements ILiveTransport {
 
   private sendContinueAfterFeedback() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn(`[${getLogTimestamp()}] ⚠️ [Feedback Nudge] Cannot send continuation cue — WebSocket not open`);
+      console.warn(`[${getLogTimestamp()}] ⚠️ [Feedback Nudge] Cannot send continuation cue - WebSocket not open`);
       return;
     }
     const isSinhala = this.config.languageMode === 'sinhala';
@@ -571,7 +571,7 @@ export class LiveTransport implements ILiveTransport {
           this.callbacks.onTurnComplete?.();
 
           // After a coaching turn WITH AUDIO, wait 750ms then nudge the model to continue smoothly
-          // Skip the tool-call turnComplete (no audio) — only fire on the coaching audio turnComplete
+          // Skip the tool-call turnComplete (no audio) - only fire on the coaching audio turnComplete
           if (this.pendingFeedbackNudge && this.hasReceivedAudioThisTurn) {
             this.pendingFeedbackNudge = false;
             if (this.feedbackNudgeTimer) clearTimeout(this.feedbackNudgeTimer);
@@ -581,7 +581,7 @@ export class LiveTransport implements ILiveTransport {
               this.sendContinueAfterFeedback();
             }, 750);
           } else if (this.pendingFeedbackNudge && !this.hasReceivedAudioThisTurn) {
-            console.log(`[${getLogTimestamp()}] ℹ️ [Feedback Turn] Tool handshake turn completed with no audio — pendingFeedbackNudge armed and waiting for Maya's coaching audio turn`);
+            console.log(`[${getLogTimestamp()}] ℹ️ [Feedback Turn] Tool handshake turn completed with no audio - pendingFeedbackNudge armed and waiting for Maya's coaching audio turn`);
           } else if (!this.pendingFeedbackNudge && this.hasReceivedAudioThisTurn && completeTranscript) {
             // Safety net: check if Maya delivered spoken coaching directly without emitting a tool call
             const hasCoachingMarkers =
@@ -723,8 +723,8 @@ export class LiveTransport implements ILiveTransport {
                 },
               });
             } else {
-              // System farewell cue NOT sent yet AND student did not ask to leave — model is self-concluding prematurely
-              console.warn(`[${getLogTimestamp()}] ⚠️ [Tool: Conclude Call REJECTED]: isWrappingUp=false, reason: "${reason}" — session time has NOT ended yet.`);
+              // System farewell cue NOT sent yet AND student did not ask to leave - model is self-concluding prematurely
+              console.warn(`[${getLogTimestamp()}] ⚠️ [Tool: Conclude Call REJECTED]: isWrappingUp=false, reason: "${reason}" - session time has NOT ended yet.`);
               functionResponses.push({
                 name: call.name,
                 id: call.id,

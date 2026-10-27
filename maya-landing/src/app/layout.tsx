@@ -27,7 +27,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "SpeakwithMaya — Your Personal AI English Speaking Coach",
+    default: "SpeakwithMaya - Your Personal AI English Speaking Coach",
     template: "%s | SpeakwithMaya",
   },
   description:
@@ -57,7 +57,7 @@ export const metadata: Metadata = {
     canonical: "/",
   },
   openGraph: {
-    title: "SpeakwithMaya — Your Personal AI English Speaking Coach",
+    title: "SpeakwithMaya - Your Personal AI English Speaking Coach",
     description:
       "Practice real spoken English conversations with Maya. Gain fluency, get instant sentence corrections, and speak naturally without fear. Join thousands practicing in Sri Lanka.",
     url: SITE_URL,
@@ -69,14 +69,14 @@ export const metadata: Metadata = {
         url: "/og-image.png",
         width: 1200,
         height: 630,
-        alt: "SpeakwithMaya — Your Personal AI English Speaking Coach",
+        alt: "SpeakwithMaya - Your Personal AI English Speaking Coach",
         type: "image/png",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "SpeakwithMaya — Your Personal AI English Speaking Coach",
+    title: "SpeakwithMaya - Your Personal AI English Speaking Coach",
     description:
       "Practice real spoken English conversations with Maya. Improve your fluency, build confidence, and speak naturally.",
     images: ["/og-image.png"],

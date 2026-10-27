@@ -141,7 +141,7 @@ function formatClientDateTime(isoTimestamp?: string, fallbackDisplayDate?: strin
   }
   if (fallbackDisplayDate) return fallbackDisplayDate;
   if (isoTimestamp) return isoTimestamp.slice(0, 16);
-  return '—';
+  return '-';
 }
 
 // Sidebar Navigation Structure
@@ -1001,7 +1001,7 @@ export default function AdminUsageScreen() {
                               <Text style={styles.hintsBadgeText}>{row.hintsUsedCount} hints</Text>
                             </View>
                           ) : (
-                            <Text style={{ color: '#94a3b8', fontSize: 13 }}>—</Text>
+                            <Text style={{ color: '#94a3b8', fontSize: 13 }}>-</Text>
                           )}
                         </View>
 
@@ -1012,7 +1012,7 @@ export default function AdminUsageScreen() {
                             { width: 105, textAlign: 'right', color: '#7c3aed', ...fontStyle('inter', 'medium') },
                           ]}
                         >
-                          {row.hintCostLkr && row.hintCostLkr > 0 ? `LKR ${row.hintCostLkr.toFixed(2)}` : '—'}
+                          {row.hintCostLkr && row.hintCostLkr > 0 ? `LKR ${row.hintCostLkr.toFixed(2)}` : '-'}
                         </Text>
 
                         {/* Total Cost */}

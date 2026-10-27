@@ -390,7 +390,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         setIsConnected(false);
         setTimeout(() => {
           if (isFirstGreetingPendingRef.current && !isInitialGreetingHeldRef.current && !playerRef.current.isPlaying()) {
-            console.warn('[useLiveCall] Initial greeting safety timeout expired (7s) — unlocking mic');
+            console.warn('[useLiveCall] Initial greeting safety timeout expired (7s) - unlocking mic');
             isFirstGreetingPendingRef.current = false;
             if (modelVolume === 0) {
               isModelSpeakingRef.current = false;
@@ -411,7 +411,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           if (!isSpeaking) {
             // Once Maya's opening greeting audio finishes playing through speakers, ensure mic is unlocked
             if (isFirstGreetingPendingRef.current) {
-              console.log('[useLiveCall] 🌟 Initial greeting audio playback completed — unlocking mic');
+              console.log('[useLiveCall] 🌟 Initial greeting audio playback completed - unlocking mic');
               isFirstGreetingPendingRef.current = false;
             }
 
@@ -510,7 +510,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             turnStartTimeRef.current = Date.now();
             if (responseTimeoutRef.current) clearTimeout(responseTimeoutRef.current);
             responseTimeoutRef.current = setTimeout(() => {
-              console.warn('[useLiveCall] ⚠️ Response delay > 5s — Maya is still thinking');
+              console.warn('[useLiveCall] ⚠️ Response delay > 5s - Maya is still thinking');
               setIsSlowResponse(true);
             }, 5000);
           } else {
@@ -1717,7 +1717,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     // even if greeting audio failed or was skipped during reconnect
     setTimeout(() => {
       if (isFirstGreetingPendingRef.current && !playerRef.current.isPlaying()) {
-        console.warn('[useLiveCall] Post-release greeting safety timeout expired (7s) — unlocking mic');
+        console.warn('[useLiveCall] Post-release greeting safety timeout expired (7s) - unlocking mic');
         isFirstGreetingPendingRef.current = false;
         isModelSpeakingRef.current = false;
         if (statusRef.current === 'connecting' || statusRef.current === 'speaking') {

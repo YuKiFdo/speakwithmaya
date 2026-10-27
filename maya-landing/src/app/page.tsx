@@ -832,7 +832,7 @@ export default function Home() {
                 </Reveal>
               </div>
 
-              {/* Right Column — 3D Maya Illustration */}
+              {/* Right Column - 3D Maya Illustration */}
               <div className="lg:col-span-6 flex justify-center lg:justify-end items-end relative -mx-5 sm:mx-0">
                 <Reveal
                   delay={220}
@@ -855,7 +855,7 @@ export default function Home() {
                     <div className="animate-maya-float relative z-10 w-full flex items-end justify-center">
                       <Image
                         src="/maya-waving.png?v=2"
-                        alt="Maya — Your Personal AI English Speaking Coach"
+                        alt="Maya - Your Personal AI English Speaking Coach"
                         width={1232}
                         height={1118}
                         unoptimized

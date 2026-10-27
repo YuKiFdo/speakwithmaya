@@ -45,7 +45,7 @@ export interface OnboardingState {
   lastActiveRoute: string | null;
   isCompleted: boolean;
 
-  // Hydration flag — true once encrypted storage has been fully decrypted & loaded
+  // Hydration flag - true once encrypted storage has been fully decrypted & loaded
   isHydrated: boolean;
 
   // Onboarding answers
@@ -98,7 +98,7 @@ import {
   CookieStorage,
 } from '@/utils/encrypted-storage';
 
-// Hydration tracking — resolves once encrypted storage has been fully loaded
+// Hydration tracking - resolves once encrypted storage has been fully loaded
 let hydrationResolve: (() => void) | null = null;
 const hydrationPromise = new Promise<void>((resolve) => {
   hydrationResolve = resolve;
@@ -241,7 +241,7 @@ function loadPersistedState(): OnboardingState {
             markHydrated();
           });
 
-        // Return default (not yet hydrated) state — guard will wait for hydration
+        // Return default (not yet hydrated) state - guard will wait for hydration
         return memoryState;
       }
 
@@ -260,7 +260,7 @@ function loadPersistedState(): OnboardingState {
     } catch {}
   }
 
-  // No persisted data or not on web — hydrated immediately
+  // No persisted data or not on web - hydrated immediately
   const immediateState = { ...defaultState, isHydrated: true };
   setTimeout(() => { hydrationResolve?.(); hydrationResolve = null; }, 0);
   return immediateState;
@@ -271,7 +271,7 @@ function persistState(state: OnboardingState) {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
     try {
       const currentVersion = ++persistVersion;
-      // Don't persist the isHydrated flag — it's runtime-only
+      // Don't persist the isHydrated flag - it's runtime-only
       const { isHydrated, ...persistable } = state;
       const json = JSON.stringify(persistable);
       // Save encrypted envelope into localStorage in strict version order
@@ -454,7 +454,7 @@ export const OnboardingStore = {
         CookieStorage.delete('maya_auth_token');
       } catch {}
     }
-    // Keep isHydrated true — the store is already loaded, this is a runtime clear (logout)
+    // Keep isHydrated true - the store is already loaded, this is a runtime clear (logout)
     memoryState = { ...defaultState, isHydrated: true };
     notify();
   },

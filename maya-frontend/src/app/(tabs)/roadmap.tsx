@@ -1904,7 +1904,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 
-  /* User Badge Row — now handled by <UserLevelBadge /> */
+  /* User Badge Row - now handled by <UserLevelBadge /> */
 
   /* Mobile Fixed Top Bar (Pinned at top) */
   mobileFixedTopBar: {

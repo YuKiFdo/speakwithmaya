@@ -46,7 +46,7 @@ export default function PhoneScreen() {
   const [errorText, setErrorText] = useState('');
   const [infoText, setInfoText] = useState(
     params.registered === '1'
-      ? 'This phone number is already registered. Switched to Login mode — tap Log In to receive your code.'
+      ? 'This phone number is already registered. Switched to Login mode - tap Log In to receive your code.'
       : '',
   );
   const { isDesktop, isTablet } = useBreakpoint();
@@ -54,7 +54,7 @@ export default function PhoneScreen() {
   useEffect(() => {
     if (params.registered === '1') {
       setInfoText(
-        'This phone number is already registered. Switched to Login mode — tap Log In to receive your code.',
+        'This phone number is already registered. Switched to Login mode - tap Log In to receive your code.',
       );
     }
   }, [params.registered]);
@@ -361,7 +361,7 @@ export default function PhoneScreen() {
         setForcedLoginMode(true);
         setInfoText(
           res.message ||
-            'This phone number is already registered. Switched to Login mode — tap Log In to receive your code.',
+            'This phone number is already registered. Switched to Login mode - tap Log In to receive your code.',
         );
         router.replace('/onboarding/phone?mode=login&registered=1' as any);
         return;

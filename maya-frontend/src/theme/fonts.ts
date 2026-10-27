@@ -9,7 +9,7 @@ import { Platform, TextStyle } from 'react-native';
  * On Android: React Native does NOT synthesise font weights for custom fonts.
  * If you set `fontFamily: 'Outfit_700Bold'` AND `fontWeight: '700'`, Android's native
  * font resolver tries to find a "bold variant of the font family named Outfit_700Bold"
- * — which doesn't exist — and SILENTLY FALLS BACK TO ROBOTO (the system font).
+ * - which doesn't exist - and SILENTLY FALLS BACK TO ROBOTO (the system font).
  *
  * THE FIX: On native, set only `fontFamily` (pointing to the exact weight file) and
  * REMOVE `fontWeight` entirely. On web, keep both `fontFamily` and `fontWeight` so the

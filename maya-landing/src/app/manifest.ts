@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "SpeakwithMaya — AI English Speaking Coach",
+    name: "SpeakwithMaya - AI English Speaking Coach",
     short_name: "SpeakwithMaya",
     description:
       "Practice real conversations with Maya, your personal AI speaking coach. Improve your fluency, build better sentences, and speak naturally.",

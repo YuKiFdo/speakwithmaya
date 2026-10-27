@@ -1,4 +1,4 @@
-# Maya AI — English Speaking Coach (Gemini Live)
+# Maya AI - English Speaking Coach (Gemini Live)
 
 See [AGENTS.md](file:///d:/outsource/Maya%20Ai/AGENTS.md) and the comprehensive rules in [.agents/rules/](file:///d:/outsource/Maya%20Ai/.agents/rules/) for all architectural standards, non-negotiable constraints, and workflow requirements.
 

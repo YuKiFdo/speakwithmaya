@@ -4,7 +4,7 @@ import { LegalNavbar } from "@/components/LegalNavbar";
 import { LegalFooter } from "@/components/LegalFooter";
 
 export const metadata: Metadata = {
-  title: "Terms of Service — SpeakwithMaya",
+  title: "Terms of Service - SpeakwithMaya",
   description:
     "Read the terms and conditions governing your use of the SpeakwithMaya AI English speaking coach platform.",
 };

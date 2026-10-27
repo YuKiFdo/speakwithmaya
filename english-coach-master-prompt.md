@@ -1,4 +1,4 @@
-# Master Prompt: AI English Speaking Coach (Gemini Live) — for Gemini Code
+# Master Prompt: AI English Speaking Coach (Gemini Live) - for Gemini Code
 
 **Stack:** Expo (React Native + React Native for Web, one codebase) · **Web first**, responsive · Native iOS/Android later · NestJS backend · Tests run on web
 
@@ -34,14 +34,14 @@ Core engine: **Gemini Live API** (native audio speech-to-speech). Target market:
 
 For each task, follow this loop and show evidence:
 
-1. **Acceptance criteria** — write them down before coding (testable, measurable).
-2. **Test first** — write failing tests for the criteria (unit, component, integration, contract, web e2e as appropriate). Show them failing.
-3. **Implement** — smallest change that passes.
-4. **Run everything** — lint, type-check, unit, component, backend integration, **web e2e (Playwright)**, web build (`expo export --platform web`), API build. Paste the real command output summary (pass/fail counts, coverage).
+1. **Acceptance criteria** - write them down before coding (testable, measurable).
+2. **Test first** - write failing tests for the criteria (unit, component, integration, contract, web e2e as appropriate). Show them failing.
+3. **Implement** - smallest change that passes.
+4. **Run everything** - lint, type-check, unit, component, backend integration, **web e2e (Playwright)**, web build (`expo export --platform web`), API build. Paste the real command output summary (pass/fail counts, coverage).
 5. **Self-review the diff** against the criteria and the security checklist (§5).
-6. **Independent review pass** — re-read the change as a hostile reviewer (or use a separate reviewer subagent/context if available). List concrete defects found and fix them.
-7. **Docs** — update README, ADRs, runbooks, and `CHANGELOG.md`.
-8. **Commit** — small conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`), never a broken build on main.
+6. **Independent review pass** - re-read the change as a hostile reviewer (or use a separate reviewer subagent/context if available). List concrete defects found and fix them.
+7. **Docs** - update README, ADRs, runbooks, and `CHANGELOG.md`.
+8. **Commit** - small conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`), never a broken build on main.
 
 **Gates:** Each phase ends with a **Verification Gate**. Produce a `docs/gates/phase-N.md` report using the template in §6. **Stop and wait for my approval** before starting the next phase. If a gate check fails, fix it and rerun. Do not skip or weaken tests to pass.
 
@@ -52,9 +52,9 @@ For each task, follow this loop and show evidence:
 The backend/design owner provides images of each screen, **step by step, in the order they want them built**. Some screens come with a mobile image only; some with both mobile and web. Treat the images as the source of truth.
 
 **Folders and manifest**
-- `design/inbox/` — new images as they arrive. Default naming (adapt if I say otherwise): `NN-<flow>-<screen>-mobile.png` and `NN-<flow>-<screen>-web.png`.
+- `design/inbox/` - new images as they arrive. Default naming (adapt if I say otherwise): `NN-<flow>-<screen>-mobile.png` and `NN-<flow>-<screen>-web.png`.
 - Once a screen is accepted, move its images to `design/screens/<flow>/`.
-- `design/manifest.md` — one row per screen: `id`, flow, step order, name, mobile image, web image, **status**, API endpoints used, open questions.
+- `design/manifest.md` - one row per screen: `id`, flow, step order, name, mobile image, web image, **status**, API endpoints used, open questions.
 - **Status values:** `mobile-only` → `web-derived (awaiting approval)` → `approved`; or `mobile+web provided` → `approved`. A derived web layout is never `approved` until I say so.
 
 **Per-screen procedure (for every screen, in order)**
@@ -79,7 +79,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 ## 4. PHASES
 
-### Phase 0 — Discovery, facts, architecture, scaffolding
+### Phase 0 - Discovery, facts, architecture, scaffolding
 **Tasks**
 - Read the official **Gemini Live API** docs and pricing. Record in `docs/facts.md`: current recommended Live model ID(s), audio in/out formats and sample rates, tokens per second of audio, per-token prices (audio in, audio out, text), session duration limits, context window compression, session resumption, voice activity detection (VAD) settings, usage metadata fields, ephemeral token support and constraints (**including how a browser client connects and authenticates with one**), rate limits/quotas, supported languages/voices, and how accent/style can be controlled.
 - Read the official **Expo / React Native for Web / Expo Router** docs. Record in `docs/facts.md`: the current Expo SDK version to pin; the exact web setup steps and dependencies (the docs list `react-dom`, `react-native-web` and `@expo/metro-runtime` installed via `npx expo install`; confirm current); how web bundling works (Metro, not the deprecated webpack config); the `web.output` modes (`single`, `static`, `server`) and which we choose (set it **explicitly**; defaults have changed between SDK versions); how to structure a monorepo with Expo/Metro; platform-specific file extensions; environment variable handling for web vs native; how to unit-test with `jest-expo` and `expo-router/testing-library` (`renderRouter`); and which Expo/Web APIs are available for microphone capture and audio playback on web vs native. Note that custom native audio may require a development build instead of Expo Go (verify). Produce a **web vs native audio comparison table** in `docs/facts.md` covering: permission model and how each platform declares/asks for it, secure-context and user-gesture requirements, audio session/interruption behavior (calls, other apps, Bluetooth/headphone changes), background/screen-lock behavior, native sample rates vs the 16 kHz/24 kHz the Live API needs (resampling), echo cancellation/noise suppression support, and known browser quirks (iOS Safari, Android Chrome, Firefox). Every row needs a source URL; anything you cannot confirm from docs is marked "unverified".
@@ -102,7 +102,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** `facts.md` complete with sources; ADRs approved by me; CI green; universal skeleton demonstrably running on web at 3 viewports; threat model draft reviewed.
 
-### Phase 1 — Cost model and budget harness (before any feature)
+### Phase 1 - Cost model and budget harness (before any feature)
 **Tasks**
 - Build a pure, well-typed `cost-model` package: inputs = price config (from `facts.md`, never hardcoded in logic), exchange rate (configurable, default 300 LKR/USD, must be updated from a trusted source before release), token rates, and a **conversation profile** (user speaking seconds, AI speaking seconds, silence seconds, turns, context growth).
 - Model, at minimum, these profiles: **A** always-on mic, chatty AI; **B** gated mic (only speech sent) with short replies (reference profile for the budget); **C** worst case (long replies, no gating, long context).
@@ -117,7 +117,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** honest cost report reviewed. If profile B fails the budget, stop and present options (tighter gating, reply caps, session caps, hybrid pipeline, tiered plans). I decide before Phase 2.
 
-### Phase 2 — Backend foundation (NestJS)
+### Phase 2 - Backend foundation (NestJS)
 **Tasks**
 - NestJS modules with clear boundaries (auth, users/devices, sessions/tokens, usage-ledger, quotas, health). Controllers stay thin; business logic lives in services; every input goes through validation (DTOs/pipes); authorization via guards on every endpoint.
 - Auth (provider per ADR), user model, device/browser binding.
@@ -135,7 +135,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** all tests green; security tests demonstrated by trying to break them; OpenAPI published.
 
-### Phase 3 — Real-time voice engine (client core, web first)
+### Phase 3 - Real-time voice engine (client core, web first)
 **Tasks**
 - Define platform-agnostic interfaces (`AudioCapture`, `AudioPlayer`, `LiveTransport`) injected via dependency injection. Implement the **web** versions now (browser microphone capture with echo cancellation/noise suppression requested, audio processing off the main thread as the docs recommend, 16-bit PCM 16 kHz in and 24 kHz out per the Live docs, jitter buffer, playback queue). Leave the native implementations as documented stubs for Phase 11.
 - **Platform parity:** write a shared **audio contract test suite** (permission granted/denied/revoked, start/stop, chunk size and format, resampling accuracy, playback queue, barge-in stop, device change, interruption, no-mic) that runs against the web implementation now and is reused unchanged against the native implementation in Phase 11. Keep `docs/audio-platform-matrix.md` listing each behavior, its web result, its native result (blank until Phase 11), and any intentional difference.
@@ -155,9 +155,9 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** all automated tests green; manual script results recorded; measured time-to-first-audio and barge-in latency reported with p50/p95 per browser tested.
 
-### Phase 4 — Tutor persona, accents, expression
+### Phase 4 - Tutor persona, accents, expression
 **Tasks**
-- Versioned system prompts in `prompts/` (semver, changelog, tested). Configurable: **accent** (e.g., neutral British, General American, Australian — confirm list with me), speaking pace, CEFR level (A1–C1), correction style (immediate vs end-of-turn), and topic/roleplay scenarios (interview, travel, phone call, small talk).
+- Versioned system prompts in `prompts/` (semver, changelog, tested). Configurable: **accent** (e.g., neutral British, General American, Australian - confirm list with me), speaking pace, CEFR level (A1–C1), correction style (immediate vs end-of-turn), and topic/roleplay scenarios (interview, travel, phone call, small talk).
 - Expression behavior: natural intonation, warm encouraging tone, appropriate emphasis; model good stress and intonation on request ("say it again slowly", "show me a friendlier tone").
 - Guardrails: stay on task, age-appropriate, refuse unsafe content, resist prompt injection spoken by the user ("ignore your instructions"), never reveal the system prompt, keep replies short (target ≤ N seconds, set from the cost model).
 - Accent/voice selection mapped to available voices per `facts.md`.
@@ -170,7 +170,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** eval report (scores per category), audio samples ready for my listening review, human checklist signed off by me.
 
-### Phase 5 — Pronunciation and expression feedback engine
+### Phase 5 - Pronunciation and expression feedback engine
 **Tasks**
 - Capture user audio clips locally during the session (only with consent; ephemeral by default; on web, keep clips in memory or short-lived browser storage and never persist longer than the retention policy).
 - After the session, send selected clips in a **batch** call to a Gemini audio-understanding model (input-only, cheaper than Live output) and request **structured JSON** (JSON schema): mispronounced words with the expected vs heard sound, stress/intonation notes, pace (words per minute), filler words, grammar notes, an overall summary, and 3 actionable drills.
@@ -187,7 +187,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** accuracy metrics and cost impact reported honestly; known limitations documented in-app copy (feedback is guidance, not certification).
 
-### Phase 6 — Client app UX (web, responsive) — built screen by screen from the design images
+### Phase 6 - Client app UX (web, responsive) - built screen by screen from the design images
 **Tasks**
 - Implement screens **in the order the design owner delivers them**, using the §3.1 procedure for each screen and §3.2 for responsiveness. Expected areas (build only what the images show): onboarding (level check, accent choice, goals, mic permission rationale, consent screens), practice screen (mic state, live captions optional, cost/time remaining), scenario picker, session summary with feedback, progress history, settings.
 - Every screen ships at phone, tablet and desktop layouts. Mobile-only images get a derived web layout awaiting my approval (§3.1 step 5).
@@ -203,7 +203,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** all screens in the manifest implemented and either `approved` or explicitly listed as pending my approval; web e2e green in all browser projects; performance numbers recorded; manual real-device pass documented.
 
-### Phase 7 — Plans, quotas, billing reconciliation
+### Phase 7 - Plans, quotas, billing reconciliation
 **Tasks**
 - Minutes wallet/plans, session and daily caps, graceful "minutes low" flow. Payment integration per ADR (local payment options considered; confirm which work in a web checkout).
 - **Reconciliation job:** compare internal ledger against Google Cloud billing export/usage data; alert on drift above a threshold.
@@ -217,7 +217,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** finance and abuse scenarios demonstrated; drift alert proven.
 
-### Phase 8 — Security and privacy hardening
+### Phase 8 - Security and privacy hardening
 **Tasks**
 - Complete the threat model. Apply OWASP ASVS (and MASVS for the later native build) checks. **Web-specific:** Content-Security-Policy, CORS, secure headers, clickjacking protection, XSS review, where and how the app's session credentials are stored in the browser (memory vs cookie vs storage) with an ADR, third-party script policy, subresource integrity where relevant.
 - Data map, retention schedule, consent records, data-subject deletion/export, encryption in transit and at rest, backups.
@@ -230,7 +230,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** zero open high/critical findings; residual risks documented; items needing legal review listed.
 
-### Phase 9 — Non-functional: performance, reliability, observability
+### Phase 9 - Non-functional: performance, reliability, observability
 **Tasks**
 - Structured logs, metrics, traces, dashboards, alerts: time-to-first-audio, session success rate, reconnect rate, **cost per minute (p50/p95)**, quota errors, feedback failures, web-vitals-style client metrics.
 - Graceful degradation: if Live quota/errors spike → fall back to the chained pipeline or text mode; feature flags and a remote kill switch.
@@ -243,7 +243,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** SLO report, dashboards live, runbooks reviewed.
 
-### Phase 10 — Web release
+### Phase 10 - Web release
 **Tasks**
 - CI/CD with staged rollout, semantic versioning, migrations with rollback, production web build and hosting per ADR (the Expo docs describe hosting options, including EAS Hosting; read current guidance), HTTPS everywhere, privacy policy and terms drafts (flag for legal review), beta program with in-app feedback and cost monitoring.
 - Documentation: README, onboarding for new engineers, API docs, ops runbooks, cost playbook (how to adjust reply caps, gating, and plans when prices change).
@@ -255,7 +255,7 @@ The backend/design owner provides images of each screen, **step by step, in the 
 
 **Gate:** web release checklist 100% checked; go/no-go report for me.
 
-### Phase 11 — Native apps (iOS and Android) from the same codebase
+### Phase 11 - Native apps (iOS and Android) from the same codebase
 *Start only after I approve the web release.*
 
 **Tasks**

@@ -753,7 +753,7 @@ export default function AdminSubscriptionsScreen() {
                         {/* Next Billing Date */}
                         <View style={[styles.tableCell, styles.tableCellStack, { flex: 1.3 }]}>
                           <Text style={styles.nextBillingText}>
-                            {sub.next_billing_date || (isCancelled ? 'Cancelled' : '—')}
+                            {sub.next_billing_date || (isCancelled ? 'Cancelled' : '-')}
                           </Text>
                           {isActive && sub.next_billing_date && (
                             <Text style={styles.nextBillingSubtext}>
@@ -1317,7 +1317,7 @@ export default function AdminSubscriptionsScreen() {
                               })}
                             </Text>
                             <Text style={styles.tokenTagText}>
-                              ID: {pmt.payment_id || pmt.order_id || '—'} · {pmt.card_no ? `Card ···· ${pmt.card_no.slice(-4)}` : pmt.payment_method}
+                              ID: {pmt.payment_id || pmt.order_id || '-'} · {pmt.card_no ? `Card ···· ${pmt.card_no.slice(-4)}` : pmt.payment_method}
                             </Text>
                           </View>
                           <Text style={styles.paymentAmount}>

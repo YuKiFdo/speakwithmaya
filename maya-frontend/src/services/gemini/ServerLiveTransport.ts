@@ -114,7 +114,7 @@ export class ServerLiveTransport implements ILiveTransport {
             window.removeEventListener('offline', this.offlineHandler);
           }
           this.offlineHandler = () => {
-            console.warn(`[${getLogTimestamp()}] 🔌 [ServerLiveTransport:${this.clientSessionId}] Browser offline event detected — closing socket`);
+            console.warn(`[${getLogTimestamp()}] 🔌 [ServerLiveTransport:${this.clientSessionId}] Browser offline event detected - closing socket`);
             if (this.isOpen && this.ws) {
               try {
                 this.ws.close(1006, 'Network offline');
@@ -218,7 +218,7 @@ export class ServerLiveTransport implements ILiveTransport {
   sendEndOfTurn(): void {
     if (!this.isOpen || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     try {
-      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport:${this.clientSessionId}] User speech ended — signaling turn_complete to server`);
+      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport:${this.clientSessionId}] User speech ended - signaling turn_complete to server`);
       this.ws.send(
         JSON.stringify({
           type: 'turn_complete',

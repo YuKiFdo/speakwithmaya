@@ -4,7 +4,7 @@ import { LegalNavbar } from "@/components/LegalNavbar";
 import { LegalFooter } from "@/components/LegalFooter";
 
 export const metadata: Metadata = {
-  title: "Refund & Cancellation Policy — SpeakwithMaya",
+  title: "Refund & Cancellation Policy - SpeakwithMaya",
   description:
     "Review SpeakwithMaya's refund and cancellation guidelines, PayHere payment processing timelines, and customer guarantee.",
 };

@@ -360,7 +360,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Check if we got a pong since last ping
       const sincePong = Date.now() - state.lastPongAt;
       if (sincePong > HEARTBEAT_TIMEOUT_MS) {
-        this.logger.warn(`[${state.sessionId}] ❌ Heartbeat timeout — no pong for ${Math.round(sincePong / 1000)}s → closing stale client`);
+        this.logger.warn(`[${state.sessionId}] ❌ Heartbeat timeout - no pong for ${Math.round(sincePong / 1000)}s → closing stale client`);
         this.addSessionLog(state, 'heartbeat_timeout', `${Math.round(sincePong / 1000)}s since last pong`);
         this.stopHeartbeat(state);
         try {
@@ -496,7 +496,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const requestedSec = Number(dto.durationSeconds) || 300;
         const maxAllowedMs = Math.min(requestedSec + 90, 1800) * 1000;
         state.maxDurationTimer = setTimeout(() => {
-          this.logger.warn(`[${state.sessionId}] ⏰ Server max session duration (${Math.round(maxAllowedMs / 1000)}s) reached — closing live session`);
+          this.logger.warn(`[${state.sessionId}] ⏰ Server max session duration (${Math.round(maxAllowedMs / 1000)}s) reached - closing live session`);
           try {
             state.geminiSession?.close?.();
           } catch {}
@@ -700,7 +700,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!state.userSpeechActive) {
         state.userSpeechActive = true;
         state.geminiSession.sendRealtimeInput({ activityStart: {} });
-        this.logger.debug(`[${state.sessionId}] 🎙️ activityStart sent — user speech burst began`);
+        this.logger.debug(`[${state.sessionId}] 🎙️ activityStart sent - user speech burst began`);
         this.addSessionLog(state, 'activity_start');
       }
 
@@ -734,7 +734,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (state.userSpeechActive) {
         state.geminiSession.sendRealtimeInput({ activityEnd: {} });
         state.userSpeechActive = false;
-        this.logger.debug(`[${state.sessionId}] 🛑 activityEnd sent — user speech burst ended`);
+        this.logger.debug(`[${state.sessionId}] 🛑 activityEnd sent - user speech burst ended`);
         this.addSessionLog(state, 'activity_end_turn');
 
         // Start latency measurement: record when we sent activityEnd
@@ -937,7 +937,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         setTimeout(() => {
           if (state.isGreetingInProgress) {
             this.logger.warn(
-              `[${state.sessionId}] ⚠️ [Greeting Watchdog] Expired (8s) — unlocking user audio gate\n` +
+              `[${state.sessionId}] ⚠️ [Greeting Watchdog] Expired (8s) - unlocking user audio gate\n` +
               `   Audio chunks received: ${state.greetingAudioChunksReceived} (${(state.greetingAudioBytesReceived / 1024).toFixed(1)} KB)\n` +
               `   Total packets received: ${state.greetingPacketCount}\n` +
               `   Raw packet timeline:\n` +

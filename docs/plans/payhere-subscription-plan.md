@@ -1,4 +1,4 @@
-# Maya AI — PayHere Subscriptions & Recurring Billing Implementation Plan
+# Maya AI - PayHere Subscriptions & Recurring Billing Implementation Plan
 
 **Author:** Antigravity AI Engineering  
 **Date:** October 15, 2026  

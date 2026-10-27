@@ -16,11 +16,11 @@ const ONBOARDING_STEP_CHAIN: {
   /** Returns true if the user has completed enough prior steps to be here */
   canAccess: (s: OnboardingState) => boolean;
 }[] = [
-  // Step 1-3: Pre-auth screens — only for unauthenticated visitors
+  // Step 1-3: Pre-auth screens - only for unauthenticated visitors
   { route: 'onboarding/name',         canAccess: (s) => !s.isAuthenticated },
   { route: 'onboarding/phone',        canAccess: (s) => !s.isAuthenticated },
   { route: 'onboarding/otp',          canAccess: (s) => !s.isAuthenticated && !!s.phone },
-  // Step 4+: Post-auth steps — require authentication
+  // Step 4+: Post-auth steps - require authentication
   { route: 'onboarding/goal',         canAccess: (s) => s.isAuthenticated },
   { route: 'onboarding/challenge',    canAccess: (s) => s.isAuthenticated && !!s.goal },
   { route: 'onboarding/level',        canAccess: (s) => s.isAuthenticated && !!s.goal },
@@ -74,7 +74,7 @@ function findEarliestAllowedStep(state: OnboardingState): string {
  * 2. Incomplete onboarding users are gracefully resumed at their exact saved step (e.g. `/onboarding/personalized-plan`).
  * 3. Fully onboarded users are automatically redirected to `/(tabs)/dashboard` instead of re-prompting for phone/OTP.
  * 4. Deleted accounts are detected in real-time, clearing local cache and ejecting to login.
- * 5. Onboarding steps enforce prerequisites — no skipping ahead without completing prior steps.
+ * 5. Onboarding steps enforce prerequisites - no skipping ahead without completing prior steps.
  * 6. Waits for encrypted storage hydration before making any routing decisions.
  */
 export function useRouteGuard() {
@@ -119,7 +119,7 @@ export function useRouteGuard() {
       return;
     }
 
-    // 1. Dedicated Admin Portal guard (/admin/*) — completely independent of student phone login
+    // 1. Dedicated Admin Portal guard (/admin/*) - completely independent of student phone login
     if (segments[0] === 'admin') {
       const isAdminLoggedIn = AdminAuthStore.isAuthenticated();
       if (routePath === 'admin/login') {

@@ -186,31 +186,31 @@ const UPGRADE_TESTIMONIALS: TestimonialItem[] = [
   {
     id: 'sanduni',
     quote: '"SpeakwithMaya has really helped me improve my confidence. The extra practice time in Pro is worth it!"',
-    author: '— Sanduni, Sri Lanka',
+    author: '- Sanduni, Sri Lanka',
     stars: '⭐⭐⭐⭐⭐',
   },
   {
     id: 'kasun',
     quote: '"I know English grammar, but speaking was difficult for me. Practicing with Maya helps me speak more naturally."',
-    author: '— Kasun , Sri Lanka',
+    author: '- Kasun , Sri Lanka',
     stars: '⭐⭐⭐⭐⭐',
   },
   {
     id: 'amaya',
     quote: '"I love that I can practice speaking anytime. The corrections help me understand my mistakes and improve."',
-    author: '— Amaya, Sri Lanka',
+    author: '- Amaya, Sri Lanka',
     stars: '⭐⭐⭐⭐⭐',
   },
   {
     id: 'dilshan',
     quote: '"The roleplay sessions are really useful. I can practice real-life situations like job interviews and everyday conversations."',
-    author: '— Dilshan, Sri Lanka',
+    author: '- Dilshan, Sri Lanka',
     stars: '⭐⭐⭐⭐⭐',
   },
   {
     id: 'nethmi',
     quote: '"Maya gives me a comfortable place to practice English. I am slowly overcoming my fear of making mistakes."',
-    author: '— Nethmi, Sri Lanka',
+    author: '- Nethmi, Sri Lanka',
     stars: '⭐⭐⭐⭐⭐',
   },
 ];

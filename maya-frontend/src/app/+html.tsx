@@ -16,7 +16,7 @@ export default function RootHtml({ children }: PropsWithChildren) {
           content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1.00001, viewport-fit=cover"
         />
         <meta name="theme-color" content="#0D4EFD" />
-        <title>SpeakwithMaya — Your Personal AI English Speaking Coach</title>
+        <title>SpeakwithMaya - Your Personal AI English Speaking Coach</title>
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
@@ -51,7 +51,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
         {/* Open Graph / Facebook */}
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://app.speakwithmaya.com" />
-        <meta property="og:title" content="SpeakwithMaya — Your Personal AI English Speaking Coach" />
+        <meta property="og:title" content="SpeakwithMaya - Your Personal AI English Speaking Coach" />
         <meta
           property="og:description"
           content="Practice real spoken English conversations with Maya. Gain fluency, get instant sentence corrections, and speak naturally without fear. Join thousands practicing in Sri Lanka."
@@ -63,7 +63,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
         {/* Twitter Cards */}
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:url" content="https://app.speakwithmaya.com" />
-        <meta name="twitter:title" content="SpeakwithMaya — Your Personal AI English Speaking Coach" />
+        <meta name="twitter:title" content="SpeakwithMaya - Your Personal AI English Speaking Coach" />
         <meta
           name="twitter:description"
           content="Practice real spoken English conversations with Maya. Improve your fluency, build confidence, and speak naturally."

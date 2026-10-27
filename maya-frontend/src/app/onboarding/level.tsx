@@ -210,7 +210,7 @@ export default function LevelScreen() {
             ]}
           >
             <Text style={styles.title}>What's your current level?</Text>
-            <Text style={styles.subtitle}>Be honest — Maya will meet you there.</Text>
+            <Text style={styles.subtitle}>Be honest - Maya will meet you there.</Text>
           </Animated.View>
 
           {/* Level Options List with Staggered Entrance */}

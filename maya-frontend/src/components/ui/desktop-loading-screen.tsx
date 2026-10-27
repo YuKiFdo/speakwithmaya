@@ -17,7 +17,7 @@ interface DesktopLoadingScreenProps {
 /**
  * Branded loading/splash screen shown on ALL web screen sizes
  * while fonts load and the app initializes.
- * (Named DesktopLoadingScreen for backwards compat — renders on mobile web too.)
+ * (Named DesktopLoadingScreen for backwards compat - renders on mobile web too.)
  */
 export function DesktopLoadingScreen({
   message = 'Loading SpeakwithMaya...',

@@ -163,7 +163,7 @@ function ConversationDisplayComponent({
       // Add realistic spoken breath pauses after punctuation on the word just spoken
       if (/[.?!]$/.test(lastRevealedWord)) {
         nextDelay += 380; // End-of-sentence pause
-      } else if (/[,;:\-—]$/.test(lastRevealedWord)) {
+      } else if (/[,;:\--]$/.test(lastRevealedWord)) {
         nextDelay += 200; // Mid-sentence comma/clause pause
       }
     }

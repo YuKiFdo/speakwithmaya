@@ -881,7 +881,7 @@ export default function AdminRoadmapScreen() {
                     {editingLevel ? `Edit Level: ${formTitle}` : 'Create New Curriculum Level'}
                   </Text>
                   <Text style={styles.modalSubtitle}>
-                    Structured prompt builder & progression rules — zero prompt engineering code required.
+                    Structured prompt builder & progression rules - zero prompt engineering code required.
                   </Text>
                 </View>
               </View>

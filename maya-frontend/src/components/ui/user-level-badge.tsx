@@ -124,7 +124,7 @@ export function UserLevelBadge({
 }
 
 /**
- * Canonical styles — aligned to the dashboard home screen.
+ * Canonical styles - aligned to the dashboard home screen.
  * Every screen that uses this component will get identical
  * font families, sizes, colours, and spacing.
  */

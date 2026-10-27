@@ -52,7 +52,7 @@ const INACTIVE_COLOR = '#94a3b8';
  * Performance advantages over the old inline implementation:
  * 1. Uses font-based Ionicons (single native Text view per icon) instead of
  *    SVG icons (multiple Svg/Path/Circle native views per icon).
- * 2. Paired with Expo Router <Tabs> layout so screens stay mounted —
+ * 2. Paired with Expo Router <Tabs> layout so screens stay mounted -
  *    switching tabs is a 0ms view swap, not a full unmount/remount.
  * 3. Includes instant touch feedback via android_ripple and pressed opacity.
  *

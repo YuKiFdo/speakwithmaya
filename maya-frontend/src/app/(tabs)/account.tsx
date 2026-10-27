@@ -1245,7 +1245,7 @@ function CurrentPlanCard({
   // Format last 4 digits of card (matches user screenshot: "···· 4582")
   const digitsOnly = (cardMasked || '').replace(/\D/g, '');
   const last4 = digitsOnly.length >= 4 ? digitsOnly.slice(-4) : (isPro ? '4582' : '');
-  const cardDisplayText = last4 ? `···· ${last4}` : '—';
+  const cardDisplayText = last4 ? `···· ${last4}` : '-';
 
   return (
     <View style={[styles.currentPlanCardContainer, isPhone && styles.currentPlanCardContainerPhone]}>

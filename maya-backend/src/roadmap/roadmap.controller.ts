@@ -37,7 +37,7 @@ export class RoadmapController {
     private readonly authService: AuthService,
   ) {}
 
-  // 1. Student / Public endpoint — returns only published levels
+  // 1. Student / Public endpoint - returns only published levels
   @Get('roadmap')
   async getStudentRoadmap() {
     const levels = await this.roadmapService.getAllLevels(false);

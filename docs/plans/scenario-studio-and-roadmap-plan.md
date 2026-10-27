@@ -382,15 +382,15 @@ gantt
 ```
 
 ### File Modification Checklist
-1. `maya-backend/src/database/create_roadmap_levels.sql` — Add migration statements.
-2. `maya-backend/src/roadmap/dto/roadmap.dto.ts` — Add scenario fields to DTOs.
-3. `maya-backend/src/roadmap/roadmap.service.ts` — Map database rows, update simulation.
-4. `maya-backend/src/sessions/sessions.service.ts` — Inject `scenarioPrompt` & `openingMode`.
-5. `maya-backend/src/live/live.gateway.ts` — Skip synthetic task events for scenario calls.
-6. `maya-frontend/src/components/admin/AdminSidebar.tsx` — Add `Scenario Studio` navigation item.
-7. `maya-frontend/src/app/admin/scenarios.tsx` — **NEW SCREEN:** Admin Scenario Studio.
-8. `maya-frontend/src/app/(tabs)/roadmap.tsx` — Link roadmap levels to scenario data.
-9. `maya-frontend/src/components/roadmap/mission-card-modal.tsx` — Display scenario briefings.
+1. `maya-backend/src/database/create_roadmap_levels.sql` - Add migration statements.
+2. `maya-backend/src/roadmap/dto/roadmap.dto.ts` - Add scenario fields to DTOs.
+3. `maya-backend/src/roadmap/roadmap.service.ts` - Map database rows, update simulation.
+4. `maya-backend/src/sessions/sessions.service.ts` - Inject `scenarioPrompt` & `openingMode`.
+5. `maya-backend/src/live/live.gateway.ts` - Skip synthetic task events for scenario calls.
+6. `maya-frontend/src/components/admin/AdminSidebar.tsx` - Add `Scenario Studio` navigation item.
+7. `maya-frontend/src/app/admin/scenarios.tsx` - **NEW SCREEN:** Admin Scenario Studio.
+8. `maya-frontend/src/app/(tabs)/roadmap.tsx` - Link roadmap levels to scenario data.
+9. `maya-frontend/src/components/roadmap/mission-card-modal.tsx` - Display scenario briefings.
 
 ---
 

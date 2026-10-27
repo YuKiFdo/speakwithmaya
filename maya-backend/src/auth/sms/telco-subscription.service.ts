@@ -403,7 +403,7 @@ export class TelcoSubscriptionService {
           : fallbackSubscriberId;
 
       this.logger.log(
-        `[TELCO OTP VERIFIED] ✅ ${provider.toUpperCase()} S1000 — Saved raw subscriberId: ${this.maskSubscriberId(rawSubscriberIdFromTelco)}`,
+        `[TELCO OTP VERIFIED] ✅ ${provider.toUpperCase()} S1000 - Saved raw subscriberId: ${this.maskSubscriberId(rawSubscriberIdFromTelco)}`,
       );
 
       return {

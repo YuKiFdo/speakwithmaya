@@ -219,7 +219,7 @@ export default function CallScreen() {
   // Document title and beforeunload safety guard on Web
   useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      document.title = 'Maya AI — Live Voice Practice';
+      document.title = 'Maya AI - Live Voice Practice';
     }
   }, []);
 

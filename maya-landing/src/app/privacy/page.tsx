@@ -4,7 +4,7 @@ import { LegalNavbar } from "@/components/LegalNavbar";
 import { LegalFooter } from "@/components/LegalFooter";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy — SpeakwithMaya",
+  title: "Privacy Policy - SpeakwithMaya",
   description:
     "Learn how SpeakwithMaya protects your personal information, voice recordings, and payment data in compliance with Sri Lanka PDPA.",
 };
