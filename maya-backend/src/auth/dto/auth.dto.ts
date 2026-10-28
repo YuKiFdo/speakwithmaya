@@ -368,6 +368,13 @@ export class UpdateAppConfigDto {
   telcoUnsubButtonEnabled?: boolean;
 
   @IsOptional()
+  @IsNumber()
+  telcoDailyPriceLkr?: number;
+
+  @IsOptional()
+  telcoRateHistory?: Array<{ rateLkr: number; effectiveFrom: string }>;
+
+  @IsOptional()
   testAccounts?: any[];
 }
 

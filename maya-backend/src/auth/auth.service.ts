@@ -94,6 +94,8 @@ export interface AppConfigData {
   mspaceAppHash: string;
   mspaceBaseUrl: string;
   telcoUnsubButtonEnabled: boolean;
+  telcoDailyPriceLkr?: number;
+  telcoRateHistory?: Array<{ rateLkr: number; effectiveFrom: string }>;
   testAccounts?: TestAccountItem[];
 }
 
@@ -102,8 +104,8 @@ const DEFAULT_APP_CONFIG: AppConfigData = {
   pricingNotice: '',
   termsDisclaimer: '',
   smsTemplate: 'Your Maya AI English Coach verification code is: {CODE}. Valid for 5 minutes. Do not share this code.',
-  ideamartPricingNotice: 'Dialog / Mobitel / Hutch: LKR 5 + tax /day. Airtime billing.',
-  ideamartTermsDisclaimer: 'By subscribing, LKR 5 + taxes per day will be deducted from your Dialog, Mobitel, or Hutch mobile balance.',
+  ideamartPricingNotice: 'Dialog / Mobitel / Hutch: LKR 12 + tax /day. Airtime billing.',
+  ideamartTermsDisclaimer: 'By subscribing, LKR 12 + taxes per day will be deducted from your Dialog, Mobitel, or Hutch mobile balance.',
   ideamartSmsTemplate: 'Maya AI: Your OTP is {CODE}. Valid for 5 min. Do not share this code.',
   ideamartEnabled: true,
   ideamartAppId: 'APP_000001',
@@ -118,6 +120,8 @@ const DEFAULT_APP_CONFIG: AppConfigData = {
   mspaceAppHash: '',
   mspaceBaseUrl: 'https://api.mspace.lk',
   telcoUnsubButtonEnabled: true,
+  telcoDailyPriceLkr: 12,
+  telcoRateHistory: [{ rateLkr: 12, effectiveFrom: '2026-01-01T00:00:00.000Z' }],
   testAccounts: [],
 };
 
@@ -585,6 +589,18 @@ export class AuthService {
       userProfile.telco_subscriber_id = rawSubscriberId;
       userProfile.telco_status = 'ACTIVE';
       userProfile.plan_status = 'active';
+
+      const extras = await this.getProfileExtrasMap();
+      const existingExtra = extras[userProfile.id] || {};
+      await this.saveProfileExtraForUser(userProfile.id, {
+        telcoProvider: telcoProvider || 'ideamart',
+        telcoSubscriberId: rawSubscriberId,
+        telcoSubscribedAt: existingExtra.telcoSubscribedAt || new Date().toISOString(),
+        telcoStatus: 'ACTIVE',
+        telcoEndedAt: null,
+        telcoUpgradedToTier: null,
+        telcoEndReason: null,
+      });
     }
 
     // 7. Generate bearer access token
@@ -1196,7 +1212,22 @@ export class AuthService {
    * (`id = 'sys_user_profile_extras'`) so they are guaranteed to be stored in the DB
    * even before migration 013 (`email`, `avatar_url` columns on `profiles`) is run.
    */
-  private async getProfileExtrasMap(): Promise<Record<string, { email?: string; avatarUrl?: string | null }>> {
+  private async getProfileExtrasMap(): Promise<
+    Record<
+      string,
+      {
+        email?: string;
+        avatarUrl?: string | null;
+        telcoProvider?: 'ideamart' | 'mspace' | null;
+        telcoSubscriberId?: string | null;
+        telcoSubscribedAt?: string | null;
+        telcoStatus?: 'ACTIVE' | 'CANCELLED' | 'UPGRADED' | null;
+        telcoEndedAt?: string | null;
+        telcoUpgradedToTier?: string | null;
+        telcoEndReason?: string | null;
+      }
+    >
+  > {
     try {
       const { data } = await this.supabase
         .from('roadmap_levels')
@@ -1213,16 +1244,28 @@ export class AuthService {
 
   private async saveProfileExtraForUser(
     userId: string,
-    extra: { email?: string; avatarUrl?: string | null },
+    extra: {
+      email?: string;
+      avatarUrl?: string | null;
+      telcoProvider?: 'ideamart' | 'mspace' | null;
+      telcoSubscriberId?: string | null;
+      telcoSubscribedAt?: string | null;
+      telcoStatus?: 'ACTIVE' | 'CANCELLED' | 'UPGRADED' | null;
+      telcoEndedAt?: string | null;
+      telcoUpgradedToTier?: string | null;
+      telcoEndReason?: string | null;
+    },
   ): Promise<void> {
     try {
       const map = await this.getProfileExtrasMap();
       const existing = map[userId] || {};
-      map[userId] = {
-        ...existing,
-        ...(extra.email !== undefined ? { email: extra.email } : {}),
-        ...(extra.avatarUrl !== undefined ? { avatarUrl: extra.avatarUrl } : {}),
-      };
+      const nextEntry: Record<string, any> = { ...existing };
+      for (const [k, v] of Object.entries(extra)) {
+        if (v !== undefined) {
+          nextEntry[k] = v;
+        }
+      }
+      map[userId] = nextEntry;
       await this.supabase.from('roadmap_levels').upsert({
         id: 'sys_user_profile_extras',
         level_number: 9998,
@@ -1524,13 +1567,22 @@ export class AuthService {
       this.logger.warn(`Telco unsubscribe gateway warning: ${err.message}`);
     }
 
+    const nowIso = new Date().toISOString();
     await this.supabase
       .from('profiles')
       .update({
         plan_status: 'canceled',
-        updated_at: new Date().toISOString(),
+        updated_at: nowIso,
       })
       .eq('id', userId);
+
+    await this.saveProfileExtraForUser(userId, {
+      telcoProvider: (profile.telco_provider as any) || this.telcoService.detectProvider(profile.phone_number),
+      telcoSubscriberId: profile.telco_subscriber_id,
+      telcoStatus: 'CANCELLED',
+      telcoEndedAt: nowIso,
+      telcoEndReason: 'Unsubscribed by user',
+    });
 
     return {
       success: true,
@@ -1558,6 +1610,12 @@ export class AuthService {
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId);
+
+      await this.saveProfileExtraForUser(userId, {
+        telcoStatus: 'ACTIVE',
+        telcoEndedAt: null,
+        telcoEndReason: null,
+      });
 
       return {
         success: true,
@@ -2169,10 +2227,61 @@ export class AuthService {
     if (dto.baselineGrammarScore !== undefined) updates.baseline_grammar_score = dto.baselineGrammarScore;
     if (dto.baselinePronunciationScore !== undefined) updates.baseline_pronunciation_score = dto.baselinePronunciationScore;
 
-    if (dto.email !== undefined || dto.avatarUrl !== undefined) {
+    if (dto.email !== undefined || dto.avatarUrl !== undefined || dto.planTier !== undefined || dto.planStatus !== undefined) {
+      const extrasMap = await this.getProfileExtrasMap();
+      const existingExtra = extrasMap[userId] || {};
+      const { data: currentProf } = await this.supabase
+        .from('profiles')
+        .select('telco_provider, telco_subscriber_id, plan_tier, plan_status, created_at')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const hadTelco = Boolean(
+        currentProf?.telco_subscriber_id ||
+          currentProf?.telco_provider ||
+          existingExtra.telcoSubscriberId ||
+          existingExtra.telcoProvider,
+      );
+
+      let telcoPatch: Record<string, any> = {};
+      if (hadTelco) {
+        const nowIso = new Date().toISOString();
+        const targetTier = dto.planTier ?? currentProf?.plan_tier ?? 'starter';
+        const targetStatus = dto.planStatus ?? currentProf?.plan_status ?? 'active';
+
+        if (targetTier !== 'starter') {
+          telcoPatch = {
+            telcoProvider: currentProf?.telco_provider || existingExtra.telcoProvider || 'ideamart',
+            telcoSubscriberId: currentProf?.telco_subscriber_id || existingExtra.telcoSubscriberId || null,
+            telcoSubscribedAt: existingExtra.telcoSubscribedAt || currentProf?.created_at || nowIso,
+            telcoStatus: 'UPGRADED',
+            telcoEndedAt: existingExtra.telcoEndedAt || nowIso,
+            telcoUpgradedToTier: targetTier,
+            telcoEndReason: `Changed to ${targetTier.toUpperCase()} Plan`,
+          };
+        } else if (targetStatus === 'canceled' || targetStatus === 'expired') {
+          telcoPatch = {
+            telcoProvider: currentProf?.telco_provider || existingExtra.telcoProvider || 'ideamart',
+            telcoSubscriberId: currentProf?.telco_subscriber_id || existingExtra.telcoSubscriberId || null,
+            telcoSubscribedAt: existingExtra.telcoSubscribedAt || currentProf?.created_at || nowIso,
+            telcoStatus: 'CANCELLED',
+            telcoEndedAt: existingExtra.telcoEndedAt || nowIso,
+            telcoEndReason: 'Cancelled by Admin',
+          };
+        } else if (targetTier === 'starter' && targetStatus === 'active') {
+          telcoPatch = {
+            telcoStatus: 'ACTIVE',
+            telcoEndedAt: null,
+            telcoUpgradedToTier: null,
+            telcoEndReason: null,
+          };
+        }
+      }
+
       await this.saveProfileExtraForUser(userId, {
         ...(dto.email !== undefined ? { email: dto.email.trim() } : {}),
         ...(dto.avatarUrl !== undefined ? { avatarUrl: dto.avatarUrl } : {}),
+        ...telcoPatch,
       });
     }
 
@@ -2274,9 +2383,31 @@ export class AuthService {
       }
     }
 
+    let telcoRateHistory = Array.isArray(currentConfig.telcoRateHistory)
+      ? [...currentConfig.telcoRateHistory]
+      : [{ rateLkr: currentConfig.telcoDailyPriceLkr || 12, effectiveFrom: '2026-01-01T00:00:00.000Z' }];
+
+    if (
+      typeof cleanedDto.telcoDailyPriceLkr === 'number' &&
+      cleanedDto.telcoDailyPriceLkr > 0 &&
+      cleanedDto.telcoDailyPriceLkr !== (currentConfig.telcoDailyPriceLkr ?? 12)
+    ) {
+      telcoRateHistory.push({
+        rateLkr: cleanedDto.telcoDailyPriceLkr,
+        effectiveFrom: new Date().toISOString(),
+      });
+    } else if (Array.isArray(cleanedDto.telcoRateHistory)) {
+      telcoRateHistory = cleanedDto.telcoRateHistory;
+    }
+
     const newConfig: AppConfigData = {
       ...currentConfig,
       ...cleanedDto,
+      telcoDailyPriceLkr:
+        typeof cleanedDto.telcoDailyPriceLkr === 'number' && cleanedDto.telcoDailyPriceLkr > 0
+          ? cleanedDto.telcoDailyPriceLkr
+          : currentConfig.telcoDailyPriceLkr ?? 12,
+      telcoRateHistory,
       // Ensure testAccounts is NEVER wiped out by updates that do not provide testAccounts
       testAccounts:
         cleanedDto.testAccounts !== undefined

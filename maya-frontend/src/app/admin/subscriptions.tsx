@@ -17,11 +17,16 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { paymentApi } from '@/services/payment/payment-api';
-import { SubscriptionRecord, AdminOrderRecord, TopUpPackageStats } from '@/services/payment/payhere-types';
+import {
+  SubscriptionRecord,
+  TelcoSubscriptionRecord,
+  AdminOrderRecord,
+  TopUpPackageStats,
+} from '@/services/payment/payhere-types';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
 import { mayaAlert } from '@/components/ui/alert-modal';
 
-type AdminViewTab = 'subscriptions' | 'renewals' | 'topups';
+type AdminViewTab = 'subscriptions' | 'telco' | 'renewals' | 'topups';
 
 export default function AdminSubscriptionsScreen() {
   const { isPhone } = useBreakpoint();
@@ -30,13 +35,27 @@ export default function AdminSubscriptionsScreen() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
+  const [telcoSubscriptions, setTelcoSubscriptions] = useState<TelcoSubscriptionRecord[]>([]);
   const [orders, setOrders] = useState<AdminOrderRecord[]>([]);
+  const [telcoRateInput, setTelcoRateInput] = useState('12');
+  const [isSavingTelcoRate, setIsSavingTelcoRate] = useState(false);
+  const [selectedTelcoStatus, setSelectedTelcoStatus] = useState<'ALL' | 'ACTIVE' | 'UPGRADED' | 'CANCELLED'>('ALL');
+
   const [stats, setStats] = useState({
     totalSubscribers: 0,
     activeCount: 0,
     pastDueCount: 0,
     cancelledCount: 0,
     mrrLkr: 0,
+    cardMrrLkr: 0,
+    telcoDailyPriceLkr: 12,
+    telcoSubscribersCount: 0,
+    telcoActiveCount: 0,
+    telcoUpgradedCount: 0,
+    telcoCancelledCount: 0,
+    telcoDailyRevenueLkr: 0,
+    telcoMrrLkr: 0,
+    telcoTotalRevenueLkr: 0,
     topUpRevenueLkr: 0,
     topUpMinutesSold: 0,
     topUpOrdersCount: 0,
@@ -76,14 +95,26 @@ export default function AdminSubscriptionsScreen() {
     try {
       const res = await paymentApi.getAdminSubscriptions();
       setSubscriptions(res.subscriptions || []);
+      setTelcoSubscriptions(res.telcoSubscriptions || []);
       setOrders(res.orders || []);
       if (res.stats) {
+        const rateLkr = res.stats.telcoDailyPriceLkr || 12;
+        setTelcoRateInput(String(rateLkr));
         setStats({
           totalSubscribers: res.stats.totalSubscribers || 0,
           activeCount: res.stats.activeCount || 0,
           pastDueCount: res.stats.pastDueCount || 0,
           cancelledCount: res.stats.cancelledCount || 0,
           mrrLkr: res.stats.mrrLkr || 0,
+          cardMrrLkr: res.stats.cardMrrLkr ?? res.stats.mrrLkr ?? 0,
+          telcoDailyPriceLkr: rateLkr,
+          telcoSubscribersCount: res.stats.telcoSubscribersCount || 0,
+          telcoActiveCount: res.stats.telcoActiveCount || 0,
+          telcoUpgradedCount: res.stats.telcoUpgradedCount || 0,
+          telcoCancelledCount: res.stats.telcoCancelledCount || 0,
+          telcoDailyRevenueLkr: res.stats.telcoDailyRevenueLkr || 0,
+          telcoMrrLkr: res.stats.telcoMrrLkr || 0,
+          telcoTotalRevenueLkr: res.stats.telcoTotalRevenueLkr || 0,
           topUpRevenueLkr: res.stats.topUpRevenueLkr || 0,
           topUpMinutesSold: res.stats.topUpMinutesSold || 0,
           topUpOrdersCount: res.stats.topUpOrdersCount || 0,
@@ -130,6 +161,73 @@ export default function AdminSubscriptionsScreen() {
       return true;
     });
   }, [subscriptions, selectedStatus, selectedTier, searchQuery]);
+
+  // Filtered Telco Subscriptions
+  const filteredTelcoSubscriptions = useMemo(() => {
+    return telcoSubscriptions.filter((t) => {
+      if (selectedTelcoStatus !== 'ALL' && t.status !== selectedTelcoStatus) {
+        return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const name = t.profile?.display_name?.toLowerCase() || '';
+        const phone = t.profile?.phone_number?.toLowerCase() || '';
+        const op = t.operator_name?.toLowerCase() || '';
+        const subId = t.subscriber_id_masked?.toLowerCase() || '';
+        if (!name.includes(q) && !phone.includes(q) && !op.includes(q) && !subId.includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [telcoSubscriptions, selectedTelcoStatus, searchQuery]);
+
+  const handleSaveTelcoRate = async () => {
+    const parsedRate = Number(telcoRateInput);
+    if (!Number.isFinite(parsedRate) || parsedRate <= 0) {
+      await mayaAlert.error('Please enter a valid daily rate in LKR (e.g. 12).', 'Invalid Rate');
+      return;
+    }
+    setIsSavingTelcoRate(true);
+    try {
+      const res = await paymentApi.updateTelcoDailyRate(parsedRate);
+      await mayaAlert.success(
+        res.message || `Telco daily rate updated to LKR ${parsedRate}/day.`,
+        'Telco Daily Rate Updated',
+      );
+      await loadData();
+    } catch (err: any) {
+      await mayaAlert.error(err.message || 'Could not update Telco daily rate.', 'Update Failed');
+    } finally {
+      setIsSavingTelcoRate(false);
+    }
+  };
+
+  const handleCancelTelcoSubscription = async (sub: TelcoSubscriptionRecord) => {
+    const confirmed = await mayaAlert.confirm({
+      title: 'Stop Telco Subscription',
+      message: `Are you sure you want to unsubscribe ${sub.profile?.display_name || 'this user'} (${sub.operator_name}) from daily mobile carrier billing?`,
+      confirmText: 'Unsubscribe User',
+      cancelText: 'Keep Active',
+      type: 'warning',
+      isDestructive: true,
+    });
+    if (!confirmed) return;
+
+    setActionLoadingId(sub.id);
+    try {
+      const res = await paymentApi.adminCancelSubscription(sub.id);
+      await mayaAlert.success(
+        res.msg || 'Telco carrier subscription stopped and marked cancelled.',
+        'Telco Unsubscribed',
+      );
+      await loadData();
+    } catch (err: any) {
+      await mayaAlert.error(err.message || 'Failed to stop Telco subscription.', 'Cancellation Error');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   // Renewal Orders (Backend Recurring Charges)
   const renewalOrders = useMemo(() => {
@@ -300,8 +398,27 @@ export default function AdminSubscriptionsScreen() {
                   </View>
                 </View>
                 <Text style={styles.statValue}>LKR {stats.mrrLkr.toLocaleString()}</Text>
-                <Text style={styles.statSubtext}>Across active recurring plans</Text>
+                <Text style={styles.statSubtext}>
+                  Card: LKR {stats.cardMrrLkr.toLocaleString()} · Telco: LKR {stats.telcoMrrLkr.toLocaleString()}/mo
+                </Text>
               </View>
+
+              {/* TELCO CARRIER SUBSCRIBERS & REVENUE */}
+              <Pressable
+                style={[styles.statCard, activeTab === 'telco' && { borderWidth: 1.5, borderColor: '#0d9488' }]}
+                onPress={() => setActiveTab('telco')}
+              >
+                <View style={styles.statCardHeader}>
+                  <Text style={styles.statLabel}>TELCO SUBSCRIBERS REVENUE</Text>
+                  <View style={[styles.statIconBadge, { backgroundColor: '#f0fdfa' }]}>
+                    <Feather name="smartphone" size={16} color="#0d9488" />
+                  </View>
+                </View>
+                <Text style={styles.statValue}>LKR {stats.telcoTotalRevenueLkr.toLocaleString()}</Text>
+                <Text style={styles.statSubtext}>
+                  {stats.telcoActiveCount} active @ LKR {stats.telcoDailyPriceLkr}/day (+LKR {stats.telcoDailyRevenueLkr}/day)
+                </Text>
+              </Pressable>
 
               {/* ACTIVE PRE-APPROVED ACCOUNTS */}
               <View style={[styles.statCard]}>
@@ -344,8 +461,8 @@ export default function AdminSubscriptionsScreen() {
               </View>
             </View>
 
-            {/* TAB SELECTOR: Subscriptions vs Renewal History vs Talk-Time Top-Ups */}
-            <View style={styles.tabSelectorBar}>
+            {/* TAB SELECTOR: Card Subscriptions vs Telco Subscribers vs Renewal History vs Talk-Time Top-Ups */}
+            <View style={[styles.tabSelectorBar, { flexWrap: 'wrap' }]}>
               <Pressable
                 style={[styles.tabSelectorItem, activeTab === 'subscriptions' && styles.tabSelectorItemActive]}
                 onPress={() => setActiveTab('subscriptions')}
@@ -361,7 +478,26 @@ export default function AdminSubscriptionsScreen() {
                     activeTab === 'subscriptions' && styles.tabSelectorItemTextActive,
                   ]}
                 >
-                  Recurring Subscriptions ({subscriptions.length})
+                  Card Subscriptions ({subscriptions.length})
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.tabSelectorItem, activeTab === 'telco' && styles.tabSelectorItemActive]}
+                onPress={() => setActiveTab('telco')}
+              >
+                <Feather
+                  name="smartphone"
+                  size={15}
+                  color={activeTab === 'telco' ? '#0d9488' : '#64748b'}
+                />
+                <Text
+                  style={[
+                    styles.tabSelectorItemText,
+                    activeTab === 'telco' && styles.tabSelectorItemTextActive,
+                  ]}
+                >
+                  Telco Subscribers ({telcoSubscriptions.length})
                 </Text>
               </Pressable>
 
@@ -403,6 +539,132 @@ export default function AdminSubscriptionsScreen() {
                 </Text>
               </Pressable>
             </View>
+
+            {/* TELCO PRICING & PLAN TRANSITION SUMMARY CARDS (Rendered when in 'telco' tab) */}
+            {activeTab === 'telco' && (
+              <View style={styles.packageCardsGrid}>
+                {/* Daily Rate Configuration Card */}
+                <View style={[styles.packageCard, { borderColor: '#99f6e4', backgroundColor: '#f0fdfa' }]}>
+                  <View style={styles.packageCardTop}>
+                    <View style={[styles.packageBadge, { backgroundColor: '#ccfbf1' }]}>
+                      <Text style={[styles.packageBadgeText, { color: '#0f766e' }]}>DAILY TELCO PRICE</Text>
+                    </View>
+                    <Text style={[styles.packagePrice, { color: '#0f766e' }]}>
+                      LKR {stats.telcoDailyPriceLkr} / day
+                    </Text>
+                  </View>
+                  <Text style={styles.packageTitle}>Dialog IdeaMart & Mobitel mSpace</Text>
+                  <Text style={[styles.packageMetricLabel, { marginBottom: 10 }]}>
+                    Changing the daily rate applies from today onward while preserving past days at their historical rate.
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View
+                      style={{
+                        flex: 1,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: '#ffffff',
+                        borderWidth: 1,
+                        borderColor: '#cbd5e1',
+                        borderRadius: 8,
+                        paddingHorizontal: 10,
+                        height: 36,
+                      }}
+                    >
+                      <Text style={{ ...fontStyle('inter', 'semiBold'), fontSize: 12, color: '#64748b', marginRight: 6 }}>
+                        LKR
+                      </Text>
+                      <TextInput
+                        style={{ flex: 1, ...fontStyle('inter', 'semiBold'), fontSize: 13, color: '#0f172a' }}
+                        value={telcoRateInput}
+                        onChangeText={setTelcoRateInput}
+                        keyboardType="numeric"
+                        placeholder="12"
+                      />
+                      <Text style={{ ...fontStyle('inter', 'regular'), fontSize: 11, color: '#94a3b8' }}>/day</Text>
+                    </View>
+                    <Pressable
+                      style={{
+                        backgroundColor: '#0d9488',
+                        paddingHorizontal: 14,
+                        height: 36,
+                        borderRadius: 8,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      onPress={handleSaveTelcoRate}
+                      disabled={isSavingTelcoRate}
+                    >
+                      {isSavingTelcoRate ? (
+                        <ActivityIndicator size="small" color="#ffffff" />
+                      ) : (
+                        <Text style={{ ...fontStyle('inter', 'semiBold'), fontSize: 12, color: '#ffffff' }}>
+                          Save Rate
+                        </Text>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+
+                {/* Active Daily Yield Card */}
+                <View style={styles.packageCard}>
+                  <View style={styles.packageCardTop}>
+                    <View style={[styles.packageBadge, { backgroundColor: '#ecfdf5' }]}>
+                      <Text style={[styles.packageBadgeText, { color: '#059669' }]}>ACTIVE TELCO BILLING</Text>
+                    </View>
+                    <Text style={styles.packagePrice}>{stats.telcoActiveCount} Users</Text>
+                  </View>
+                  <Text style={styles.packageTitle}>Recurring Daily Carrier Revenue</Text>
+                  <View style={styles.packageMetricsRow}>
+                    <Text style={styles.packageMetricLabel}>Daily Revenue Run-Rate:</Text>
+                    <Text style={[styles.packageMetricValue, { color: '#059669' }]}>
+                      LKR {stats.telcoDailyRevenueLkr.toLocaleString()} / day
+                    </Text>
+                  </View>
+                  <View style={styles.packageMetricsRow}>
+                    <Text style={styles.packageMetricLabel}>Monthly Equivalent (30d MRR):</Text>
+                    <Text style={styles.packageMetricValue}>
+                      LKR {stats.telcoMrrLkr.toLocaleString()} / mo
+                    </Text>
+                  </View>
+                  <View style={styles.packageMetricsRow}>
+                    <Text style={styles.packageMetricLabel}>Total Telco Revenue Earned:</Text>
+                    <Text style={[styles.packageMetricValue, { color: '#0d9488' }]}>
+                      LKR {stats.telcoTotalRevenueLkr.toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Plan Transitions & Cancellations Card */}
+                <View style={styles.packageCard}>
+                  <View style={styles.packageCardTop}>
+                    <View style={[styles.packageBadge, { backgroundColor: '#eff6ff' }]}>
+                      <Text style={[styles.packageBadgeText, { color: '#2563eb' }]}>PLAN TRANSITIONS</Text>
+                    </View>
+                    <Text style={styles.packagePrice}>{stats.telcoUpgradedCount} Upgraded</Text>
+                  </View>
+                  <Text style={styles.packageTitle}>Plan Change & Churn Handling</Text>
+                  <View style={styles.packageMetricsRow}>
+                    <Text style={styles.packageMetricLabel}>Switched to Card Plan:</Text>
+                    <Text style={[styles.packageMetricValue, { color: '#2563eb' }]}>
+                      {stats.telcoUpgradedCount} users (Telco auto-stopped)
+                    </Text>
+                  </View>
+                  <View style={styles.packageMetricsRow}>
+                    <Text style={styles.packageMetricLabel}>Unsubscribed (Stopped):</Text>
+                    <Text style={styles.packageMetricValue}>
+                      {stats.telcoCancelledCount} users
+                    </Text>
+                  </View>
+                  <View style={styles.packageMetricsRow}>
+                    <Text style={styles.packageMetricLabel}>Prior Telco Days Revenue:</Text>
+                    <Text style={[styles.packageMetricValue, { color: '#0d9488' }]}>
+                      Preserved up to change date
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
 
             {/* MINUTES BUYING THINGS: Top-Up Package Highlights (Rendered when in 'topups' tab) */}
             {activeTab === 'topups' && (
@@ -508,6 +770,8 @@ export default function AdminSubscriptionsScreen() {
                   placeholder={
                     activeTab === 'subscriptions'
                       ? 'Search by learner name, phone, or masked card...'
+                      : activeTab === 'telco'
+                      ? 'Search Telco subscriber by name, phone, or carrier (Dialog/Mobitel)...'
                       : activeTab === 'renewals'
                       ? 'Search renewal by learner, phone, or order ID...'
                       : 'Search top-up by learner, phone, or package...'
@@ -521,7 +785,7 @@ export default function AdminSubscriptionsScreen() {
                 ) : null}
               </View>
 
-              {/* Status Chips (only on subscriptions tab) */}
+              {/* Status Chips (on subscriptions tab) */}
               {activeTab === 'subscriptions' && (
                 <View style={styles.chipGroup}>
                   {(['ALL', 'ACTIVE', 'PAST_DUE', 'CANCELLED'] as const).map((st) => (
@@ -537,6 +801,32 @@ export default function AdminSubscriptionsScreen() {
                         ]}
                       >
                         {st === 'ALL' ? 'All Status' : st.replace('_', ' ')}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+
+              {/* Status Chips (on telco tab) */}
+              {activeTab === 'telco' && (
+                <View style={styles.chipGroup}>
+                  {(['ALL', 'ACTIVE', 'UPGRADED', 'CANCELLED'] as const).map((st) => (
+                    <Pressable
+                      key={st}
+                      style={[styles.filterChip, selectedTelcoStatus === st && styles.filterChipActive]}
+                      onPress={() => setSelectedTelcoStatus(st)}
+                    >
+                      <Text
+                        style={[
+                          styles.filterChipText,
+                          selectedTelcoStatus === st && styles.filterChipTextActive,
+                        ]}
+                      >
+                        {st === 'ALL'
+                          ? 'All Telco'
+                          : st === 'UPGRADED'
+                          ? 'Upgraded (Card)'
+                          : st}
                       </Text>
                     </Pressable>
                   ))}
@@ -816,6 +1106,237 @@ export default function AdminSubscriptionsScreen() {
                     );
                   })
                 )}
+                  </View>
+                </ScrollView>
+              </View>
+            )}
+
+            {/* ==================================================================== */}
+            {/* VIEW 1B: TELCO CARRIER SUBSCRIBERS & DAILY REVENUE TABLE             */}
+            {/* ==================================================================== */}
+            {activeTab === 'telco' && (
+              <View style={styles.tableCard}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ minWidth: '100%' }}>
+                  <View style={{ minWidth: 1080, flex: 1 }}>
+                    <View style={styles.tableHeaderRow}>
+                      <Text style={[styles.tableHeaderCell, { flex: 2.0 }]}>LEARNER</Text>
+                      <Text style={[styles.tableHeaderCell, { flex: 1.6 }]}>CARRIER & SUBSCRIBER</Text>
+                      <Text style={[styles.tableHeaderCell, { flex: 1.5 }]}>PLAN & DAILY RATE</Text>
+                      <Text style={[styles.tableHeaderCell, { flex: 1.4 }]}>EARNED REVENUE</Text>
+                      <Text style={[styles.tableHeaderCell, { flex: 1.3 }]}>STATUS</Text>
+                      <Text style={[styles.tableHeaderCell, { flex: 1.5 }]}>BILLING TIMELINE</Text>
+                      <Text style={[styles.tableHeaderCell, { flex: 1.5, textAlign: 'right' }]}>ACTIONS</Text>
+                    </View>
+
+                    {isLoading ? (
+                      <AdminTableSkeleton rows={6} />
+                    ) : filteredTelcoSubscriptions.length === 0 ? (
+                      <View style={styles.emptyContainer}>
+                        <Feather name="smartphone" size={36} color="#cbd5e1" />
+                        <Text style={styles.emptyTitle}>No Telco Subscribers Found</Text>
+                        <Text style={styles.emptySubtitle}>
+                          {telcoSubscriptions.length === 0
+                            ? 'Users who subscribe via Dialog IdeaMart or Mobitel mSpace daily airtime billing will appear here.'
+                            : 'No Telco subscribers match your current filter settings.'}
+                        </Text>
+                      </View>
+                    ) : (
+                      filteredTelcoSubscriptions.map((tSub, index) => {
+                        const isActive = tSub.status === 'ACTIVE';
+                        const isUpgraded = tSub.status === 'UPGRADED';
+                        const isActionLoading = actionLoadingId === tSub.id;
+                        const isMspace = tSub.telco_provider === 'mspace';
+
+                        return (
+                          <View
+                            key={tSub.id}
+                            style={[
+                              styles.tableRow,
+                              index % 2 === 1 && styles.tableRowAlt,
+                              index === filteredTelcoSubscriptions.length - 1 && { borderBottomWidth: 0 },
+                            ]}
+                          >
+                            {/* Learner Info */}
+                            <View style={[styles.tableCell, { flex: 2.0 }]}>
+                              <View style={[styles.learnerAvatar, { backgroundColor: isMspace ? '#2563eb' : '#0d9488' }]}>
+                                <Text style={styles.learnerAvatarText}>
+                                  {(tSub.profile?.display_name || 'M').charAt(0).toUpperCase()}
+                                </Text>
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.learnerName} numberOfLines={1}>
+                                  {tSub.profile?.display_name || 'Mobile Learner'}
+                                </Text>
+                                <Text style={styles.learnerPhone} numberOfLines={1}>
+                                  {tSub.profile?.phone_number || 'No phone'}
+                                </Text>
+                              </View>
+                            </View>
+
+                            {/* Carrier & Masked Subscriber ID */}
+                            <View style={[styles.tableCell, { flex: 1.6 }]}>
+                              <View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <Feather name="smartphone" size={14} color={isMspace ? '#2563eb' : '#0d9488'} />
+                                  <Text style={styles.cardMaskedText}>{tSub.operator_name}</Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                                  <View
+                                    style={[
+                                      styles.tokenPill,
+                                      isMspace ? { backgroundColor: '#eff6ff' } : { backgroundColor: '#f0fdfa' },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.tokenPillText,
+                                        isMspace ? { color: '#2563eb' } : { color: '#0d9488' },
+                                      ]}
+                                    >
+                                      {tSub.telco_provider.toUpperCase()}
+                                    </Text>
+                                  </View>
+                                  <Text style={styles.cardHolderText} numberOfLines={1}>
+                                    · {tSub.subscriber_id_masked}
+                                  </Text>
+                                </View>
+                              </View>
+                            </View>
+
+                            {/* Plan & Daily Rate (with Plan Change indication) */}
+                            <View style={[styles.tableCell, { flex: 1.5 }]}>
+                              <View>
+                                <View
+                                  style={[
+                                    styles.tierBadge,
+                                    isUpgraded
+                                      ? { backgroundColor: '#eff6ff' }
+                                      : { backgroundColor: '#f0fdfa' },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.tierBadgeText,
+                                      isUpgraded ? { color: '#2563eb' } : { color: '#0f766e' },
+                                    ]}
+                                  >
+                                    {isUpgraded
+                                      ? `TELCO → ${(tSub.upgraded_to_tier || 'PRO').toUpperCase()}`
+                                      : 'STARTER DAILY'}
+                                  </Text>
+                                </View>
+                                <Text style={styles.cycleText}>
+                                  LKR {tSub.daily_rate_lkr}/day ({isActive ? `LKR ${tSub.monthly_equivalent_lkr}/mo` : 'Historical Rate'})
+                                </Text>
+                              </View>
+                            </View>
+
+                            {/* Earned Revenue & Billed Days */}
+                            <View style={[styles.tableCell, styles.tableCellStack, { flex: 1.4 }]}>
+                              <Text style={[styles.amountText, { color: '#0f766e' }]}>
+                                LKR {Number(tSub.total_revenue_lkr || 0).toLocaleString()}
+                              </Text>
+                              <Text style={styles.installmentsCountText}>
+                                {tSub.active_days} day{tSub.active_days > 1 ? 's' : ''} billed
+                              </Text>
+                            </View>
+
+                            {/* Status */}
+                            <View style={[styles.tableCell, styles.tableCellStack, { flex: 1.3 }]}>
+                              <View
+                                style={[
+                                  styles.statusPill,
+                                  isActive
+                                    ? styles.statusPillActive
+                                    : isUpgraded
+                                    ? { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }
+                                    : styles.statusPillCancelled,
+                                ]}
+                              >
+                                <View
+                                  style={[
+                                    styles.statusDot,
+                                    isActive
+                                      ? { backgroundColor: '#16a34a' }
+                                      : isUpgraded
+                                      ? { backgroundColor: '#2563eb' }
+                                      : { backgroundColor: '#64748b' },
+                                  ]}
+                                />
+                                <Text
+                                  style={[
+                                    styles.statusPillText,
+                                    isActive
+                                      ? { color: '#16a34a' }
+                                      : isUpgraded
+                                      ? { color: '#2563eb' }
+                                      : { color: '#64748b' },
+                                  ]}
+                                >
+                                  {isUpgraded ? 'PLAN CHANGED' : tSub.status}
+                                </Text>
+                              </View>
+                              {tSub.end_reason ? (
+                                <Text style={[styles.nextBillingSubtext, { marginTop: 3 }]} numberOfLines={1}>
+                                  {tSub.end_reason}
+                                </Text>
+                              ) : null}
+                            </View>
+
+                            {/* Billing Timeline */}
+                            <View style={[styles.tableCell, styles.tableCellStack, { flex: 1.5 }]}>
+                              <Text style={styles.nextBillingText}>
+                                {isActive
+                                  ? `Next: ${tSub.next_billing_date || 'Tomorrow'}`
+                                  : `Ended: ${(tSub.ended_at || '').split('T')[0] || '-'}`}
+                              </Text>
+                              <Text style={styles.nextBillingSubtext}>
+                                Started: {(tSub.subscribed_at || '').split('T')[0]}
+                              </Text>
+                            </View>
+
+                            {/* Actions */}
+                            <View style={[styles.tableCell, { flex: 1.5, justifyContent: 'flex-end', gap: 6 }]}>
+                              {isActionLoading ? (
+                                <ActivityIndicator size="small" color="#0d9488" />
+                              ) : (
+                                <>
+                                  <Pressable
+                                    style={styles.actionBtnSecondary}
+                                    onPress={() =>
+                                      handleOpenPaymentsModal({
+                                        id: tSub.id,
+                                        userId: tSub.user_id,
+                                        name: tSub.profile?.display_name,
+                                        phone: tSub.profile?.phone_number,
+                                        plan: isUpgraded
+                                          ? `Telco Daily → ${(tSub.upgraded_to_tier || 'PRO').toUpperCase()}`
+                                          : `Telco Daily (LKR ${tSub.daily_rate_lkr}/day)`,
+                                      })
+                                    }
+                                    hitSlop={4}
+                                  >
+                                    <Feather name="file-text" size={13} color="#0284c7" />
+                                    <Text style={styles.actionBtnSecondaryText}>Ledger</Text>
+                                  </Pressable>
+
+                                  {isActive && (
+                                    <Pressable
+                                      style={styles.actionBtnDanger}
+                                      onPress={() => handleCancelTelcoSubscription(tSub)}
+                                      hitSlop={4}
+                                    >
+                                      <Feather name="slash" size={12} color="#dc2626" />
+                                      <Text style={styles.actionBtnDangerText}>Stop</Text>
+                                    </Pressable>
+                                  )}
+                                </>
+                              )}
+                            </View>
+                          </View>
+                        );
+                      })
+                    )}
                   </View>
                 </ScrollView>
               </View>
@@ -1273,13 +1794,27 @@ export default function AdminSubscriptionsScreen() {
                         <View style={styles.paymentItemTop}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             <Ionicons
-                              name={pmt.order_type === 'add_on_topup' ? 'time' : 'card'}
+                              name={
+                                pmt.order_type === 'add_on_topup'
+                                  ? 'time'
+                                  : pmt.order_type === 'telco_daily' || pmt.order_type === 'telco_unsubscribe'
+                                  ? 'phone-portrait-outline'
+                                  : pmt.order_type === 'plan_change'
+                                  ? 'swap-horizontal'
+                                  : 'card'
+                              }
                               size={16}
                               color="#0d9488"
                             />
                             <Text style={styles.paymentId}>
                               {pmt.order_type === 'add_on_topup'
                                 ? `Top-Up (+${pmt.minutes_credited || 30} mins)`
+                                : pmt.order_type === 'telco_daily'
+                                ? `Daily Telco Airtime Charge (${pmt.order_id})`
+                                : pmt.order_type === 'plan_change'
+                                ? `Plan Changed: Upgraded to ${(pmt.plan_tier || 'PRO').toUpperCase()}`
+                                : pmt.order_type === 'telco_unsubscribe'
+                                ? 'Telco Subscription Stopped'
                                 : pmt.order_type === 'subscription_renewal'
                                 ? 'Automated Monthly Renewal'
                                 : 'Initial Subscription Activation'}
@@ -1289,6 +1824,10 @@ export default function AdminSubscriptionsScreen() {
                             style={
                               pmt.status === 'RECEIVED' || pmt.status === 'completed'
                                 ? styles.statusPillActive
+                                : pmt.status === 'PLAN_UPGRADED'
+                                ? [styles.statusPill, { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }]
+                                : pmt.status === 'UNSUBSCRIBED'
+                                ? styles.statusPillCancelled
                                 : styles.statusPillPastDue
                             }
                           >
@@ -1297,6 +1836,10 @@ export default function AdminSubscriptionsScreen() {
                                 styles.statusPillText,
                                 pmt.status === 'RECEIVED' || pmt.status === 'completed'
                                   ? { color: '#16a34a' }
+                                  : pmt.status === 'PLAN_UPGRADED'
+                                  ? { color: '#2563eb' }
+                                  : pmt.status === 'UNSUBSCRIBED'
+                                  ? { color: '#64748b' }
                                   : { color: '#ea580c' },
                               ]}
                             >

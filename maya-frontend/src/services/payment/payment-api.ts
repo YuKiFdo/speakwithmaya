@@ -233,6 +233,29 @@ class PaymentApiService {
   }
 
   /**
+   * Admin: Update daily Telco subscription rate (e.g. LKR 12/day).
+   */
+  async updateTelcoDailyRate(dailyPriceLkr: number): Promise<{
+    success: boolean;
+    telcoDailyPriceLkr: number;
+    telcoRateHistory: Array<{ rateLkr: number; effectiveFrom: string }>;
+    message: string;
+  }> {
+    const res = await fetch(`${this.baseUrl}/v1/admin/subscriptions/telco-rate`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ dailyPriceLkr }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to update Telco daily rate');
+    }
+
+    return data;
+  }
+
+  /**
    * Admin: List orders with filters (subscription renewals, talk-time top-ups, initial subscriptions).
    */
   async getAdminOrders(type: string = 'ALL', limit: number = 100): Promise<any[]> {

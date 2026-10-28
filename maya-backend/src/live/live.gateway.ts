@@ -24,6 +24,8 @@ interface ClientSessionState {
   geminiSession?: any;
   dto?: CreateSessionTokenDto;
   sessionId: string;
+  userId?: string;
+  userName?: string;
   isConnectedToGemini: boolean;
   supportsOpus: boolean;
   opusEncoder?: any;
@@ -38,6 +40,7 @@ interface ClientSessionState {
   modelTurnCount: number;
   chronologicalAudioTurns: Array<{ speaker: 'user' | 'model'; turnIdx: number; pcm: Buffer; sampleRate: number }>;
   authoritativeTurns: Array<{ role: 'user' | 'model'; text: string; timestamp: string }>;
+  grammarCorrections: Array<{ studentSaid: string; moreNatural: string; explanation: string; highlightWords?: string[] }>;
   userSpeechActive: boolean;
   hasDispatchedGreeting: boolean;
   isGreetingInProgress: boolean;
@@ -143,6 +146,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       modelTurnCount: 0,
       chronologicalAudioTurns: [],
       authoritativeTurns: [],
+      grammarCorrections: [],
       userSpeechActive: false,
       hasDispatchedGreeting: false,
       isGreetingInProgress: false,
@@ -333,6 +337,95 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
       }
 
+      // Auto-finalize session on server disconnect if real conversation/audio activity occurred.
+      // This guarantees that when a user's phone dies, network drops, or browser closes abruptly,
+      // the session is marked completed in public.sessions, recorded in usage_ledger (Admin Usage),
+      // and practice minutes are accurately calculated and deducted from profiles.minutes_balance.
+      const hadActivity =
+        (state.authoritativeTurns && state.authoritativeTurns.length > 0) ||
+        state.userTurnCount > 0 ||
+        state.modelTurnCount > 0 ||
+        state.totalAudioInTokens > 0 ||
+        state.totalAudioOutTokens > 0;
+
+      if (hadActivity) {
+        const isHeartbeatTimeout = state.sessionLog.some((e) => e.event === 'heartbeat_timeout');
+        const isSocketError = state.sessionLog.some((e) => e.event === 'client_socket_error');
+        const isAbruptDisconnect = isHeartbeatTimeout || isSocketError;
+
+        // If heartbeat timed out (e.g. 30s without pong because phone died), use the time up to lastPongAt
+        // so the student is only billed for actual connected time before their device lost power.
+        const activeDurationSec = isHeartbeatTimeout && state.lastPongAt > state.connectedAt
+          ? Math.max(5, Math.round((state.lastPongAt - state.connectedAt) / 1000))
+          : Math.max(5, durationSec);
+
+        const snapshotSessionId = state.sessionId;
+        const snapshotUserId = state.userId || 'guest-user';
+        const snapshotDto = state.dto;
+        const snapshotTurns = [...state.authoritativeTurns];
+        const snapshotCorrections = [...state.grammarCorrections];
+        const snapshotEval = state.evaluationResult;
+        const snapshotTokens = {
+          textInTokens: state.totalTextInTokens || 520,
+          audioInTokens: state.totalAudioInTokens || Math.max(150, state.userTurnCount * 320),
+          audioOutTokens: state.totalAudioOutTokens || Math.max(250, state.modelTurnCount * 480),
+          textOutTokens: state.totalTextOutTokens || Math.max(40, state.modelTurnCount * 35),
+          thoughtsTokens: state.totalThoughtsTokens || 0,
+        };
+        const totalTok =
+          snapshotTokens.textInTokens +
+          snapshotTokens.audioInTokens +
+          snapshotTokens.audioOutTokens +
+          snapshotTokens.textOutTokens +
+          snapshotTokens.thoughtsTokens;
+
+        const runAutoFinalize = () => {
+          this.logger.log(
+            `[${snapshotSessionId}] 🛡️ Auto-finalizing session on disconnect (abrupt=${isAbruptDisconnect}, activeDuration=${activeDurationSec}s, turns=${snapshotTurns.length}, tokens=${totalTok})`,
+          );
+          this.sessionsService
+            .finishSession(snapshotSessionId, snapshotUserId, {
+              durationSeconds: activeDurationSec,
+              tokensUsed: {
+                ...snapshotTokens,
+                totalTokens: totalTok,
+                promptTokens: snapshotTokens.textInTokens + snapshotTokens.audioInTokens,
+                responseTokens: snapshotTokens.audioOutTokens + snapshotTokens.textOutTokens + snapshotTokens.thoughtsTokens,
+              },
+              turns: snapshotTurns,
+              grammarCorrections: snapshotCorrections,
+              scores: snapshotEval?.scorePercent
+                ? {
+                    overall: snapshotEval.scorePercent,
+                    fluency: snapshotEval.scorePercent,
+                    grammar: snapshotEval.scorePercent,
+                    pronunciation: snapshotEval.scorePercent,
+                  }
+                : undefined,
+              userName: state.userName || snapshotDto?.userName || 'Learner',
+              model: this.liveModel,
+              topic: snapshotDto?.topic || 'English Speaking Practice',
+              languageMode: snapshotDto?.languageMode || 'sinhala',
+              sinhalaStyle: snapshotDto?.sinhalaStyle || 'balanced',
+              isIntroCall: Boolean(snapshotDto?.isIntroCall),
+              roadmapLevelId: snapshotDto?.roadmapLevelId,
+              levelNumber: snapshotDto?.levelNumber,
+            })
+            .catch((err: any) => {
+              this.logger.warn(`[${snapshotSessionId}] Auto-finalize on disconnect warning: ${err?.message}`);
+            });
+        };
+
+        if (isAbruptDisconnect) {
+          // Device/connection is dead; finalize immediately
+          runAutoFinalize();
+        } else {
+          // Normal disconnect: give client 3 seconds to send HTTP POST /v1/sessions/:id/finish first,
+          // then auto-finalize if client closed tab/app before HTTP request completed.
+          setTimeout(runAutoFinalize, 3000);
+        }
+      }
+
       if (state.geminiSession) {
         try {
           await state.geminiSession.close();
@@ -468,10 +561,19 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         state.dto = dto;
 
         // Verify user token & quota balance if token is provided
+        let resolvedUserId: string | undefined;
         if (message.accessToken) {
           try {
             const userId = this.authService.validateAuthToken(message.accessToken);
+            resolvedUserId = userId;
+            state.userId = userId;
             const profile = await this.authService.getProfile(userId);
+            if (profile?.display_name) {
+              state.userName = profile.display_name;
+              if (!dto.userName || dto.userName === 'Learner') {
+                dto.userName = profile.display_name;
+              }
+            }
             if (!dto.isIntroCall && (profile.minutes_balance ?? 0) <= 0) {
               this.logger.warn(`[${state.sessionId}] ⛔ Blocking live session for user ${userId}: 0 minutes remaining`);
               this.safeSendToClient(
@@ -488,6 +590,20 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             this.logger.warn(`[${state.sessionId}] Token check note in start_session: ${authErr?.message}`);
           }
         }
+
+        // Register active session in SessionsService so user_id, topic, and metadata are tracked on server
+        await this.sessionsService.registerActiveSession(state.sessionId, {
+          userId: resolvedUserId,
+          userName: state.userName || dto.userName,
+          model: this.liveModel,
+          topic: dto.topic,
+          scenarioId: dto.scenarioId,
+          languageMode: dto.languageMode,
+          sinhalaStyle: dto.sinhalaStyle,
+          roadmapLevelId: dto.roadmapLevelId,
+          isIntroCall: dto.isIntroCall,
+          isReconnect: dto.isReconnect,
+        });
 
         // Enforce server-side max session duration timer (+90s grace for intro guide & farewell wrap-up, max 30 min)
         if (state.maxDurationTimer) {
@@ -1453,6 +1569,13 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const rawExplanation = String(args.explanation || '').replace(/"/g, "'");
           let instruction: string;
 
+          state.grammarCorrections.push({
+            studentSaid: String(args.studentSaid || args.student_said || ''),
+            moreNatural: String(args.moreNatural || args.more_natural || ''),
+            explanation: String(args.explanation || ''),
+            highlightWords: Array.isArray(args.highlightWords) ? args.highlightWords : [],
+          });
+
           // Forward to client so UI displays the animated grammar feedback drawer / card
           this.safeSendToClient(state, JSON.stringify({
             type: 'tool_call',
@@ -1484,6 +1607,13 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const shortKeyPhrase = String(args.moreNatural || args.more_natural || '').split(/[.,;!?]/)[0].trim().replace(/"/g, "'");
           const rawExplanation = String(args.explanation || '').replace(/"/g, "'");
           let instruction: string;
+
+          state.grammarCorrections.push({
+            studentSaid: String(args.studentSaid || args.student_said || ''),
+            moreNatural: String(args.moreNatural || args.more_natural || ''),
+            explanation: String(args.explanation || ''),
+            highlightWords: Array.isArray(args.highlightWords) ? args.highlightWords : [],
+          });
 
           // Forward to client so UI displays the animated rephrase feedback drawer / card
           this.safeSendToClient(state, JSON.stringify({

@@ -89,6 +89,35 @@ export interface AdminOrderRecord {
   };
 }
 
+export interface TelcoSubscriptionRecord {
+  id: string;
+  user_id: string;
+  telco_provider: 'ideamart' | 'mspace';
+  operator_name: string;
+  subscriber_id_masked: string;
+  plan_tier: string;
+  billing_cycle: string;
+  daily_rate_lkr: number;
+  active_days: number;
+  total_revenue_lkr: number;
+  monthly_equivalent_lkr: number;
+  status: 'ACTIVE' | 'UPGRADED' | 'CANCELLED';
+  upgraded_to_tier?: string | null;
+  end_reason?: string | null;
+  subscribed_at: string;
+  ended_at?: string | null;
+  next_billing_date?: string | null;
+  created_at: string;
+  updated_at: string;
+  profile?: {
+    id: string;
+    display_name: string;
+    phone_number: string;
+    minutes_balance: number;
+    level?: string;
+  };
+}
+
 export interface AdminSubscriptionsResponse {
   stats: {
     totalSubscribers: number;
@@ -96,6 +125,16 @@ export interface AdminSubscriptionsResponse {
     pastDueCount: number;
     cancelledCount: number;
     mrrLkr: number;
+    cardMrrLkr?: number;
+    telcoDailyPriceLkr?: number;
+    telcoSubscribersCount?: number;
+    telcoActiveCount?: number;
+    telcoUpgradedCount?: number;
+    telcoCancelledCount?: number;
+    telcoDailyRevenueLkr?: number;
+    telcoMrrLkr?: number;
+    telcoTotalRevenueLkr?: number;
+    telcoRateHistory?: Array<{ rateLkr: number; effectiveFrom: string }>;
     topUpRevenueLkr?: number;
     topUpMinutesSold?: number;
     topUpOrdersCount?: number;
@@ -110,5 +149,6 @@ export interface AdminSubscriptionsResponse {
     renewalsRevenueLkr?: number;
   };
   subscriptions: SubscriptionRecord[];
+  telcoSubscriptions?: TelcoSubscriptionRecord[];
   orders?: AdminOrderRecord[];
 }

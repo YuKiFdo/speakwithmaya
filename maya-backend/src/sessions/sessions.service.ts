@@ -213,7 +213,71 @@ export class SessionsService {
   private readonly sessionRecordingsMap = new Map<string, { userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string }>();
   private readonly sessionTurnAudioMap = new Map<string, Map<number, string>>();
   private readonly authoritativeTurnsMap = new Map<string, Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>();
+  private readonly finalizingSessionIds = new Set<string>();
+  private lastOrphanReconcileAt = 0;
   private lastSavedSessionId: string | null = null;
+
+  async registerActiveSession(
+    sessionId: string,
+    meta: {
+      userId?: string;
+      userName?: string;
+      model?: string;
+      topic?: string;
+      scenarioId?: string;
+      languageMode?: string;
+      sinhalaStyle?: string;
+      roadmapLevelId?: string;
+      isIntroCall?: boolean;
+      isReconnect?: boolean;
+    },
+  ): Promise<void> {
+    const validId = toValidUuid(sessionId);
+    let resolvedUserId = meta.userId;
+    if (!resolvedUserId && this.supabase) {
+      resolvedUserId = (await this.getActiveProfileId()) || undefined;
+    }
+
+    const entry = {
+      userId: resolvedUserId,
+      userName: (meta.userName || '').trim() || DEFAULT_LEARNER_NAME,
+      model: meta.model || this.liveModel,
+      topic: meta.isIntroCall ? 'Introductory Practice' : (meta.topic || 'English Speaking Practice'),
+      scenarioId: meta.scenarioId,
+      languageMode: meta.languageMode || 'sinhala',
+      sinhalaStyle: meta.sinhalaStyle || 'balanced',
+      roadmapLevelId: meta.roadmapLevelId,
+    };
+
+    this.activeSessions.set(validId, entry);
+    if (validId !== sessionId) {
+      this.activeSessions.set(sessionId, entry);
+    }
+
+    if (this.supabase && resolvedUserId && !meta.isReconnect) {
+      try {
+        const { data: existing } = await this.supabase
+          .from('sessions')
+          .select('id')
+          .eq('id', validId)
+          .maybeSingle();
+
+        if (!existing) {
+          await this.supabase.from('sessions').insert({
+            id: validId,
+            user_id: resolvedUserId,
+            topic: entry.topic,
+            status: 'active',
+            duration_seconds: 0,
+            start_time: new Date().toISOString(),
+            ...(meta.roadmapLevelId ? { roadmap_level_id: meta.roadmapLevelId } : {}),
+          });
+        }
+      } catch (err: any) {
+        this.logger.debug(`Could not pre-insert active session ${validId}: ${err?.message}`);
+      }
+    }
+  }
 
   setAuthoritativeTurns(sessionId: string, turns: Array<{ role: 'user' | 'model'; text: string; timestamp: string }>) {
     const validId = toValidUuid(sessionId);
@@ -1911,23 +1975,53 @@ ${memoryPart}`;
     const modelAudioUrl = rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined);
 
     if (this.supabase) {
+      // Guard against concurrent finalization (e.g. WebSocket disconnect + HTTP /finish arriving together)
+      if (this.finalizingSessionIds.has(validSessionId)) {
+        this.logger.log(`[SessionsService] ⏳ Session ${validSessionId} finalization already in progress; waiting...`);
+        await new Promise((r) => setTimeout(r, 1200));
+      }
+      this.finalizingSessionIds.add(validSessionId);
+
       try {
         // Prevent duplicate ledger entry and double counting if session was already finalized
         const { data: existingLedger } = await this.supabase
           .from('usage_ledger')
-          .select('id')
+          .select('id, duration_seconds, total_tokens, cost_usd, cost_lkr')
           .eq('session_id', validSessionId)
           .maybeSingle();
 
         if (existingLedger) {
-          this.logger.warn(`Session ${validSessionId} is already finalized in usage_ledger. Ignoring duplicate finish request.`);
+          this.logger.warn(`Session ${validSessionId} is already finalized in usage_ledger. Returning existing finalized record without double-deducting minutes.`);
+          // If client provided explicit scores or grammarCorrections after server auto-finalize, enrich them cleanly
+          if (scores?.overall && scores.overall > 0) {
+            await this.supabase
+              .from('sessions')
+              .update({
+                overall_score: scores.overall,
+                fluency_score: scores.fluency || scores.overall,
+                grammar_score: scores.grammar || scores.overall,
+                pronunciation_score: scores.pronunciation || scores.overall,
+              })
+              .eq('id', validSessionId);
+          }
+          if (resolvedUserId) {
+            const { data: prof } = await this.supabase
+              .from('profiles')
+              .select('minutes_balance')
+              .eq('id', resolvedUserId)
+              .maybeSingle();
+            if (typeof prof?.minutes_balance === 'number') {
+              remainingMinutes = prof.minutes_balance;
+            }
+          }
           return {
             sessionId: validSessionId,
             sessionCode: `SM-${validSessionId.slice(0, 5).toUpperCase()}`,
             status: 'completed',
-            durationSeconds,
+            durationSeconds: existingLedger.duration_seconds || durationSeconds,
+            remainingMinutes,
             tokensUsed: {
-              totalTokens,
+              totalTokens: existingLedger.total_tokens || totalTokens,
               textInTokens,
               audioInTokens,
               textOutTokens,
@@ -1935,8 +2029,8 @@ ${memoryPart}`;
               thoughtsTokens,
               promptTokens: textInTokens + audioInTokens,
               responseTokens: textOutTokens + audioOutTokens + thoughtsTokens,
-              costUsd,
-              costLkr,
+              costUsd: existingLedger.cost_usd || costUsd,
+              costLkr: existingLedger.cost_lkr || costLkr,
             },
             recordings: {
               userAudioUrl,
@@ -2148,6 +2242,8 @@ ${memoryPart}`;
         }
       } catch (e: unknown) {
         this.logger.error(`Error saving final session records to Supabase: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        this.finalizingSessionIds.delete(validSessionId);
       }
     }
 
@@ -2214,7 +2310,181 @@ ${memoryPart}`;
     };
   }
 
+  /**
+   * Self-healing reconciliation for sessions that ended abruptly (e.g. phone battery died,
+   * network dropped, or heartbeat timeout) where `session_turns` / `session_diagnostics` were saved
+   * on disconnect, but the client never called `POST /v1/sessions/:id/finish`.
+   * Ensures `public.sessions` has accurate `duration_seconds` and `status = 'completed'`,
+   * `usage_ledger` has the usage entry so Admin Usage & Sessions shows it, and `profiles.minutes_balance` is deducted.
+   */
+  async reconcileOrphanedSessions(force: boolean = false): Promise<number> {
+    if (!this.supabase) return 0;
+    const now = Date.now();
+    if (!force && now - this.lastOrphanReconcileAt < 15_000) {
+      return 0;
+    }
+    this.lastOrphanReconcileAt = now;
+
+    let reconciledCount = 0;
+    try {
+      // Find sessions that are still marked 'active' or have 0 duration, created at least 2 minutes ago
+      const twoMinutesAgoIso = new Date(now - 2 * 60 * 1000).toISOString();
+      const { data: candidateSessions, error: candErr } = await this.supabase
+        .from('sessions')
+        .select('id, user_id, topic, status, duration_seconds, start_time, created_at, roadmap_level_id')
+        .or('status.eq.active,duration_seconds.is.null,duration_seconds.eq.0')
+        .lt('created_at', twoMinutesAgoIso)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (candErr || !candidateSessions || candidateSessions.length === 0) {
+        return 0;
+      }
+
+      const candidateIds = candidateSessions.map((s: any) => s.id);
+
+      // Check which of these already have a usage_ledger entry
+      const { data: existingLedgers } = await this.supabase
+        .from('usage_ledger')
+        .select('session_id, duration_seconds')
+        .in('session_id', candidateIds);
+
+      const ledgerMap = new Map<string, any>();
+      (existingLedgers || []).forEach((l: any) => {
+        if (l.session_id) ledgerMap.set(l.session_id, l);
+      });
+
+      // Fetch turns and diagnostics for candidates missing from usage_ledger or missing duration
+      const { data: allTurns } = await this.supabase
+        .from('session_turns')
+        .select('session_id, turn_order, role, text_transcript, timestamp')
+        .in('session_id', candidateIds)
+        .order('turn_order', { ascending: true });
+
+      const turnsBySession = new Map<string, any[]>();
+      (allTurns || []).forEach((t: any) => {
+        if (!turnsBySession.has(t.session_id)) turnsBySession.set(t.session_id, []);
+        turnsBySession.get(t.session_id)!.push(t);
+      });
+
+      const { data: allDiags } = await this.supabase
+        .from('session_diagnostics')
+        .select('session_id, duration_seconds, turns_count, events, created_at')
+        .in('session_id', candidateIds);
+
+      const diagBySession = new Map<string, any>();
+      (allDiags || []).forEach((d: any) => {
+        if (d.session_id) diagBySession.set(d.session_id, d);
+      });
+
+      for (const sess of candidateSessions) {
+        const sid = sess.id;
+        const existingLedger = ledgerMap.get(sid);
+        const turns = turnsBySession.get(sid) || [];
+        const diag = diagBySession.get(sid);
+
+        // If already in usage_ledger, just make sure sessions row status and duration_seconds are synced
+        if (existingLedger) {
+          if (sess.status !== 'completed' || !sess.duration_seconds) {
+            const syncedDuration = existingLedger.duration_seconds || diag?.duration_seconds || sess.duration_seconds || 60;
+            await this.supabase
+              .from('sessions')
+              .update({
+                status: 'completed',
+                duration_seconds: syncedDuration,
+                end_time: new Date(new Date(sess.start_time || sess.created_at).getTime() + syncedDuration * 1000).toISOString(),
+              })
+              .eq('id', sid);
+            reconciledCount++;
+          }
+          continue;
+        }
+
+        // If session has 0 turns and is older than 10 minutes, it was an empty connection drop -> clean up
+        if (turns.length === 0 && (!diag || (diag.turns_count || 0) === 0)) {
+          const ageMs = now - new Date(sess.created_at || sess.start_time || now).getTime();
+          if (ageMs > 10 * 60 * 1000 && sess.status === 'active') {
+            await this.supabase.from('sessions').delete().eq('id', sid);
+          }
+          continue;
+        }
+
+        // Determine accurate active duration before disconnect/heartbeat timeout
+        let effectiveDurationSec = sess.duration_seconds || diag?.duration_seconds || 0;
+        if (diag?.events && Array.isArray(diag.events)) {
+          const hbEvent = diag.events.find((e: any) => e.event === 'heartbeat_timeout');
+          if (hbEvent && effectiveDurationSec > 35) {
+            // Subtract the 30s heartbeat grace period after phone died so user is only billed for active talk time
+            effectiveDurationSec = Math.max(15, effectiveDurationSec - 30);
+          }
+        }
+
+        if (!effectiveDurationSec && turns.length >= 2) {
+          const firstTs = new Date(turns[0].timestamp || sess.start_time || sess.created_at).getTime();
+          const lastTs = new Date(turns[turns.length - 1].timestamp || sess.created_at).getTime();
+          const spanSec = Math.round((lastTs - firstTs) / 1000);
+          effectiveDurationSec = spanSec > 5 ? spanSec + 12 : turns.length * 14;
+        }
+        if (!effectiveDurationSec || effectiveDurationSec <= 0) {
+          effectiveDurationSec = Math.max(20, turns.length * 15);
+        }
+
+        // Estimate token consumption from turns and audio duration (~25 tokens/sec audio + system prompt text)
+        const userTurns = turns.filter((t: any) => t.role === 'user');
+        const modelTurns = turns.filter((t: any) => t.role === 'model');
+        const textInTokens = 520 + userTurns.length * 45;
+        const audioInTokens = Math.max(150, userTurns.length * 320);
+        const audioOutTokens = Math.max(250, modelTurns.length * 480);
+        const textOutTokens = modelTurns.reduce(
+          (sum: number, t: any) => sum + Math.max(10, Math.round(((t.text_transcript || '').length || 40) / 3.5)),
+          0,
+        );
+        const totalTokens = textInTokens + audioInTokens + audioOutTokens + textOutTokens;
+
+        const topicLower = (sess.topic || '').toLowerCase();
+        const isIntro =
+          topicLower.includes('intro') ||
+          topicLower.includes('onboarding') ||
+          topicLower.includes('assessment') ||
+          topicLower.includes('placement');
+
+        this.logger.log(
+          `[SessionsService] 🔄 Reconciling abruptly closed session ${sid} (user=${sess.user_id}, duration=${effectiveDurationSec}s, turns=${turns.length})`,
+        );
+
+        await this.finishSession(sid, sess.user_id || 'guest-user', {
+          durationSeconds: effectiveDurationSec,
+          tokensUsed: {
+            textInTokens,
+            audioInTokens,
+            audioOutTokens,
+            textOutTokens,
+            thoughtsTokens: 0,
+            totalTokens,
+            promptTokens: textInTokens + audioInTokens,
+            responseTokens: audioOutTokens + textOutTokens,
+          },
+          turns: turns.map((t: any) => ({
+            role: t.role === 'model' ? 'model' : 'user',
+            text: t.text_transcript || '',
+            timestamp: t.timestamp,
+          })),
+          topic: sess.topic || 'English Speaking Practice',
+          isIntroCall: isIntro,
+          roadmapLevelId: sess.roadmap_level_id || undefined,
+        });
+
+        reconciledCount++;
+      }
+    } catch (err: any) {
+      this.logger.warn(`[SessionsService] Error in reconcileOrphanedSessions: ${err?.message}`);
+    }
+
+    return reconciledCount;
+  }
+
   async getUsageData(query: QueryUsageDto) {
+    await this.reconcileOrphanedSessions();
     const range = query?.range || '30d';
     const search = (query?.search || '').toLowerCase().trim();
     const statusFilter = (query?.status || '').toLowerCase().trim();
@@ -2713,6 +2983,8 @@ ${memoryPart}`;
     if (!this.supabase) {
       return [];
     }
+
+    await this.reconcileOrphanedSessions();
 
     try {
       let query = this.supabase

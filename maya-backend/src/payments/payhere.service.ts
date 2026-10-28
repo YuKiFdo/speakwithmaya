@@ -75,16 +75,17 @@ export class PayHereService {
     try {
       const { data: profile, error } = await this.supabase
         .from('profiles')
-        .select('id, phone_number, telco_subscriber_id, telco_provider')
+        .select('id, phone_number, telco_subscriber_id, telco_provider, created_at')
         .eq('id', userId)
         .maybeSingle();
 
-      if (error || !profile?.telco_subscriber_id || !profile?.telco_provider) {
+      if (error || (!profile?.telco_subscriber_id && !profile?.telco_provider)) {
         return;
       }
 
-      const provider = profile.telco_provider as 'ideamart' | 'mspace';
+      const provider = (profile.telco_provider || 'ideamart') as 'ideamart' | 'mspace';
       const subscriberId = profile.telco_subscriber_id;
+      const nowIso = new Date().toISOString();
 
       this.logger.log(
         `[TelcoAutoUnsub] User ${userId} upgraded to ${newPlanTier}. Automatically canceling existing ${provider.toUpperCase()} carrier subscription...`,
@@ -106,20 +107,52 @@ export class PayHereService {
       }
 
       // Dispatch unsubscribe request to IdeaMart or mSpace API
-      if (this.telcoService) {
+      if (this.telcoService && subscriberId) {
         await this.telcoService.unsubscribe(provider, subscriberId, telcoConfig);
         this.logger.log(
           `[TelcoAutoUnsub] ✅ Successfully unsubscribed ${provider.toUpperCase()} carrier subscription for user ${userId}.`,
         );
       }
 
-      // Clear telco subscriber tracking on profile so mobile billing is detached
+      // Preserve Telco subscription history in sys_user_profile_extras so Admin Subscriptions retains
+      // the exact days and revenue accrued on Telco before upgrading to a paid Card plan.
+      try {
+        const { data: extrasRow } = await this.supabase
+          .from('roadmap_levels')
+          .select('canonical_content')
+          .eq('id', 'sys_user_profile_extras')
+          .maybeSingle();
+        const extrasMap = extrasRow?.canonical_content ? JSON.parse(extrasRow.canonical_content) : {};
+        const existingExtra = extrasMap[userId] || {};
+        extrasMap[userId] = {
+          ...existingExtra,
+          telcoProvider: provider,
+          telcoSubscriberId: subscriberId || existingExtra.telcoSubscriberId || null,
+          telcoSubscribedAt: existingExtra.telcoSubscribedAt || profile.created_at || nowIso,
+          telcoStatus: 'UPGRADED',
+          telcoEndedAt: existingExtra.telcoEndedAt || nowIso,
+          telcoUpgradedToTier: newPlanTier,
+          telcoEndReason: `Upgraded to ${newPlanTier.toUpperCase()} Card Plan`,
+        };
+        await this.supabase.from('roadmap_levels').upsert({
+          id: 'sys_user_profile_extras',
+          level_number: 9998,
+          title: 'USER_PROFILE_EXTRAS',
+          is_published: false,
+          canonical_content: JSON.stringify(extrasMap),
+          updated_at: nowIso,
+        });
+      } catch (extraErr: any) {
+        this.logger.warn(`[TelcoAutoUnsub] Could not record telco upgrade history: ${extraErr?.message}`);
+      }
+
+      // Clear active telco_subscriber_id on profile so mobile billing is detached, while keeping telco_provider
       await this.supabase
         .from('profiles')
         .update({
           telco_subscriber_id: null,
           telco_reference_no: null,
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso,
         })
         .eq('id', userId);
     } catch (unsubErr: any) {
@@ -1117,10 +1150,87 @@ export class PayHereService {
 
   /**
    * Fetches payment history for a specific subscription directly from database orders (with fallback to PayHere API).
+   * Also supports Telco daily carrier billing history when subscriptionId starts with "telco-".
    */
   async getSubscriptionPayments(
     subscriptionId: string
   ): Promise<any[]> {
+    // Handle Telco daily subscription payment history
+    if (subscriptionId.startsWith('telco-')) {
+      const telcoUserId = subscriptionId.replace(/^telco-/, '');
+      const adminData = await this.getAdminSubscriptions();
+      const telcoSub = (adminData.telcoSubscriptions || []).find(
+        (t: any) => t.user_id === telcoUserId || t.id === subscriptionId,
+      );
+      if (!telcoSub) return [];
+
+      const historyItems: any[] = [];
+      const startMs = new Date(telcoSub.subscribed_at).getTime();
+      const endMs = telcoSub.ended_at ? new Date(telcoSub.ended_at).getTime() : Date.now();
+      const dayMs = 24 * 60 * 60 * 1000;
+      const totalDays = Math.max(1, Math.min(60, telcoSub.active_days || 1));
+      const rateHistory: Array<{ rateLkr: number; effectiveFrom: string }> =
+        adminData.stats?.telcoRateHistory || [{ rateLkr: telcoSub.daily_rate_lkr || 12, effectiveFrom: '2026-01-01T00:00:00.000Z' }];
+
+      const getRateAt = (ts: number) => {
+        let rate = telcoSub.daily_rate_lkr || 12;
+        for (const r of rateHistory) {
+          const eff = new Date(r.effectiveFrom).getTime();
+          if (!isNaN(eff) && ts >= eff && typeof r.rateLkr === 'number' && r.rateLkr > 0) {
+            rate = r.rateLkr;
+          }
+        }
+        return rate;
+      };
+
+      // If user upgraded or cancelled, add the plan change / termination event at the top
+      if (telcoSub.status === 'UPGRADED' && telcoSub.ended_at) {
+        historyItems.push({
+          payment_id: `PLAN-CHANGE-${telcoUserId.slice(0, 6).toUpperCase()}`,
+          order_id: `TELCO->${(telcoSub.upgraded_to_tier || 'PRO').toUpperCase()}`,
+          order_type: 'plan_change',
+          plan_tier: telcoSub.upgraded_to_tier || 'pro',
+          amount: 0,
+          currency: 'LKR',
+          date: telcoSub.ended_at,
+          status: 'PLAN_UPGRADED',
+          payment_method: `${telcoSub.operator_name} → Switched to ${(telcoSub.upgraded_to_tier || 'PRO').toUpperCase()} Card Plan (Telco Billing Stopped)`,
+        });
+      } else if (telcoSub.status === 'CANCELLED' && telcoSub.ended_at) {
+        historyItems.push({
+          payment_id: `TELCO-STOP-${telcoUserId.slice(0, 6).toUpperCase()}`,
+          order_id: `UNSUB-${telcoUserId.slice(0, 6).toUpperCase()}`,
+          order_type: 'telco_unsubscribe',
+          plan_tier: 'starter',
+          amount: 0,
+          currency: 'LKR',
+          date: telcoSub.ended_at,
+          status: 'UNSUBSCRIBED',
+          payment_method: `${telcoSub.operator_name} Carrier Billing Stopped`,
+        });
+      }
+
+      for (let d = totalDays - 1; d >= 0; d--) {
+        const dayTs = Math.min(endMs, startMs + d * dayMs);
+        const dayIso = new Date(dayTs).toISOString();
+        const dayRate = getRateAt(dayTs);
+        historyItems.push({
+          payment_id: `TELCO-DAY-${d + 1}`,
+          order_id: `${telcoSub.telco_provider?.toUpperCase() || 'TELCO'}-D${d + 1}`,
+          order_type: 'telco_daily',
+          plan_tier: 'starter',
+          minutes_credited: 5,
+          amount: dayRate,
+          currency: 'LKR',
+          date: dayIso,
+          status: 'RECEIVED',
+          payment_method: `${telcoSub.operator_name} Airtime`,
+        });
+      }
+
+      return historyItems;
+    }
+
     // 1. Try resolving subscription record from database
     const isSubUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(subscriptionId);
     let subQuery = this.supabase.from('subscriptions').select('*');
@@ -1324,6 +1434,82 @@ export class PayHereService {
     subscriptionId: string,
     userId?: string
   ): Promise<{ success: boolean; msg: string }> {
+    // Support cancelling a Telco carrier subscription from Admin Subscriptions
+    if (subscriptionId.startsWith('telco-')) {
+      const telcoUserId = subscriptionId.replace(/^telco-/, '');
+      const { data: profile } = await this.supabase
+        .from('profiles')
+        .select('id, phone_number, telco_subscriber_id, telco_provider, created_at')
+        .eq('id', telcoUserId)
+        .maybeSingle();
+
+      if (!profile) {
+        throw new BadRequestException('Telco subscriber profile not found.');
+      }
+
+      let telcoConfig: any = {};
+      try {
+        const { data: settings } = await this.supabase
+          .from('roadmap_levels')
+          .select('canonical_content')
+          .eq('id', 'sys_app_settings')
+          .maybeSingle();
+        if (settings?.canonical_content) {
+          telcoConfig = JSON.parse(settings.canonical_content);
+        }
+      } catch {}
+
+      if (this.telcoService && profile.telco_subscriber_id && profile.telco_provider) {
+        try {
+          await this.telcoService.unsubscribe(
+            profile.telco_provider as any,
+            profile.telco_subscriber_id,
+            telcoConfig,
+          );
+        } catch (err: any) {
+          this.logger.warn(`Admin telco unsubscribe gateway warning: ${err?.message}`);
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      await this.supabase
+        .from('profiles')
+        .update({
+          plan_status: 'canceled',
+          updated_at: nowIso,
+        })
+        .eq('id', telcoUserId);
+
+      try {
+        const { data: extrasRow } = await this.supabase
+          .from('roadmap_levels')
+          .select('canonical_content')
+          .eq('id', 'sys_user_profile_extras')
+          .maybeSingle();
+        const extrasMap = extrasRow?.canonical_content ? JSON.parse(extrasRow.canonical_content) : {};
+        const existingExtra = extrasMap[telcoUserId] || {};
+        extrasMap[telcoUserId] = {
+          ...existingExtra,
+          telcoProvider: profile.telco_provider || existingExtra.telcoProvider || 'ideamart',
+          telcoSubscriberId: profile.telco_subscriber_id || existingExtra.telcoSubscriberId || null,
+          telcoSubscribedAt: existingExtra.telcoSubscribedAt || profile.created_at || nowIso,
+          telcoStatus: 'CANCELLED',
+          telcoEndedAt: nowIso,
+          telcoEndReason: 'Cancelled by Admin',
+        };
+        await this.supabase.from('roadmap_levels').upsert({
+          id: 'sys_user_profile_extras',
+          level_number: 9998,
+          title: 'USER_PROFILE_EXTRAS',
+          is_published: false,
+          canonical_content: JSON.stringify(extrasMap),
+          updated_at: nowIso,
+        });
+      } catch {}
+
+      return { success: true, msg: 'Telco carrier subscription stopped and marked cancelled.' };
+    }
+
     const { data: sub } = await this.supabase
       .from('subscriptions')
       .select('*')
@@ -1748,11 +1934,156 @@ export class PayHereService {
   }
 
   /**
+   * Detects Sri Lankan mobile carrier name from phone number and telco provider.
+   */
+  private getTelcoOperatorLabel(phone: string, provider?: string | null): string {
+    const digits = (phone || '').replace(/\D/g, '');
+    const prefix = digits.startsWith('94') ? digits.slice(2, 4) : digits.startsWith('0') ? digits.slice(1, 3) : digits.slice(0, 2);
+    if (prefix === '70' || prefix === '71' || provider === 'mspace') {
+      return 'Mobitel (mSpace)';
+    }
+    if (prefix === '78' || prefix === '72') {
+      return 'Hutch (IdeaMart)';
+    }
+    if (prefix === '75') {
+      return 'Airtel (IdeaMart)';
+    }
+    return 'Dialog (IdeaMart)';
+  }
+
+  /**
+   * Calculates exact billed days and total LKR revenue for a Telco subscription between
+   * `subscribedAt` and `endedAt || now`, respecting historical daily rate changes in `rateHistory`.
+   */
+  private calculateTelcoRevenue(
+    subscribedAtIso: string,
+    endedAtIso: string | null,
+    defaultDailyRateLkr: number,
+    rateHistory: Array<{ rateLkr: number; effectiveFrom: string }>,
+  ): { activeDays: number; totalRevenueLkr: number; currentAppliedRateLkr: number } {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const startMs = new Date(subscribedAtIso || Date.now()).getTime();
+    const rawEndMs = endedAtIso ? new Date(endedAtIso).getTime() : Date.now();
+    const endMs = Math.max(startMs, rawEndMs);
+
+    const activeDays = Math.max(1, Math.floor((endMs - startMs) / dayMs) + 1);
+    const sortedRates = Array.isArray(rateHistory) && rateHistory.length > 0
+      ? [...rateHistory]
+          .filter((r) => typeof r.rateLkr === 'number' && r.rateLkr > 0)
+          .sort((a, b) => new Date(a.effectiveFrom).getTime() - new Date(b.effectiveFrom).getTime())
+      : [{ rateLkr: defaultDailyRateLkr, effectiveFrom: '2026-01-01T00:00:00.000Z' }];
+
+    const getRateForTimestamp = (ts: number): number => {
+      let activeRate = sortedRates[0]?.rateLkr || defaultDailyRateLkr;
+      for (const entry of sortedRates) {
+        const effMs = new Date(entry.effectiveFrom).getTime();
+        if (!isNaN(effMs) && ts >= effMs) {
+          activeRate = entry.rateLkr;
+        }
+      }
+      return activeRate;
+    };
+
+    let totalRevenueLkr = 0;
+    // Cap day-by-day iteration at 730 days (2 years) for fast O(1) execution
+    const cappedDays = Math.min(activeDays, 730);
+    for (let d = 0; d < cappedDays; d++) {
+      const dayTs = startMs + d * dayMs;
+      totalRevenueLkr += getRateForTimestamp(dayTs);
+    }
+    if (activeDays > cappedDays) {
+      totalRevenueLkr += (activeDays - cappedDays) * getRateForTimestamp(endMs);
+    }
+
+    return {
+      activeDays,
+      totalRevenueLkr: Number(totalRevenueLkr.toFixed(2)),
+      currentAppliedRateLkr: getRateForTimestamp(endMs),
+    };
+  }
+
+  /**
+   * Admin: Updates the daily Telco subscription rate (e.g. LKR 12/day) in sys_app_settings
+   * and appends to telcoRateHistory so historical revenue is preserved while future days use the new rate.
+   */
+  async updateTelcoDailyPrice(dailyPriceLkr: number): Promise<{
+    success: boolean;
+    telcoDailyPriceLkr: number;
+    telcoRateHistory: Array<{ rateLkr: number; effectiveFrom: string }>;
+    message: string;
+  }> {
+    const cleanRate = Number(dailyPriceLkr);
+    if (!Number.isFinite(cleanRate) || cleanRate <= 0 || cleanRate > 5000) {
+      throw new BadRequestException('Please provide a valid daily price in LKR (e.g. 12).');
+    }
+
+    let currentConfig: Record<string, any> = {};
+    try {
+      const { data } = await this.supabase
+        .from('roadmap_levels')
+        .select('canonical_content')
+        .eq('id', 'sys_app_settings')
+        .maybeSingle();
+      if (data?.canonical_content) {
+        currentConfig = JSON.parse(data.canonical_content);
+      }
+    } catch {}
+
+    const prevRate = Number(currentConfig.telcoDailyPriceLkr) || 12;
+    const rateHistory: Array<{ rateLkr: number; effectiveFrom: string }> = Array.isArray(currentConfig.telcoRateHistory)
+      ? [...currentConfig.telcoRateHistory]
+      : [{ rateLkr: prevRate, effectiveFrom: '2026-01-01T00:00:00.000Z' }];
+
+    if (cleanRate !== prevRate) {
+      rateHistory.push({
+        rateLkr: cleanRate,
+        effectiveFrom: new Date().toISOString(),
+      });
+    }
+
+    const updatedConfig = {
+      ...currentConfig,
+      telcoDailyPriceLkr: cleanRate,
+      telcoRateHistory: rateHistory,
+      ideamartPricingNotice: `Dialog / Mobitel / Hutch: LKR ${cleanRate} + tax /day. Airtime billing.`,
+      ideamartTermsDisclaimer: `By subscribing, LKR ${cleanRate} + taxes per day will be deducted from your Dialog, Mobitel, or Hutch mobile balance.`,
+    };
+
+    const { error } = await this.supabase.from('roadmap_levels').upsert({
+      id: 'sys_app_settings',
+      level_number: 9999,
+      title: 'APP_SYSTEM_SETTINGS',
+      is_published: false,
+      canonical_content: JSON.stringify(updatedConfig),
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      throw new InternalServerErrorException(`Failed to save Telco daily rate: ${error.message}`);
+    }
+
+    this.logger.log(`[TelcoPricing] Updated Telco daily subscription rate to LKR ${cleanRate}/day.`);
+    return {
+      success: true,
+      telcoDailyPriceLkr: cleanRate,
+      telcoRateHistory: rateHistory,
+      message: `Telco daily subscription rate updated to LKR ${cleanRate}/day. Past days retain their historical rate and active subscribers now accrue LKR ${cleanRate}/day.`,
+    };
+  }
+
+  /**
    * Admin: Queries all subscribers from database with profile metadata and calculates overview metrics,
-   * including recurring renewal metrics and talk-time top-up telemetry.
+   * including recurring renewal metrics, talk-time top-up telemetry, and Telco carrier-billed subscribers & revenue.
    */
   async getAdminSubscriptions() {
-    const [{ data: subs, error: subErr }, { data: orders, error: orderErr }] = await Promise.all([
+    const [
+      { data: subs, error: subErr },
+      { data: orders },
+      { data: profiles },
+      { data: telcoVerifs },
+      { data: appSettingsRow },
+      { data: extrasRow },
+    ] = await Promise.all([
       this.supabase
         .from('subscriptions')
         .select(`
@@ -1767,6 +2098,26 @@ export class PayHereService {
           profile:profiles(id, display_name, phone_number, level)
         `)
         .order('created_at', { ascending: false }),
+      this.supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false }),
+      this.supabase
+        .from('phone_verifications')
+        .select('phone_number, otp_hash, is_verified, created_at, verified_at')
+        .eq('is_verified', true)
+        .like('otp_hash', 'TELCO:%')
+        .order('created_at', { ascending: true }),
+      this.supabase
+        .from('roadmap_levels')
+        .select('canonical_content')
+        .eq('id', 'sys_app_settings')
+        .maybeSingle(),
+      this.supabase
+        .from('roadmap_levels')
+        .select('canonical_content')
+        .eq('id', 'sys_user_profile_extras')
+        .maybeSingle(),
     ]);
 
     if (subErr) {
@@ -1774,17 +2125,209 @@ export class PayHereService {
       throw new InternalServerErrorException('Database query failed');
     }
 
+    let appConfig: Record<string, any> = {};
+    if (appSettingsRow?.canonical_content) {
+      try {
+        appConfig = JSON.parse(appSettingsRow.canonical_content);
+      } catch {}
+    }
+
+    let extrasMap: Record<string, any> = {};
+    if (extrasRow?.canonical_content) {
+      try {
+        extrasMap = JSON.parse(extrasRow.canonical_content);
+      } catch {}
+    }
+
+    // Resolve configured Telco daily price (default LKR 12/day)
+    let telcoDailyPriceLkr = Number(appConfig.telcoDailyPriceLkr);
+    if (!Number.isFinite(telcoDailyPriceLkr) || telcoDailyPriceLkr <= 0) {
+      const noticeMatch = String(appConfig.ideamartPricingNotice || '').match(/LKR\s*(\d+(?:\.\d+)?)/i);
+      const parsedNoticeRate = noticeMatch ? Number(noticeMatch[1]) : 0;
+      telcoDailyPriceLkr = parsedNoticeRate > 0 && parsedNoticeRate !== 5 ? parsedNoticeRate : 12;
+    }
+
+    const telcoRateHistory: Array<{ rateLkr: number; effectiveFrom: string }> =
+      Array.isArray(appConfig.telcoRateHistory) && appConfig.telcoRateHistory.length > 0
+        ? appConfig.telcoRateHistory
+        : [{ rateLkr: telcoDailyPriceLkr, effectiveFrom: '2026-01-01T00:00:00.000Z' }];
+
+    const testPhoneDigitsSet = new Set<string>(
+      (Array.isArray(appConfig.testAccounts) ? appConfig.testAccounts : [])
+        .map((t: any) => String(t?.phoneNumber || '').replace(/\D/g, ''))
+        .filter(Boolean),
+    );
+
     const items = subs || [];
     const allOrders = orders || [];
+    const allProfiles = profiles || [];
+
+    // Index card subscriptions by user_id
+    const cardSubByUser = new Map<string, any>();
+    for (const s of items) {
+      if (!cardSubByUser.has(s.user_id) || s.status === 'ACTIVE') {
+        cardSubByUser.set(s.user_id, s);
+      }
+    }
+
+    // Index verified TELCO OTP records by normalized digits
+    const telcoVerifByDigits = new Map<string, { provider: 'ideamart' | 'mspace'; verifiedAt: string; referenceNo: string }>();
+    for (const v of telcoVerifs || []) {
+      const digits = String(v.phone_number || '').replace(/\D/g, '');
+      if (!digits) continue;
+      const parts = String(v.otp_hash || '').split(':');
+      const prov = (parts[1] === 'mspace' ? 'mspace' : 'ideamart') as 'ideamart' | 'mspace';
+      const refNo = parts.slice(2).join(':');
+      if (!telcoVerifByDigits.has(digits)) {
+        telcoVerifByDigits.set(digits, {
+          provider: prov,
+          verifiedAt: v.verified_at || v.created_at,
+          referenceNo: refNo,
+        });
+      }
+    }
+
+    const isTelcoGatewayActive = appConfig.smsGateway === 'ideamart' || appConfig.smsGateway === 'mspace';
+    const tomorrowDateStr = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // Build Telco Subscriptions list with accurate plan-change & cancellation lifecycle handling
+    const telcoSubscriptions: any[] = [];
+    for (const prof of allProfiles) {
+      const digits = String(prof.phone_number || '').replace(/\D/g, '');
+      if (testPhoneDigitsSet.has(digits) || (prof.monthly_minutes_allowance || 0) >= 9000) {
+        continue; // Skip admin test accounts
+      }
+
+      const extra = extrasMap[prof.id] || {};
+      const verif = digits ? telcoVerifByDigits.get(digits) : undefined;
+      const hasExplicitTelco = Boolean(
+        prof.telco_subscriber_id ||
+          prof.telco_provider ||
+          extra.telcoSubscriberId ||
+          extra.telcoProvider ||
+          verif,
+      );
+      const isImplicitTelcoDailyStarter =
+        isTelcoGatewayActive &&
+        (prof.billing_cycle === 'daily' || prof.plan_tier === 'starter') &&
+        !cardSubByUser.has(prof.id);
+
+      if (!hasExplicitTelco && !isImplicitTelcoDailyStarter) {
+        continue;
+      }
+
+      const prefix = digits.startsWith('94') ? digits.slice(2, 4) : digits.slice(0, 2);
+      const detectedProvider: 'ideamart' | 'mspace' =
+        prof.telco_provider ||
+        extra.telcoProvider ||
+        verif?.provider ||
+        (prefix === '70' || prefix === '71' ? 'mspace' : 'ideamart');
+
+      const operatorName = this.getTelcoOperatorLabel(prof.phone_number, detectedProvider);
+      const rawSubId = prof.telco_subscriber_id || extra.telcoSubscriberId || verif?.referenceNo || `tel:${digits}`;
+      const maskedSubId =
+        rawSubId && rawSubId.length > 10 && !rawSubId.startsWith('tel:')
+          ? `${rawSubId.slice(0, 6)}···${rawSubId.slice(-4)}`
+          : prof.phone_number || 'Mobile Carrier';
+
+      const subscribedAt =
+        extra.telcoSubscribedAt ||
+        verif?.verifiedAt ||
+        prof.created_at ||
+        new Date().toISOString();
+
+      const userCardSub = cardSubByUser.get(prof.id);
+      const hasUpgradedToCard =
+        Boolean(userCardSub && (userCardSub.status === 'ACTIVE' || userCardSub.status === 'PAST_DUE')) ||
+        (prof.plan_tier && prof.plan_tier !== 'starter') ||
+        extra.telcoStatus === 'UPGRADED';
+
+      const isCancelled =
+        !hasUpgradedToCard &&
+        (prof.plan_status === 'canceled' ||
+          prof.plan_status === 'expired' ||
+          extra.telcoStatus === 'CANCELLED');
+
+      let status: 'ACTIVE' | 'UPGRADED' | 'CANCELLED' = 'ACTIVE';
+      let endedAt: string | null = null;
+      let upgradedToTier: string | null = null;
+      let endReason: string | null = null;
+
+      if (hasUpgradedToCard) {
+        status = 'UPGRADED';
+        upgradedToTier =
+          userCardSub?.plan_tier ||
+          (prof.plan_tier !== 'starter' ? prof.plan_tier : extra.telcoUpgradedToTier || 'pro');
+        endedAt =
+          extra.telcoEndedAt ||
+          userCardSub?.created_at ||
+          prof.updated_at ||
+          new Date().toISOString();
+        endReason =
+          extra.telcoEndReason ||
+          `Switched to ${String(upgradedToTier).toUpperCase()} Card Plan (Daily Telco Stopped)`;
+      } else if (isCancelled) {
+        status = 'CANCELLED';
+        endedAt = extra.telcoEndedAt || prof.updated_at || new Date().toISOString();
+        endReason = extra.telcoEndReason || 'Unsubscribed from carrier billing';
+      }
+
+      const { activeDays, totalRevenueLkr, currentAppliedRateLkr } = this.calculateTelcoRevenue(
+        subscribedAt,
+        endedAt,
+        telcoDailyPriceLkr,
+        telcoRateHistory,
+      );
+
+      telcoSubscriptions.push({
+        id: `telco-${prof.id}`,
+        user_id: prof.id,
+        telco_provider: detectedProvider,
+        operator_name: operatorName,
+        subscriber_id_masked: maskedSubId,
+        plan_tier: status === 'UPGRADED' ? (upgradedToTier || prof.plan_tier) : 'starter',
+        billing_cycle: 'Daily',
+        daily_rate_lkr: status === 'ACTIVE' ? telcoDailyPriceLkr : currentAppliedRateLkr,
+        active_days: activeDays,
+        total_revenue_lkr: totalRevenueLkr,
+        monthly_equivalent_lkr: status === 'ACTIVE' ? Number((telcoDailyPriceLkr * 30).toFixed(2)) : 0,
+        status,
+        upgraded_to_tier: upgradedToTier,
+        end_reason: endReason,
+        subscribed_at: subscribedAt,
+        ended_at: endedAt,
+        next_billing_date: status === 'ACTIVE' ? tomorrowDateStr : endedAt ? endedAt.split('T')[0] : null,
+        created_at: subscribedAt,
+        updated_at: prof.updated_at || subscribedAt,
+        profile: {
+          id: prof.id,
+          display_name: prof.display_name || 'Mobile Learner',
+          phone_number: prof.phone_number,
+          minutes_balance: prof.minutes_balance ?? 5,
+          level: prof.level || 'Intermediate',
+        },
+      });
+    }
 
     const activeSubs = items.filter((s) => s.status === 'ACTIVE');
     const pastDueSubs = items.filter((s) => s.status === 'PAST_DUE');
     const cancelledSubs = items.filter((s) => s.status === 'CANCELLED');
 
-    const totalMRR = activeSubs.reduce((acc, curr) => {
+    const cardMRR = activeSubs.reduce((acc, curr) => {
       const amount = parseFloat(curr.amount_lkr || 0);
       return curr.billing_cycle === '3 Month' ? acc + amount / 3 : acc + amount;
     }, 0);
+
+    const activeTelcoSubs = telcoSubscriptions.filter((t) => t.status === 'ACTIVE');
+    const upgradedTelcoSubs = telcoSubscriptions.filter((t) => t.status === 'UPGRADED');
+    const cancelledTelcoSubs = telcoSubscriptions.filter((t) => t.status === 'CANCELLED');
+
+    const telcoDailyRevenueLkr = Number((activeTelcoSubs.length * telcoDailyPriceLkr).toFixed(2));
+    const telcoMrrLkr = Math.round(telcoDailyRevenueLkr * 30);
+    const telcoTotalRevenueLkr = Number(
+      telcoSubscriptions.reduce((sum, t) => sum + (t.total_revenue_lkr || 0), 0).toFixed(2),
+    );
+    const totalMRR = cardMRR + telcoMrrLkr;
 
     // Compute Talk Time Top-Up metrics
     const topUpOrders = allOrders.filter((o) => o.order_type === 'add_on_topup' && o.status === 'completed');
@@ -1803,11 +2346,21 @@ export class PayHereService {
 
     return {
       stats: {
-        totalSubscribers: items.length,
+        totalSubscribers: items.length + telcoSubscriptions.length,
         activeCount: activeSubs.length,
         pastDueCount: pastDueSubs.length,
         cancelledCount: cancelledSubs.length,
         mrrLkr: Math.round(totalMRR),
+        cardMrrLkr: Math.round(cardMRR),
+        telcoDailyPriceLkr,
+        telcoSubscribersCount: telcoSubscriptions.length,
+        telcoActiveCount: activeTelcoSubs.length,
+        telcoUpgradedCount: upgradedTelcoSubs.length,
+        telcoCancelledCount: cancelledTelcoSubs.length,
+        telcoDailyRevenueLkr,
+        telcoMrrLkr,
+        telcoTotalRevenueLkr,
+        telcoRateHistory,
         topUpRevenueLkr: totalTopUpRevenue,
         topUpMinutesSold: totalTopUpMinutes,
         topUpOrdersCount: topUpOrders.length,
@@ -1834,6 +2387,7 @@ export class PayHereService {
         renewalsRevenueLkr: renewalsRevenue,
       },
       subscriptions: items,
+      telcoSubscriptions,
       orders: allOrders,
     };
   }

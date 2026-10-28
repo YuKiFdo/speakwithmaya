@@ -208,6 +208,16 @@ export class PayHereController {
   }
 
   /**
+   * Admin: Update daily Telco subscription rate (e.g. LKR 12/day).
+   * Preserves historical revenue for past days while applying the new rate going forward.
+   */
+  @Post('admin/subscriptions/telco-rate')
+  @UseGuards(AdminGuard)
+  async updateTelcoDailyRate(@Body() body: { dailyPriceLkr: number }) {
+    return this.payHereService.updateTelcoDailyPrice(Number(body?.dailyPriceLkr));
+  }
+
+  /**
    * Resilient Verification & Recovery:
    * Client calls this endpoint upon return from PayHere checkout to ensure payment is activated
    * immediately, even if server was restarted or webhook was delayed.
