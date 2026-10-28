@@ -28,6 +28,8 @@ import {
   AdminUpdateUserDto,
   UpdateAppConfigDto,
   CreateTestAccountDto,
+  SubmitComplaintDto,
+  UpdateComplaintStatusDto,
 } from './dto/auth.dto.js';
 
 @Controller('v1')
@@ -237,6 +239,71 @@ export class AuthController {
   @UseGuards(AdminGuard)
   async deleteTestAccount(@Param('id') id: string) {
     return this.authService.deleteTestAccount(id);
+  }
+
+  /**
+   * Student: Submit a complaint or feedback
+   */
+  @Post('users/complaints')
+  @UseGuards(AuthGuard)
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async submitComplaint(
+    @GetUser('id') userId: string,
+    @Body() dto: SubmitComplaintDto,
+  ) {
+    return this.authService.submitComplaint(userId, dto);
+  }
+
+  /**
+   * Public / Student: Get real database leaderboard ranked by XP and practice minutes consumed
+   */
+  @Get('users/leaderboard')
+  async getPublicLeaderboard(
+    @Query('userId') queryUserId?: string,
+    @Query('period') period?: 'weekly' | 'monthly' | 'all_time',
+    @Req() req?: any,
+  ) {
+    let userId = queryUserId;
+    const authHeader = req?.headers?.['authorization'] as string | undefined;
+    if (authHeader) {
+      try {
+        userId = this.authService.validateAuthToken(authHeader);
+      } catch {}
+    }
+    const validPeriod =
+      period === 'monthly' || period === 'all_time' ? period : 'weekly';
+    return this.authService.getPublicLeaderboard(userId, validPeriod);
+  }
+
+  /**
+   * Admin: List all student complaints and feedback
+   */
+  @Get('admin/complaints')
+  @UseGuards(AdminGuard)
+  async getAdminComplaints() {
+    return this.authService.getAdminComplaints();
+  }
+
+  /**
+   * Admin: Update complaint status (open / resolved)
+   */
+  @Put('admin/complaints/:id/status')
+  @UseGuards(AdminGuard)
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async updateComplaintStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateComplaintStatusDto,
+  ) {
+    return this.authService.updateComplaintStatus(id, dto.status);
+  }
+
+  /**
+   * Admin: Delete a complaint
+   */
+  @Delete('admin/complaints/:id')
+  @UseGuards(AdminGuard)
+  async deleteComplaint(@Param('id') id: string) {
+    return this.authService.deleteComplaint(id);
   }
 }
 

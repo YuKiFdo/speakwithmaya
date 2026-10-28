@@ -43,8 +43,20 @@ import {
 
 const CLOCK_IMAGE = require('@/assets/images/offer-expired-clock.png');
 
-// Testing duration: 30 seconds as requested by the user
-const TEST_DURATION_SECONDS = 30;
+const PAYHERE_LOGOS = [
+  { id: 'visa', source: require('@/assets/images/payhere/visa.png'), type: 'circle' as const },
+  { id: 'mastercard', source: require('@/assets/images/payhere/mastercard.png'), type: 'circle' as const },
+  { id: 'amex', source: require('@/assets/images/payhere/amex.png'), type: 'circle' as const },
+  { id: 'gpay', source: require('@/assets/images/payhere/gpay.png'), type: 'pill' as const },
+  { id: 'helakuru-pay', source: require('@/assets/images/payhere/helakuru-pay.png'), type: 'pill' as const },
+  { id: 'genie', source: require('@/assets/images/payhere/genie.png'), type: 'circle' as const },
+  { id: 'frimi', source: require('@/assets/images/payhere/frimi.png'), type: 'circle' as const },
+  { id: 'ipay', source: require('@/assets/images/payhere/ipay.png'), type: 'circle' as const },
+  { id: 'qplus', source: require('@/assets/images/payhere/qplus.png'), type: 'circle' as const },
+];
+
+// Offer reservation duration: 10 minutes
+const TEST_DURATION_SECONDS = 10 * 60;
 const EXTRA_MINUTES_SECONDS = 10 * 60; // 10 minutes
 
 interface PlanItem {
@@ -63,9 +75,9 @@ const ALL_PLANS: PlanItem[] = [
     id: '3-months-pro',
     name: '3 Months Pro',
     minutes: '1,800 AI conversation minutes',
-    minutesSubtext: 'for 3 months',
+    minutesSubtext: 'every 3 months',
     pricePerMonth: 'LKR 2,880',
-    billedInfo: 'Billed as LKR 8,640 for 3 months',
+    billedInfo: 'Billed as LKR 8,640 every 3 months',
     saveBadge: 'Save 20%',
     isFeatured: true,
   },
@@ -96,7 +108,7 @@ const ALL_PLANS: PlanItem[] = [
 ];
 
 const PRO_FEATURES = [
-  '600 AI conversation minutes',
+  // '600 AI conversation minutes',
   'Detailed speaking analytics',
   'Advanced pronunciation feedback',
   'Personalized learning insights',
@@ -310,6 +322,36 @@ export default function PersonalizedPlanScreen() {
   // Plans expansion state
   const [showAllPlans, setShowAllPlans] = useState<boolean>(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>('3-months-pro');
+  const chevronBounceAnim = useRef(new Animated.Value(0)).current;
+
+  // Subtle vertical nudge animation on "See more Plans" chevron when collapsed
+  useEffect(() => {
+    if (showAllPlans) {
+      chevronBounceAnim.stopAnimation();
+      chevronBounceAnim.setValue(0);
+      return;
+    }
+
+    const bounceLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(chevronBounceAnim, {
+          toValue: 1.1,
+          duration: 850,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(chevronBounceAnim, {
+          toValue: 0,
+          duration: 850,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ])
+    );
+
+    bounceLoop.start();
+    return () => bounceLoop.stop();
+  }, [showAllPlans, chevronBounceAnim]);
 
   // FAQ accordion state
   const [openFaq, setOpenFaq] = useState<string | null>(null);
@@ -464,7 +506,7 @@ export default function PersonalizedPlanScreen() {
         const cardDisplay = sub.card_masked ? `card ending in ${sub.card_masked.slice(-4)}` : 'your saved card';
         const chargeText =
           selectedPlanId === '3-months-pro'
-            ? 'LKR 8,640 (for 3 months)'
+            ? 'LKR 8,640 (every 3 months)'
             : `${selectedPlan?.pricePerMonth || 'LKR 5,400'}/month`;
         const confirmed = await mayaAlert.confirm({
           title: '1-Click Activation',
@@ -624,7 +666,7 @@ export default function PersonalizedPlanScreen() {
           {/* Top Reservation Banner with Countdown */}
           <View style={styles.topReservationBar}>
             <View style={styles.topBarLeft}>
-              <Ionicons name="lock-closed" size={15} color="#2563EB" style={styles.lockIcon} />
+              <Ionicons name="lock-closed" size={15} color="#0D4EFD" style={styles.lockIcon} />
               <Text style={styles.topBarText}>Offer reserved for you</Text>
             </View>
             <View style={[styles.timerBadge, isTimerExpired && styles.timerBadgeExpired]}>
@@ -634,7 +676,8 @@ export default function PersonalizedPlanScreen() {
 
           {/* Heading */}
           <Text style={styles.title}>
-            Hi {userName}! Your Personalized Plan is Ready
+            Hi {userName}! Your{' '}
+            <Text style={styles.titleHighlight}>Personalized Plan</Text> is Ready
           </Text>
 
           {/* Subtitle */}
@@ -675,10 +718,12 @@ export default function PersonalizedPlanScreen() {
                     )}
 
                     <View style={styles.planCardLeft}>
-                      <Text style={styles.planName}>{plan.name}</Text>
+                      <Text style={[styles.planName, isSelected && styles.planNameSelected]}>
+                        {plan.name}
+                      </Text>
                       <View style={styles.minutesRow}>
                         <View style={styles.clockIconCircle}>
-                          <Ionicons name="time-outline" size={12} color="#2563EB" />
+                          <Ionicons name="time-outline" size={12} color="#0D4EFD" />
                         </View>
                         <View>
                           <Text style={styles.minutesTitle}>{plan.minutes}</Text>
@@ -721,10 +766,12 @@ export default function PersonalizedPlanScreen() {
                 )}
 
                 <View style={styles.planCardLeft}>
-                  <Text style={styles.planName}>{selectedPlan.name}</Text>
+                  <Text style={[styles.planName, styles.planNameSelected]}>
+                    {selectedPlan.name}
+                  </Text>
                   <View style={styles.minutesRow}>
                     <View style={styles.clockIconCircle}>
-                      <Ionicons name="time-outline" size={12} color="#2563EB" />
+                      <Ionicons name="time-outline" size={12} color="#0D4EFD" />
                     </View>
                     <View>
                       <Text style={styles.minutesTitle}>{selectedPlan.minutes}</Text>
@@ -757,16 +804,25 @@ export default function PersonalizedPlanScreen() {
                   return next;
                 });
               }}
-              style={styles.togglePlansButton}
+              style={({ pressed }) => [
+                styles.togglePlansButton,
+                pressed && { opacity: 0.75 },
+              ]}
             >
               <Text style={styles.togglePlansText}>
                 {showAllPlans ? 'Collapse' : 'See more Plans'}
               </Text>
-              <Ionicons
-                name={showAllPlans ? 'chevron-up' : 'chevron-down'}
-                size={14}
-                color="#64748B"
-              />
+              <Animated.View
+                style={{
+                  transform: [{ translateY: chevronBounceAnim }],
+                }}
+              >
+                <Ionicons
+                  name={showAllPlans ? 'chevron-up' : 'chevron-down'}
+                  size={15}
+                  color="#0D4EFD"
+                />
+              </Animated.View>
             </Pressable>
           </View>
 
@@ -802,44 +858,32 @@ export default function PersonalizedPlanScreen() {
           {/* Payment Trust & Gateways */}
           <View style={styles.securityRow}>
             <Feather name="lock" size={12} color="#64748B" style={styles.lockSmallIcon} />
-            <Text style={styles.securityText}>Secure payment powered by PayHere · Cancel anytime in 1 click</Text>
+            <Text style={styles.securityText}>Secure payment powered by PayHere · Cancel anytime</Text>
           </View>
 
-          {/* Payment Methods Badges Row */}
+          {/* Payment Methods Badges Row (Actual PayHere Supported Logos) */}
           <View style={styles.paymentMethodsRow}>
-            {/* VISA */}
-            <View style={styles.paymentBadge}>
-              <Text style={styles.visaText}>VISA</Text>
-            </View>
-
-            {/* Mastercard */}
-            <View style={styles.paymentBadge}>
-              <View style={styles.mastercardDots}>
-                <View style={[styles.mcCircle, { backgroundColor: '#EB001B', marginRight: -6 }]} />
-                <View style={[styles.mcCircle, { backgroundColor: '#F79E1B' }]} />
+            {PAYHERE_LOGOS.map((logo) => (
+              <View
+                key={logo.id}
+                style={
+                  logo.type === 'pill'
+                    ? styles.paymentLogoPillWrap
+                    : styles.paymentLogoCircleWrap
+                }
+              >
+                <Image
+                  source={logo.source}
+                  style={
+                    logo.type === 'pill'
+                      ? styles.paymentLogoPillImg
+                      : styles.paymentLogoCircleImg
+                  }
+                  resizeMode="contain"
+                  accessibilityLabel={logo.id}
+                />
               </View>
-            </View>
-
-            {/* PayHere */}
-            <View style={styles.paymentBadge}>
-              <Text style={styles.payHereText}>
-                <Text style={{ color: '#0057FF' }}>Pay</Text>
-                <Text style={{ color: '#F79E1B' }}>Here</Text>
-              </Text>
-            </View>
-
-            {/* Apple Pay */}
-            <View style={styles.paymentBadge}>
-              <Ionicons name="logo-apple" size={13} color="#000000" style={{ marginRight: 2 }} />
-              <Text style={styles.applePayText}>Pay</Text>
-            </View>
-
-            {/* Google Pay */}
-            <View style={styles.paymentBadge}>
-              <Text style={styles.gPayText}>
-                <Text style={{ color: '#4285F4' }}>G</Text> Pay
-              </Text>
-            </View>
+            ))}
           </View>
 
           {/* Everything in Pro Section */}
@@ -851,7 +895,7 @@ export default function PersonalizedPlanScreen() {
                   <Ionicons
                     name="checkmark-circle"
                     size={20}
-                    color="#2563EB"
+                    color="#0D4EFD"
                     style={styles.checkIcon}
                   />
                   <Text style={styles.featureItemText}>{feature}</Text>
@@ -1005,7 +1049,7 @@ export default function PersonalizedPlanScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F8FAFC',
   },
   scrollContent: {
     flexGrow: 1,
@@ -1027,7 +1071,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#DCEBFE',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -1043,11 +1089,11 @@ const styles = StyleSheet.create({
   },
   topBarText: {
     fontSize: 13,
-    color: '#2563EB',
+    color: '#0D4EFD',
     ...fontStyle('inter', 'bold'),
   },
   timerBadge: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#0D4EFD',
     paddingHorizontal: 14,
     paddingVertical: 5,
     borderRadius: 14,
@@ -1062,17 +1108,21 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'extraBold'),
   },
   title: {
-    fontSize: 26,
-    lineHeight: 33,
-    color: '#10213D',
+    fontSize: 27,
+    lineHeight: 34,
+    color: '#0F172A',
     letterSpacing: -0.6,
     textAlign: 'left',
     alignSelf: 'flex-start',
     marginBottom: 10,
-    ...fontStyle('inter', 'extraBold'),
+    ...fontStyle('outfit', 'extraBold'),
+  },
+  titleHighlight: {
+    color: '#0D4EFD',
+    ...fontStyle('outfit', 'extraBold'),
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 14.5,
     lineHeight: 21,
     color: '#64748B',
     textAlign: 'left',
@@ -1087,7 +1137,7 @@ const styles = StyleSheet.create({
   planCard: {
     width: '100%',
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1.5,
     borderColor: '#E2E8F0',
     padding: 18,
@@ -1098,17 +1148,17 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   planCardSelected: {
-    borderColor: '#2563EB',
-    backgroundColor: '#FFFFFF',
+    borderColor: '#0D4EFD',
+    backgroundColor: '#EFF6FF',
     ...Platform.select({
       web: {
-        boxShadow: '0 8px 24px rgba(37, 99, 235, 0.12)',
+        boxShadow: '0 8px 24px rgba(13, 78, 253, 0.14)',
       } as any,
       default: {
         elevation: 3,
-        shadowColor: '#2563EB',
+        shadowColor: '#0D4EFD',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.12,
+        shadowOpacity: 0.14,
         shadowRadius: 12,
       },
     }),
@@ -1119,7 +1169,7 @@ const styles = StyleSheet.create({
     right: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2563EB',
+    backgroundColor: '#0D4EFD',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -1140,10 +1190,13 @@ const styles = StyleSheet.create({
     paddingRight: 10,
   },
   planName: {
-    fontSize: 16,
-    color: '#10213D',
+    fontSize: 17,
+    color: '#0F172A',
     marginBottom: 8,
-    ...fontStyle('inter', 'extraBold'),
+    ...fontStyle('outfit', 'bold'),
+  },
+  planNameSelected: {
+    color: '#0D4EFD',
   },
   minutesRow: {
     flexDirection: 'row',
@@ -1155,23 +1208,23 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: '#E0F2FE',
+    backgroundColor: '#DBEAFE',
     alignItems: 'center',
     justifyContent: 'center',
   },
   minutesTitle: {
     fontSize: 12,
-    color: '#10213D',
+    color: '#0F172A',
     ...fontStyle('inter', 'bold'),
   },
   minutesSub: {
-    fontSize: 10,
+    fontSize: 10.5,
     color: '#64748B',
     ...fontStyle('inter', 'regular'),
   },
   billedInfo: {
-    fontSize: 11,
-    color: '#94A3B8',
+    fontSize: 11.5,
+    color: '#64748B',
     ...fontStyle('inter', 'medium'),
   },
   planCardRight: {
@@ -1179,14 +1232,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   priceNumber: {
-    fontSize: 16,
-    color: '#10213D',
+    fontSize: 17,
+    color: '#0F172A',
     letterSpacing: -0.4,
-    ...fontStyle('inter', 'bold'),
+    ...fontStyle('outfit', 'bold'),
   },
   priceNumberSelected: {
-    color: '#2563EB',
-    ...fontStyle('inter', 'extraBold'),
+    color: '#0D4EFD',
+    ...fontStyle('outfit', 'extraBold'),
   },
   pricePeriod: {
     fontSize: 11,
@@ -1198,12 +1251,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'center',
     paddingVertical: 8,
-    gap: 4,
+    gap: 5,
   },
   togglePlansText: {
-    fontSize: 13,
-    color: '#64748B',
+    fontSize: 13.5,
+    color: '#0D4EFD',
     ...fontStyle('inter', 'semiBold'),
   },
   primaryButtonWrapper: {
@@ -1247,60 +1301,93 @@ const styles = StyleSheet.create({
   },
   paymentMethodsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    marginBottom: 36,
+    gap: 8,
+    marginBottom: 32,
+    paddingHorizontal: 4,
   },
-  paymentBadge: {
-    flexDirection: 'row',
+  paymentLogoCircleWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 28,
+    overflow: 'hidden',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 6px rgba(15, 23, 42, 0.05)',
+      } as any,
+      default: {
+        elevation: 1,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+      },
+    }),
+  },
+  paymentLogoCircleImg: {
+    width: 34,
+    height: 34,
+  },
+  paymentLogoPillWrap: {
+    height: 34,
     paddingHorizontal: 8,
-  },
-  visaText: {
-    fontSize: 18,
-    color: '#1A1F71',
-    letterSpacing: 0.5,
-    fontStyle: 'italic',
-    ...fontStyle('inter', 'extraBold'),
-  },
-  mastercardDots: {
-    flexDirection: 'row',
+    borderRadius: 17,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 6px rgba(15, 23, 42, 0.05)',
+      } as any,
+      default: {
+        elevation: 1,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+      },
+    }),
   },
-  mcCircle: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-  },
-  payHereText: {
-    fontSize: 14,
-    ...fontStyle('inter', 'bold'),
-  },
-  applePayText: {
-    fontSize: 13,
-    color: '#000000',
-    ...fontStyle('inter', 'bold'),
-  },
-  gPayText: {
-    fontSize: 13,
-    color: '#5F6368',
-    ...fontStyle('inter', 'bold'),
+  paymentLogoPillImg: {
+    width: 48,
+    height: 24,
   },
   proFeaturesCard: {
     width: '100%',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     borderRadius: 22,
     padding: 22,
     marginBottom: 32,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 18px rgba(15, 23, 42, 0.04)',
+      } as any,
+      default: {
+        elevation: 2,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.04,
+        shadowRadius: 10,
+      },
+    }),
   },
   proFeaturesTitle: {
-    fontSize: 17,
-    color: '#10213D',
+    fontSize: 17.5,
+    color: '#0F172A',
     marginBottom: 16,
-    ...fontStyle('inter', 'extraBold'),
+    ...fontStyle('outfit', 'bold'),
   },
   featureList: {
     gap: 13,
@@ -1326,13 +1413,13 @@ const styles = StyleSheet.create({
   testimonialCard: {
     width: '100%',
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: '#E2E8F0',
     padding: 18,
     ...Platform.select({
       web: {
-        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+        boxShadow: '0 4px 18px rgba(15, 23, 42, 0.04)',
       } as any,
     }),
   },
@@ -1379,14 +1466,14 @@ const styles = StyleSheet.create({
     width: 22,
     height: 7,
     borderRadius: 4,
-    backgroundColor: '#0057FF',
+    backgroundColor: '#0D4EFD',
   },
   faqSection: {
     width: '100%',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 18,
     marginBottom: 24,
   },
@@ -1398,12 +1485,12 @@ const styles = StyleSheet.create({
   },
   faqTitle: {
     fontSize: 17,
-    color: '#10213D',
+    color: '#0F172A',
     ...fontStyle('outfit', 'bold'),
   },
   faqViewAllLink: {
     fontSize: 13,
-    color: '#0057FF',
+    color: '#0D4EFD',
     ...fontStyle('inter', 'semiBold'),
   },
   faqListContainer: {
@@ -1412,15 +1499,15 @@ const styles = StyleSheet.create({
   faqCard: {
     width: '100%',
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
   faqCardOpen: {
-    borderColor: '#93C5FD',
-    backgroundColor: '#F8FAFC',
+    borderColor: '#0D4EFD',
+    backgroundColor: '#EFF6FF',
   },
   faqQuestionRow: {
     flexDirection: 'row',
@@ -1429,7 +1516,7 @@ const styles = StyleSheet.create({
   },
   faqQuestionText: {
     fontSize: 14,
-    color: '#10213D',
+    color: '#0F172A',
     flex: 1,
     paddingRight: 10,
     ...fontStyle('inter', 'semiBold'),

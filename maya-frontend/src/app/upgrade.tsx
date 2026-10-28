@@ -11,6 +11,7 @@ import {
   Alert,
   ActivityIndicator,
   Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -524,6 +525,29 @@ export default function UpgradeScreen() {
   const [activeTestimonialIdx, setActiveTestimonialIdx] = useState<number>(0);
   const testimonialFadeAnim = useRef(new Animated.Value(1)).current;
   const testimonialSlideAnim = useRef(new Animated.Value(0)).current;
+  const chevronBounce = useRef(new Animated.Value(0)).current;
+
+  // Subtle vertical attention animation for "See more Plans" chevron
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(chevronBounce, {
+          toValue: 1.1,
+          duration: 750,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(chevronBounce, {
+          toValue: 0,
+          duration: 750,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [chevronBounce]);
 
   // Auto-rotate testimonials horizontally every 4.5 seconds
   useEffect(() => {
@@ -578,7 +602,7 @@ export default function UpgradeScreen() {
         : targetPlan?.name || planId.toUpperCase();
     const chargeDescription =
       planId === '3-months-pro'
-        ? 'LKR 8,640 for 3 months'
+        ? 'LKR 8,640 every 3 months'
         : `${targetPlan?.price || 'LKR 5,400'}${targetPlan?.period || ' / month'}`;
 
     const planAnalytics = resolvePlanAnalyticsDetails({
@@ -799,7 +823,6 @@ export default function UpgradeScreen() {
                   isPro={stats.isPro}
                   planTier={stats.planTier}
                   isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
-                  avatarSource={require('@/assets/images/maya-avatar.png')}
                 />
               </View>
             ) : (
@@ -833,7 +856,7 @@ export default function UpgradeScreen() {
                     {/* Left Column: Title & Total Price & Minutes */}
                     <View style={styles.specialOfferLeftCol}>
                       <Text style={styles.specialOfferTitle}>3 Months Pro</Text>
-                      <Text style={styles.specialOfferTotalSubtitle}>LKR 8,640 for 3 months</Text>
+                      <Text style={styles.specialOfferTotalSubtitle}>LKR 8,640 every 3 months</Text>
 
                       <View style={styles.specialOfferMinutesRow}>
                         <View style={styles.specialOfferClockCircle}>
@@ -841,7 +864,7 @@ export default function UpgradeScreen() {
                         </View>
                         <View>
                           <Text style={styles.specialOfferMinutesText}>1,800 AI conversation minutes</Text>
-                          <Text style={styles.specialOfferPeriodSub}>for 3 months</Text>
+                          <Text style={styles.specialOfferPeriodSub}>every 3 months</Text>
                         </View>
                       </View>
                     </View>
@@ -885,7 +908,7 @@ export default function UpgradeScreen() {
                     <View style={styles.specialOfferMobileTopRow}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.specialOfferTitle}>3 Months Pro</Text>
-                        <Text style={styles.specialOfferTotalSubtitle}>LKR 8,640 for 3 months</Text>
+                        <Text style={styles.specialOfferTotalSubtitle}>LKR 8,640 every 3 months</Text>
                       </View>
                       <View style={styles.specialOfferMobilePriceRight}>
                         <Text style={styles.specialOfferOriginalPrice}>LKR 3,600 / month</Text>
@@ -924,7 +947,7 @@ export default function UpgradeScreen() {
                 )}
               </View>
 
-              {/* See other plans toggle line */}
+              {/* See more plans toggle line */}
               <View style={styles.seeOtherPlansWrap}>
                 <View style={styles.seeOtherPlansLine} />
                 <Pressable
@@ -939,13 +962,21 @@ export default function UpgradeScreen() {
                     })
                   }
                 >
-                  <Text style={styles.seeOtherPlansText}>See other plans</Text>
-                  <Ionicons
-                    name={showOtherPlans ? 'chevron-up' : 'chevron-down'}
-                    size={16}
-                    color="#0057FF"
-                    style={{ marginLeft: 4 }}
-                  />
+                  <Text style={styles.seeOtherPlansText}>
+                    {showOtherPlans ? 'Show fewer plans' : 'See more Plans'}
+                  </Text>
+                  <Animated.View
+                    style={{
+                      marginLeft: 5,
+                      transform: [{ translateY: showOtherPlans ? 0 : chevronBounce }],
+                    }}
+                  >
+                    <Ionicons
+                      name={showOtherPlans ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color="#0D4EFD"
+                    />
+                  </Animated.View>
                 </Pressable>
                 <View style={styles.seeOtherPlansLine} />
               </View>
@@ -2224,9 +2255,9 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   seeOtherPlansText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 13,
-    color: '#0F172A',
+    ...fontStyle('inter', 'bold'),
+    fontSize: 13.5,
+    color: '#0D4EFD',
   },
 
   /* ── Frequently Asked Questions ── */

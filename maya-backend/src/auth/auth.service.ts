@@ -21,6 +21,7 @@ import {
   AdminUsersQueryDto,
   AdminUpdateUserDto,
   CreateTestAccountDto,
+  SubmitComplaintDto,
 } from './dto/auth.dto.js';
 import { SmsApiLkProvider } from './sms/smsapi-lk.provider.js';
 import { IdeamartSmsProvider } from './sms/ideamart-sms.provider.js';
@@ -1191,6 +1192,51 @@ export class AuthService {
   }
 
   /**
+   * Persists extra profile fields (email, avatarUrl) in Supabase `roadmap_levels`
+   * (`id = 'sys_user_profile_extras'`) so they are guaranteed to be stored in the DB
+   * even before migration 013 (`email`, `avatar_url` columns on `profiles`) is run.
+   */
+  private async getProfileExtrasMap(): Promise<Record<string, { email?: string; avatarUrl?: string | null }>> {
+    try {
+      const { data } = await this.supabase
+        .from('roadmap_levels')
+        .select('canonical_content')
+        .eq('id', 'sys_user_profile_extras')
+        .maybeSingle();
+      if (data?.canonical_content) {
+        const parsed = JSON.parse(data.canonical_content);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {}
+    return {};
+  }
+
+  private async saveProfileExtraForUser(
+    userId: string,
+    extra: { email?: string; avatarUrl?: string | null },
+  ): Promise<void> {
+    try {
+      const map = await this.getProfileExtrasMap();
+      const existing = map[userId] || {};
+      map[userId] = {
+        ...existing,
+        ...(extra.email !== undefined ? { email: extra.email } : {}),
+        ...(extra.avatarUrl !== undefined ? { avatarUrl: extra.avatarUrl } : {}),
+      };
+      await this.supabase.from('roadmap_levels').upsert({
+        id: 'sys_user_profile_extras',
+        level_number: 9998,
+        title: 'USER_PROFILE_EXTRAS',
+        is_published: false,
+        canonical_content: JSON.stringify(map),
+        updated_at: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      this.logger.warn(`Could not persist profile extra in sys_user_profile_extras: ${err?.message}`);
+    }
+  }
+
+  /**
    * Persists onboarding choices directly into public.profiles in Supabase.
    */
   async savePreferences(userId: string, dto: SavePreferencesDto) {
@@ -1201,6 +1247,9 @@ export class AuthService {
     };
 
     if (dto.displayName !== undefined) updates.display_name = dto.displayName.trim();
+    if (dto.phoneNumber !== undefined && dto.phoneNumber.trim()) {
+      updates.phone_number = this.normalizePhoneNumber(dto.phoneNumber.trim());
+    }
     if (dto.nativeLanguage !== undefined) updates.native_language = dto.nativeLanguage;
     if (dto.level !== undefined) updates.level = dto.level;
     if (dto.goal !== undefined) updates.goal = dto.goal;
@@ -1216,19 +1265,52 @@ export class AuthService {
       }
     }
 
-    const { data, error } = await this.supabase
+    // Persist email & avatarUrl in DB extras store and attempt direct column update on profiles
+    if (dto.email !== undefined || dto.avatarUrl !== undefined) {
+      await this.saveProfileExtraForUser(userId, {
+        ...(dto.email !== undefined ? { email: dto.email.trim() } : {}),
+        ...(dto.avatarUrl !== undefined ? { avatarUrl: dto.avatarUrl } : {}),
+      });
+    }
+
+    const updatesWithCols = {
+      ...updates,
+      ...(dto.email !== undefined ? { email: dto.email.trim() } : {}),
+      ...(dto.avatarUrl !== undefined ? { avatar_url: dto.avatarUrl } : {}),
+    };
+
+    let { data, error } = await this.supabase
       .from('profiles')
-      .update(updates)
+      .update(updatesWithCols)
       .eq('id', userId)
       .select()
       .single();
+
+    if (error && (dto.email !== undefined || dto.avatarUrl !== undefined)) {
+      // Fallback if migration 013 columns are not yet present in public.profiles
+      const fallback = await this.supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', userId)
+        .select()
+        .single();
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error || !data) {
       this.logger.error(`Database error saving preferences: ${error?.message}`);
       throw new InternalServerErrorException('Failed to save user preferences in database.');
     }
 
-    return { success: true, profile: data };
+    return {
+      success: true,
+      profile: {
+        ...data,
+        email: data.email ?? dto.email,
+        avatar_url: data.avatar_url ?? dto.avatarUrl,
+      },
+    };
   }
 
   /**
@@ -1404,6 +1486,20 @@ export class AuthService {
     profile.is_subscription_locked = isSubscriptionLocked;
     profile.is_grace_period_active = isGracePeriodActive;
     profile.grace_period_end = gracePeriodEnd;
+
+    // Merge email and avatar_url from DB extras if not already on profile row
+    if (!(profile as any).email || !(profile as any).avatar_url) {
+      const extrasMap = await this.getProfileExtrasMap();
+      const userExtra = extrasMap[userId];
+      if (userExtra) {
+        if (!(profile as any).email && userExtra.email) {
+          (profile as any).email = userExtra.email;
+        }
+        if (!(profile as any).avatar_url && userExtra.avatarUrl) {
+          (profile as any).avatar_url = userExtra.avatarUrl;
+        }
+      }
+    }
 
     return profile;
   }
@@ -1718,6 +1814,7 @@ export class AuthService {
       }
 
       const allProfiles = (profiles || []) as UserProfileData[];
+      const extrasMap = await this.getProfileExtrasMap();
 
       // 2. Fetch sessions to aggregate per user
       const { data: sessions } = await this.supabase
@@ -1796,11 +1893,16 @@ export class AuthService {
           : (p.baseline_fluency_score || 0);
 
         const lastSession = userSessions[0];
+        const extra = extrasMap[p.id] || {};
+        const email = (p as any).email || extra.email || null;
+        const avatarUrl = (p as any).avatar_url || extra.avatarUrl || null;
 
         return {
           id: p.id,
           phoneNumber: p.phone_number,
           displayName: p.display_name || 'Anonymous Student',
+          email,
+          avatarUrl,
           level: p.level || 'Intermediate',
           goal: p.goal || 'General Fluency',
           challenge: p.challenge || 'Vocabulary & Hesitation',
@@ -1846,6 +1948,7 @@ export class AuthService {
           (u) =>
             u.displayName.toLowerCase().includes(q) ||
             u.phoneNumber.toLowerCase().includes(q) ||
+            (u.email && u.email.toLowerCase().includes(q)) ||
             u.id.toLowerCase().includes(q) ||
             u.goal.toLowerCase().includes(q)
         );
@@ -1945,26 +2048,79 @@ export class AuthService {
         throw new NotFoundException(`User with ID ${userId} not found.`);
       }
 
-      // Fetch recent corrections for top sessions if any
+      // Fetch recent corrections and transcript turns for the user's sessions
       let corrections: any[] = [];
+      let allTurns: any[] = [];
       const sessionIds = (sessions || []).map((s: any) => s.id);
       if (sessionIds.length > 0) {
-        const { data: corrData } = await this.supabase
-          .from('grammar_corrections')
-          .select('id, session_id, student_said, more_natural, explanation, highlight_words, created_at')
-          .in('session_id', sessionIds.slice(0, 10))
-          .order('created_at', { ascending: false })
-          .limit(30);
+        const [{ data: corrData }, { data: turnsData }] = await Promise.all([
+          this.supabase
+            .from('grammar_corrections')
+            .select('id, session_id, student_said, more_natural, explanation, highlight_words, created_at')
+            .in('session_id', sessionIds)
+            .order('created_at', { ascending: false })
+            .limit(60),
+          this.supabase
+            .from('session_turns')
+            .select('id, session_id, turn_order, role, text_transcript, timestamp')
+            .in('session_id', sessionIds)
+            .order('turn_order', { ascending: true }),
+        ]);
         corrections = corrData || [];
+        allTurns = turnsData || [];
       }
+
+      const turnsBySession = new Map<string, any[]>();
+      for (const t of allTurns) {
+        if (!t.session_id) continue;
+        const txt = (t.text_transcript || '').trim();
+        if (!txt || txt === '...' || txt === '(untranscribed / audio speech)') continue;
+        if (!turnsBySession.has(t.session_id)) {
+          turnsBySession.set(t.session_id, []);
+        }
+        const list = turnsBySession.get(t.session_id)!;
+        const prev = list[list.length - 1];
+        if (!prev || prev.role !== t.role || prev.text !== txt) {
+          list.push({
+            id: t.id,
+            role: t.role,
+            text: txt,
+            timestamp: t.timestamp,
+          });
+        }
+      }
+
+      const correctionsBySession = new Map<string, any[]>();
+      for (const c of corrections) {
+        if (!c.session_id) continue;
+        if (!correctionsBySession.has(c.session_id)) {
+          correctionsBySession.set(c.session_id, []);
+        }
+        correctionsBySession.get(c.session_id)!.push(c);
+      }
+
+      const enrichedSessions = (sessions || []).map((s: any) => ({
+        ...s,
+        turns: turnsBySession.get(s.id) || [],
+        corrections: correctionsBySession.get(s.id) || [],
+      }));
 
       const totalTokens = (ledger || []).reduce((acc: number, l: any) => acc + (l.total_tokens || 0), 0);
       const totalCostLkr = (ledger || []).reduce((acc: number, l: any) => acc + Number(l.cost_lkr || 0), 0);
       const totalCostUsd = (ledger || []).reduce((acc: number, l: any) => acc + Number(l.cost_usd || 0), 0);
       const totalPracticeSeconds = (sessions || []).reduce((acc: number, s: any) => acc + (s.duration_seconds || 0), 0);
 
+      const extrasMap = await this.getProfileExtrasMap();
+      const extra = extrasMap[userId] || {};
+      const enrichedProfile = {
+        ...profile,
+        email: (profile as any).email || extra.email || null,
+        avatar_url: (profile as any).avatar_url || extra.avatarUrl || null,
+        avatarUrl: (profile as any).avatar_url || extra.avatarUrl || null,
+      };
+
       return {
-        profile,
+        profile: enrichedProfile,
         stats: {
           totalSessions: (sessions || []).length,
           totalPracticeMinutes: Math.round(totalPracticeSeconds / 60),
@@ -1972,7 +2128,7 @@ export class AuthService {
           totalCostLkr: Number(totalCostLkr.toFixed(2)),
           totalCostUsd: Number(totalCostUsd.toFixed(4)),
         },
-        sessions: sessions || [],
+        sessions: enrichedSessions,
         corrections,
         orders: orders || [],
         subscription: sub || null,
@@ -1998,6 +2154,9 @@ export class AuthService {
     };
 
     if (dto.displayName !== undefined) updates.display_name = dto.displayName;
+    if (dto.phoneNumber !== undefined && dto.phoneNumber.trim()) {
+      updates.phone_number = this.normalizePhoneNumber(dto.phoneNumber.trim());
+    }
     if (dto.level !== undefined) updates.level = dto.level;
     if (dto.goal !== undefined) updates.goal = dto.goal;
     if (dto.challenge !== undefined) updates.challenge = dto.challenge;
@@ -2010,12 +2169,36 @@ export class AuthService {
     if (dto.baselineGrammarScore !== undefined) updates.baseline_grammar_score = dto.baselineGrammarScore;
     if (dto.baselinePronunciationScore !== undefined) updates.baseline_pronunciation_score = dto.baselinePronunciationScore;
 
-    const { data, error } = await this.supabase
+    if (dto.email !== undefined || dto.avatarUrl !== undefined) {
+      await this.saveProfileExtraForUser(userId, {
+        ...(dto.email !== undefined ? { email: dto.email.trim() } : {}),
+        ...(dto.avatarUrl !== undefined ? { avatarUrl: dto.avatarUrl } : {}),
+      });
+    }
+
+    const updatesWithCols = {
+      ...updates,
+      ...(dto.email !== undefined ? { email: dto.email.trim() } : {}),
+      ...(dto.avatarUrl !== undefined ? { avatar_url: dto.avatarUrl } : {}),
+    };
+
+    let { data, error } = await this.supabase
       .from('profiles')
-      .update(updates)
+      .update(updatesWithCols)
       .eq('id', userId)
       .select()
       .single();
+
+    if (error && (dto.email !== undefined || dto.avatarUrl !== undefined)) {
+      const fallback = await this.supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', userId)
+        .select()
+        .single();
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error || !data) {
       this.logger.error(`Failed to update user profile in adminUpdateUser: ${error?.message}`);
@@ -2025,7 +2208,11 @@ export class AuthService {
     return {
       success: true,
       message: 'User profile updated successfully.',
-      profile: data,
+      profile: {
+        ...data,
+        email: data.email ?? dto.email,
+        avatar_url: data.avatar_url ?? dto.avatarUrl,
+      },
     };
   }
 
@@ -2377,6 +2564,386 @@ export class AuthService {
       success: true,
       deletedId: found?.id || targetProfile?.id || idOrPhone,
     };
+  }
+
+  /**
+   * Internal helper: Reads stored complaints list from `roadmap_levels` (`id = 'sys_user_complaints'`)
+   */
+  private async getStoredComplaintsList(): Promise<any[]> {
+    try {
+      const { data } = await this.supabase
+        .from('roadmap_levels')
+        .select('canonical_content')
+        .eq('id', 'sys_user_complaints')
+        .maybeSingle();
+      if (data?.canonical_content) {
+        const parsed = JSON.parse(data.canonical_content);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  }
+
+  private async saveStoredComplaintsList(list: any[]): Promise<void> {
+    try {
+      await this.supabase.from('roadmap_levels').upsert({
+        id: 'sys_user_complaints',
+        level_number: 9997,
+        title: 'USER_COMPLAINTS',
+        is_published: false,
+        canonical_content: JSON.stringify(list),
+        updated_at: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      this.logger.warn(`Could not persist complaints in sys_user_complaints: ${err?.message}`);
+    }
+  }
+
+  /**
+   * Student: Submit a complaint or feedback item
+   */
+  async submitComplaint(userId: string, dto: SubmitComplaintDto) {
+    const cleanMsg = (dto.message || '').trim();
+    if (!cleanMsg) {
+      throw new BadRequestException('Complaint message cannot be empty.');
+    }
+
+    const [{ data: profile }, extrasMap] = await Promise.all([
+      this.supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+      this.getProfileExtrasMap(),
+    ]);
+
+    const extra = extrasMap[userId] || {};
+    const nowIso = new Date().toISOString();
+    const complaintItem = {
+      id: crypto.randomUUID(),
+      userId,
+      displayName: profile?.display_name || 'Student',
+      phoneNumber: profile?.phone_number || '',
+      email: (profile as any)?.email || extra.email || null,
+      avatarUrl: (profile as any)?.avatar_url || extra.avatarUrl || null,
+      planTier: profile?.plan_tier || 'starter',
+      message: cleanMsg,
+      status: 'open' as 'open' | 'resolved',
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    // 1. Save in resilient DB list (`sys_user_complaints`)
+    const list = await this.getStoredComplaintsList();
+    list.unshift(complaintItem);
+    await this.saveStoredComplaintsList(list);
+
+    // 2. Also insert into `public.user_complaints` if migration 014 is applied
+    try {
+      await this.supabase.from('user_complaints').insert({
+        id: complaintItem.id,
+        user_id: userId,
+        display_name: complaintItem.displayName,
+        phone_number: complaintItem.phoneNumber,
+        email: complaintItem.email,
+        avatar_url: complaintItem.avatarUrl,
+        plan_tier: complaintItem.planTier,
+        message: complaintItem.message,
+        status: complaintItem.status,
+        created_at: nowIso,
+        updated_at: nowIso,
+      });
+    } catch {}
+
+    return {
+      success: true,
+      complaint: complaintItem,
+    };
+  }
+
+  /**
+   * Admin: Retrieve all student complaints enriched with latest user profile data
+   */
+  async getAdminComplaints() {
+    const [storedList, { data: profiles }, extrasMap] = await Promise.all([
+      this.getStoredComplaintsList(),
+      this.supabase.from('profiles').select('*'),
+      this.getProfileExtrasMap(),
+    ]);
+
+    let tableRows: any[] = [];
+    try {
+      const { data, error } = await this.supabase
+        .from('user_complaints')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && Array.isArray(data)) {
+        tableRows = data;
+      }
+    } catch {}
+
+    const profileMap = new Map<string, any>();
+    for (const p of profiles || []) {
+      profileMap.set(p.id, p);
+    }
+
+    const byId = new Map<string, any>();
+    for (const item of storedList) {
+      if (item?.id) {
+        byId.set(item.id, item);
+      }
+    }
+    for (const row of tableRows) {
+      if (row?.id && !byId.has(row.id)) {
+        byId.set(row.id, {
+          id: row.id,
+          userId: row.user_id,
+          displayName: row.display_name,
+          phoneNumber: row.phone_number,
+          email: row.email,
+          avatarUrl: row.avatar_url,
+          planTier: row.plan_tier,
+          message: row.message,
+          status: row.status || 'open',
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        });
+      }
+    }
+
+    const complaints = Array.from(byId.values())
+      .map((c: any) => {
+        const prof = c.userId ? profileMap.get(c.userId) : null;
+        const extra = c.userId ? extrasMap[c.userId] || {} : {};
+        return {
+          id: c.id,
+          userId: c.userId,
+          displayName: prof?.display_name || c.displayName || 'Anonymous Student',
+          phoneNumber: prof?.phone_number || c.phoneNumber || 'No phone',
+          email: prof?.email || extra.email || c.email || null,
+          avatarUrl: prof?.avatar_url || extra.avatarUrl || c.avatarUrl || null,
+          planTier: prof?.plan_tier || c.planTier || 'starter',
+          level: prof?.level || 'Intermediate',
+          message: c.message,
+          status: (c.status || 'open') as 'open' | 'resolved',
+          createdAt: c.createdAt || new Date().toISOString(),
+          updatedAt: c.updatedAt || c.createdAt || new Date().toISOString(),
+        };
+      })
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    const openCount = complaints.filter((c) => c.status === 'open').length;
+    const resolvedCount = complaints.filter((c) => c.status === 'resolved').length;
+
+    return {
+      stats: {
+        total: complaints.length,
+        open: openCount,
+        resolved: resolvedCount,
+      },
+      complaints,
+    };
+  }
+
+  /**
+   * Admin: Update complaint status ('open' | 'resolved')
+   */
+  async updateComplaintStatus(complaintId: string, status: 'open' | 'resolved') {
+    const nowIso = new Date().toISOString();
+    const list = await this.getStoredComplaintsList();
+    const updatedList = list.map((c: any) =>
+      c.id === complaintId ? { ...c, status, updatedAt: nowIso } : c,
+    );
+    await this.saveStoredComplaintsList(updatedList);
+
+    try {
+      await this.supabase
+        .from('user_complaints')
+        .update({ status, updated_at: nowIso })
+        .eq('id', complaintId);
+    } catch {}
+
+    return { success: true, id: complaintId, status };
+  }
+
+  /**
+   * Admin: Delete a complaint
+   */
+  async deleteComplaint(complaintId: string) {
+    const list = await this.getStoredComplaintsList();
+    const filtered = list.filter((c: any) => c.id !== complaintId);
+    await this.saveStoredComplaintsList(filtered);
+
+    try {
+      await this.supabase.from('user_complaints').delete().eq('id', complaintId);
+    } catch {}
+
+    return { success: true, deletedId: complaintId };
+  }
+
+  /**
+   * Public / Student Leaderboard: Computes rankings across all real users in `public.profiles`
+   * based on XP earned and practice minutes consumed. Users with 0 XP and 0 minutes get rank = null (N/A).
+   */
+  async getPublicLeaderboard(
+    userId?: string,
+    period: 'weekly' | 'monthly' | 'all_time' = 'weekly',
+  ) {
+    if (!this.supabase) {
+      return { entries: [], myEntry: null };
+    }
+
+    try {
+      const now = Date.now();
+      const cutoffMs =
+        period === 'weekly'
+          ? now - 7 * 24 * 60 * 60 * 1000
+          : period === 'monthly'
+          ? now - 30 * 24 * 60 * 60 * 1000
+          : 0;
+
+      const [
+        { data: profiles },
+        { data: progressRows },
+        { data: sessionRows },
+        extrasMap,
+      ] = await Promise.all([
+        this.supabase
+          .from('profiles')
+          .select('*')
+          .order('created_at', { ascending: true }),
+        this.supabase
+          .from('user_roadmap_progress')
+          .select('*'),
+        this.supabase
+          .from('sessions')
+          .select('id, user_id, duration_seconds, created_at, status'),
+        this.getProfileExtrasMap(),
+      ]);
+
+      const allProfiles = Array.isArray(profiles) ? profiles : [];
+
+      const xpByUser = new Map<string, number>();
+      const allTimeXpByUser = new Map<string, number>();
+      const completedLevelsByUser = new Map<string, Set<string>>();
+      const allTimeLevelsByUser = new Map<string, Set<string>>();
+
+      if (Array.isArray(progressRows)) {
+        for (const row of progressRows) {
+          if (!row.user_id) continue;
+          if (row.status === 'completed' || row.is_passed) {
+            const key = String(row.roadmap_level_id || row.level_number || row.id || '');
+            const earned = typeof row.xp_earned === 'number' ? row.xp_earned : Number(row.xp_earned) || 0;
+
+            let allSet = allTimeLevelsByUser.get(row.user_id);
+            if (!allSet) {
+              allSet = new Set<string>();
+              allTimeLevelsByUser.set(row.user_id, allSet);
+            }
+            if (!allSet.has(key)) {
+              allSet.add(key);
+              allTimeXpByUser.set(row.user_id, (allTimeXpByUser.get(row.user_id) || 0) + earned);
+            }
+
+            const ts = row.completed_at
+              ? new Date(row.completed_at).getTime()
+              : row.created_at
+              ? new Date(row.created_at).getTime()
+              : now;
+            if (cutoffMs === 0 || ts >= cutoffMs) {
+              let set = completedLevelsByUser.get(row.user_id);
+              if (!set) {
+                set = new Set<string>();
+                completedLevelsByUser.set(row.user_id, set);
+              }
+              if (!set.has(key)) {
+                set.add(key);
+                xpByUser.set(row.user_id, (xpByUser.get(row.user_id) || 0) + earned);
+              }
+            }
+          }
+        }
+      }
+
+      const sessionSecondsByUser = new Map<string, number>();
+      const allTimeSessionSecondsByUser = new Map<string, number>();
+      if (Array.isArray(sessionRows)) {
+        for (const s of sessionRows) {
+          if (!s.user_id) continue;
+          const dur = Number(s.duration_seconds) || 0;
+          allTimeSessionSecondsByUser.set(
+            s.user_id,
+            (allTimeSessionSecondsByUser.get(s.user_id) || 0) + dur,
+          );
+          const ts = s.created_at ? new Date(s.created_at).getTime() : now;
+          if (cutoffMs === 0 || ts >= cutoffMs) {
+            sessionSecondsByUser.set(
+              s.user_id,
+              (sessionSecondsByUser.get(s.user_id) || 0) + dur,
+            );
+          }
+        }
+      }
+
+      const entries = allProfiles.map((p: any) => {
+        // Strictly use database XP from user_roadmap_progress (never calculate fake XP from minutes)
+        const dbPeriodXp = xpByUser.get(p.id) || 0;
+        const dbAllTimeXp = allTimeXpByUser.get(p.id) || dbPeriodXp;
+        const sessionMinutes = Math.round((sessionSecondsByUser.get(p.id) || 0) / 60);
+        const allowance = Number(p.monthly_minutes_allowance ?? 5) + Number(p.add_on_minutes_balance ?? 0);
+        const balance = Number(p.minutes_balance ?? allowance);
+        const quotaMinutesUsed = Math.max(0, allowance - balance);
+        const minutesConsumed = Math.max(sessionMinutes, quotaMinutesUsed);
+
+        const levelNumber = Math.max(1, Math.floor(dbAllTimeXp / 500) + 1);
+
+        const extra = extrasMap[p.id] || {};
+        const avatarUrl = (p as any).avatar_url || extra.avatarUrl || null;
+        const rawName = (p.display_name || '').trim();
+        const fallbackPhone = p.phone_number
+          ? `Learner ••${String(p.phone_number).slice(-4)}`
+          : 'Learner';
+
+        return {
+          userId: p.id,
+          displayName: rawName || fallbackPhone,
+          avatarUrl,
+          levelNumber,
+          xp: dbPeriodXp,
+          minutesConsumed,
+          createdAt: p.created_at || '',
+          isCurrentUser: p.id === userId,
+        };
+      });
+
+      // Rank strictly by DB XP first, then DB minutesConsumed second
+      entries.sort((a, b) => {
+        if (b.xp !== a.xp) return b.xp - a.xp;
+        if (b.minutesConsumed !== a.minutesConsumed) return b.minutesConsumed - a.minutesConsumed;
+        return String(a.createdAt).localeCompare(String(b.createdAt));
+      });
+
+      let activeRankCounter = 0;
+      const rankedEntries = entries.map((entry) => {
+        const hasActivity = entry.xp > 0 || entry.minutesConsumed > 0;
+        return {
+          rank: hasActivity ? ++activeRankCounter : null,
+          userId: entry.userId,
+          displayName: entry.displayName,
+          avatarUrl: entry.avatarUrl,
+          levelNumber: entry.levelNumber,
+          xp: entry.xp,
+          minutesConsumed: entry.minutesConsumed,
+          isCurrentUser: entry.isCurrentUser,
+        };
+      });
+
+      const myEntry = rankedEntries.find((r) => r.userId === userId) || null;
+      return {
+        entries: rankedEntries,
+        myEntry,
+        totalParticipants: rankedEntries.length,
+      };
+    } catch (err: any) {
+      this.logger.warn(`getPublicLeaderboard error: ${err?.message}`);
+      return { entries: [], myEntry: null, totalParticipants: 0 };
+    }
   }
 }
 

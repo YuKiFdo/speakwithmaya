@@ -24,7 +24,7 @@ export interface UserStats {
   isGracePeriodActive: boolean;
   gracePeriodEndDate: string | null;
 
-  // Level & XP
+  // Level, XP & Rank
   completedLessonsCount: number;
   currentLevelNumber: number;
   levelLabel: string;
@@ -33,6 +33,8 @@ export interface UserStats {
   levelXp: number;
   targetLevelXp: number;
   progress: number; // 0 to 1
+  rank: number | null;
+  practicedMinutes: number;
 
   // User Profile
   displayName: string;
@@ -53,6 +55,8 @@ export interface UserStats {
 interface CachedStats {
   earnedXp: number;
   completedLessonsCount: number;
+  rank: number | null;
+  practicedMinutes: number;
 }
 
 const STATS_CACHE_KEY_PREFIX = 'maya_user_stats_cache_';
@@ -69,6 +73,8 @@ function getStoredStatsCache(userId?: string): CachedStats | null {
             return {
               earnedXp: parsed.earnedXp,
               completedLessonsCount: parsed.completedLessonsCount || 0,
+              rank: typeof parsed.rank === 'number' && parsed.rank > 0 ? parsed.rank : null,
+              practicedMinutes: parsed.practicedMinutes || 0,
             };
           }
         }
@@ -80,6 +86,8 @@ function getStoredStatsCache(userId?: string): CachedStats | null {
           return {
             earnedXp: parsed.earnedXp,
             completedLessonsCount: parsed.completedLessonsCount || 0,
+            rank: typeof parsed.rank === 'number' && parsed.rank > 0 ? parsed.rank : null,
+            practicedMinutes: parsed.practicedMinutes || 0,
           };
         }
       }
@@ -89,7 +97,7 @@ function getStoredStatsCache(userId?: string): CachedStats | null {
 }
 
 function loadInitialStatsCache(): CachedStats {
-  return getStoredStatsCache() || { earnedXp: 0, completedLessonsCount: 0 };
+  return getStoredStatsCache() || { earnedXp: 0, completedLessonsCount: 0, rank: null, practicedMinutes: 0 };
 }
 
 let globalStatsCache: CachedStats = loadInitialStatsCache();
@@ -112,7 +120,7 @@ function updateGlobalStats(newStats: CachedStats, userId?: string) {
 }
 
 export function clearStatsCache() {
-  globalStatsCache = { earnedXp: 0, completedLessonsCount: 0 };
+  globalStatsCache = { earnedXp: 0, completedLessonsCount: 0, rank: null, practicedMinutes: 0 };
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
     try {
       window.localStorage.removeItem(STATS_CACHE_KEY_DEFAULT);
@@ -272,36 +280,57 @@ export function useUserStats(): UserStats {
 
         const completedIds = new Set<string>();
         let totalXpAccumulated = 0;
+        let serverRank: number | null = null;
+        let serverMinutesConsumed: number = 0;
 
         if (progressRes && progressRes.ok) {
           try {
             const data = await progressRes.json();
+            if (typeof data.rank === 'number' && data.rank > 0) {
+              serverRank = data.rank;
+            }
+            if (typeof data.minutesConsumed === 'number') {
+              serverMinutesConsumed = data.minutesConsumed;
+            }
             if (Array.isArray(data.progress)) {
               data.progress.forEach((p: any) => {
                 if (p.status === 'completed' || p.isPassed) {
                   completedIds.add(p.roadmapLevelId || String(p.levelNumber));
-                  totalXpAccumulated += p.xpEarned || 100;
+                  totalXpAccumulated += typeof p.xpEarned === 'number' ? p.xpEarned : Number(p.xpEarned) || 0;
                 }
               });
             }
           } catch {}
         }
 
+        let totalSessionSeconds = 0;
         if (Array.isArray(sessions)) {
           sessions.forEach((s: any) => {
-            if (s.status === 'completed' && s.roadmap_level_id) {
-              if (!completedIds.has(s.roadmap_level_id)) {
-                completedIds.add(s.roadmap_level_id);
-                totalXpAccumulated += 100;
-              }
-            }
+            totalSessionSeconds += Number(s.duration_seconds || 0);
           });
         }
+
+        const practicedMinutes = Math.max(
+          serverMinutesConsumed,
+          Math.round(totalSessionSeconds / 60),
+          usedMinutes,
+        );
+
+        // If the user has 0 XP and 0 practiced minutes, their rank is null (displayed as N/A)
+        const hasActivity = totalXpAccumulated > 0 || practicedMinutes > 0;
+        const effectiveRank: number | null =
+          !hasActivity
+            ? null
+            : serverRank && serverRank > 0
+            ? serverRank
+            : null;
 
         updateGlobalStats(
           {
             completedLessonsCount: completedIds.size,
             earnedXp: totalXpAccumulated,
+            rank: effectiveRank,
+            practicedMinutes,
           },
           user?.id,
         );
@@ -359,36 +388,41 @@ export function useUserStats(): UserStats {
   const levelLabel = `Level ${currentLevelNumber}`;
   const xpLabel = `${levelXp} / ${targetLevelXp} XP`;
 
-  return {
-    minutesBalance,
-    monthlyMinutesAllowance,
-    usedMinutes,
-    totalMinutes,
-    resetsInText,
-    isTimeExpired,
-    isPro,
-    planTier,
-    planStatus: user?.planStatus || 'active',
-    isPastDue: user?.planStatus === 'past_due',
-    hasTelcoSubscription: Boolean(user?.hasTelcoSubscription),
-    isTelcoUnsubscribed: user?.telcoStatus === 'UNSUBSCRIBED',
-    telcoProvider: user?.telcoProvider || null,
-    isSubscriptionLocked: Boolean(
-      user?.isSubscriptionLocked ||
-      (user?.hasTelcoSubscription && user?.telcoStatus === 'UNSUBSCRIBED') ||
-      user?.planStatus === 'expired'
-    ),
-    isGracePeriodActive: Boolean(user?.isGracePeriodActive),
-    gracePeriodEndDate: user?.gracePeriodEndDate || null,
-    completedLessonsCount: statsState.completedLessonsCount,
-    currentLevelNumber,
-    levelLabel,
-    xpLabel,
-    totalXp,
-    levelXp,
-    targetLevelXp,
-    progress,
-    displayName,
+    const effectivePracticedMinutes = statsState.practicedMinutes || usedMinutes;
+    const hasActivity = totalXp > 0 || effectivePracticedMinutes > 0;
+
+    return {
+      minutesBalance,
+      monthlyMinutesAllowance,
+      usedMinutes,
+      totalMinutes,
+      resetsInText,
+      isTimeExpired,
+      isPro,
+      planTier,
+      planStatus: user?.planStatus || 'active',
+      isPastDue: user?.planStatus === 'past_due',
+      hasTelcoSubscription: Boolean(user?.hasTelcoSubscription),
+      isTelcoUnsubscribed: user?.telcoStatus === 'UNSUBSCRIBED',
+      telcoProvider: user?.telcoProvider || null,
+      isSubscriptionLocked: Boolean(
+        user?.isSubscriptionLocked ||
+        (user?.hasTelcoSubscription && user?.telcoStatus === 'UNSUBSCRIBED') ||
+        user?.planStatus === 'expired'
+      ),
+      isGracePeriodActive: Boolean(user?.isGracePeriodActive),
+      gracePeriodEndDate: user?.gracePeriodEndDate || null,
+      completedLessonsCount: statsState.completedLessonsCount,
+      currentLevelNumber,
+      levelLabel,
+      xpLabel,
+      totalXp,
+      levelXp,
+      targetLevelXp,
+      progress,
+      rank: hasActivity ? statsState.rank : null,
+      practicedMinutes: effectivePracticedMinutes,
+      displayName,
     initials,
     phoneNumber,
     nativeLanguageDisplay,

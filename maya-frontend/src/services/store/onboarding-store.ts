@@ -5,6 +5,8 @@ export interface UserSessionData {
   id: string;
   phoneNumber: string;
   displayName?: string | null;
+  email?: string | null;
+  avatarUrl?: string | null;
   planTier: 'starter' | 'basic' | 'pro' | 'premium';
   planStatus: string;
   monthlyMinutesAllowance: number;
@@ -51,6 +53,8 @@ export interface OnboardingState {
   // Onboarding answers
   name: string;
   phone: string;
+  email: string;
+  avatarUrl: string | null;
   goal: string;
   challenge: string;
   level: string;
@@ -73,6 +77,8 @@ const defaultState: OnboardingState = {
   isHydrated: false,
   name: '',
   phone: '',
+  email: '',
+  avatarUrl: null,
   goal: '',
   challenge: '',
   level: 'Intermediate',
@@ -342,12 +348,16 @@ export const OnboardingStore = {
       accessToken: token,
       user: {
         ...user,
+        email: user.email || memoryState.email || memoryState.user?.email || null,
+        avatarUrl: user.avatarUrl || memoryState.avatarUrl || memoryState.user?.avatarUrl || null,
         isCompleted,
         lastActiveStep: nextLastActiveRoute,
       },
       isAuthenticated: true,
       phone: user.phoneNumber || memoryState.phone,
       name: user.displayName !== undefined && user.displayName !== null && user.displayName !== '' ? user.displayName : memoryState.name,
+      email: user.email || memoryState.email || '',
+      avatarUrl: user.avatarUrl || memoryState.avatarUrl || null,
       level: user.level || memoryState.level,
       goal: user.goal || memoryState.goal,
       challenge: user.challenge || memoryState.challenge,

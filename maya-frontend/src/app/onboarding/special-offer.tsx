@@ -771,7 +771,7 @@ const styles = StyleSheet.create({
   titleLine2: {
     fontSize: 27,
     lineHeight: 33,
-    color: '#2563EB',
+    color: '#0D4EFD',
     letterSpacing: -0.6,
     textAlign: 'center',
     marginBottom: 8,

@@ -23,6 +23,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     group: 'USER MANAGEMENT',
     items: [
       { id: 'users-directory', label: 'Users & Profiles', icon: 'users', route: '/admin/users' },
+      { id: 'user-complaints', label: 'Complaints & Feedback', icon: 'alert-circle', route: '/admin/complaints' },
     ],
   },
   {

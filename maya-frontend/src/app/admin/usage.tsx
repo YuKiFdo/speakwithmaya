@@ -21,6 +21,7 @@ import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
+import { AdminSessionTranscriptAndPlayer } from '@/components/admin/AdminSessionTranscriptAndPlayer';
 
 interface DailyUsagePoint {
   date: string;
@@ -1307,30 +1308,16 @@ export default function AdminUsageScreen() {
                 </View>
               </View>
 
-              {/* Grammar Corrections */}
-              {activeSession?.grammarCorrections && activeSession.grammarCorrections.length > 0 && (
-                <View style={styles.modalSection}>
-                  <Text style={styles.modalSectionTitle}>Real-Time Coaching Corrections ({activeSession.grammarCorrections.length})</Text>
-                  {activeSession.grammarCorrections.map((c, i) => (
-                    <View key={i} style={styles.correctionCard}>
-                      <Text style={styles.corrStudentSaid}>❌ "{c.studentSaid}"</Text>
-                      <Text style={styles.corrMoreNatural}>✅ "{c.moreNatural}"</Text>
-                      <Text style={styles.corrExplanation}>{c.explanation}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Transcript Turns */}
-              {activeSession?.turns && activeSession.turns.length > 0 && (
-                <View style={styles.modalSection}>
-                  <Text style={styles.modalSectionTitle}>Transcript Turns ({activeSession.turns.length})</Text>
-                  {activeSession.turns.map((t, idx) => (
-                    <View key={idx} style={[styles.turnBubble, t.role === 'model' ? styles.turnModel : styles.turnUser]}>
-                      <Text style={styles.turnRole}>{t.role === 'model' ? 'Maya (Coach)' : activeSession.user.name}</Text>
-                      <Text style={styles.turnText}>{t.text}</Text>
-                    </View>
-                  ))}
+              {/* Audio Recording Player, Coaching Corrections & Full Conversation Transcript */}
+              {activeSession?.id && (
+                <View style={{ marginBottom: 16 }}>
+                  <AdminSessionTranscriptAndPlayer
+                    sessionId={activeSession.id}
+                    studentName={activeSession.user?.name || 'Student'}
+                    durationSeconds={activeSession.durationSeconds}
+                    initialTurns={activeSession.turns}
+                    initialCorrections={activeSession.grammarCorrections}
+                  />
                 </View>
               )}
 

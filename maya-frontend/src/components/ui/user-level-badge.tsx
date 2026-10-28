@@ -3,6 +3,7 @@ import { View, Text, Image, StyleSheet, Pressable, PressableProps, DimensionValu
 import { Fonts, fontStyle } from '@/theme/fonts';
 import { Radii } from '@/theme/tokens';
 import { CrownSolidIcon } from '@/components/icons/nav-icons';
+import { useOnboardingStore } from '@/services/store/onboarding-store';
 
 import { Ionicons } from '@expo/vector-icons';
 
@@ -82,6 +83,17 @@ export function UserLevelBadge({
   };
 
   const badgeConfig = getTierBadgeConfig();
+  const store = useOnboardingStore();
+
+  const uploadedPhotoUri =
+    store.avatarUrl ||
+    store.user?.avatarUrl ||
+    (avatarSource && typeof avatarSource === 'object' && typeof avatarSource.uri === 'string'
+      ? avatarSource.uri
+      : null);
+
+  const rawUserName = (store.user?.displayName || store.name || '').trim();
+  const fallbackFirstLetter = rawUserName ? rawUserName.charAt(0).toUpperCase() : 'U';
 
   return (
     <Pressable
@@ -110,13 +122,22 @@ export function UserLevelBadge({
           <View style={[styles.miniProgressFill, { width: progressWidth }]} />
         </View>
       </View>
-      {avatarSource && (
+      {uploadedPhotoUri ? (
         <View style={[styles.userAvatarWrapper, isInactive && styles.userAvatarWrapperInactive]}>
           <Image
-            source={avatarSource}
+            source={{ uri: uploadedPhotoUri }}
             style={styles.userAvatarImage}
             resizeMode="cover"
           />
+        </View>
+      ) : (
+        <View
+          style={[
+            styles.userAvatarFallbackCircle,
+            isInactive && styles.userAvatarWrapperInactive,
+          ]}
+        >
+          <Text style={styles.userAvatarFallbackLetter}>{fallbackFirstLetter}</Text>
         </View>
       )}
     </Pressable>
@@ -204,7 +225,7 @@ const styles = StyleSheet.create({
   },
   miniProgressFill: {
     height: '100%',
-    backgroundColor: '#0085db',
+    backgroundColor: '#0D4EFD',
     borderRadius: 2,
   },
   userAvatarWrapper: {
@@ -214,6 +235,21 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#e2e8f0',
     overflow: 'hidden',
+  },
+  userAvatarFallbackCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#0D4EFD',
+    borderWidth: 2,
+    borderColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userAvatarFallbackLetter: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 16,
+    color: '#FFFFFF',
   },
   userAvatarWrapperInactive: {
     borderColor: '#FECACA',

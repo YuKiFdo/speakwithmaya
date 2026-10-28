@@ -40,6 +40,9 @@ export interface VerifyOtpResponse {
 
 export interface PreferencesPayload {
   displayName?: string;
+  phoneNumber?: string;
+  email?: string;
+  avatarUrl?: string | null;
   nativeLanguage?: string;
   level?: string;
   goal?: string;
@@ -158,7 +161,40 @@ class AuthService {
    * Persist onboarding answers to user's profile.
    */
   async savePreferences(payload: PreferencesPayload): Promise<boolean> {
-    const token = OnboardingStore.getState().accessToken;
+    const state = OnboardingStore.getState();
+    const token = state.accessToken;
+    const userId = state.user?.id;
+
+    // Immediately update local store and per-user profile extra cache (avatarUrl & email)
+    if (payload.displayName !== undefined) {
+      OnboardingStore.updateField('name', payload.displayName);
+    }
+    if (payload.phoneNumber !== undefined) {
+      OnboardingStore.updateField('phone', payload.phoneNumber);
+    }
+    if (payload.email !== undefined) {
+      OnboardingStore.updateField('email', payload.email);
+    }
+    if (payload.avatarUrl !== undefined) {
+      OnboardingStore.updateField('avatarUrl', payload.avatarUrl);
+    }
+    if (payload.level !== undefined) {
+      OnboardingStore.updateField('level', payload.level);
+    }
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && userId) {
+      try {
+        const extraKey = `maya_user_profile_extra_${userId}`;
+        const existingRaw = window.localStorage.getItem(extraKey);
+        const existing = existingRaw ? JSON.parse(existingRaw) : {};
+        const merged = {
+          ...existing,
+          ...(payload.email !== undefined ? { email: payload.email } : {}),
+          ...(payload.avatarUrl !== undefined ? { avatarUrl: payload.avatarUrl } : {}),
+        };
+        window.localStorage.setItem(extraKey, JSON.stringify(merged));
+      } catch {}
+    }
+
     try {
       const res = await fetch(`${this.baseUrl}/v1/users/onboarding-preferences`, {
         method: 'POST',
@@ -223,10 +259,24 @@ class AuthService {
       if (res.ok) {
         const data = await res.json();
         if (data.profile) {
+          let extraEmail: string | null = data.profile.email || null;
+          let extraAvatar: string | null = data.profile.avatar_url || null;
+          if (Platform.OS === 'web' && typeof window !== 'undefined' && data.profile.id) {
+            try {
+              const rawExtra = window.localStorage.getItem(`maya_user_profile_extra_${data.profile.id}`);
+              if (rawExtra) {
+                const parsedExtra = JSON.parse(rawExtra);
+                if (!extraEmail && parsedExtra.email) extraEmail = parsedExtra.email;
+                if (!extraAvatar && parsedExtra.avatarUrl) extraAvatar = parsedExtra.avatarUrl;
+              }
+            } catch {}
+          }
           const user = {
             id: data.profile.id,
             phoneNumber: data.profile.phone_number,
             displayName: data.profile.display_name,
+            email: extraEmail,
+            avatarUrl: extraAvatar,
             planTier: data.profile.plan_tier,
             planStatus: data.profile.plan_status,
             monthlyMinutesAllowance: data.profile.monthly_minutes_allowance,
@@ -289,6 +339,27 @@ class AuthService {
           },
         });
       } catch {}
+    }
+  }
+
+  /**
+   * Submits a student complaint or feedback item to the database so it appears in the Admin Portal.
+   */
+  async submitComplaint(message: string): Promise<boolean> {
+    const token = OnboardingStore.getState().accessToken;
+    const authScheme = 'Bearer';
+    try {
+      const res = await fetch(`${this.baseUrl}/v1/users/complaints`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `${authScheme} ${token || 'dev-token'}`,
+        },
+        body: JSON.stringify({ message }),
+      });
+      return res.ok;
+    } catch {
+      return false;
     }
   }
 }

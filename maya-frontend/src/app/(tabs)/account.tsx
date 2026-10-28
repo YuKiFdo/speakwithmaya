@@ -23,6 +23,7 @@ import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CrownNavIcon } from '@/components/icons/nav-icons';
+import { LKFlag } from '@/components/icons/lk-flag';
 import { MayaPrimaryButton } from '@/components/ui/maya-primary-button';
 import { useOnboardingStore, OnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
@@ -39,6 +40,53 @@ import {
 } from '@/utils/analytics';
 
 const PLAN_CROWN_IMAGE = require('@/assets/images/plan-crown.png');
+
+const ENGLISH_LEVEL_OPTIONS = [
+  {
+    id: 'beginner',
+    title: 'Beginner',
+    subtitle: 'Basic words and simple\nsentences',
+    bars: 1,
+  },
+  {
+    id: 'intermediate',
+    title: 'Intermediate',
+    subtitle: 'Can handle daily\nconversations',
+    bars: 2,
+  },
+  {
+    id: 'upper-intermediate',
+    title: 'Upper Intermediate',
+    subtitle: 'Confident in most\nsituations',
+    bars: 3,
+  },
+  {
+    id: 'advanced',
+    title: 'Advanced',
+    subtitle: 'Fluent and natural\nconversations',
+    bars: 4,
+  },
+] as const;
+
+function normalizeLevelId(raw?: string | null): string {
+  const clean = (raw || '').toLowerCase().trim().replace(/\s+/g, '-');
+  if (clean === 'beginner') return 'beginner';
+  if (clean === 'upper-intermediate' || clean === 'upper_intermediate') return 'upper-intermediate';
+  if (clean === 'advanced') return 'advanced';
+  return 'intermediate';
+}
+
+function formatLocalPhoneDigits(rawPhone?: string | null): string {
+  const raw = (rawPhone || '').trim();
+  if (!raw) return '';
+  const stripped = raw.replace(/^\+?94\s*/, '').replace(/\D/g, '');
+  if (!stripped) return '';
+  const withLeadingZero = stripped.startsWith('0') ? stripped : `0${stripped}`;
+  if (withLeadingZero.length > 3) {
+    return `${withLeadingZero.slice(0, 3)} ${withLeadingZero.slice(3, 10)}`;
+  }
+  return withLeadingZero;
+}
 
 function formatBillingDate(dateStr: string | null | undefined, fallback: string = '25 Jun 2026'): string {
   if (!dateStr) return fallback;
@@ -72,8 +120,20 @@ export default function AccountScreen() {
 
   // Edit Profile & Preferences modal state
   const user = store.user;
+  const currentAvatarUrl = store.avatarUrl || user?.avatarUrl || null;
+  const currentEmail = store.email || user?.email || '';
+  const currentLevelId = normalizeLevelId(user?.level || store.level);
+
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
+  const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
+  const [isComplaintModalOpen, setIsComplaintModalOpen] = useState(false);
+  const [complaintText, setComplaintText] = useState('');
+  const [isSubmittingComplaint, setIsSubmittingComplaint] = useState(false);
   const [editName, setEditName] = useState(displayName);
+  const [editPhone, setEditPhone] = useState(() => formatLocalPhoneDigits(phoneNumber));
+  const [editEmail, setEditEmail] = useState(currentEmail);
+  const [editAvatarUrl, setEditAvatarUrl] = useState<string | null>(currentAvatarUrl);
+  const [editLevel, setEditLevel] = useState<string>(currentLevelId);
   const [editLang, setEditLang] = useState<'sinhala' | 'tamil' | 'english'>(
     (user?.nativeLanguage as any) || 'sinhala'
   );
@@ -82,32 +142,112 @@ export default function AccountScreen() {
 
   useEffect(() => {
     setEditName(displayName);
+    setEditPhone(formatLocalPhoneDigits(phoneNumber));
+    setEditEmail(currentEmail);
+    setEditAvatarUrl(currentAvatarUrl);
+    setEditLevel(currentLevelId);
     if (user?.nativeLanguage) {
       setEditLang(user.nativeLanguage as any);
     }
     if (user?.dailyGoalMinutes) {
       setEditGoal(user.dailyGoalMinutes);
     }
-  }, [displayName, user?.nativeLanguage, user?.dailyGoalMinutes]);
+  }, [
+    displayName,
+    phoneNumber,
+    currentEmail,
+    currentAvatarUrl,
+    currentLevelId,
+    user?.nativeLanguage,
+    user?.dailyGoalMinutes,
+  ]);
 
   const handleOpenEditModal = () => {
     setEditName(displayName);
+    setEditPhone(formatLocalPhoneDigits(phoneNumber));
+    setEditEmail(currentEmail);
+    setEditAvatarUrl(currentAvatarUrl);
+    setEditLevel(currentLevelId);
     setEditLang((user?.nativeLanguage as any) || 'sinhala');
     setEditGoal(user?.dailyGoalMinutes || 10);
     setIsEditProfileModalOpen(true);
   };
 
+  const handlePickProfilePhoto = () => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/jpeg,image/png,image/webp';
+      input.onchange = (e: any) => {
+        const file: File | undefined = e?.target?.files?.[0];
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) {
+          mayaAlert.toast('Please choose a JPG or PNG image under 5MB.', 'error');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          if (!dataUrl) return;
+          // Resize & center-crop to a clean 256x256 square JPEG so storage stays fast and lightweight
+          const img = new window.Image();
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              const targetSize = 256;
+              canvas.width = targetSize;
+              canvas.height = targetSize;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                const minSide = Math.min(img.width, img.height);
+                const sx = Math.floor((img.width - minSide) / 2);
+                const sy = Math.floor((img.height - minSide) / 2);
+                ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, targetSize, targetSize);
+                const compressed = canvas.toDataURL('image/jpeg', 0.86);
+                setEditAvatarUrl(compressed);
+                return;
+              }
+            } catch {}
+            setEditAvatarUrl(dataUrl);
+          };
+          img.onerror = () => setEditAvatarUrl(dataUrl);
+          img.src = dataUrl;
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    }
+  };
+
   const handleSaveProfile = async () => {
-    if (!editName.trim()) return;
+    if (!editName.trim()) {
+      mayaAlert.toast('Please enter your full name.', 'warning');
+      return;
+    }
     setIsSaving(true);
     try {
+      const isStarterPlan = !isPro || currentPlanTier === 'starter';
+      const cleanDigits = editPhone.replace(/\D/g, '');
+      const normalizedPhone = !isStarterPlan && cleanDigits
+        ? cleanDigits.startsWith('0')
+          ? `+94${cleanDigits.slice(1)}`
+          : cleanDigits.startsWith('94')
+          ? `+${cleanDigits}`
+          : `+94${cleanDigits}`
+        : undefined;
+
       await authService.savePreferences({
         displayName: editName.trim(),
+        phoneNumber: normalizedPhone,
+        email: editEmail.trim(),
+        avatarUrl: editAvatarUrl,
+        level: editLevel,
         nativeLanguage: editLang,
         dailyGoalMinutes: editGoal,
       });
       await stats.refreshStats();
       setIsEditProfileModalOpen(false);
+      mayaAlert.toast('Profile updated successfully!', 'success');
     } finally {
       setIsSaving(false);
     }
@@ -131,6 +271,36 @@ export default function AccountScreen() {
 
   const handleSupportEmail = () => {
     Linking.openURL('mailto:support@talkwithmaya.com').catch(() => {});
+  };
+
+  const handleSelectExplanationLanguage = async (lang: 'sinhala' | 'tamil' | 'english') => {
+    setEditLang(lang);
+    setIsLanguageModalOpen(false);
+    await authService.savePreferences({ nativeLanguage: lang });
+    await stats.refreshStats();
+    mayaAlert.toast(
+      `Explanation language updated to ${lang.charAt(0).toUpperCase() + lang.slice(1)}.`,
+      'success',
+    );
+  };
+
+  const handleSubmitComplaint = async () => {
+    if (!complaintText.trim()) {
+      mayaAlert.toast('Please describe your issue or feedback before submitting.', 'warning');
+      return;
+    }
+    setIsSubmittingComplaint(true);
+    try {
+      await authService.submitComplaint(complaintText.trim());
+      setComplaintText('');
+      setIsComplaintModalOpen(false);
+      await mayaAlert.success(
+        'Thank you for your feedback! Our team has received your message and will review it promptly.',
+        'Submitted',
+      );
+    } finally {
+      setIsSubmittingComplaint(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -574,7 +744,6 @@ export default function AccountScreen() {
                   isPro={isPro}
                   planTier={stats.planTier}
                   isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
-                  avatarSource={require('@/assets/images/maya-avatar.png')}
                   onPress={() => setActivePopup('level-up')}
                 />
               </View>
@@ -598,6 +767,7 @@ export default function AccountScreen() {
                   <ProfileCard
                     name={displayName}
                     initials={stats.initials}
+                    avatarUrl={currentAvatarUrl}
                     memberSince={stats.memberSinceText}
                     isPro={isPro}
                     isLocked={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
@@ -610,16 +780,15 @@ export default function AccountScreen() {
                   <StatsCard
                     xp={stats.totalXp}
                     levelNumber={stats.currentLevelNumber}
-                    lessonsCompleted={stats.completedLessonsCount}
+                    rank={stats.rank}
                   />
 
-                  <PreferencesCard
+                  <AccountActionCards
                     language={stats.nativeLanguageDisplay}
-                    dailyGoal={stats.dailyGoalDisplay}
-                    onRowPress={() => handleOpenEditModal()}
+                    onLanguagePress={() => setIsLanguageModalOpen(true)}
+                    onLeaderboardPress={() => router.push('/leaderboard' as any)}
+                    onComplaintPress={() => setIsComplaintModalOpen(true)}
                   />
-
-                  <LogoutCard onLogout={handleLogout} />
                 </View>
 
                 {/* RIGHT COLUMN */}
@@ -632,8 +801,10 @@ export default function AccountScreen() {
                     monthlyAllowance={stats.monthlyMinutesAllowance}
                     isTimeExpired={isTimeExpired}
                     phone={phoneNumber}
+                    registeredDate={user?.createdAt}
                     renewalDate={stats.resetsInText}
-                    nextBillingDate={subscription?.next_billing_date}
+                    nextBillingDate={subscription?.next_billing_date || user?.minutesResetAt}
+                    billingCycle={subscription?.billing_cycle}
                     cardMasked={subscription?.card_masked}
                     isUpdatingPayment={isUpdatingCard}
                     hasTelcoSubscription={stats.hasTelcoSubscription}
@@ -657,6 +828,7 @@ export default function AccountScreen() {
                 <ProfileCard
                   name={displayName}
                   initials={stats.initials}
+                  avatarUrl={currentAvatarUrl}
                   memberSince={stats.memberSinceText}
                   isPro={isPro}
                   isLocked={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
@@ -669,7 +841,14 @@ export default function AccountScreen() {
                 <StatsCard
                   xp={stats.totalXp}
                   levelNumber={stats.currentLevelNumber}
-                  lessonsCompleted={stats.completedLessonsCount}
+                  rank={stats.rank}
+                />
+
+                <AccountActionCards
+                  language={stats.nativeLanguageDisplay}
+                  onLanguagePress={() => setIsLanguageModalOpen(true)}
+                  onLeaderboardPress={() => router.push('/leaderboard' as any)}
+                  onComplaintPress={() => setIsComplaintModalOpen(true)}
                 />
 
                 <CurrentPlanCard
@@ -680,8 +859,10 @@ export default function AccountScreen() {
                   monthlyAllowance={stats.monthlyMinutesAllowance}
                   isTimeExpired={isTimeExpired}
                   phone={phoneNumber}
+                  registeredDate={user?.createdAt}
                   renewalDate={stats.resetsInText}
-                  nextBillingDate={subscription?.next_billing_date}
+                  nextBillingDate={subscription?.next_billing_date || user?.minutesResetAt}
+                  billingCycle={subscription?.billing_cycle}
                   cardMasked={subscription?.card_masked}
                   isUpdatingPayment={isUpdatingCard}
                   hasTelcoSubscription={stats.hasTelcoSubscription}
@@ -695,17 +876,9 @@ export default function AccountScreen() {
                   onReactivate={() => setActivePopup('reactivate-plan')}
                 />
 
-                <PreferencesCard
-                  language={stats.nativeLanguageDisplay}
-                  dailyGoal={stats.dailyGoalDisplay}
-                  onRowPress={() => handleOpenEditModal()}
-                />
-
                 <CustomerSupportCard onEmailPress={handleSupportEmail} />
 
                 <AboutCard />
-
-                <LogoutCard onLogout={handleLogout} />
               </View>
             )}
 
@@ -713,7 +886,7 @@ export default function AccountScreen() {
           </ScrollView>
         </View>
 
-        {/* EDIT PROFILE & PREFERENCES MODAL */}
+        {/* EDIT PROFILE MODAL (Figma Spec) */}
         <Modal
           visible={isEditProfileModalOpen}
           transparent
@@ -721,83 +894,241 @@ export default function AccountScreen() {
           onRequestClose={() => setIsEditProfileModalOpen(false)}
         >
           <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
+            <View style={[styles.modalCard, !isPhone && styles.modalCardDesktop]}>
+              {/* Top Header */}
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Edit Profile & Settings</Text>
+                <View style={{ flex: 1, paddingRight: 16 }}>
+                  <Text style={styles.modalTitle}>Edit Profile</Text>
+                  <Text style={styles.modalSubtitle}>
+                    Update your information and personalize your experience with Maya.
+                  </Text>
+                </View>
                 <Pressable
                   onPress={() => setIsEditProfileModalOpen(false)}
-                  hitSlop={8}
+                  hitSlop={10}
                   style={({ pressed }) => [styles.modalCloseBtn, pressed && { opacity: 0.6 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close edit profile"
                 >
-                  <Feather name="x" size={20} color="#64748B" />
+                  <Feather name="x" size={20} color="#475569" />
                 </Pressable>
               </View>
 
-              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-                {/* Name Field */}
-                <Text style={styles.modalInputLabel}>Display Name</Text>
+              <ScrollView
+                style={styles.modalBody}
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+              >
+                {/* Avatar Upload Row */}
+                <View style={styles.photoUploadRow}>
+                  <Pressable
+                    onPress={handlePickProfilePhoto}
+                    style={styles.editAvatarOuterRing}
+                    accessibilityRole="button"
+                    accessibilityLabel="Upload profile photo"
+                  >
+                    {editAvatarUrl ? (
+                      <Image
+                        source={{ uri: editAvatarUrl }}
+                        style={styles.editAvatarImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.editAvatarFallback}>
+                        <Text style={styles.editAvatarFallbackText}>
+                          {(editName || displayName || 'U').trim().charAt(0).toUpperCase() || 'U'}
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* Bottom-Right Blue Camera/Photo Badge */}
+                    <View style={styles.editAvatarBadgeBtn}>
+                      <Ionicons name="image-outline" size={14} color="#FFFFFF" />
+                    </View>
+                  </Pressable>
+
+                  <View style={styles.photoUploadActionCol}>
+                    <Pressable
+                      onPress={handlePickProfilePhoto}
+                      style={({ pressed }) => [
+                        styles.changePhotoBtn,
+                        pressed && { opacity: 0.75, backgroundColor: '#EFF6FF' },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Change Photo"
+                    >
+                      <Text style={styles.changePhotoBtnText}>Change Photo</Text>
+                    </Pressable>
+                    <Text style={styles.photoFormatHintText}>JPG, PNG (Max 5MB)</Text>
+                  </View>
+                </View>
+
+                {/* Full Name */}
+                <Text style={styles.modalInputLabel}>Full Name</Text>
                 <TextInput
                   style={styles.modalTextInput}
                   value={editName}
                   onChangeText={setEditName}
-                  placeholder="Enter your name"
+                  placeholder="Enter your full name"
                   placeholderTextColor="#94A3B8"
                 />
 
-                {/* Explanation Language */}
-                <Text style={[styles.modalInputLabel, { marginTop: 16 }]}>Explanation Language</Text>
-                <View style={styles.chipRow}>
-                  {(['sinhala', 'tamil', 'english'] as const).map((lang) => {
-                    const isSelected = editLang === lang;
-                    const label = lang.charAt(0).toUpperCase() + lang.slice(1);
-                    return (
-                      <Pressable
-                        key={lang}
-                        style={[styles.modalChip, isSelected && styles.modalChipActive]}
-                        onPress={() => setEditLang(lang)}
-                      >
-                        <Text style={[styles.modalChipText, isSelected && styles.modalChipTextActive]}>
-                          {label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
+                {/* Mobile Number & Email Address Row */}
+                <View
+                  style={[
+                    styles.contactFieldsRow,
+                    isPhone && styles.contactFieldsRowMobile,
+                  ]}
+                >
+                  {/* Mobile Number */}
+                  <View style={[styles.contactFieldCol, !isPhone && { flex: 1.15 }]}>
+                    <Text style={styles.modalInputLabel}>Mobile Number</Text>
+                    <View
+                      style={[
+                        styles.phoneInputComposite,
+                        (!isPro || currentPlanTier === 'starter') &&
+                          styles.phoneInputCompositeDisabled,
+                      ]}
+                    >
+                      <View style={styles.phoneCountryPrefix}>
+                        <LKFlag width={16} height={11} />
+                        <Text style={styles.phoneCountryCodeText}>+94</Text>
+                        <Feather name="chevron-down" size={12} color="#64748B" />
+                      </View>
+                      <TextInput
+                        style={[
+                          styles.phoneDigitsInput,
+                          (!isPro || currentPlanTier === 'starter') &&
+                            styles.phoneDigitsInputDisabled,
+                        ]}
+                        value={editPhone}
+                        onChangeText={setEditPhone}
+                        editable={isPro && currentPlanTier !== 'starter'}
+                        placeholder="077 1234567"
+                        placeholderTextColor="#94A3B8"
+                        keyboardType="phone-pad"
+                      />
+                      {(!isPro || currentPlanTier === 'starter') && (
+                        <Feather
+                          name="lock"
+                          size={13}
+                          color="#94A3B8"
+                          style={{ marginRight: 10 }}
+                        />
+                      )}
+                    </View>
+                  </View>
+
+                  {/* Email Address */}
+                  <View style={[styles.contactFieldCol, !isPhone && { flex: 1 }]}>
+                    <Text style={styles.modalInputLabel}>Email Address</Text>
+                    <TextInput
+                      style={styles.modalTextInput}
+                      value={editEmail}
+                      onChangeText={setEditEmail}
+                      placeholder="you@example.com"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </View>
                 </View>
 
-                {/* Daily Goal Minutes */}
-                <Text style={[styles.modalInputLabel, { marginTop: 16 }]}>Daily Practice Goal</Text>
-                <View style={styles.chipRow}>
-                  {[5, 10, 15, 20].map((mins) => {
-                    const isSelected = editGoal === mins;
-                    return (
-                      <Pressable
-                        key={mins}
-                        style={[styles.modalChip, isSelected && styles.modalChipActive]}
-                        onPress={() => setEditGoal(mins)}
-                      >
-                        <Text style={[styles.modalChipText, isSelected && styles.modalChipTextActive]}>
-                          {mins} mins
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                {/* Divider */}
+                <View style={styles.modalSectionDivider} />
 
-                <Text style={styles.modalSyncNotice}>
-                  Changes are saved directly to the database and synced across your session and devices.
+                {/* English Level Section */}
+                <View style={styles.levelSectionHeaderRow}>
+                  <Text style={styles.levelSectionTitle}>English Level</Text>
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={17}
+                    color="#0D4EFD"
+                    style={{ marginLeft: 5, marginTop: 1 }}
+                  />
+                </View>
+                <Text style={styles.levelSectionSubtitle}>
+                  Select your current English speaking level.
                 </Text>
+
+                {/* 4 Level Cards Grid */}
+                <View
+                  style={[
+                    styles.levelCardsGrid,
+                    isPhone && styles.levelCardsGridMobile,
+                  ]}
+                >
+                  {ENGLISH_LEVEL_OPTIONS.map((lvl) => {
+                    const isSelected = editLevel === lvl.id;
+                    const barHeights = [12, 18, 24, 30];
+                    return (
+                      <Pressable
+                        key={lvl.id}
+                        onPress={() => setEditLevel(lvl.id)}
+                        style={({ pressed }) => [
+                          styles.levelCardItem,
+                          isPhone && styles.levelCardItemMobile,
+                          isSelected && styles.levelCardItemSelected,
+                          pressed && { opacity: 0.9 },
+                        ]}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: isSelected }}
+                        accessibilityLabel={lvl.title}
+                      >
+                        {/* Top-Right Radio Indicator */}
+                        <View
+                          style={[
+                            styles.levelRadioCircle,
+                            isSelected && styles.levelRadioCircleSelected,
+                          ]}
+                        />
+
+                        {/* 4 Signal Bars */}
+                        <View style={styles.levelBarsRow}>
+                          {barHeights.map((h, barIdx) => {
+                            const isBarActive = barIdx < lvl.bars;
+                            return (
+                              <View
+                                key={barIdx}
+                                style={[
+                                  styles.levelSignalBar,
+                                  {
+                                    height: h,
+                                    backgroundColor: isBarActive ? '#0D4EFD' : '#DCE4F2',
+                                  },
+                                ]}
+                              />
+                            );
+                          })}
+                        </View>
+
+                        <Text style={styles.levelCardTitle}>{lvl.title}</Text>
+                        <Text style={styles.levelCardSubtitle}>{lvl.subtitle}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
               </ScrollView>
 
+              {/* Footer Buttons */}
               <View style={styles.modalFooter}>
                 <Pressable
-                  style={styles.modalCancelBtn}
+                  style={({ pressed }) => [
+                    styles.modalCancelBtn,
+                    pressed && { backgroundColor: '#F8FAFC' },
+                  ]}
                   onPress={() => setIsEditProfileModalOpen(false)}
                   disabled={isSaving}
                 >
                   <Text style={styles.modalCancelBtnText}>Cancel</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.modalSaveBtn, isSaving && { opacity: 0.7 }]}
+                  style={({ pressed }) => [
+                    styles.modalSaveBtn,
+                    isSaving && { opacity: 0.7 },
+                    pressed && !isSaving && { opacity: 0.92 },
+                  ]}
                   onPress={handleSaveProfile}
                   disabled={isSaving}
                 >
@@ -900,6 +1231,138 @@ export default function AccountScreen() {
                   disabled={isVerifyingReactivateOtp}
                 >
                   <Text style={styles.otpCancelBtnText}>Cancel</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* EXPLANATION LANGUAGE MODAL */}
+        <Modal
+          visible={isLanguageModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsLanguageModalOpen(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.selectionModalCard, { maxWidth: 420 }]}>
+              <View style={styles.modalHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.selectionModalTitle}>Explanation Language</Text>
+                  <Text style={styles.selectionModalSubtitle}>
+                    Choose the language Maya uses for explanations.
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => setIsLanguageModalOpen(false)}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.modalCloseBtn, pressed && { opacity: 0.6 }]}
+                >
+                  <Feather name="x" size={20} color="#64748B" />
+                </Pressable>
+              </View>
+
+              <View style={{ gap: 10, marginTop: 4 }}>
+                {(
+                  [
+                    { id: 'sinhala', label: 'Sinhala', sub: 'සිංහල පැහැදිලි කිරීම්' },
+                    { id: 'tamil', label: 'Tamil', sub: 'தமிழ் விளக்கங்கள்' },
+                    { id: 'english', label: 'English Only', sub: 'Full immersion in English' },
+                  ] as const
+                ).map((item) => {
+                  const selected = editLang.toLowerCase() === item.id;
+                  return (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => handleSelectExplanationLanguage(item.id)}
+                      style={({ pressed }) => [
+                        styles.selectionOptionCard,
+                        selected && styles.selectionOptionCardFeatured,
+                        pressed && styles.selectionOptionCardPressed,
+                      ]}
+                    >
+                      <View style={[styles.selectionIconBox, { backgroundColor: selected ? '#EFF6FF' : '#F8FAFC' }]}>
+                        <Ionicons
+                          name="globe-outline"
+                          size={22}
+                          color={selected ? '#0D4EFD' : '#64748B'}
+                        />
+                      </View>
+                      <View style={styles.selectionContentCol}>
+                        <Text style={styles.selectionOptionTitle}>{item.label}</Text>
+                        <Text style={styles.selectionOptionDesc}>{item.sub}</Text>
+                      </View>
+                      {selected ? (
+                        <Ionicons name="checkmark-circle" size={22} color="#0D4EFD" />
+                      ) : (
+                        <Feather name="chevron-right" size={18} color="#94A3B8" />
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* SUBMIT COMPLAINT MODAL */}
+        <Modal
+          visible={isComplaintModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsComplaintModalOpen(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.selectionModalCard, { maxWidth: 460 }]}>
+              <View style={styles.modalHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.selectionModalTitle}>Submit Complaint</Text>
+                  <Text style={styles.selectionModalSubtitle}>
+                    Report an issue or share your feedback with our team.
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => setIsComplaintModalOpen(false)}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.modalCloseBtn, pressed && { opacity: 0.6 }]}
+                >
+                  <Feather name="x" size={20} color="#64748B" />
+                </Pressable>
+              </View>
+
+              <TextInput
+                style={[
+                  styles.modalTextInput,
+                  { height: 110, textAlignVertical: 'top', paddingTop: 12, marginTop: 4, marginBottom: 16 },
+                ]}
+                placeholder="Tell us what went wrong or how we can improve..."
+                placeholderTextColor="#94A3B8"
+                multiline
+                value={complaintText}
+                onChangeText={setComplaintText}
+              />
+
+              <View style={styles.modalFooter}>
+                <Pressable
+                  style={({ pressed }) => [styles.modalCancelBtn, pressed && styles.buttonPressed]}
+                  onPress={() => setIsComplaintModalOpen(false)}
+                >
+                  <Text style={styles.modalCancelBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.modalSaveBtn,
+                    pressed && styles.buttonPressed,
+                    isSubmittingComplaint && { opacity: 0.7 },
+                  ]}
+                  onPress={handleSubmitComplaint}
+                  disabled={isSubmittingComplaint}
+                >
+                  {isSubmittingComplaint ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.modalSaveBtnText}>Submit</Text>
+                  )}
                 </Pressable>
               </View>
             </View>
@@ -1048,20 +1511,23 @@ export default function AccountScreen() {
 }
 
 /**
- * 1. Profile Information Card
+ * 1. Profile Information Card (Matches Figma Image 3)
  */
 function ProfileCard({
   name,
-  initials = 'M',
-  memberSince = 'Member since 2026',
+  initials = 'TF',
+  avatarUrl,
+  memberSince = 'Member since May 20, 2026',
   isPro,
   isLocked = false,
   onEdit,
   onTogglePlan,
   onCancelSubscription,
+  onLogout,
 }: {
   name: string;
   initials?: string;
+  avatarUrl?: string | null;
   memberSince?: string;
   isPro: boolean;
   isLocked?: boolean;
@@ -1070,96 +1536,111 @@ function ProfileCard({
   onCancelSubscription: () => void;
   onLogout: () => void;
 }) {
+  const displayInitials = (initials || (name || 'U').trim().charAt(0)).toUpperCase();
   return (
     <View style={styles.cardContainer}>
       <View style={styles.profileRow}>
-        {/* Avatar Initials Circle */}
+        {/* Left Blue Circular Avatar */}
         <View style={styles.avatarInitialsCircle}>
-          <Text style={styles.avatarInitialsText}>{initials}</Text>
+          {avatarUrl ? (
+            <Image
+              source={{ uri: avatarUrl }}
+              style={styles.profileCardAvatarImg}
+              resizeMode="cover"
+            />
+          ) : (
+            <Text style={styles.avatarInitialsText}>{displayInitials}</Text>
+          )}
         </View>
 
-        {/* Profile Name & Member Since */}
+        {/* Right Info Stack: Name + Edit inline + Top-Right Log Out, Member since, Plan Pill + Cancel Subscription */}
         <View style={styles.profileInfoCol}>
-          <Text style={styles.profileNameText} numberOfLines={1}>
-            {name}
-          </Text>
+          <View style={styles.profileTopHeaderRow}>
+            <View style={styles.profileNameInlineRow}>
+              <Text style={styles.profileNameText} numberOfLines={1}>
+                {name}
+              </Text>
+              <Pressable
+                style={({ pressed }) => [styles.inlineEditBtn, pressed && styles.cardPressed]}
+                onPress={onEdit}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Edit Profile"
+              >
+                <Feather name="edit-2" size={14} color="#0D4EFD" />
+                <Text style={styles.inlineEditBtnText}>Edit</Text>
+              </Pressable>
+            </View>
+
+            <Pressable
+              onPress={onLogout}
+              hitSlop={10}
+              style={({ pressed }) => [styles.profileTopRightLogoutBtn, pressed && styles.cardPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Log Out"
+            >
+              <Text style={styles.profileTopRightLogoutText}>Log Out</Text>
+            </Pressable>
+          </View>
+
           <Text style={styles.memberSinceText} numberOfLines={1}>
             {memberSince}
           </Text>
+
+          <View style={styles.profileInlineActionsRow}>
+            <Pressable
+              onPress={onTogglePlan}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.proPlanPill,
+                isLocked && styles.inactivePlanPill,
+                pressed && styles.cardPressed,
+              ]}
+            >
+              <Text style={[styles.proPlanPillText, isLocked && styles.inactivePlanPillText]}>
+                {isPro
+                  ? isLocked
+                    ? 'Pro Plan · Inactive'
+                    : 'Pro Plan'
+                  : isLocked
+                  ? 'Starter Plan · Inactive'
+                  : 'Starter Plan'}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={onCancelSubscription}
+              hitSlop={8}
+              style={({ pressed }) => [styles.profileActionLinkBtn, pressed && styles.cardPressed]}
+            >
+              <Text style={[styles.cancelSubText, isLocked && styles.reactivateSubText]}>
+                {isLocked ? 'Reactivate Subscription' : 'Cancel Subscription'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
-
-        {/* Clean Edit Action Pill */}
-        <Pressable
-          style={({ pressed }) => [styles.editBtn, pressed && styles.cardPressed]}
-          onPress={onEdit}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Edit Profile"
-        >
-          <Feather name="edit-2" size={13} color="#2563EB" />
-          <Text style={styles.editBtnText}>Edit</Text>
-        </Pressable>
-      </View>
-
-      {/* Bottom Plan Status & Action Footer Row (Full Width — Zero Overflow) */}
-      <View style={styles.profileFooterBar}>
-        <Pressable
-          onPress={onTogglePlan}
-          hitSlop={8}
-          style={({ pressed }) => [
-            styles.proPlanPill,
-            isLocked && styles.inactivePlanPill,
-            pressed && styles.cardPressed,
-          ]}
-        >
-          <View
-            style={[
-              styles.planStatusDot,
-              { backgroundColor: isLocked ? '#EF4444' : '#2563EB' },
-            ]}
-          />
-          <Text style={[styles.proPlanPillText, isLocked && styles.inactivePlanPillText]}>
-            {isPro
-              ? isLocked
-                ? 'Pro Plan · Inactive'
-                : 'Pro Plan'
-              : isLocked
-              ? 'Starter Plan · Inactive'
-              : 'Starter Plan'}
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={onCancelSubscription}
-          hitSlop={8}
-          style={({ pressed }) => [styles.profileActionLinkBtn, pressed && styles.cardPressed]}
-        >
-          <Text style={[styles.cancelSubText, isLocked && styles.reactivateSubText]}>
-            {isLocked ? 'Reactivate →' : 'Cancel Plan'}
-          </Text>
-        </Pressable>
       </View>
     </View>
   );
 }
 
 /**
- * 2. Stats Row Card (3 Columns: XP, Level, Lessons Completed)
+ * 2. Stats Row Card (3 Columns: XP, Level, Rank based on XP & Minutes Consumed)
  */
 function StatsCard({
   xp = 0,
   levelNumber = 1,
-  lessonsCompleted = 0,
+  rank = null,
 }: {
   xp?: number;
   levelNumber?: number;
-  lessonsCompleted?: number;
+  rank?: number | null;
 }) {
   return (
     <View style={[styles.cardContainer, styles.statsCardPadding]}>
       <View style={styles.statsRow}>
         <View style={styles.statCol}>
-          <Feather name="zap" size={22} color="#2563EB" />
+          <Feather name="zap" size={24} color="#3B82F6" />
           <Text style={styles.statNumberText}>{xp.toLocaleString()} XP</Text>
           <Text style={styles.statLabelText}>Keep practicing!</Text>
         </View>
@@ -1167,7 +1648,7 @@ function StatsCard({
         <View style={styles.statDivider} />
 
         <View style={styles.statCol}>
-          <Feather name="bar-chart-2" size={22} color="#2563EB" />
+          <Feather name="bar-chart-2" size={24} color="#3B82F6" />
           <Text style={styles.statNumberText}>Level {levelNumber}</Text>
           <Text style={styles.statLabelText}>You're doing great</Text>
         </View>
@@ -1175,9 +1656,9 @@ function StatsCard({
         <View style={styles.statDivider} />
 
         <View style={styles.statCol}>
-          <Feather name="book-open" size={22} color="#2563EB" />
-          <Text style={styles.statNumberText}>{lessonsCompleted}</Text>
-          <Text style={styles.statLabelText}>Lessons Completed</Text>
+          <Ionicons name="trophy-outline" size={24} color="#3B82F6" />
+          <Text style={styles.statNumberText}>{rank && rank > 0 ? `#${rank}` : 'N/A'}</Text>
+          <Text style={styles.statLabelText}>Your Rank</Text>
         </View>
       </View>
     </View>
@@ -1185,95 +1666,91 @@ function StatsCard({
 }
 
 /**
- * 3. Settings & Preferences Card (4 Items)
+ * 3. Separate Account Action Cards (Explanation Language, Leaderboard, Submit Complaint - Matches Image 3)
  */
-function PreferencesCard({
+function AccountActionCards({
   language = 'Sinhala',
-  dailyGoal = '10 min daily',
-  onRowPress,
+  onLanguagePress,
+  onLeaderboardPress,
+  onComplaintPress,
 }: {
   language?: string;
-  dailyGoal?: string;
-  onRowPress: (id: string) => void;
+  onLanguagePress: () => void;
+  onLeaderboardPress: () => void;
+  onComplaintPress: () => void;
 }) {
-  const PREFERENCES = [
-    {
-      id: 'explanation-lang',
-      iconBg: '#DCFCE7',
-      icon: <Ionicons name="globe-outline" size={19} color="#16A34A" />,
-      title: 'Explanation Language',
-      subtitle: 'Choose the language Maya uses for explanations.',
-      value: language,
-    },
-    {
-      id: 'speaking-pref',
-      iconBg: '#FFEDD5',
-      icon: <Feather name="activity" size={18} color="#EA580C" />,
-      title: 'Speaking Preferences',
-      subtitle: 'Set speaking speed, feedback style and more.',
-      value: 'Normal Speed',
-    },
-    {
-      id: 'notifications',
-      iconBg: '#F3E8FF',
-      icon: <Feather name="bell" size={18} color="#9333EA" />,
-      title: 'Notifications & Reminders',
-      subtitle: 'Manage daily reminders and important alerts.',
-      value: dailyGoal,
-    },
-    {
-      id: 'privacy-data',
-      iconBg: '#E0F2FE',
-      icon: <Feather name="shield" size={18} color="#0284C7" />,
-      title: 'Privacy & Data',
-      subtitle: 'Manage your data and privacy settings.',
-      value: 'Protected',
-    },
-  ];
-
   return (
-    <View style={styles.cardContainer}>
-      {PREFERENCES.map((item, index) => {
-        const isLast = index === PREFERENCES.length - 1;
-        return (
-          <React.Fragment key={item.id}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.preferenceRow,
-                pressed && styles.cardPressed,
-              ]}
-              onPress={() => onRowPress(item.id)}
-            >
-              <View style={[styles.prefIconCircle, { backgroundColor: item.iconBg }]}>
-                {item.icon}
-              </View>
+    <View style={styles.actionCardsStack}>
+      {/* Card 1: Explanation Language */}
+      <Pressable
+        style={({ pressed }) => [styles.actionItemCard, pressed && styles.cardPressed]}
+        onPress={onLanguagePress}
+        accessibilityRole="button"
+        accessibilityLabel="Explanation Language"
+      >
+        <View style={[styles.actionIconBox, { backgroundColor: '#E6F9F0' }]}>
+          <Ionicons name="globe-outline" size={22} color="#10B981" />
+        </View>
+        <View style={styles.prefTextCol}>
+          <Text style={styles.prefTitleText}>Explanation Language</Text>
+          <Text style={styles.prefSubtitleText} numberOfLines={2}>
+            Choose the language Maya uses for explanations.
+          </Text>
+        </View>
+        <View style={styles.prefRightCol}>
+          <Text style={styles.prefValueText}>{language}</Text>
+          <Feather name="chevron-right" size={18} color="#64748B" />
+        </View>
+      </Pressable>
 
-              <View style={styles.prefTextCol}>
-                <Text style={styles.prefTitleText}>{item.title}</Text>
-                <Text style={styles.prefSubtitleText} numberOfLines={1}>
-                  {item.subtitle}
-                </Text>
-              </View>
+      {/* Card 2: Leaderboard */}
+      <Pressable
+        style={({ pressed }) => [styles.actionItemCard, pressed && styles.cardPressed]}
+        onPress={onLeaderboardPress}
+        accessibilityRole="button"
+        accessibilityLabel="Leaderboard"
+      >
+        <View style={[styles.actionIconBox, { backgroundColor: '#EFF6FF' }]}>
+          <Ionicons name="trophy-outline" size={21} color="#0D4EFD" />
+        </View>
+        <View style={styles.prefTextCol}>
+          <Text style={styles.prefTitleText}>Leaderboard</Text>
+          <Text style={styles.prefSubtitleText} numberOfLines={2}>
+            See your rank and compare your progress with others.
+          </Text>
+        </View>
+        <View style={styles.prefRightCol}>
+          <Feather name="chevron-right" size={18} color="#64748B" />
+        </View>
+      </Pressable>
 
-              <View style={styles.prefRightCol}>
-                {item.value && (
-                  <Text style={styles.prefValueText}>{item.value}</Text>
-                )}
-                <Feather name="chevron-right" size={18} color="#94A3B8" />
-              </View>
-            </Pressable>
-
-            {!isLast && <View style={styles.prefDivider} />}
-          </React.Fragment>
-        );
-      })}
+      {/* Card 3: Submit Complaint */}
+      <Pressable
+        style={({ pressed }) => [styles.actionItemCard, pressed && styles.cardPressed]}
+        onPress={onComplaintPress}
+        accessibilityRole="button"
+        accessibilityLabel="Submit Complaint"
+      >
+        <View style={[styles.actionIconBox, { backgroundColor: '#FEF2F2' }]}>
+          <Feather name="message-square" size={20} color="#EF4444" />
+        </View>
+        <View style={styles.prefTextCol}>
+          <Text style={styles.prefTitleText}>Submit Complaint</Text>
+          <Text style={styles.prefSubtitleText} numberOfLines={2}>
+            Report an issue or share your feedback.
+          </Text>
+        </View>
+        <View style={styles.prefRightCol}>
+          <Feather name="chevron-right" size={18} color="#64748B" />
+        </View>
+      </Pressable>
     </View>
   );
 }
 
 /**
  * 4. Your Current Plan Card
- * Matches Image 1 for Pro Plan (Monthly) and Image 2 for Starter Plan (Daily)
+ * Matches Image 1 for Starter Plan (Daily) and Image 2 for Pro Plan (Monthly)
  */
 function CurrentPlanCard({
   planTier,
@@ -1283,8 +1760,10 @@ function CurrentPlanCard({
   monthlyAllowance,
   isTimeExpired,
   phone,
+  registeredDate,
   renewalDate,
   nextBillingDate,
+  billingCycle,
   cardMasked,
   isUpdatingPayment = false,
   hasTelcoSubscription = false,
@@ -1304,8 +1783,10 @@ function CurrentPlanCard({
   monthlyAllowance: number;
   isTimeExpired: boolean;
   phone: string;
+  registeredDate?: string | null;
   renewalDate: string;
   nextBillingDate?: string | null;
+  billingCycle?: string | null;
   cardMasked?: string;
   isUpdatingPayment?: boolean;
   hasTelcoSubscription?: boolean;
@@ -1320,13 +1801,23 @@ function CurrentPlanCard({
 }) {
   const { isPhone } = useBreakpoint();
   const isPro = planTier === 'pro' || planTier === 'premium' || planTier === 'basic';
-  const planDisplayName = planTier.charAt(0).toUpperCase() + planTier.slice(1) + ' Plan';
-  const nextBillingDateText = formatBillingDate(nextBillingDate, renewalDate || '25 Jun 2026');
+  const planDisplayName = isPro ? 'Pro Plan' : 'Starter Plan';
+  const cycleLabel = isPro
+    ? billingCycle === 'quarterly'
+      ? '3 Months'
+      : billingCycle === 'yearly'
+      ? 'Yearly'
+      : 'Monthly'
+    : 'Daily';
 
-  // Format last 4 digits of card (matches user screenshot: "···· 4582")
+  const registeredDateText = formatBillingDate(registeredDate, '25 Jun 2026');
+  const nextBillingDateText = formatBillingDate(nextBillingDate, '25 Jun 2026');
+  const localMobileFormatted = formatLocalPhoneDigits(phone) || '077 1234567';
+
+  // Format last 4 digits of card (matches user screenshot: "•••• 4582")
   const digitsOnly = (cardMasked || '').replace(/\D/g, '');
-  const last4 = digitsOnly.length >= 4 ? digitsOnly.slice(-4) : (isPro ? '4582' : '');
-  const cardDisplayText = last4 ? `···· ${last4}` : '-';
+  const last4 = digitsOnly.length >= 4 ? digitsOnly.slice(-4) : '4582';
+  const cardDisplayText = `•••• ${last4}`;
 
   return (
     <View style={[styles.currentPlanCardContainer, isPhone && styles.currentPlanCardContainerPhone]}>
@@ -1343,7 +1834,7 @@ function CurrentPlanCard({
           </Text>
         </View>
 
-        {/* Top-Right Badge */}
+        {/* Top-Right White Pill Badge */}
         <View
           style={[
             styles.starterBadgePill,
@@ -1353,7 +1844,7 @@ function CurrentPlanCard({
               ? { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }
               : isPastDue
               ? { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }
-              : isTimeExpired && { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
+              : null,
           ]}
         >
           {isSubscriptionLocked && (
@@ -1368,7 +1859,7 @@ function CurrentPlanCard({
                 ? { color: '#B45309' }
                 : isPastDue
                 ? { color: '#B45309' }
-                : isTimeExpired && { color: '#DC2626' },
+                : null,
             ]}
           >
             {isSubscriptionLocked
@@ -1377,8 +1868,6 @@ function CurrentPlanCard({
               ? `Cancels on ${formatBillingDate(gracePeriodEndDate)}`
               : isPastDue
               ? 'Past Due'
-              : isTimeExpired
-              ? 'Time Expired'
               : planDisplayName}
           </Text>
         </View>
@@ -1412,7 +1901,7 @@ function CurrentPlanCard({
 
       {/* Main Title & Subtitle */}
       <Text style={styles.planMainTitle}>
-        {planDisplayName} {!isSubscriptionLocked ? (isPro ? '· Monthly' : '· 5 Min/Day') : ''}
+        {planDisplayName} ({cycleLabel})
       </Text>
       <Text style={styles.planMainSubtitle}>
         {isSubscriptionLocked
@@ -1421,96 +1910,105 @@ function CurrentPlanCard({
           ? `Your plan remains active until ${formatBillingDate(gracePeriodEndDate)}.`
           : isPastDue
           ? 'Payment retry in progress. Paid features are frozen until payment settles.'
-          : isTimeExpired
-          ? (isPro ? 'You have used all available minutes for this cycle. Get extra time to continue.' : "You've reached your daily limit! Continue your practice with Premium.")
           : 'Perfect for getting started with Maya.'}
       </Text>
 
-      {/* Table Information Rows inside sleek surface container */}
-      <View style={styles.planInfoTable}>
+      {/* 3 Information Rows (Matches Image 1 for Starter & Image 2 for Pro) */}
+      <View style={styles.planInfoRowsWrap}>
         {/* Row 1: Current Plan */}
-        <View style={styles.planInfoRow}>
-          <Text style={styles.planInfoLabel}>Plan</Text>
-          <View style={styles.planInfoValueCol}>
-            <Text style={styles.planInfoValue}>{planDisplayName}</Text>
-          </View>
+        <View style={styles.planInfoCleanRow}>
+          <Text style={styles.planInfoCleanLabel}>Current Plan</Text>
+          <Text style={styles.planInfoCleanValue}>{planDisplayName}</Text>
         </View>
 
-        <View style={styles.planInfoRowDivider} />
-
-        {/* Row 2: Next Billing Date / Status */}
-        <View style={styles.planInfoRow}>
-          <Text style={styles.planInfoLabel}>
-            {isGracePeriodActive
-              ? 'Access Expires'
-              : isSubscriptionLocked
-              ? 'Billing Status'
-              : 'Next Billing Date'}
-          </Text>
-          <View style={styles.planInfoValueCol}>
-            <Text
-              style={[
-                styles.planInfoValue,
-                isSubscriptionLocked && { color: '#DC2626' },
-              ]}
-            >
-              {isGracePeriodActive
-                ? formatBillingDate(gracePeriodEndDate)
-                : isSubscriptionLocked
-                ? 'Cancelled'
-                : nextBillingDateText}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.planInfoRowDivider} />
-
-        {/* Row 3: Payment Method */}
-        <View style={styles.planInfoRow}>
-          <Text style={styles.planInfoLabel}>Payment Method</Text>
-          <View style={styles.paymentMethodRow}>
-            <View style={styles.paymentCardInfo}>
-              <Ionicons
-                name={hasTelcoSubscription ? 'phone-portrait-outline' : 'card-outline'}
-                size={16}
-                color="#2563EB"
-                style={{ marginRight: 6 }}
-              />
-              <Text style={styles.planInfoValue}>
-                {hasTelcoSubscription ? 'Mobile Balance' : cardDisplayText}
+        {isPro ? (
+          <>
+            {/* Row 2 (Pro): Next Billing Date */}
+            <View style={styles.planInfoCleanRow}>
+              <Text style={styles.planInfoCleanLabel}>
+                {isGracePeriodActive
+                  ? 'Access Expires'
+                  : isSubscriptionLocked
+                  ? 'Billing Status'
+                  : 'Next Billing Date'}
+              </Text>
+              <Text
+                style={[
+                  styles.planInfoCleanValue,
+                  isSubscriptionLocked && { color: '#DC2626' },
+                ]}
+              >
+                {isGracePeriodActive
+                  ? formatBillingDate(gracePeriodEndDate)
+                  : isSubscriptionLocked
+                  ? 'Cancelled'
+                  : nextBillingDateText}
               </Text>
             </View>
-            {!hasTelcoSubscription && (
-              <Pressable
-                onPress={onChangePayment}
-                disabled={isUpdatingPayment}
-                hitSlop={8}
-                style={({ pressed }) => [{ marginLeft: 10 }, pressed && { opacity: 0.7 }]}
-                accessibilityRole="button"
-                accessibilityLabel="Change payment card"
-              >
-                {isUpdatingPayment ? (
-                  <ActivityIndicator size="small" color="#2563EB" />
-                ) : (
-                  <Text style={styles.changePaymentText}>Change</Text>
+
+            {/* Row 3 (Pro): Payment Method */}
+            <View style={styles.planInfoCleanRow}>
+              <Text style={styles.planInfoCleanLabel}>Payment Method</Text>
+              <View style={styles.planPaymentRightWrap}>
+                <View style={styles.paymentCardInfo}>
+                  <Ionicons
+                    name={hasTelcoSubscription ? 'phone-portrait-outline' : 'card-outline'}
+                    size={17}
+                    color="#0D4EFD"
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={styles.planInfoCleanValue}>
+                    {hasTelcoSubscription ? 'Mobile Balance' : cardDisplayText}
+                  </Text>
+                </View>
+
+                {!hasTelcoSubscription && (
+                  <Pressable
+                    onPress={onChangePayment}
+                    disabled={isUpdatingPayment}
+                    hitSlop={8}
+                    style={({ pressed }) => [pressed && { opacity: 0.7 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Change payment card"
+                  >
+                    {isUpdatingPayment ? (
+                      <ActivityIndicator size="small" color="#0D4EFD" />
+                    ) : (
+                      <Text style={styles.changePaymentText}>Change</Text>
+                    )}
+                  </Pressable>
                 )}
-              </Pressable>
-            )}
-          </View>
-        </View>
+              </View>
+            </View>
+          </>
+        ) : (
+          <>
+            {/* Row 2 (Starter): Registered Date */}
+            <View style={styles.planInfoCleanRow}>
+              <Text style={styles.planInfoCleanLabel}>Registered Date</Text>
+              <Text style={styles.planInfoCleanValue}>{registeredDateText}</Text>
+            </View>
+
+            {/* Row 3 (Starter): Mobile Number */}
+            <View style={styles.planInfoCleanRow}>
+              <Text style={styles.planInfoCleanLabel}>Mobile Number</Text>
+              <Text style={styles.planInfoCleanValue}>{localMobileFormatted}</Text>
+            </View>
+          </>
+        )}
       </View>
 
       {/* Thin Horizontal Divider Line above button */}
       <View style={styles.planCardDivider} />
 
-      {/* Action Buttons: Reactivate Maya (Single Primary Button) or Upgrade */}
-      <View style={{ gap: 10 }}>
+      {/* Action Buttons */}
+      <View style={styles.planBottomBtnContainer}>
         {isSubscriptionLocked ? (
           <MayaPrimaryButton
             label="Reactivate Maya"
             onPress={onReactivate}
             height={52}
-            borderRadius={16}
+            borderRadius={14}
             showArrow
           />
         ) : (
@@ -1552,13 +2050,9 @@ function CurrentPlanCard({
             >
               <CrownNavIcon color="#FFFFFF" size={19} />
               <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>
-                {isPro
-                  ? planTier === 'premium'
-                    ? 'Manage Subscription Plan'
-                    : 'Upgrade to Premium'
-                  : 'Upgrade to Pro'}
+                Upgrade to Pro
               </Text>
-              <Feather name="chevron-right" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
+              <Feather name="chevron-right" size={18} color="#FFFFFF" style={{ marginLeft: 8 }} />
             </Pressable>
           </>
         )}
@@ -1800,23 +2294,28 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.99 }],
   },
 
-  /* Profile Card */
+  /* Profile Card (Matches Figma Image 3) */
   profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 18,
   },
   avatarInitialsCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: '#2563EB',
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#0D4EFD',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
     flexShrink: 0,
   },
+  profileCardAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
   avatarInitialsText: {
-    fontSize: 18,
+    fontSize: 22,
     color: '#FFFFFF',
     ...fontStyle('outfit', 'bold'),
   },
@@ -1824,96 +2323,101 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  profileNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  profileNameText: {
-    fontSize: 17.5,
-    lineHeight: 23,
-    color: '#0F172A',
-    ...fontStyle('outfit', 'bold'),
-  },
-  editBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#EFF6FF',
-    borderRadius: 10,
-    paddingHorizontal: 11,
-    paddingVertical: 6.5,
-    flexShrink: 0,
-  },
-  editBtnText: {
-    fontSize: 12.5,
-    color: '#2563EB',
-    ...fontStyle('inter', 'semiBold'),
-  },
-  memberSinceText: {
-    fontSize: 12.5,
-    color: '#64748B',
-    marginTop: 2,
-    ...fontStyle('inter', 'regular'),
-  },
-  profileFooterBar: {
+  profileTopHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
     gap: 8,
   },
-  profileBadgesRow: {
+  profileNameInlineRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  profileTopRightLogoutBtn: {
+    paddingVertical: 2,
+    paddingLeft: 8,
+    flexShrink: 0,
+  },
+  profileTopRightLogoutText: {
+    fontSize: 13,
+    color: '#64748B',
+    ...fontStyle('inter', 'semiBold'),
+  },
+  profileNameText: {
+    fontSize: 20,
+    lineHeight: 26,
+    color: '#0F172A',
+    ...fontStyle('outfit', 'bold'),
+  },
+  inlineEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+    flexShrink: 0,
+  },
+  inlineEditBtnText: {
+    fontSize: 13.5,
+    color: '#0D4EFD',
+    ...fontStyle('inter', 'bold'),
+  },
+  memberSinceText: {
+    fontSize: 13.5,
+    color: '#64748B',
+    marginTop: 3,
+    ...fontStyle('inter', 'regular'),
+  },
+  profileInlineActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginTop: 12,
+    gap: 18,
   },
   proPlanPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
     backgroundColor: '#EFF6FF',
-    borderWidth: 1,
-    borderColor: '#DBEAFE',
     borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 4.5,
+    paddingHorizontal: 16,
+    paddingVertical: 6.5,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 8px rgba(13, 78, 253, 0.08)',
+      } as any,
+    }),
   },
   inactivePlanPill: {
     backgroundColor: '#FEF2F2',
-    borderColor: '#FECACA',
-  },
-  planStatusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
   },
   proPlanPillText: {
-    fontSize: 12,
-    color: '#2563EB',
-    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12.5,
+    color: '#0D4EFD',
+    ...fontStyle('inter', 'bold'),
   },
   inactivePlanPillText: {
     color: '#DC2626',
   },
   profileActionLinkBtn: {
     paddingVertical: 4,
-    paddingHorizontal: 4,
   },
   cancelSubText: {
     fontSize: 12.5,
-    color: '#64748B',
-    ...fontStyle('inter', 'semiBold'),
+    color: '#EF4444',
+    ...fontStyle('inter', 'medium'),
   },
   reactivateSubText: {
-    color: '#2563EB',
+    color: '#0D4EFD',
   },
 
-  /* Stats Card */
+  /* Stats Card (Matches Figma Image 3) */
   statsCardPadding: {
-    paddingVertical: 18,
+    paddingVertical: 22,
     paddingHorizontal: 12,
   },
   statsRow: {
@@ -1927,94 +2431,111 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   statNumberText: {
-    fontSize: 17,
-    color: '#10213D',
-    marginTop: 6,
-    marginBottom: 2,
-    ...fontStyle('inter', 'bold'),
+    fontSize: 19,
+    color: '#0F172A',
+    marginTop: 8,
+    marginBottom: 3,
+    ...fontStyle('outfit', 'bold'),
   },
   statLabelText: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#64748B',
     ...fontStyle('inter', 'regular'),
   },
   statDivider: {
     width: 1,
-    height: 40,
+    height: 60,
     backgroundColor: '#E2E8F0',
   },
 
-  /* Preferences List Card */
-  preferenceRow: {
+  /* 3 Separate Action Cards (Explanation Language, Leaderboard, Submit Complaint) */
+  actionCardsStack: {
+    gap: 14,
+  },
+  actionItemCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 8px rgba(15, 23, 42, 0.03)',
+      } as any,
+      default: {
+        elevation: 1,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.03,
+        shadowRadius: 6,
+      },
+    }),
   },
-  prefIconCircle: {
-    width: 38,
-    height: 38,
+  actionIconBox: {
+    width: 44,
+    height: 44,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
+    marginRight: 16,
+    flexShrink: 0,
   },
   prefTextCol: {
     flex: 1,
     marginRight: 10,
   },
   prefTitleText: {
-    fontSize: 14,
-    color: '#10213D',
-    ...fontStyle('inter', 'bold'),
+    fontSize: 15,
+    color: '#0F172A',
+    ...fontStyle('outfit', 'bold'),
   },
   prefSubtitleText: {
-    fontSize: 11.5,
+    fontSize: 12.5,
     color: '#64748B',
-    marginTop: 2,
+    marginTop: 3,
     ...fontStyle('inter', 'regular'),
   },
   prefRightCol: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   prefValueText: {
-    fontSize: 12.5,
+    fontSize: 13,
     color: '#64748B',
-    ...fontStyle('inter', 'medium'),
-  },
-  prefDivider: {
-    height: 1,
-    backgroundColor: '#F1F5F9',
-    marginLeft: 52,
+    ...fontStyle('inter', 'regular'),
   },
 
-  /* Current Plan Card */
+  /* Current Plan Card (Matches Image 1 & Image 2) */
   currentPlanCardContainer: {
     backgroundColor: '#FFFFFF',
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#EDF2F7',
-    paddingHorizontal: 26,
-    paddingTop: 22,
-    paddingBottom: 22,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 28,
+    paddingTop: 24,
+    paddingBottom: 24,
     ...Platform.select({
       web: {
-        boxShadow: '0px 3px 12px 0px #1A366906',
+        backgroundImage: 'linear-gradient(180deg, #F4F8FF 0%, #FFFFFF 42%)',
+        boxShadow: '0px 4px 16px rgba(15, 23, 42, 0.02)',
       } as any,
       default: {
         elevation: 2,
         shadowColor: '#1A3669',
         shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.04,
+        shadowOpacity: 0.02,
         shadowRadius: 12,
       },
     }),
   },
   currentPlanCardContainerPhone: {
-    paddingHorizontal: 16,
-    paddingTop: 18,
-    paddingBottom: 18,
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: 20,
     borderRadius: 18,
   },
   planCrownImg: {
@@ -2025,93 +2546,83 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 16,
     gap: 8,
   },
   planHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 9,
     flexShrink: 1,
     minWidth: 0,
   },
   planHeaderLeftText: {
-    fontSize: 14,
-    color: '#0055FF',
+    fontSize: 14.5,
+    color: '#0D4EFD',
     flexShrink: 1,
     ...fontStyle('inter', 'bold'),
   },
   starterBadgePill: {
-    backgroundColor: '#EFF6FF',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#DBEAFE',
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 3.5,
+    borderColor: '#EEF2FF',
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 8px rgba(15, 23, 42, 0.05)',
+      } as any,
+    }),
   },
   starterBadgeText: {
-    fontSize: 11.5,
-    color: '#2563EB',
-    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12.5,
+    color: '#0D4EFD',
+    ...fontStyle('inter', 'bold'),
   },
   planMainTitle: {
-    fontSize: 21,
-    lineHeight: 27,
+    fontSize: 25,
+    lineHeight: 32,
     color: '#0F172A',
     letterSpacing: -0.4,
-    marginBottom: 4,
+    marginBottom: 6,
     ...fontStyle('outfit', 'bold'),
   },
   planMainSubtitle: {
-    fontSize: 13.5,
+    fontSize: 14,
     lineHeight: 20,
     color: '#64748B',
-    marginBottom: 16,
+    marginBottom: 22,
     ...fontStyle('inter', 'regular'),
   },
-  planInfoTable: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 10,
+  planInfoRowsWrap: {
+    paddingLeft: 18,
+    paddingRight: 8,
+    gap: 15,
   },
-  planInfoRowDivider: {
-    height: 1,
-    backgroundColor: '#EDF2F7',
+  planInfoCleanRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  planInfoRow: {
+  planInfoCleanLabel: {
+    width: 155,
+    fontSize: 14,
+    color: '#64748B',
+    ...fontStyle('inter', 'regular'),
+  },
+  planInfoCleanValue: {
+    fontSize: 14,
+    color: '#0F172A',
+    ...fontStyle('inter', 'bold'),
+  },
+  planPaymentRightWrap: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
-  },
-  planInfoLabel: {
-    fontSize: 13,
-    color: '#64748B',
-    ...fontStyle('inter', 'regular'),
-  },
-  planInfoValueCol: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    flexShrink: 1,
-  },
-  planInfoValue: {
-    fontSize: 13.5,
-    color: '#0F172A',
-    textAlign: 'right',
-    ...fontStyle('inter', 'semiBold'),
-  },
-  paymentMethodRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
   },
   paymentCardInfo: {
     flexDirection: 'row',
@@ -2119,8 +2630,8 @@ const styles = StyleSheet.create({
   },
   changePaymentText: {
     fontSize: 13.5,
-    color: '#2563EB',
-    ...fontStyle('inter', 'semiBold'),
+    color: '#0D4EFD',
+    ...fontStyle('inter', 'medium'),
   },
   pastDueBanner: {
     backgroundColor: '#FFFBEB',
@@ -2147,28 +2658,32 @@ const styles = StyleSheet.create({
   },
   planCardDivider: {
     height: 1,
-    backgroundColor: '#EEF2F6',
+    backgroundColor: '#E2E8F0',
     marginTop: 22,
-    marginBottom: 20,
+    marginBottom: 22,
     width: '100%',
+  },
+  planBottomBtnContainer: {
+    paddingHorizontal: 14,
+    gap: 10,
   },
   planUpgradeBtn: {
     width: '100%',
     height: 52,
-    backgroundColor: '#1E50FF',
-    borderRadius: 16,
+    backgroundColor: '#0D4EFD',
+    borderRadius: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     ...Platform.select({
       web: {
-        boxShadow: '0 8px 24px rgba(30, 80, 255, 0.35)',
+        boxShadow: '0 8px 22px rgba(13, 78, 253, 0.28)',
       } as any,
       default: {
         elevation: 4,
-        shadowColor: '#1E50FF',
+        shadowColor: '#0D4EFD',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.35,
+        shadowOpacity: 0.3,
         shadowRadius: 10,
       },
     }),
@@ -2282,128 +2797,371 @@ const styles = StyleSheet.create({
     color: '#737E94',
   },
 
-  /* Edit Profile Modal Styles */
+  /* Edit Profile Modal Styles (Figma Spec — Balanced for Laptops & Mobile) */
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 16,
   },
   modalCard: {
     width: '100%',
-    maxWidth: 480,
+    maxWidth: 440,
+    maxHeight: '95%',
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    padding: 24,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 20,
     ...Platform.select({
       web: {
-        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+        boxShadow: '0 24px 48px -12px rgba(15, 23, 42, 0.18)',
       } as any,
       default: {
-        elevation: 8,
+        elevation: 10,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.16,
+        shadowRadius: 24,
       },
     }),
+  },
+  modalCardDesktop: {
+    maxWidth: 580,
+    paddingHorizontal: 28,
+    paddingTop: 24,
+    paddingBottom: 22,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 18,
+    alignItems: 'flex-start',
+    marginBottom: 16,
   },
   modalTitle: {
     fontSize: 20,
+    lineHeight: 26,
     color: '#0F172A',
-    ...fontStyle('inter', 'bold'),
+    letterSpacing: -0.3,
+    ...fontStyle('outfit', 'bold'),
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#64748B',
+    marginTop: 3,
+    ...fontStyle('inter', 'regular'),
   },
   modalCloseBtn: {
     padding: 4,
+    marginTop: -2,
   },
   modalBody: {
-    marginBottom: 20,
+    marginBottom: 15,
   },
-  modalInputLabel: {
-    fontSize: 13,
-    color: '#475569',
-    marginBottom: 6,
+  photoUploadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginBottom: 18,
+  },
+  editAvatarOuterRing: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    borderWidth: 3.5,
+    borderColor: '#DBEAFE',
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  editAvatarImage: {
+    width: 67,
+    height: 67,
+    borderRadius: 33.5,
+  },
+  editAvatarFallback: {
+    width: 67,
+    height: 67,
+    borderRadius: 33.5,
+    backgroundColor: '#0D4EFD',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editAvatarFallbackText: {
+    fontSize: 26,
+    color: '#FFFFFF',
+    ...fontStyle('outfit', 'bold'),
+  },
+  editAvatarBadgeBtn: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#0D4EFD',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoUploadActionCol: {
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    gap: 5,
+  },
+  changePhotoBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#0D4EFD',
+    backgroundColor: '#FFFFFF',
+  },
+  changePhotoBtnText: {
+    fontSize: 12.5,
+    color: '#0D4EFD',
     ...fontStyle('inter', 'semiBold'),
   },
+  photoFormatHintText: {
+    fontSize: 11.5,
+    color: '#64748B',
+    ...fontStyle('inter', 'regular'),
+  },
+  modalInputLabel: {
+    fontSize: 12.5,
+    color: '#0F172A',
+    marginBottom: 6,
+    ...fontStyle('inter', 'bold'),
+  },
   modalTextInput: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#CBD5E1',
     borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 15,
+    paddingHorizontal: 13,
+    height: 41,
+    fontSize: 13.5,
     color: '#0F172A',
     ...fontStyle('inter', 'regular'),
+    ...Platform.select({
+      web: {
+        outlineStyle: 'none',
+      } as any,
+      default: {},
+    }),
   },
-  chipRow: {
+  contactFieldsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    gap: 14,
+    marginTop: 14,
   },
-  modalChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
+  contactFieldsRowMobile: {
+    flexDirection: 'column',
+    gap: 12,
+  },
+  contactFieldCol: {
+    flex: 1,
+  },
+  phoneInputComposite: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 41,
+    borderRadius: 10,
     borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+  },
+  phoneInputCompositeDisabled: {
+    backgroundColor: '#F8FAFC',
     borderColor: '#E2E8F0',
+    opacity: 0.78,
+    ...Platform.select({
+      web: {
+        cursor: 'not-allowed',
+      } as any,
+      default: {},
+    }),
+  },
+  phoneCountryPrefix: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
+    height: '100%',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
     backgroundColor: '#F8FAFC',
   },
-  modalChipActive: {
-    borderColor: '#2563EB',
-    backgroundColor: '#EFF6FF',
-  },
-  modalChipText: {
-    fontSize: 13.5,
-    color: '#475569',
-    ...fontStyle('inter', 'medium'),
-  },
-  modalChipTextActive: {
-    color: '#2563EB',
+  phoneCountryCodeText: {
+    fontSize: 13,
+    color: '#0F172A',
     ...fontStyle('inter', 'bold'),
   },
-  modalSyncNotice: {
+  phoneDigitsInput: {
+    flex: 1,
+    height: '100%',
+    paddingHorizontal: 11,
+    fontSize: 13.5,
+    color: '#0F172A',
+    ...fontStyle('inter', 'regular'),
+    ...Platform.select({
+      web: {
+        outlineStyle: 'none',
+      } as any,
+      default: {},
+    }),
+  },
+  phoneDigitsInputDisabled: {
+    color: '#64748B',
+    ...Platform.select({
+      web: {
+        cursor: 'not-allowed',
+      } as any,
+      default: {},
+    }),
+  },
+  modalSectionDivider: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 16,
+  },
+  levelSectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  levelSectionTitle: {
+    fontSize: 14.5,
+    color: '#0F172A',
+    ...fontStyle('outfit', 'semiBold'),
+  },
+  levelSectionSubtitle: {
     fontSize: 12,
-    color: '#94A3B8',
-    marginTop: 18,
-    lineHeight: 17,
+    color: '#64748B',
+    marginTop: 3,
+    marginBottom: 11,
+    ...fontStyle('inter', 'regular'),
+  },
+  levelCardsGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  levelCardsGridMobile: {
+    flexWrap: 'wrap',
+  },
+  levelCardItem: {
+    flex: 1,
+    minWidth: 112,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1.2,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 9,
+    paddingTop: 12,
+    paddingBottom: 11,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  levelCardItemMobile: {
+    minWidth: '47%',
+    flexBasis: '47%',
+  },
+  levelCardItemSelected: {
+    borderColor: '#0D4EFD',
+    backgroundColor: '#F5F9FF',
+  },
+  levelRadioCircle: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
+    borderWidth: 1.2,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+  },
+  levelRadioCircleSelected: {
+    borderColor: '#0D4EFD',
+    backgroundColor: '#0D4EFD',
+  },
+  levelBarsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 4.5,
+    height: 35,
+    marginTop: 5,
+    marginBottom: 9,
+  },
+  levelSignalBar: {
+    width: 7,
+    borderRadius: 3.5,
+  },
+  levelCardTitle: {
+    fontSize: 12,
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 3,
+    ...fontStyle('inter', 'bold'),
+  },
+  levelCardSubtitle: {
+    fontSize: 10.5,
+    lineHeight: 13.5,
+    color: '#64748B',
+    textAlign: 'center',
     ...fontStyle('inter', 'regular'),
   },
   modalFooter: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-    paddingTop: 12,
+    gap: 12,
+    paddingTop: 13,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
   },
   modalCancelBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#F1F5F9',
+    flex: 1,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalCancelBtnText: {
-    fontSize: 14,
+    fontSize: 13.5,
     color: '#475569',
     ...fontStyle('inter', 'semiBold'),
   },
   modalSaveBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#2563EB',
-    minWidth: 120,
+    flex: 1,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#0D4EFD',
     alignItems: 'center',
     justifyContent: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 6px 16px rgba(13, 78, 253, 0.25)',
+      } as any,
+      default: {
+        elevation: 3,
+        shadowColor: '#0D4EFD',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 8,
+      },
+    }),
   },
   modalSaveBtnText: {
-    fontSize: 14,
+    fontSize: 13.5,
     color: '#FFFFFF',
     ...fontStyle('inter', 'bold'),
   },

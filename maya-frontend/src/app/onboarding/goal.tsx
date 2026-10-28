@@ -265,7 +265,7 @@ export default function GoalScreen() {
                     {/* Blue Checkmark Indicator when selected */}
                     {isSelected && (
                       <View style={styles.checkmarkWrapper}>
-                        <Ionicons name="checkmark-circle" size={24} color="#2563EB" />
+                        <Ionicons name="checkmark-circle" size={24} color="#0D4EFD" />
                       </View>
                     )}
                   </Pressable>
@@ -356,14 +356,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
   },
   cardSelected: {
-    borderColor: '#2563EB',
+    borderColor: '#0D4EFD',
     backgroundColor: '#EFF6FF',
     ...Platform.select({
       web: {
-        boxShadow: '0 6px 20px rgba(37, 99, 235, 0.16)',
+        boxShadow: '0 6px 20px rgba(13, 78, 253, 0.16)',
       } as any,
       default: {
-        shadowColor: '#2563EB',
+        shadowColor: '#0D4EFD',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.16,
         shadowRadius: 14,
@@ -398,7 +398,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   cardTitleSelected: {
-    color: '#1D4ED8',
+    color: '#0D4EFD',
   },
   cardSubtitle: {
     ...fontStyle('inter', 'regular'),

@@ -765,6 +765,303 @@ INSTRUCTIONS:
     return [];
   }
 
+  /**
+   * Computes leaderboard rankings across all learners based on XP earned and practice minutes consumed.
+   */
+  async getUserRankAndLeaderboard(userId: string): Promise<{
+    rank: number | null;
+    totalParticipants: number;
+    userXp: number;
+    userMinutesConsumed: number;
+  }> {
+    if (!this.supabase) {
+      return { rank: null, totalParticipants: 1, userXp: 0, userMinutesConsumed: 0 };
+    }
+
+    try {
+      const [
+        { data: profiles },
+        { data: progressRows },
+        { data: sessionRows },
+      ] = await Promise.all([
+        this.supabase
+          .from('profiles')
+          .select('id, display_name, monthly_minutes_allowance, add_on_minutes_balance, minutes_balance, created_at'),
+        this.supabase
+          .from('user_roadmap_progress')
+          .select('user_id, roadmap_level_id, level_number, status, is_passed, xp_earned'),
+        this.supabase
+          .from('sessions')
+          .select('user_id, duration_seconds, status, roadmap_level_id'),
+      ]);
+
+      const allProfiles = Array.isArray(profiles) ? profiles : [];
+      if (allProfiles.length === 0) {
+        return { rank: 1, totalParticipants: 1, userXp: 0, userMinutesConsumed: 0 };
+      }
+
+      const xpByUser = new Map<string, number>();
+      const completedLevelsByUser = new Map<string, Set<string>>();
+
+      if (Array.isArray(progressRows)) {
+        for (const row of progressRows) {
+          if (!row.user_id) continue;
+          if (row.status === 'completed' || row.is_passed) {
+            const key = row.roadmap_level_id || String(row.level_number || '');
+            let set = completedLevelsByUser.get(row.user_id);
+            if (!set) {
+              set = new Set<string>();
+              completedLevelsByUser.set(row.user_id, set);
+            }
+            if (!set.has(key)) {
+              set.add(key);
+              xpByUser.set(row.user_id, (xpByUser.get(row.user_id) || 0) + (Number(row.xp_earned) || 100));
+            }
+          }
+        }
+      }
+
+      const sessionSecondsByUser = new Map<string, number>();
+      if (Array.isArray(sessionRows)) {
+        for (const s of sessionRows) {
+          if (!s.user_id) continue;
+          sessionSecondsByUser.set(
+            s.user_id,
+            (sessionSecondsByUser.get(s.user_id) || 0) + (Number(s.duration_seconds) || 0),
+          );
+          if (s.status === 'completed' && s.roadmap_level_id) {
+            let set = completedLevelsByUser.get(s.user_id);
+            if (!set) {
+              set = new Set<string>();
+              completedLevelsByUser.set(s.user_id, set);
+            }
+            if (!set.has(s.roadmap_level_id)) {
+              set.add(s.roadmap_level_id);
+              xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + 100);
+            }
+          }
+        }
+      }
+
+      const ranked = allProfiles.map((p: any) => {
+        const xp = xpByUser.get(p.id) || 0;
+        const sessionMinutes = Math.round((sessionSecondsByUser.get(p.id) || 0) / 60);
+        const allowance = Number(p.monthly_minutes_allowance ?? 5) + Number(p.add_on_minutes_balance ?? 0);
+        const balance = Number(p.minutes_balance ?? allowance);
+        const quotaMinutesUsed = Math.max(0, allowance - balance);
+        const minutesConsumed = Math.max(sessionMinutes, quotaMinutesUsed);
+        // Combined score weights both XP and minutes consumed
+        const compositeScore = xp + minutesConsumed * 10;
+        return {
+          userId: p.id,
+          xp,
+          minutesConsumed,
+          compositeScore,
+          createdAt: p.created_at || '',
+        };
+      });
+
+      ranked.sort((a, b) => {
+        if (b.compositeScore !== a.compositeScore) return b.compositeScore - a.compositeScore;
+        if (b.xp !== a.xp) return b.xp - a.xp;
+        if (b.minutesConsumed !== a.minutesConsumed) return b.minutesConsumed - a.minutesConsumed;
+        return a.createdAt.localeCompare(b.createdAt);
+      });
+
+      const activeRanked = ranked.filter((r) => r.compositeScore > 0);
+      const activeIdx = activeRanked.findIndex((r) => r.userId === userId);
+      const userEntry = ranked.find((r) => r.userId === userId) || null;
+
+      return {
+        rank: activeIdx >= 0 ? activeIdx + 1 : null,
+        totalParticipants: ranked.length,
+        userXp: userEntry?.xp || 0,
+        userMinutesConsumed: userEntry?.minutesConsumed || 0,
+      };
+    } catch (err: any) {
+      this.logger.debug(`getUserRankAndLeaderboard error: ${err?.message}`);
+      return { rank: null, totalParticipants: 1, userXp: 0, userMinutesConsumed: 0 };
+    }
+  }
+
+  /**
+   * Returns full ranked leaderboard entries for Weekly, Monthly, or All-Time views.
+   */
+  async getFullLeaderboard(
+    userId?: string,
+    period: 'weekly' | 'monthly' | 'all_time' = 'weekly',
+  ) {
+    const sb = this.supabase;
+    if (!sb) {
+      return { entries: [], myEntry: null };
+    }
+
+    try {
+      const now = Date.now();
+      const cutoffMs =
+        period === 'weekly'
+          ? now - 7 * 24 * 60 * 60 * 1000
+          : period === 'monthly'
+          ? now - 30 * 24 * 60 * 60 * 1000
+          : 0;
+
+      const [
+        profilesRes,
+        { data: progressRows },
+        { data: sessionRows },
+        { data: extrasRow },
+      ] = await Promise.all([
+        sb.from('profiles').select('*'),
+        sb
+          .from('user_roadmap_progress')
+          .select('user_id, roadmap_level_id, level_number, status, is_passed, xp_earned, completed_at, created_at'),
+        sb
+          .from('sessions')
+          .select('user_id, duration_seconds, status, roadmap_level_id, created_at'),
+        sb
+          .from('roadmap_levels')
+          .select('canonical_content')
+          .eq('id', 'sys_user_profile_extras')
+          .maybeSingle(),
+      ]);
+
+      let extrasMap: Record<string, { email?: string; avatarUrl?: string | null }> = {};
+      if (extrasRow?.canonical_content) {
+        try {
+          extrasMap = JSON.parse(extrasRow.canonical_content) || {};
+        } catch {}
+      }
+
+      const allProfiles = Array.isArray(profilesRes.data) ? profilesRes.data : [];
+
+      const xpByUser = new Map<string, number>();
+      const allTimeXpByUser = new Map<string, number>();
+      const completedLevelsByUser = new Map<string, Set<string>>();
+      const allTimeLevelsByUser = new Map<string, Set<string>>();
+
+      if (Array.isArray(progressRows)) {
+        for (const row of progressRows) {
+          if (!row.user_id) continue;
+          if (row.status === 'completed' || row.is_passed) {
+            const key = row.roadmap_level_id || String(row.level_number || '');
+            const earned = Number(row.xp_earned) || 100;
+
+            let allSet = allTimeLevelsByUser.get(row.user_id);
+            if (!allSet) {
+              allSet = new Set<string>();
+              allTimeLevelsByUser.set(row.user_id, allSet);
+            }
+            if (!allSet.has(key)) {
+              allSet.add(key);
+              allTimeXpByUser.set(row.user_id, (allTimeXpByUser.get(row.user_id) || 0) + earned);
+            }
+
+            const ts = new Date(row.completed_at || row.created_at || 0).getTime();
+            if (cutoffMs === 0 || ts >= cutoffMs) {
+              let set = completedLevelsByUser.get(row.user_id);
+              if (!set) {
+                set = new Set<string>();
+                completedLevelsByUser.set(row.user_id, set);
+              }
+              if (!set.has(key)) {
+                set.add(key);
+                xpByUser.set(row.user_id, (xpByUser.get(row.user_id) || 0) + earned);
+              }
+            }
+          }
+        }
+      }
+
+      const sessionSecondsByUser = new Map<string, number>();
+      if (Array.isArray(sessionRows)) {
+        for (const s of sessionRows) {
+          if (!s.user_id) continue;
+          const ts = new Date(s.created_at || 0).getTime();
+          if (cutoffMs === 0 || ts >= cutoffMs) {
+            sessionSecondsByUser.set(
+              s.user_id,
+              (sessionSecondsByUser.get(s.user_id) || 0) + (Number(s.duration_seconds) || 0),
+            );
+            if (s.status === 'completed' && s.roadmap_level_id) {
+              let set = completedLevelsByUser.get(s.user_id);
+              if (!set) {
+                set = new Set<string>();
+                completedLevelsByUser.set(s.user_id, set);
+              }
+              if (!set.has(s.roadmap_level_id)) {
+                set.add(s.roadmap_level_id);
+                xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + 100);
+              }
+            }
+          }
+        }
+      }
+
+      const entries = allProfiles.map((p: any) => {
+        const periodXp = xpByUser.get(p.id) || 0;
+        const allTimeXp = allTimeXpByUser.get(p.id) || periodXp;
+        const sessionMinutes = Math.round((sessionSecondsByUser.get(p.id) || 0) / 60);
+        const allowance = Number(p.monthly_minutes_allowance ?? 5) + Number(p.add_on_minutes_balance ?? 0);
+        const balance = Number(p.minutes_balance ?? allowance);
+        const quotaMinutesUsed = Math.max(0, allowance - balance);
+        const minutesConsumed = Math.max(sessionMinutes, quotaMinutesUsed);
+        const compositeScore = periodXp + minutesConsumed * 10;
+        const displayXp = periodXp + minutesConsumed * 10;
+        const levelNumber = Math.max(1, Math.floor(Math.max(allTimeXp, periodXp) / 500) + 1);
+        const extra = extrasMap[p.id] || {};
+        const avatarUrl = (p as any).avatar_url || extra.avatarUrl || null;
+        const rawName = (p.display_name || '').trim();
+        const fallbackPhone = p.phone_number
+          ? `Learner ••${String(p.phone_number).slice(-4)}`
+          : 'Learner';
+
+        return {
+          userId: p.id,
+          displayName: rawName || fallbackPhone,
+          avatarUrl,
+          levelNumber,
+          xp: displayXp,
+          minutesConsumed,
+          compositeScore,
+          createdAt: p.created_at || '',
+          isCurrentUser: p.id === userId,
+        };
+      });
+
+      entries.sort((a, b) => {
+        if (b.compositeScore !== a.compositeScore) return b.compositeScore - a.compositeScore;
+        if (b.xp !== a.xp) return b.xp - a.xp;
+        if (b.minutesConsumed !== a.minutesConsumed) return b.minutesConsumed - a.minutesConsumed;
+        return a.createdAt.localeCompare(b.createdAt);
+      });
+
+      let activeCounter = 0;
+      const rankedEntries = entries.map((entry) => {
+        const hasActivity = entry.compositeScore > 0 || entry.xp > 0 || entry.minutesConsumed > 0;
+        const assignedRank = hasActivity ? ++activeCounter : null;
+        return {
+          rank: assignedRank,
+          userId: entry.userId,
+          displayName: entry.displayName,
+          avatarUrl: entry.avatarUrl,
+          levelNumber: entry.levelNumber,
+          xp: entry.xp,
+          minutesConsumed: entry.minutesConsumed,
+          isCurrentUser: entry.isCurrentUser,
+        };
+      });
+
+      const myEntry = rankedEntries.find((r) => r.userId === userId) || null;
+      return {
+        entries: rankedEntries,
+        myEntry,
+      };
+    } catch (err: any) {
+      this.logger.debug(`getFullLeaderboard error: ${err?.message}`);
+      return { entries: [], myEntry: null };
+    }
+  }
+
   async recordUserProgress(
     userId: string,
     dto: RecordUserRoadmapProgressDto,

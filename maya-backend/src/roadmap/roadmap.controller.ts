@@ -232,7 +232,10 @@ export class RoadmapController {
       throw new UnauthorizedException('Authentication required to view roadmap progress');
     }
 
-    const progress = await this.roadmapService.getUserProgress(userId);
+    const [progress, leaderboardData] = await Promise.all([
+      this.roadmapService.getUserProgress(userId),
+      this.authService.getPublicLeaderboard(userId, 'all_time'),
+    ]);
     const completedItems = progress.filter((p) => p.status === 'completed' || p.isPassed);
     return {
       userId,
@@ -240,7 +243,33 @@ export class RoadmapController {
       completedLevelIds: completedItems.map((p) => p.roadmapLevelId),
       completedLevelNumbers: completedItems.map((p) => p.levelNumber),
       totalCompleted: completedItems.length,
+      rank: leaderboardData.myEntry?.rank ?? null,
+      totalParticipants: leaderboardData.totalParticipants || 1,
+      minutesConsumed: leaderboardData.myEntry?.minutesConsumed ?? 0,
     };
+  }
+
+  // 9b. Leaderboard: Get ranked learners by XP and practice minutes consumed
+  @Get('roadmap/leaderboard')
+  async getLeaderboard(
+    @Headers('authorization') authHeader?: string,
+    @Query('userId') queryUserId?: string,
+    @Query('period') period?: 'weekly' | 'monthly' | 'all_time',
+  ) {
+    let userId = queryUserId;
+    if (authHeader) {
+      try {
+        userId = this.authService.validateAuthToken(authHeader);
+      } catch {}
+    }
+    if (!userId) {
+      const activeProf = await this.authService.getActiveProfile();
+      userId = activeProf?.id;
+    }
+
+    const validPeriod =
+      period === 'monthly' || period === 'all_time' ? period : 'weekly';
+    return this.authService.getPublicLeaderboard(userId, validPeriod);
   }
 
   // 10. User Roadmap Progress: Record a completed level

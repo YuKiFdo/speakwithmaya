@@ -183,7 +183,7 @@ export function MobileTopBar({
         isPro={resolvedIsPro}
         planTier={resolvedPlanTier}
         isInactive={resolvedIsInactive}
-        avatarSource={avatarSource ?? require('@/assets/images/maya-avatar.png')}
+        avatarSource={avatarSource}
         onPress={handleLevelBadgePress}
       />
 

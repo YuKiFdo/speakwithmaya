@@ -1670,7 +1670,6 @@ export default function HistoryScreen() {
                 isPro={isPro}
                 planTier={stats.planTier}
                 isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
-                avatarSource={require('@/assets/images/maya-avatar.png')}
                 onPress={() => setActivePopup('level-up')}
               />
             </View>

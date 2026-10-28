@@ -188,6 +188,7 @@ export function useRouteGuard() {
       segments[0] === 'call' ||
       segments[0] === 'explore' ||
       segments[0] === 'upgrade' ||
+      segments[0] === 'leaderboard' ||
       segments[0] === 'history';
 
     if (isProtected) {

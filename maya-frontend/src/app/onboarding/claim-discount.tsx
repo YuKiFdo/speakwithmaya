@@ -557,13 +557,13 @@ const styles = StyleSheet.create({
   discountNumber: {
     fontSize: 58,
     lineHeight: 64,
-    color: '#2563EB',
+    color: '#0D4EFD',
     letterSpacing: -2,
     ...fontStyle('inter', 'extraBold'),
   },
   discountUnit: {
     fontSize: 24,
-    color: '#2563EB',
+    color: '#0D4EFD',
     letterSpacing: -0.5,
     marginLeft: 6,
     marginTop: 24,

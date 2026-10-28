@@ -505,7 +505,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.84,
   },
   titleHighlight: {
-    color: '#2563EB',
+    color: '#0D4EFD',
     ...fontStyle('inter', 'extraBold'),
   },
   subtitle: {
@@ -565,7 +565,7 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'extraBold'),
     fontSize: 28,
     lineHeight: 38,
-    color: '#2563EB',
+    color: '#0D4EFD',
     textAlign: 'center',
     letterSpacing: -0.84,
   },

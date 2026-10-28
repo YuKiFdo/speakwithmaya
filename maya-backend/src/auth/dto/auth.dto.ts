@@ -83,6 +83,18 @@ export class SavePreferencesDto {
 
   @IsOptional()
   @IsString()
+  phoneNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
+
+  @IsOptional()
+  @IsString()
   @IsIn(['sinhala', 'tamil', 'english'])
   nativeLanguage?: string;
 
@@ -203,6 +215,18 @@ export class AdminUpdateUserDto {
   @IsOptional()
   @IsString()
   displayName?: string;
+
+  @IsOptional()
+  @IsString()
+  phoneNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
 
   @IsOptional()
   @IsString()
@@ -370,5 +394,18 @@ export class CreateTestAccountDto {
   @Max(99999)
   minutesBalance?: number;
 }
+
+export class SubmitComplaintDto {
+  @IsString()
+  @IsNotEmpty()
+  message!: string;
+}
+
+export class UpdateComplaintStatusDto {
+  @IsString()
+  @IsIn(['open', 'resolved'])
+  status!: 'open' | 'resolved';
+}
+
 
 

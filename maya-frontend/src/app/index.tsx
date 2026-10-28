@@ -530,7 +530,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   highlightName: {
-    color: '#2563EB',
+    color: '#0D4EFD',
   },
   subtext: {
     ...fontStyle('inter', 'regular'),

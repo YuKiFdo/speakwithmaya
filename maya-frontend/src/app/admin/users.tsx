@@ -9,6 +9,7 @@ import {
   Modal,
   ActivityIndicator,
   Platform,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
+import { AdminSessionTranscriptAndPlayer } from '@/components/admin/AdminSessionTranscriptAndPlayer';
 import { mayaAlert } from '@/components/ui/alert-modal';
 
 export interface TestAccountItem {
@@ -29,10 +31,27 @@ export interface TestAccountItem {
   createdAt?: string;
 }
 
+export interface AdminComplaintItem {
+  id: string;
+  userId?: string;
+  displayName: string;
+  phoneNumber: string;
+  email?: string | null;
+  avatarUrl?: string | null;
+  planTier: string;
+  level?: string;
+  message: string;
+  status: 'open' | 'resolved';
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface UserSummaryItem {
   id: string;
   phoneNumber: string;
   displayName: string;
+  email?: string | null;
+  avatarUrl?: string | null;
   level: string;
   goal: string;
   challenge: string;
@@ -90,6 +109,19 @@ export interface UserPersonalizedDetail {
     created_at: string;
     user_rating?: number;
     user_feedback?: string;
+    turns?: Array<{
+      id?: string;
+      role: 'user' | 'model';
+      text: string;
+      audioUrl?: string | null;
+      timestamp?: string;
+    }>;
+    corrections?: Array<{
+      id?: string;
+      student_said?: string;
+      more_natural?: string;
+      explanation?: string;
+    }>;
   }>;
   corrections: Array<{
     id: string;
@@ -153,15 +185,67 @@ export default function AdminUsersScreen() {
   const [userDetail, setUserDetail] = useState<UserPersonalizedDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [detailTab, setDetailTab] = useState<'overview' | 'sessions' | 'corrections' | 'roadmap' | 'orders'>('overview');
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
 
-  // Modal: Edit User Quota/Profile
-  const [editingUser, setEditingUser] = useState<UserSummaryItem | null>(null);
-  const [editMinutesBalance, setEditMinutesBalance] = useState('');
-  const [editAllowance, setEditAllowance] = useState('');
-  const [editPlanTier, setEditPlanTier] = useState<'starter' | 'basic' | 'pro' | 'premium'>('starter');
-  const [editPlanStatus, setEditPlanStatus] = useState<'active' | 'trialing' | 'past_due' | 'canceled'>('active');
-  const [editGoal, setEditGoal] = useState('');
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  // Complaints & Feedback
+  const [complaints, setComplaints] = useState<AdminComplaintItem[]>([]);
+  const [complaintsStats, setComplaintsStats] = useState({ total: 0, open: 0, resolved: 0 });
+  const [isLoadingComplaints, setIsLoadingComplaints] = useState(false);
+
+  const fetchComplaints = async () => {
+    setIsLoadingComplaints(true);
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/admin/complaints`);
+      if (res.ok) {
+        const data = await res.json();
+        setComplaints(Array.isArray(data.complaints) ? data.complaints : []);
+        if (data.stats) {
+          setComplaintsStats(data.stats);
+        }
+      }
+    } catch (err) {
+      console.warn('[AdminUsers] Failed to fetch complaints:', err);
+    } finally {
+      setIsLoadingComplaints(false);
+    }
+  };
+
+  const handleToggleComplaintStatus = async (item: AdminComplaintItem) => {
+    const nextStatus = item.status === 'resolved' ? 'open' : 'resolved';
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/admin/complaints/${item.id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (res.ok) {
+        fetchComplaints();
+      }
+    } catch {}
+  };
+
+  const handleDeleteComplaint = async (item: AdminComplaintItem) => {
+    const confirmed = await mayaAlert.confirm({
+      title: 'Delete Complaint',
+      message: `Remove complaint from ${item.displayName}?`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'warning',
+      isDestructive: true,
+    });
+    if (!confirmed) return;
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/admin/complaints/${item.id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        fetchComplaints();
+      }
+    } catch {}
+  };
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -318,11 +402,9 @@ export default function AdminUsersScreen() {
         if (selectedUserId === u.id) {
           closeUserDetail();
         }
-        if (editingUser?.id === u.id) {
-          closeEditUser();
-        }
         fetchUsers();
         fetchTestAccounts();
+        fetchComplaints();
       } else {
         const errJson = await res.json().catch(() => ({}));
         await mayaAlert.error(errJson.message || 'Failed to delete user profile.', 'Error');
@@ -361,6 +443,7 @@ export default function AdminUsersScreen() {
   useEffect(() => {
     fetchUsers();
     fetchTestAccounts();
+    fetchComplaints();
   }, [selectedTier, selectedLevel, selectedStatus]);
 
   // Debounced search trigger
@@ -397,57 +480,7 @@ export default function AdminUsersScreen() {
   const closeUserDetail = () => {
     setSelectedUserId(null);
     setUserDetail(null);
-  };
-
-  // Edit User Modal
-  const openEditUser = (u: UserSummaryItem) => {
-    setEditingUser(u);
-    setEditMinutesBalance(String(u.minutesBalance ?? 0));
-    setEditAllowance(String(u.monthlyMinutesAllowance ?? 10));
-    setEditPlanTier(u.planTier);
-    setEditPlanStatus(u.planStatus);
-    setEditGoal(u.goal || '');
-  };
-
-  const closeEditUser = () => {
-    setEditingUser(null);
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editingUser) return;
-    setIsSavingEdit(true);
-    try {
-      const baseUrl = getBackendBaseUrl();
-      const payload = {
-        minutesBalance: parseInt(editMinutesBalance, 10) || 0,
-        monthlyMinutesAllowance: parseInt(editAllowance, 10) || 10,
-        planTier: editPlanTier,
-        planStatus: editPlanStatus,
-        goal: editGoal,
-      };
-
-      const res = await fetch(`${baseUrl}/v1/admin/users/${editingUser.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        await mayaAlert.success('User updated successfully!', 'Saved');
-        closeEditUser();
-        fetchUsers();
-        if (selectedUserId === editingUser.id) {
-          openUserDetail(editingUser.id);
-        }
-      } else {
-        const errJson = await res.json().catch(() => ({}));
-        await mayaAlert.error(errJson.message || 'Failed to update user profile.', 'Error');
-      }
-    } catch (err: any) {
-      await mayaAlert.error(err.message || 'Network error updating user.', 'Error');
-    } finally {
-      setIsSavingEdit(false);
-    }
+    setExpandedSessionId(null);
   };
 
   // Pagination calculation
@@ -527,6 +560,7 @@ export default function AdminUsersScreen() {
                   onPress={() => {
                     fetchUsers();
                     fetchTestAccounts();
+                    fetchComplaints();
                   }}
                   style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.8 }]}
                 >
@@ -745,7 +779,15 @@ export default function AdminUsersScreen() {
                         {/* Student Name & Phone */}
                         <View style={[styles.tableCol, { flex: 2, flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
                           <View style={styles.userAvatar}>
-                            <Text style={styles.avatarText}>{getInitials(u.displayName, u.phoneNumber)}</Text>
+                            {u.avatarUrl ? (
+                              <Image
+                                source={{ uri: u.avatarUrl }}
+                                style={styles.userAvatarImage}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <Text style={styles.avatarText}>{getInitials(u.displayName, u.phoneNumber)}</Text>
+                            )}
                           </View>
                           <View style={{ flex: 1 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -758,7 +800,10 @@ export default function AdminUsersScreen() {
                                 </View>
                               )}
                             </View>
-                            <Text style={styles.userPhone}>{u.phoneNumber || 'No phone'}</Text>
+                            <Text style={styles.userPhone} numberOfLines={1}>
+                              {u.phoneNumber || 'No phone'}
+                              {u.email ? ` • ${u.email}` : ''}
+                            </Text>
                           </View>
                         </View>
 
@@ -826,14 +871,6 @@ export default function AdminUsersScreen() {
                           </Pressable>
 
                           <Pressable
-                            onPress={() => openEditUser(u)}
-                            style={({ pressed }) => [styles.actionBtn, styles.editBtn, pressed && { opacity: 0.8 }]}
-                          >
-                            <Feather name="edit-2" size={13} color="#475569" />
-                            <Text style={styles.editBtnText}>Edit</Text>
-                          </Pressable>
-
-                          <Pressable
                             onPress={() => handleDeleteUser(u)}
                             style={({ pressed }) => [
                               styles.actionBtn,
@@ -875,6 +912,170 @@ export default function AdminUsersScreen() {
                 </View>
               )}
             </View>
+
+            {/* Student Complaints & Feedback Table Card */}
+            <View style={[styles.tableCard, { marginTop: 22 }]}>
+              <View style={[styles.tableCardHeader, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+                <View>
+                  <Text style={styles.tableTitle}>Student Complaints & Feedback</Text>
+                  <Text style={styles.tableSubtitle}>
+                    {complaintsStats.total} total submissions ({complaintsStats.open} open, {complaintsStats.resolved} resolved)
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={fetchComplaints}
+                  style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.8 }]}
+                >
+                  <Feather name="refresh-cw" size={13} color="#0d9488" />
+                  <Text style={styles.refreshBtnText}>Refresh</Text>
+                </Pressable>
+              </View>
+
+              {isLoadingComplaints ? (
+                <AdminTableSkeleton rows={3} />
+              ) : complaints.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Feather name="message-square" size={32} color="#94a3b8" />
+                  <Text style={styles.emptyTitle}>No complaints submitted yet</Text>
+                  <Text style={styles.emptySubtitle}>
+                    Complaints and feedback submitted by students from the Account screen will appear here.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.table}>
+                  <View style={styles.tableHeaderRow}>
+                    <Text style={[styles.tableColHeader, { flex: 1.8 }]}>STUDENT</Text>
+                    <Text style={[styles.tableColHeader, { flex: 0.9 }]}>PLAN</Text>
+                    <Text style={[styles.tableColHeader, { flex: 2.8 }]}>COMPLAINT / FEEDBACK MESSAGE</Text>
+                    <Text style={[styles.tableColHeader, { flex: 1.1 }]}>SUBMITTED</Text>
+                    <Text style={[styles.tableColHeader, { flex: 0.9 }]}>STATUS</Text>
+                    <Text style={[styles.tableColHeader, { flex: 1.2, textAlign: 'right' }]}>ACTIONS</Text>
+                  </View>
+
+                  {complaints.map((c) => {
+                    const tierStyle = getTierColor(c.planTier);
+                    const isResolved = c.status === 'resolved';
+                    return (
+                      <View key={c.id} style={styles.tableRow}>
+                        {/* Student */}
+                        <View style={[styles.tableCol, { flex: 1.8, flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
+                          <View style={styles.userAvatar}>
+                            {c.avatarUrl ? (
+                              <Image
+                                source={{ uri: c.avatarUrl }}
+                                style={styles.userAvatarImage}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <Text style={styles.avatarText}>{getInitials(c.displayName, c.phoneNumber)}</Text>
+                            )}
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.userName} numberOfLines={1}>
+                              {c.displayName || 'Anonymous Student'}
+                            </Text>
+                            <Text style={styles.userPhone} numberOfLines={1}>
+                              {c.phoneNumber || 'No phone'}
+                              {c.email ? ` • ${c.email}` : ''}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Plan */}
+                        <View style={[styles.tableCol, { flex: 0.9 }]}>
+                          <View
+                            style={[
+                              styles.planBadge,
+                              { backgroundColor: tierStyle.bg, borderColor: tierStyle.border },
+                            ]}
+                          >
+                            <Text style={[styles.planBadgeText, { color: tierStyle.text }]}>
+                              {(c.planTier || 'starter').toUpperCase()}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Complaint Message */}
+                        <View style={[styles.tableCol, { flex: 2.8, paddingRight: 12 }]}>
+                          <Text style={[styles.userName, { fontWeight: '400', lineHeight: 19 }]}>
+                            {c.message}
+                          </Text>
+                        </View>
+
+                        {/* Submitted Date */}
+                        <View style={[styles.tableCol, { flex: 1.1 }]}>
+                          <Text style={styles.practicedMinutesText}>
+                            {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '-'}
+                          </Text>
+                          <Text style={styles.allowanceSubText}>
+                            {c.createdAt ? new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                          </Text>
+                        </View>
+
+                        {/* Status */}
+                        <View style={[styles.tableCol, { flex: 0.9 }]}>
+                          <View
+                            style={[
+                              styles.planBadge,
+                              {
+                                backgroundColor: isResolved ? '#f0fdf4' : '#fef2f2',
+                                borderColor: isResolved ? '#bbf7d0' : '#fecaca',
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.planBadgeText,
+                                { color: isResolved ? '#16a34a' : '#dc2626' },
+                              ]}
+                            >
+                              {isResolved ? 'RESOLVED' : 'OPEN'}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Actions */}
+                        <View
+                          style={[
+                            styles.tableCol,
+                            { flex: 1.2, flexDirection: 'row', justifyContent: 'flex-end', gap: 6 },
+                          ]}
+                        >
+                          <Pressable
+                            onPress={() => handleToggleComplaintStatus(c)}
+                            style={({ pressed }) => [
+                              styles.actionBtn,
+                              isResolved ? styles.editBtn : styles.viewBtn,
+                              pressed && { opacity: 0.8 },
+                            ]}
+                          >
+                            <Feather
+                              name={isResolved ? 'rotate-ccw' : 'check'}
+                              size={13}
+                              color={isResolved ? '#475569' : '#0d9488'}
+                            />
+                            <Text style={isResolved ? styles.editBtnText : styles.viewBtnText}>
+                              {isResolved ? 'Reopen' : 'Resolve'}
+                            </Text>
+                          </Pressable>
+
+                          <Pressable
+                            onPress={() => handleDeleteComplaint(c)}
+                            style={({ pressed }) => [
+                              styles.actionBtn,
+                              styles.deleteUserRowBtn,
+                              pressed && { opacity: 0.8 },
+                            ]}
+                          >
+                            <Feather name="trash-2" size={13} color="#ef4444" />
+                          </Pressable>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
           </ScrollView>
         </View>
       </View>
@@ -892,16 +1093,25 @@ export default function AdminUsersScreen() {
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 <View style={styles.modalAvatar}>
-                  <Text style={styles.modalAvatarText}>
-                    {getInitials(userDetail?.profile?.display_name, userDetail?.profile?.phone_number)}
-                  </Text>
+                  {userDetail?.profile?.avatar_url || userDetail?.profile?.avatarUrl ? (
+                    <Image
+                      source={{ uri: userDetail.profile.avatar_url || userDetail.profile.avatarUrl }}
+                      style={styles.modalAvatarImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Text style={styles.modalAvatarText}>
+                      {getInitials(userDetail?.profile?.display_name, userDetail?.profile?.phone_number)}
+                    </Text>
+                  )}
                 </View>
                 <View>
                   <Text style={styles.modalTitle}>
                     {userDetail?.profile?.display_name || 'Student Profile'}
                   </Text>
                   <Text style={styles.modalSubtitle}>
-                    {userDetail?.profile?.phone_number || ''} • Joined{' '}
+                    {userDetail?.profile?.phone_number || ''}
+                    {userDetail?.profile?.email ? ` • ${userDetail.profile.email}` : ''} • Joined{' '}
                     {userDetail?.profile?.created_at
                       ? new Date(userDetail.profile.created_at).toLocaleDateString()
                       : ''}
@@ -1073,6 +1283,18 @@ export default function AdminUsersScreen() {
                       <Text style={styles.sectionTitle}>Personalized Learning Attributes</Text>
                       <View style={styles.attributesGrid}>
                         <View style={styles.attributeItem}>
+                          <Text style={styles.attrLabel}>Full Name</Text>
+                          <Text style={styles.attrValue}>{userDetail.profile.display_name || 'Anonymous Student'}</Text>
+                        </View>
+                        <View style={styles.attributeItem}>
+                          <Text style={styles.attrLabel}>Mobile Number</Text>
+                          <Text style={styles.attrValue}>{userDetail.profile.phone_number || 'Not provided'}</Text>
+                        </View>
+                        <View style={styles.attributeItem}>
+                          <Text style={styles.attrLabel}>Email Address</Text>
+                          <Text style={styles.attrValue}>{userDetail.profile.email || 'Not provided'}</Text>
+                        </View>
+                        <View style={styles.attributeItem}>
                           <Text style={styles.attrLabel}>Current English Level</Text>
                           <Text style={styles.attrValue}>{userDetail.profile.level || 'Intermediate'}</Text>
                         </View>
@@ -1161,6 +1383,46 @@ export default function AdminUsersScreen() {
                               <View style={styles.feedbackBox}>
                                 <Text style={styles.feedbackLabel}>Student Feedback:</Text>
                                 <Text style={styles.feedbackText}>{sess.user_feedback}</Text>
+                              </View>
+                            )}
+
+                            {/* Toggle Transcript & Audio Recording Button */}
+                            <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <Text style={{ fontSize: 11.5, color: '#64748b' }}>
+                                {sess.turns?.length ? `${sess.turns.length} transcript turns` : 'Audio & transcript available'}
+                              </Text>
+                              <Pressable
+                                onPress={() =>
+                                  setExpandedSessionId((prev) => (prev === sess.id ? null : sess.id))
+                                }
+                                style={({ pressed }) => [
+                                  styles.actionBtn,
+                                  styles.viewBtn,
+                                  pressed && { opacity: 0.8 },
+                                ]}
+                              >
+                                <Feather
+                                  name={expandedSessionId === sess.id ? 'chevron-up' : 'headphones'}
+                                  size={13}
+                                  color="#0d9488"
+                                />
+                                <Text style={styles.viewBtnText}>
+                                  {expandedSessionId === sess.id
+                                    ? 'Hide Transcript & Audio'
+                                    : 'Transcript & Audio Recording'}
+                                </Text>
+                              </Pressable>
+                            </View>
+
+                            {expandedSessionId === sess.id && (
+                              <View style={{ marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#e2e8f0' }}>
+                                <AdminSessionTranscriptAndPlayer
+                                  sessionId={sess.id}
+                                  studentName={userDetail.profile.display_name || 'Student'}
+                                  durationSeconds={sess.duration_seconds}
+                                  initialTurns={sess.turns}
+                                  initialCorrections={sess.corrections}
+                                />
                               </View>
                             )}
                           </View>
@@ -1301,161 +1563,6 @@ export default function AdminUsersScreen() {
                 )}
               </View>
             )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* 2. EDIT USER MODAL */}
-      <Modal
-        visible={Boolean(editingUser)}
-        animationType="fade"
-        transparent
-        onRequestClose={closeEditUser}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.editModalContainer}>
-            <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>Manage Student Account</Text>
-                <Text style={styles.modalSubtitle}>
-                  {editingUser?.displayName} ({editingUser?.phoneNumber})
-                </Text>
-              </View>
-              <Pressable onPress={closeEditUser} style={styles.modalCloseBtn}>
-                <Feather name="x" size={20} color="#64748b" />
-              </Pressable>
-            </View>
-
-            <ScrollView style={{ padding: 20 }}>
-              {/* Practice Minutes Balance */}
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Practice Minutes Balance</Text>
-                <TextInput
-                  style={styles.formInput}
-                  keyboardType="numeric"
-                  value={editMinutesBalance}
-                  onChangeText={setEditMinutesBalance}
-                  placeholder="e.g. 15"
-                  placeholderTextColor="#94a3b8"
-                />
-                <Text style={styles.formHint}>
-                  Total minutes currently available for live voice speaking sessions.
-                </Text>
-              </View>
-
-              {/* Monthly Allowance */}
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Monthly Minutes Allowance</Text>
-                <TextInput
-                  style={styles.formInput}
-                  keyboardType="numeric"
-                  value={editAllowance}
-                  onChangeText={setEditAllowance}
-                  placeholder="e.g. 10"
-                  placeholderTextColor="#94a3b8"
-                />
-              </View>
-
-              {/* Plan Tier Selection */}
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Subscription Plan Tier</Text>
-                <View style={styles.tierSelectRow}>
-                  {(['starter', 'basic', 'pro', 'premium'] as const).map((tier) => (
-                    <Pressable
-                      key={tier}
-                      onPress={() => setEditPlanTier(tier)}
-                      style={[styles.tierOption, editPlanTier === tier && styles.tierOptionActive]}
-                    >
-                      <Text
-                        style={[
-                          styles.tierOptionText,
-                          editPlanTier === tier && styles.tierOptionTextActive,
-                        ]}
-                      >
-                        {tier.toUpperCase()}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-
-              {/* Plan Status */}
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Plan Status</Text>
-                <View style={styles.tierSelectRow}>
-                  {(['active', 'trialing', 'past_due', 'canceled'] as const).map((st) => (
-                    <Pressable
-                      key={st}
-                      onPress={() => setEditPlanStatus(st)}
-                      style={[styles.tierOption, editPlanStatus === st && styles.tierOptionActive]}
-                    >
-                      <Text
-                        style={[
-                          styles.tierOptionText,
-                          editPlanStatus === st && styles.tierOptionTextActive,
-                        ]}
-                      >
-                        {st.toUpperCase()}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-
-              {/* Learning Goal */}
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Personalized Goal</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editGoal}
-                  onChangeText={setEditGoal}
-                  placeholder="e.g. English for Job Interviews & Presentations"
-                  placeholderTextColor="#94a3b8"
-                />
-              </View>
-
-              {/* Actions */}
-              <View style={styles.editActionRow}>
-                <Pressable
-                  onPress={() => editingUser && handleDeleteUser(editingUser)}
-                  style={({ pressed }) => [
-                    styles.deleteModalBtn,
-                    pressed && { opacity: 0.8 },
-                  ]}
-                >
-                  <Feather name="trash-2" size={14} color="#ef4444" />
-                  <Text style={styles.deleteModalBtnText}>Delete User</Text>
-                </Pressable>
-
-                <View style={{ flex: 1 }} />
-
-                <Pressable
-                  onPress={closeEditUser}
-                  style={({ pressed }) => [styles.cancelBtn, pressed && { opacity: 0.8 }]}
-                >
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={handleSaveEdit}
-                  disabled={isSavingEdit}
-                  style={({ pressed }) => [
-                    styles.saveBtn,
-                    pressed && { opacity: 0.8 },
-                    isSavingEdit && { opacity: 0.6 },
-                  ]}
-                >
-                  {isSavingEdit ? (
-                    <ActivityIndicator size="small" color="#ffffff" />
-                  ) : (
-                    <>
-                      <Feather name="check" size={16} color="#ffffff" />
-                      <Text style={styles.saveBtnText}>Save Changes</Text>
-                    </>
-                  )}
-                </Pressable>
-              </View>
-            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1903,6 +2010,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#e0f2fe',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  userAvatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 18,
   },
   avatarText: {
     ...fontStyle('outfit', 'bold'),
@@ -2110,6 +2223,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#ccfbf1',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  modalAvatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 22,
   },
   modalAvatarText: {
     ...fontStyle('outfit', 'bold'),
