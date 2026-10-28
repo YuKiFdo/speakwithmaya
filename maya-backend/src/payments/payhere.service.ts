@@ -163,14 +163,14 @@ export class PayHereService {
         name: 'Maya AI Basic Monthly',
         tier: 'basic',
         amount: 3600.0,
-        allowance: 450,
+        allowance: 600,
         isPreapproval: true,
       },
       pro: {
         name: 'Maya AI Pro Monthly',
         tier: 'pro',
         amount: 5400.0,
-        allowance: 600,
+        allowance: 900,
         isPreapproval: true,
       },
       premium: {
@@ -493,7 +493,7 @@ export class PayHereService {
         const planTier = planTierKey === '3-months-pro' ? 'pro' : planTierKey;
         const isQuarterly = planTierKey === '3-months-pro';
         const amount = isQuarterly ? 8640 : planTier === 'basic' ? 3600 : planTier === 'premium' ? 7200 : 5400;
-        const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
+        const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 600 : planTier === 'premium' ? 1200 : 900;
         const cycleDays = isQuarterly ? 90 : 30;
 
         // Determine if PayHere captured Month 1 upfront in preapproval or if we charge via token
@@ -774,10 +774,10 @@ export class PayHereService {
     const minutesAllowance = isQuarterlySub
       ? 1800
       : planTier === 'basic'
-      ? 450
+      ? 600
       : planTier === 'premium'
       ? 1200
-      : 600;
+      : 900;
 
     this.logger.log(`[PayHereWebhook] 📦 Subscription Plan: tier=${planTier}, minutes_allowance=${minutesAllowance} min/mo`);
 
@@ -1212,7 +1212,7 @@ export class PayHereService {
       const defaultAmount = isQuarterly ? 8640 : planTier === 'basic' ? 3600 : planTier === 'premium' ? 7200 : 5400;
       const amount = parseFloat(sub.amount_lkr || String(defaultAmount));
       const cycleDays = isQuarterly ? 90 : 30;
-      const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
+      const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 600 : planTier === 'premium' ? 1200 : 900;
       const retryOrderId = `MAYA-RENEW-RETRY-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
       this.logger.log(`[PayHereRetry] ⚡ Executing token charge retry for user ${sub.user_id}, plan=${planTier}, amount=${amount} LKR...`);
@@ -1522,11 +1522,11 @@ export class PayHereService {
         itemName = 'Maya AI Pro Plan (3 Months)';
       } else if (dto.planTier === 'basic') {
         amount = 3600;
-        allowance = 450;
+        allowance = 600;
         itemName = 'Maya Basic Plan (Monthly)';
       } else if (dto.planTier === 'pro') {
         amount = 5400;
-        allowance = 600;
+        allowance = 900;
         itemName = 'Maya Pro Plan (Monthly)';
       } else if (dto.planTier === 'premium') {
         amount = 7200;
@@ -2231,7 +2231,7 @@ export class PayHereService {
     const isQuarterly = rawTier === '3-months-pro' || Number(order.amount_lkr) === 8640;
     const planTier = isQuarterly ? 'pro' : rawTier;
     const amount = order.amount_lkr || (isQuarterly ? 8640 : planTier === 'basic' ? 3600 : planTier === 'premium' ? 7200 : 5400);
-    const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
+    const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 600 : planTier === 'premium' ? 1200 : 900;
     const cycleDays = isQuarterly ? 90 : 30;
     const nextBillingDate = new Date(Date.now() + cycleDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 

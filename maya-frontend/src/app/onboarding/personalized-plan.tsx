@@ -84,7 +84,7 @@ const ALL_PLANS: PlanItem[] = [
   {
     id: 'basic',
     name: 'Basic',
-    minutes: '450 AI conversation minutes',
+    minutes: '600 AI conversation minutes',
     minutesSubtext: 'per month',
     pricePerMonth: 'LKR 3,600',
     billedInfo: 'Billed as LKR 3,600 monthly',
@@ -92,7 +92,7 @@ const ALL_PLANS: PlanItem[] = [
   {
     id: 'pro',
     name: 'Pro',
-    minutes: '600 AI conversation minutes',
+    minutes: '900 AI conversation minutes',
     minutesSubtext: 'per month',
     pricePerMonth: 'LKR 5,400',
     billedInfo: 'Billed as LKR 5,400 monthly',

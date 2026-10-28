@@ -1644,8 +1644,8 @@ export class AuthService {
    */
   async upgradePlan(userId: string, dto: UpgradePlanDto) {
     const minutesMap = {
-      basic: 450,
-      pro: 600,
+      basic: 600,
+      pro: 900,
       premium: 1200,
     };
     const allowance = minutesMap[dto.planTier];
@@ -1755,26 +1755,26 @@ export class AuthService {
           name: 'Starter',
           priceLkr: 0,
           period: '/ day',
-          minutes: 5,
-          features: ['5 AI conversation minutes / day', 'Basic AI speaking partner', 'Level 1 Roadmap Practice', 'Voice captions'],
+          minutes: 3,
+          features: ['3 AI conversation minutes / day', 'Basic AI speaking partner', 'Level 1 Roadmap Practice', 'Voice captions'],
         },
         {
           id: 'basic',
           name: 'Basic',
           priceLkr: 3600,
           period: '/ month',
-          minutes: 450,
-          features: ['450 AI conversation minutes', 'AI partner', 'Grammar corrections', 'Session transcript'],
+          minutes: 600,
+          features: ['600 AI conversation minutes', '10-minute practice sessions', 'Grammar corrections', 'Session transcript', 'Voice captions'],
         },
         {
           id: 'pro',
           name: 'Pro',
           priceLkr: 5400,
           period: '/ month',
-          minutes: 600,
+          minutes: 900,
           highlighted: true,
           badge: 'Most Popular',
-          features: ['600 AI conversation minutes', 'Advanced pronunciation feedback', 'Rephrasing suggestions', 'Full session history'],
+          features: ['900 AI conversation minutes', '15-minute practice sessions', 'Advanced pronunciation feedback', 'Rephrasing suggestions', 'Conversation history', 'Everything in Basic'],
         },
         {
           id: 'premium',
@@ -1782,7 +1782,7 @@ export class AuthService {
           priceLkr: 7200,
           period: '/ month',
           minutes: 1200,
-          features: ['1,200 AI conversation minutes', 'Detailed speaking analytics', 'Personalized learning insights', 'Priority AI responses'],
+          features: ['1,200 AI conversation minutes', '30-minute practice sessions', 'Detailed speaking analytics', 'Personalized learning insights', 'Priority AI responses', 'Everything in Pro'],
         },
       ],
       addOnPacks: [

@@ -1681,12 +1681,13 @@ function AccountActionCards({
 }) {
   return (
     <View style={styles.actionCardsStack}>
-      {/* Card 1: Explanation Language */}
-      <Pressable
-        style={({ pressed }) => [styles.actionItemCard, pressed && styles.cardPressed]}
-        onPress={onLanguagePress}
-        accessibilityRole="button"
-        accessibilityLabel="Explanation Language"
+      {/* Card 1: Explanation Language (Disabled for all users for now) */}
+      <View
+        style={[
+          styles.actionItemCard,
+          styles.actionItemCardDisabled,
+        ]}
+        accessibilityLabel="Explanation Language (Disabled)"
       >
         <View style={[styles.actionIconBox, { backgroundColor: '#E6F9F0' }]}>
           <Ionicons name="globe-outline" size={22} color="#10B981" />
@@ -1699,9 +1700,9 @@ function AccountActionCards({
         </View>
         <View style={styles.prefRightCol}>
           <Text style={styles.prefValueText}>{language}</Text>
-          <Feather name="chevron-right" size={18} color="#64748B" />
+          <Ionicons name="lock-closed-outline" size={15} color="#94A3B8" />
         </View>
-      </Pressable>
+      </View>
 
       {/* Card 2: Leaderboard */}
       <Pressable
@@ -2472,6 +2473,15 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.03,
         shadowRadius: 6,
       },
+    }),
+  },
+  actionItemCardDisabled: {
+    opacity: 0.62,
+    backgroundColor: '#F8FAFC',
+    ...Platform.select({
+      web: {
+        cursor: 'not-allowed',
+      } as any,
     }),
   },
   actionIconBox: {

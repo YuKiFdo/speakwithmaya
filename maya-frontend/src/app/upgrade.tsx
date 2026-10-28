@@ -22,6 +22,7 @@ import { Radii } from '@/theme/tokens';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
+import { MayaPrimaryButton } from '@/components/ui/maya-primary-button';
 import { Ionicons } from '@expo/vector-icons';
 import { useUserStats } from '@/hooks/useUserStats';
 import { paymentApi } from '@/services/payment/payment-api';
@@ -75,7 +76,7 @@ const PLANS: PricingPlan[] = [
     price: 'LKR 3,600',
     period: '/ month',
     features: [
-      { text: '450 AI conversation minutes' },
+      { text: '600 AI conversation minutes' },
       { text: '10-minute practice sessions' },
       { text: 'Grammar corrections' },
       { text: 'Session transcript' },
@@ -93,7 +94,7 @@ const PLANS: PricingPlan[] = [
     price: 'LKR 5,400',
     period: '/ month',
     features: [
-      { text: '600 AI conversation minutes' },
+      { text: '900 AI conversation minutes' },
       { text: '15-minute practice sessions' },
       { text: 'Advanced pronunciation feedback' },
       { text: 'Rephrasing suggestions' },
@@ -859,9 +860,14 @@ export default function UpgradeScreen() {
           {isStarter && (
             <View style={styles.specialOfferContainer}>
               <View style={styles.specialOfferCard}>
-                {/* Header ribbon / badge row */}
+                {/* Header ribbon / badge row (Matches Figma Pasted Image) */}
                 <View style={styles.specialOfferHeaderRow}>
-                  <Text style={styles.specialOfferBadgeLeftText}>Your special offer is reserved for you</Text>
+                  <View style={styles.specialOfferBadgeLeft}>
+                    <Ionicons name="lock-closed" size={14} color="#0D4EFD" />
+                    <Text style={styles.specialOfferBadgeLeftText}>
+                      Your special offer is reserved for you
+                    </Text>
+                  </View>
                   <View style={styles.saveBadgePill}>
                     <Text style={styles.saveBadgePillText}>Save 20%</Text>
                   </View>
@@ -877,7 +883,7 @@ export default function UpgradeScreen() {
 
                       <View style={styles.specialOfferMinutesRow}>
                         <View style={styles.specialOfferClockCircle}>
-                          <Ionicons name="time-outline" size={18} color="#0057FF" />
+                          <Ionicons name="time-outline" size={18} color="#0D4EFD" />
                         </View>
                         <View>
                           <Text style={styles.specialOfferMinutesText}>1,800 AI conversation minutes</Text>
@@ -891,36 +897,28 @@ export default function UpgradeScreen() {
 
                     {/* Middle Column: Price per month */}
                     <View style={styles.specialOfferPriceCol}>
-                      <Text style={styles.specialOfferOriginalPrice}>LKR 3,600 / month</Text>
                       <Text style={styles.specialOfferMonthlyPrice}>
                         LKR 2,880 <Text style={styles.specialOfferPerMonthText}>/ month</Text>
                       </Text>
+                      <Text style={styles.specialOfferOriginalPrice}>LKR 3,600 / month</Text>
                     </View>
 
-                    {/* Right Column: CTA button */}
+                    {/* Right Column: Prominent MayaPrimaryButton */}
                     <View style={styles.specialOfferCtaCol}>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.specialOfferButton,
-                          pressed && styles.ctaButtonPressed,
-                          loadingPlanId === '3-months-pro' && { opacity: 0.8 },
-                        ]}
-                        disabled={loadingPlanId !== null}
+                      <MayaPrimaryButton
+                        label="Get This Offer"
                         onPress={() => handleSelectPlan('3-months-pro')}
-                      >
-                        {loadingPlanId === '3-months-pro' ? (
-                          <ActivityIndicator size="small" color="#ffffff" />
-                        ) : (
-                          <View style={styles.specialOfferButtonContent}>
-                            <Text style={styles.specialOfferButtonText}>Get This Offer</Text>
-                            <Ionicons name="arrow-forward" size={16} color="#ffffff" style={{ marginLeft: 6 }} />
-                          </View>
-                        )}
-                      </Pressable>
+                        loading={loadingPlanId === '3-months-pro'}
+                        disabled={loadingPlanId !== null}
+                        height={48}
+                        borderRadius={999}
+                        showArrow
+                        style={{ minWidth: 196, paddingHorizontal: 24 }}
+                      />
                     </View>
                   </View>
                 ) : (
-                  /* Mobile: Exactly matching the mobile screenshot */
+                  /* Mobile: Prominent MayaPrimaryButton */
                   <View style={styles.specialOfferMobileBody}>
                     <View style={styles.specialOfferMobileTopRow}>
                       <View style={{ flex: 1 }}>
@@ -937,29 +935,22 @@ export default function UpgradeScreen() {
 
                     <View style={styles.specialOfferMinutesRow}>
                       <View style={styles.specialOfferClockCircle}>
-                        <Ionicons name="time-outline" size={18} color="#0057FF" />
+                        <Ionicons name="time-outline" size={18} color="#0D4EFD" />
                       </View>
                       <Text style={styles.specialOfferMinutesText}>1,800 AI conversation minutes</Text>
                     </View>
 
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.specialOfferButtonMobile,
-                        pressed && styles.ctaButtonPressed,
-                        loadingPlanId === '3-months-pro' && { opacity: 0.8 },
-                      ]}
-                      disabled={loadingPlanId !== null}
-                      onPress={() => handleSelectPlan('3-months-pro')}
-                    >
-                      {loadingPlanId === '3-months-pro' ? (
-                        <ActivityIndicator size="small" color="#ffffff" />
-                      ) : (
-                        <View style={styles.specialOfferButtonContent}>
-                          <Text style={styles.specialOfferButtonText}>Get This Offer</Text>
-                          <Ionicons name="arrow-forward" size={16} color="#ffffff" style={{ marginLeft: 8 }} />
-                        </View>
-                      )}
-                    </Pressable>
+                    <View style={{ marginTop: 14, width: '100%' }}>
+                      <MayaPrimaryButton
+                        label="Get This Offer"
+                        onPress={() => handleSelectPlan('3-months-pro')}
+                        loading={loadingPlanId === '3-months-pro'}
+                        disabled={loadingPlanId !== null}
+                        height={48}
+                        borderRadius={999}
+                        showArrow
+                      />
+                    </View>
                   </View>
                 )}
               </View>
@@ -1049,6 +1040,7 @@ export default function UpgradeScreen() {
                           paddingHorizontal: desktopCardPaddingH,
                         },
                       ],
+                      plan.id === 'pro' && !isCurrentPlan && styles.cardProGradient,
                       plan.highlighted && !isCurrentPlan && styles.cardHighlighted,
                       isCurrentPlan && styles.cardCurrentPlan,
                     ]}
@@ -1225,45 +1217,57 @@ export default function UpgradeScreen() {
                     </View>
 
                     {/* CTA button */}
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.ctaButton,
-                        isDesktop && { height: desktopCtaHeight },
-                        isCurrentPlan
-                          ? styles.ctaButtonCurrentPlan
-                          : styles.ctaButtonOutline,
-                        (pressed || loadingPlanId === plan.id) && !isCurrentPlan && styles.ctaButtonPressed,
-                      ]}
-                      onPress={() => !isCurrentPlan && handleSelectPlan(plan.id)}
-                      disabled={isCurrentPlan || loadingPlanId !== null}
-                      accessibilityRole="button"
-                      accessibilityLabel={ctaText}
-                    >
-                      {loadingPlanId === plan.id ? (
-                        <ActivityIndicator
-                          size="small"
-                          color="#0057FF"
-                        />
-                      ) : (
-                        <View style={styles.ctaButtonContent}>
-                          {isCurrentPlan && (
-                            <Ionicons name="checkmark-circle" size={16} color="#059669" style={{ marginRight: 6 }} />
-                          )}
-                          <Text
-                            style={[
-                              styles.ctaButtonText,
-                              isCurrentPlan
-                                ? styles.ctaButtonTextCurrentPlan
-                                : isDowngrade
-                                ? styles.ctaButtonTextDowngrade
-                                : null,
-                            ]}
-                          >
-                            {ctaText}
-                          </Text>
-                        </View>
-                      )}
-                    </Pressable>
+                    {plan.id === 'pro' && !isCurrentPlan ? (
+                      <MayaPrimaryButton
+                        label={ctaText}
+                        onPress={() => handleSelectPlan(plan.id)}
+                        loading={loadingPlanId === plan.id}
+                        disabled={loadingPlanId !== null}
+                        height={isDesktop ? desktopCtaHeight : 46}
+                        borderRadius={12}
+                        showArrow={false}
+                      />
+                    ) : (
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.ctaButton,
+                          isDesktop && { height: desktopCtaHeight },
+                          isCurrentPlan
+                            ? styles.ctaButtonCurrentPlan
+                            : styles.ctaButtonOutline,
+                          (pressed || loadingPlanId === plan.id) && !isCurrentPlan && styles.ctaButtonPressed,
+                        ]}
+                        onPress={() => !isCurrentPlan && handleSelectPlan(plan.id)}
+                        disabled={isCurrentPlan || loadingPlanId !== null}
+                        accessibilityRole="button"
+                        accessibilityLabel={ctaText}
+                      >
+                        {loadingPlanId === plan.id ? (
+                          <ActivityIndicator
+                            size="small"
+                            color="#0057FF"
+                          />
+                        ) : (
+                          <View style={styles.ctaButtonContent}>
+                            {isCurrentPlan && (
+                              <Ionicons name="checkmark-circle" size={16} color="#059669" style={{ marginRight: 6 }} />
+                            )}
+                            <Text
+                              style={[
+                                styles.ctaButtonText,
+                                isCurrentPlan
+                                  ? styles.ctaButtonTextCurrentPlan
+                                  : isDowngrade
+                                  ? styles.ctaButtonTextDowngrade
+                                  : null,
+                              ]}
+                            >
+                              {ctaText}
+                            </Text>
+                          </View>
+                        )}
+                      </Pressable>
+                    )}
 
                   </View>
                 );
@@ -1599,6 +1603,22 @@ const styles = StyleSheet.create({
   cardDesktop: {
     flex: 1,
     justifyContent: 'space-between',
+  },
+  cardProGradient: {
+    borderColor: '#93C5FD',
+    ...Platform.select({
+      web: {
+        backgroundImage: 'linear-gradient(180deg, #F4F8FF 0%, #FFFFFF 42%)',
+        boxShadow: '0px 4px 16px rgba(15, 23, 42, 0.02)',
+      } as any,
+      default: {
+        elevation: 2,
+        shadowColor: '#1A3669',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.02,
+        shadowRadius: 12,
+      },
+    }),
   },
   cardHighlighted: {
     borderColor: '#0057FF',
@@ -2095,9 +2115,9 @@ const styles = StyleSheet.create({
   specialOfferCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
-    borderColor: '#3B82F6',
+    borderColor: '#60A5FA',
     borderRadius: 16,
-    padding: 20,
+    overflow: 'hidden',
     ...Platform.select({
       web: {
         boxShadow: '0 4px 12px rgba(59, 130, 246, 0.08)',
@@ -2110,23 +2130,27 @@ const styles = StyleSheet.create({
   specialOfferHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
+    justifyContent: 'center',
+    backgroundColor: '#EDF4FF',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 12,
   },
   specialOfferBadgeLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 7,
   },
   specialOfferBadgeLeftText: {
     ...fontStyle('inter', 'medium'),
-    fontSize: 13,
-    color: '#0057FF',
+    fontSize: 13.5,
+    color: '#0D4EFD',
   },
   saveBadgePill: {
-    backgroundColor: '#FF0055',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    backgroundColor: '#F41F68',
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 999,
   },
   saveBadgePillText: {
     ...fontStyle('inter', 'bold'),
@@ -2138,6 +2162,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 16,
+    padding: 22,
   },
   specialOfferMainRowMobile: {
     flexDirection: 'column',
@@ -2228,6 +2253,7 @@ const styles = StyleSheet.create({
   },
   specialOfferMobileBody: {
     gap: 14,
+    padding: 18,
   },
   specialOfferMobileTopRow: {
     flexDirection: 'row',

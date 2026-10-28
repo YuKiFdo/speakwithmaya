@@ -338,7 +338,7 @@ export class SubscriptionReconciliationService {
         const defaultAmount = isQuarterly ? 8640 : planTier === 'basic' ? 3600 : planTier === 'premium' ? 7200 : 5400;
         const amount = parseFloat(sub.amount_lkr || String(defaultAmount));
         const cycleDays = isQuarterly ? 90 : 30;
-        const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 450 : planTier === 'premium' ? 1200 : 600;
+        const allowance = isQuarterly ? 1800 : planTier === 'basic' ? 600 : planTier === 'premium' ? 1200 : 900;
 
         const renewalOrderId = `MAYA-RENEW-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 

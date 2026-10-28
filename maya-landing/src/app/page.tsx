@@ -1506,7 +1506,7 @@ export default function Home() {
                       Basic
                     </h3>
                     <p className="text-[12.5px] text-[#94A3B8] mb-5">
-                      Good for getting started
+                      Great for getting started
                     </p>
                     <div className="flex items-baseline gap-1 mb-6 pb-6 border-b border-[#F1F5F9]">
                       <span className="font-display text-[28px] font-extrabold text-[#0F172A] tracking-tight">
@@ -1520,23 +1520,23 @@ export default function Home() {
                     <ul className="space-y-3.5 mb-8 text-[13px] text-[#475569]">
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>10 minutes of practice per day</span>
+                        <span>600 AI conversation minutes</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>Limited hints</span>
+                        <span>10-minute practice sessions</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>Basic feedback</span>
+                        <span>Grammar corrections</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>All conversation topics</span>
+                        <span>Session transcript</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>Sinhala &amp; Tamil explanations</span>
+                        <span>Voice captions</span>
                       </li>
                     </ul>
                   </div>
@@ -1546,7 +1546,7 @@ export default function Home() {
                     onClick={() => trackLandingSelectPlan("Basic")}
                     className="w-full py-3 rounded-xl border border-[#E2E8F0] hover:bg-[#F8FAFC] text-[#0F172A] text-[13px] font-bold text-center transition-colors"
                   >
-                    Start Basic
+                    Choose Basic
                   </a>
                 </div>
               </Reveal>
@@ -1566,7 +1566,7 @@ export default function Home() {
                       Pro
                     </h3>
                     <p className="text-[12.5px] text-[#94A3B8] mb-5">
-                      For faster improvement
+                      Best for consistent learners
                     </p>
                     <div className="flex items-baseline gap-1 mb-6 pb-6 border-b border-[#F1F5F9]">
                       <span className="font-display text-[28px] font-extrabold text-[#0F172A] tracking-tight">
@@ -1580,23 +1580,27 @@ export default function Home() {
                     <ul className="space-y-3.5 mb-8 text-[13px] text-[#475569]">
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
+                        <span>900 AI conversation minutes</span>
+                      </li>
+                      <li className="flex items-center gap-2.5">
+                        <CheckCircleIcon />
                         <span>15-minute practice sessions</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>Unlimited hints</span>
+                        <span>Advanced pronunciation feedback</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>Detailed feedback</span>
+                        <span>Rephrasing suggestions</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>All conversation topics</span>
+                        <span>Conversation history</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>Sinhala &amp; Tamil explanations</span>
+                        <span>Everything in Basic</span>
                       </li>
                     </ul>
                   </div>
@@ -1606,7 +1610,7 @@ export default function Home() {
                     onClick={() => trackLandingSelectPlan("Pro")}
                     className="landing-primary-cta w-full py-3 rounded-xl bg-[#0D4EFD] hover:bg-[#0B42D8] text-white text-[13px] font-bold text-center shadow-[0_6px_16px_rgba(13,78,253,0.28)] transition-all"
                   >
-                    Upgrade to Pro
+                    Choose Pro
                   </a>
                 </div>
               </Reveal>
@@ -1619,7 +1623,7 @@ export default function Home() {
                       Premium
                     </h3>
                     <p className="text-[12.5px] text-[#94A3B8] mb-5">
-                      For maximum guidance
+                      For serious learners
                     </p>
                     <div className="flex items-baseline gap-1 mb-6 pb-6 border-b border-[#F1F5F9]">
                       <span className="font-display text-[28px] font-extrabold text-[#0F172A] tracking-tight">
@@ -1633,35 +1637,27 @@ export default function Home() {
                     <ul className="space-y-3.5 mb-8 text-[13px] text-[#475569]">
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
+                        <span>1,200 AI conversation minutes</span>
+                      </li>
+                      <li className="flex items-center gap-2.5">
+                        <CheckCircleIcon />
                         <span>30-minute practice sessions</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>Unlimited hints</span>
+                        <span>Detailed speaking analytics</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>
-                          <span className="md:hidden">Advanced feedback</span>
-                          <span className="hidden md:inline">
-                            Deep guidance and advanced feedback
-                          </span>
-                        </span>
+                        <span>Personalized learning insights</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>
-                          <span className="md:hidden">
-                            Personalised guidance
-                          </span>
-                          <span className="hidden md:inline">
-                            Priority conversation topics
-                          </span>
-                        </span>
+                        <span>Priority AI responses</span>
                       </li>
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
-                        <span>Sinhala &amp; Tamil explanations</span>
+                        <span>Everything in Pro</span>
                       </li>
                     </ul>
                   </div>
@@ -1671,7 +1667,7 @@ export default function Home() {
                     onClick={() => trackLandingSelectPlan("Premium")}
                     className="w-full py-3 rounded-xl border border-[#E2E8F0] md:border-transparent bg-white md:bg-[#EDF4FF] hover:bg-[#F8FAFC] md:hover:bg-[#E0ECFF] text-[#0F172A] md:text-[#0D4EFD] text-[13px] font-bold text-center transition-colors"
                   >
-                    Upgrade to Premium
+                    Choose Premium
                   </a>
                 </div>
               </Reveal>
