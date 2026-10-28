@@ -208,6 +208,7 @@ export default function RootLayout({
       className={`${inter.variable} ${jakarta.variable} scroll-smooth antialiased`}
     >
       <head>
+        <meta name="facebook-domain-verification" content="4upgmm941w888kmdif1i6kjywtit3o" />
         <Script id="google-tag-manager" strategy="afterInteractive">
           {`(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
 new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],

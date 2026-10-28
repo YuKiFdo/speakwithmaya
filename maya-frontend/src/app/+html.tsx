@@ -16,6 +16,7 @@ export default function RootHtml({ children }: PropsWithChildren) {
           content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1.00001, viewport-fit=cover"
         />
         <meta name="theme-color" content="#0D4EFD" />
+        <meta name="facebook-domain-verification" content="78qfs00exvb1c95o4ctbms7pq1c0wc" />
         <title>SpeakwithMaya - Your Personal AI English Speaking Coach</title>
         <script
           dangerouslySetInnerHTML={{
