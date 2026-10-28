@@ -212,7 +212,9 @@ export class SessionsService {
 
   private readonly sessionRecordingsMap = new Map<string, { userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string }>();
   private readonly sessionTurnAudioMap = new Map<string, Map<number, string>>();
+  private readonly sessionTurnTranscriptMap = new Map<string, Map<number, string>>();
   private readonly authoritativeTurnsMap = new Map<string, Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>();
+  private readonly saveTurnsLocks = new Map<string, Promise<void>>();
   private readonly finalizingSessionIds = new Set<string>();
   private lastOrphanReconcileAt = 0;
   private lastSavedSessionId: string | null = null;
@@ -281,6 +283,12 @@ export class SessionsService {
 
   setAuthoritativeTurns(sessionId: string, turns: Array<{ role: 'user' | 'model'; text: string; timestamp: string }>) {
     const validId = toValidUuid(sessionId);
+    const existing = this.authoritativeTurnsMap.get(validId) || this.authoritativeTurnsMap.get(sessionId);
+    const existingUserCount = (existing || []).filter((t) => t.role === 'user').length;
+    const incomingUserCount = (turns || []).filter((t) => t.role === 'user').length;
+    if (existing && existingUserCount > incomingUserCount) {
+      return;
+    }
     this.authoritativeTurnsMap.set(validId, turns);
     if (validId !== sessionId) {
       this.authoritativeTurnsMap.set(sessionId, turns);
@@ -592,8 +600,25 @@ export class SessionsService {
     }
   }
 
-  async uploadSingleTurnAudio(sessionId: string, turnIdx: number, turnPcm: Buffer, speaker: 'user' | 'model' = 'user'): Promise<string | undefined> {
+  async uploadSingleTurnAudio(
+    sessionId: string,
+    turnIdx: number,
+    turnPcm: Buffer,
+    speaker: 'user' | 'model' = 'user',
+    transcriptText?: string,
+  ): Promise<string | undefined> {
     const validSessionId = toValidUuid(sessionId);
+    if (speaker === 'user' && transcriptText && transcriptText.trim()) {
+      let tMap = this.sessionTurnTranscriptMap.get(validSessionId);
+      if (!tMap) {
+        tMap = new Map<number, string>();
+        this.sessionTurnTranscriptMap.set(validSessionId, tMap);
+      }
+      tMap.set(turnIdx, transcriptText.trim());
+      if (sessionId !== validSessionId) {
+        this.sessionTurnTranscriptMap.set(sessionId, tMap);
+      }
+    }
     if (!this.supabase || !turnPcm || turnPcm.length === 0) return undefined;
 
     try {
@@ -620,6 +645,9 @@ export class SessionsService {
             this.sessionTurnAudioMap.set(validSessionId, map);
           }
           map.set(turnIdx, turnUrl);
+          if (sessionId !== validSessionId) {
+            this.sessionTurnAudioMap.set(sessionId, map);
+          }
         }
         return turnUrl;
       }
@@ -633,6 +661,23 @@ export class SessionsService {
     const validSessionId = toValidUuid(sessionId);
     if (!this.supabase) return;
 
+    const prevLock = this.saveTurnsLocks.get(validSessionId) || Promise.resolve();
+    const task = prevLock
+      .catch(() => {})
+      .then(() => this.executeSaveSessionTurns(sessionId, validSessionId, turns, topic));
+    this.saveTurnsLocks.set(validSessionId, task);
+    try {
+      await task;
+    } finally {
+      if (this.saveTurnsLocks.get(validSessionId) === task) {
+        this.saveTurnsLocks.delete(validSessionId);
+      }
+    }
+  }
+
+  private async executeSaveSessionTurns(sessionId: string, validSessionId: string, turns: any[], topic?: string): Promise<void> {
+    if (!this.supabase) return;
+
     // Defend against incomplete client turns: if server authoritative turns has more user turns, use it
     const serverTurns = this.getAuthoritativeTurns(validSessionId);
     const serverUserCount = (serverTurns || []).filter((t) => t.role === 'user').length;
@@ -642,6 +687,13 @@ export class SessionsService {
       : (turns && turns.length > 0 ? turns : serverTurns || []);
 
     if (!turnsToUse || turnsToUse.length === 0) return;
+
+    // Keep authoritativeTurnsMap synced with the most complete turn list so later callers never regress it
+    this.setAuthoritativeTurns(validSessionId, turnsToUse.map((t: any) => ({
+      role: t.role === 'model' ? 'model' : 'user',
+      text: (t.text || t.text_transcript || '').trim(),
+      timestamp: t.timestamp || new Date().toISOString(),
+    })));
 
     try {
       // Ensure the parent session row exists in public.sessions before inserting child turns
@@ -2878,10 +2930,21 @@ ${memoryPart}`;
     const hasModelAudio = filesSet.has('model_recording.wav');
     const hasTurnsFolder = filesSet.has('turns');
 
-    // Deduplicate consecutive identical turns (if historical duplicates exist in db)
-    const rawTurns = turns || [];
+    // Deduplicate turns (if historical duplicate turn_order rows exist in db, sort by timestamp first)
+    const rawTurns = (turns || []) as any[];
+    const hasDuplicateTurnOrders = new Set(rawTurns.map((t) => t.turn_order)).size < rawTurns.length;
+    const sortedTurns = [...rawTurns].sort((a: any, b: any) => {
+      if (hasDuplicateTurnOrders && a.timestamp && b.timestamp) {
+        const ta = new Date(a.timestamp).getTime();
+        const tb = new Date(b.timestamp).getTime();
+        if (!isNaN(ta) && !isNaN(tb) && Math.abs(ta - tb) > 500) {
+          return ta - tb;
+        }
+      }
+      return (a.turn_order || 0) - (b.turn_order || 0);
+    });
     const dedupedTurns: any[] = [];
-    for (const t of (rawTurns as any[]).sort((a: any, b: any) => (a.turn_order || 0) - (b.turn_order || 0))) {
+    for (const t of sortedTurns) {
       const prev = dedupedTurns[dedupedTurns.length - 1];
       if (!prev || prev.role !== t.role || (prev.text_transcript || '').trim() !== (t.text_transcript || '').trim()) {
         dedupedTurns.push(t);
@@ -3058,10 +3121,21 @@ ${memoryPart}`;
         const hasModelAudio = filesSet ? filesSet.has('model_recording.wav') : Boolean(rec?.modelAudioUrl);
         const hasTurnsFolder = filesSet ? filesSet.has('turns') : false;
 
-        // Deduplicate consecutive identical turns (if historical duplicates exist in db)
-        const rawTurns = sess.session_turns || [];
+        // Deduplicate turns (if historical duplicate turn_order rows exist in db, sort by timestamp first)
+        const rawTurns = (sess.session_turns || []) as any[];
+        const hasDuplicateTurnOrders = new Set(rawTurns.map((t) => t.turn_order)).size < rawTurns.length;
+        const sortedTurns = [...rawTurns].sort((a: any, b: any) => {
+          if (hasDuplicateTurnOrders && a.timestamp && b.timestamp) {
+            const ta = new Date(a.timestamp).getTime();
+            const tb = new Date(b.timestamp).getTime();
+            if (!isNaN(ta) && !isNaN(tb) && Math.abs(ta - tb) > 500) {
+              return ta - tb;
+            }
+          }
+          return (a.turn_order || 0) - (b.turn_order || 0);
+        });
         const dedupedTurns: any[] = [];
-        for (const t of (rawTurns as any[]).sort((a: any, b: any) => (a.turn_order || 0) - (b.turn_order || 0))) {
+        for (const t of sortedTurns) {
           const prev = dedupedTurns[dedupedTurns.length - 1];
           if (!prev || prev.role !== t.role || (prev.text_transcript || '').trim() !== (t.text_transcript || '').trim()) {
             dedupedTurns.push(t);
@@ -3965,7 +4039,8 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
     const activeHints = (dto.activeHints || []).map((h) => h.toLowerCase().trim());
     const userTurns = (turns as any[])
       .map((t: any, idx: number) => ({ ...t, turnIndex: t.turnIndex ?? idx }))
-      .filter((t: any) => t.role === 'user' && t.text && t.text.trim().length > 0);
+      .filter((t: any) => t.role === 'user' && t.text && t.text.trim().length > 0)
+      .map((t: any, uIdx: number) => ({ ...t, userTurnIdx: uIdx }));
 
     if (userTurns.length === 0) {
       return { sessionId: dto.sessionId, items: [] };
@@ -3998,11 +4073,11 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
       try {
         const ai = new GoogleGenAI({ apiKey });
         const dialogueSummary = (turns as any[])
-          .map((t: any, idx: number) => `Turn ${t.turnIndex ?? idx} [${t.role.toUpperCase()}]: ${t.text}`)
+          .map((t: any, idx: number) => `Turn ${idx} [${t.role.toUpperCase()}]: ${t.text}`)
           .join('\n');
 
         const userUtterancesList = turnsToAnalyze
-          .map((t) => `Turn ${t.turnIndex}: "${t.text}"`)
+          .map((t) => `[userTurnIndex=${t.userTurnIdx}]: "${t.text}"`)
           .join('\n');
 
         const prompt = `You are Maya, an expert English speaking coach.
@@ -4010,7 +4085,7 @@ A student just finished an English speaking practice session.
 Here is the full conversation transcript:
 ${dialogueSummary}
 
-Here are the student's spontaneous spoken sentences to analyze:
+Here are the student's spontaneous spoken sentences to analyze (each labeled with its 0-based userTurnIndex):
 ${userUtterancesList}
 
 CRITICAL RULES:
@@ -4159,6 +4234,49 @@ CRITICAL RULES:
                 });
             }
 
+            const turnTranscriptsMap =
+              this.sessionTurnTranscriptMap.get(validSessionId) ||
+              (dto.sessionId ? this.sessionTurnTranscriptMap.get(dto.sessionId) : undefined) ||
+              (this.lastSavedSessionId ? this.sessionTurnTranscriptMap.get(this.lastSavedSessionId) : undefined);
+
+            const normalizeText = (s?: string) =>
+              (s || '')
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            const scoreTurnMatch = (turnText: string, it: any): number => {
+              const turnNorm = normalizeText(turnText);
+              const saidNorm = normalizeText(it.youSaid);
+              const betterNorm = normalizeText(it.betterWay);
+              if (!turnNorm || !saidNorm) return 0;
+
+              if (turnNorm === saidNorm) return 1.0;
+
+              if (it.type === 'pronunciation') {
+                const turnWords = turnNorm.split(' ').filter(Boolean);
+                if (turnWords.includes(saidNorm) || (betterNorm && turnWords.includes(betterNorm))) {
+                  return 0.95;
+                }
+                if (turnNorm.includes(saidNorm) || (betterNorm && turnNorm.includes(betterNorm))) {
+                  return 0.85;
+                }
+                return 0;
+              }
+
+              if (saidNorm.length >= 4 && (turnNorm.includes(saidNorm) || saidNorm.includes(turnNorm))) {
+                return 0.95;
+              }
+
+              const saidWords = saidNorm.split(' ').filter((w) => w.length > 1);
+              const turnWords = new Set(turnNorm.split(' ').filter((w) => w.length > 1));
+              if (saidWords.length === 0) return 0;
+              const matched = saidWords.filter((w) => turnWords.has(w)).length;
+              const overlap = matched / saidWords.length;
+              return overlap >= 0.5 ? overlap * 0.9 : 0;
+            };
+
             return {
               sessionId: dto.sessionId,
               scenarioId,
@@ -4168,26 +4286,72 @@ CRITICAL RULES:
               userAudioUrl: userAudioUrl || null,
               modelAudioUrl: modelAudioUrl || null,
               items: rawItems.slice(0, 5).map((it: any) => {
-                const turnIdx = it.userTurnIndex ?? 0;
+                const rawTurnIdx = typeof it.userTurnIndex === 'number' ? it.userTurnIndex : 0;
                 let isolatedTurnAudio: string | undefined;
 
-                // Find the user turn's position in userTurns to get the exact matching audio clip index
-                let userTurnPosition = userTurns.findIndex((ut) => ut.turnIndex === turnIdx);
-                if (userTurnPosition < 0 && it.youSaid) {
-                  const normSaid = it.youSaid.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
-                  userTurnPosition = userTurns.findIndex((ut) => {
-                    const normUt = (ut.text || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
-                    return normUt.includes(normSaid) || normSaid.includes(normUt);
+                // 1. Check if the LLM-provided index (as 0-based userTurnIdx or dialogue turnIndex) matches the spoken text
+                let bestUserTurnPos = -1;
+                let bestScore = 0;
+
+                const directCandidate = userTurns[rawTurnIdx];
+                if (directCandidate) {
+                  const s = scoreTurnMatch(directCandidate.text, it);
+                  if (s >= 0.5) {
+                    bestUserTurnPos = rawTurnIdx;
+                    bestScore = s;
+                  }
+                }
+
+                if (bestScore < 0.9) {
+                  const byDialogueIdxPos = userTurns.findIndex((ut) => ut.turnIndex === rawTurnIdx);
+                  if (byDialogueIdxPos >= 0) {
+                    const s = scoreTurnMatch(userTurns[byDialogueIdxPos].text, it);
+                    if (s > bestScore && s >= 0.5) {
+                      bestUserTurnPos = byDialogueIdxPos;
+                      bestScore = s;
+                    }
+                  }
+                }
+
+                // 2. Always scan all userTurns by text similarity if the index did not produce a strong text match
+                if (bestScore < 0.9 && it.youSaid) {
+                  userTurns.forEach((ut, idx) => {
+                    const s = scoreTurnMatch(ut.text, it);
+                    if (s > bestScore) {
+                      bestScore = s;
+                      bestUserTurnPos = idx;
+                    }
                   });
                 }
-                const effectiveUserTurnIdx = userTurnPosition >= 0 ? userTurnPosition : turnIdx;
 
-                if (turnUrlsMap) {
-                  isolatedTurnAudio = turnUrlsMap.get(effectiveUserTurnIdx) || turnUrlsMap.get(turnIdx);
+                let effectiveUserTurnIdx = bestUserTurnPos >= 0 ? bestUserTurnPos : rawTurnIdx;
+
+                // 3. If server recorded per-turn audio transcripts, verify that the audio clip at effectiveUserTurnIdx matches the text
+                if (turnTranscriptsMap && turnTranscriptsMap.size > 0 && it.youSaid) {
+                  const recordedTextAtIdx = turnTranscriptsMap.get(effectiveUserTurnIdx);
+                  const currentClipScore = recordedTextAtIdx ? scoreTurnMatch(recordedTextAtIdx, it) : 0;
+                  if (currentClipScore < 0.5) {
+                    let bestClipIdx = -1;
+                    let bestClipScore = 0;
+                    for (const [clipIdx, clipText] of turnTranscriptsMap.entries()) {
+                      const s = scoreTurnMatch(clipText, it);
+                      if (s > bestClipScore) {
+                        bestClipScore = s;
+                        bestClipIdx = clipIdx;
+                      }
+                    }
+                    if (bestClipIdx >= 0 && bestClipScore >= 0.5) {
+                      effectiveUserTurnIdx = bestClipIdx;
+                    }
+                  }
                 }
 
-                // If not found in-memory, construct the turn URL directly from Supabase storage
-                if (!isolatedTurnAudio && this.supabase) {
+                if (turnUrlsMap) {
+                  isolatedTurnAudio = turnUrlsMap.get(effectiveUserTurnIdx);
+                }
+
+                // If not found in-memory, construct the isolated turn URL directly from storage
+                if (!isolatedTurnAudio && this.supabase && effectiveUserTurnIdx >= 0) {
                   isolatedTurnAudio = this.supabase.storage
                     .from('session-recordings')
                     .getPublicUrl(`${validSessionId}/turns/user_turn_${effectiveUserTurnIdx}.wav`).data.publicUrl;
@@ -4195,7 +4359,7 @@ CRITICAL RULES:
 
                 const sentenceAudioUrl = isolatedTurnAudio
                   ? isolatedTurnAudio.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp')
-                  : userAudioUrl || null;
+                  : null;
 
                 let youSaidHighlight = it.youSaidHighlight?.trim();
                 let betterWayHighlight = it.betterWayHighlight?.trim();
@@ -4212,6 +4376,7 @@ CRITICAL RULES:
 
                 return {
                   ...it,
+                  userTurnIndex: effectiveUserTurnIdx,
                   youSaidHighlight,
                   betterWayHighlight,
                   userAudioUrl: sentenceAudioUrl,

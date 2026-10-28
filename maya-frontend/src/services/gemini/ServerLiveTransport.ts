@@ -67,6 +67,21 @@ export class ServerLiveTransport implements ILiveTransport {
     }
 
     try {
+      // Ensure any previous socket or ping timer from an earlier connect attempt is cleanly closed first
+      if (this.pingInterval) {
+        clearInterval(this.pingInterval);
+        this.pingInterval = null;
+      }
+      if (this.ws) {
+        try {
+          this.ws.onclose = null;
+          this.ws.onerror = null;
+          this.ws.onmessage = null;
+          this.ws.close(1000, 'Reconnecting session');
+        } catch {}
+        this.ws = null;
+      }
+
       let targetWsUrl = this.backendWsUrl;
 
       // If backend gave an explicit wsUrl or if on web, dynamically match window location or configured backend
@@ -117,7 +132,8 @@ export class ServerLiveTransport implements ILiveTransport {
             console.warn(`[${getLogTimestamp()}] 🔌 [ServerLiveTransport:${this.clientSessionId}] Browser offline event detected - closing socket`);
             if (this.isOpen && this.ws) {
               try {
-                this.ws.close(1006, 'Network offline');
+                // Note: Browser WebSocket.close() only allows code 1000 or 3000-4999 (1006 throws InvalidAccessError)
+                this.ws.close(4006, 'Network offline');
               } catch {}
               this.isOpen = false;
               this.callbacks.onClose?.(1006, 'Network offline');
@@ -130,9 +146,9 @@ export class ServerLiveTransport implements ILiveTransport {
         if (this.pingInterval) clearInterval(this.pingInterval);
         this.pingInterval = setInterval(() => {
           if (this.isOpen && this.ws?.readyState === WebSocket.OPEN) {
-            // If no pong or message received for > 7000ms, socket is dead (e.g. Wi-Fi turned off)
+            // If no pong or message received for > 15000ms (5 ping cycles), socket is dead (e.g. Wi-Fi turned off)
             const timeSinceLastPong = Date.now() - this.lastPongAt;
-            if (timeSinceLastPong > 7000) {
+            if (timeSinceLastPong > 15000) {
               console.warn(
                 `[${getLogTimestamp()}] ⚠️ [ServerLiveTransport:${this.clientSessionId}] Heartbeat timeout (${timeSinceLastPong}ms without response) -> forcing reconnect`,
               );
@@ -141,7 +157,8 @@ export class ServerLiveTransport implements ILiveTransport {
                 this.pingInterval = null;
               }
               try {
-                this.ws.close(1006, 'Heartbeat timeout');
+                // Use valid custom close code 4008 so browser actually closes the TCP/WS connection
+                this.ws.close(4008, 'Heartbeat timeout');
               } catch {}
               this.isOpen = false;
               this.callbacks.onClose?.(1006, 'Heartbeat timeout');

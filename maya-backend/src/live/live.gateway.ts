@@ -98,6 +98,27 @@ interface ClientSessionState {
     feedbackSinhala?: string;
     feedbackEnglish?: string;
   };
+  supersededByReconnect?: boolean;
+}
+
+interface PersistentSessionAudioState {
+  userAudioChunks: Buffer[];
+  userTurnAudioMap: Map<number, Buffer>;
+  userTurnTranscriptMap: Map<number, string>;
+  userTurnCount: number;
+  modelAudioChunks: Buffer[];
+  modelTurnAudioMap: Map<number, Buffer>;
+  modelTurnCount: number;
+  chronologicalAudioTurns: Array<{ speaker: 'user' | 'model'; turnIdx: number; pcm: Buffer; sampleRate: number }>;
+  authoritativeTurns: Array<{ role: 'user' | 'model'; text: string; timestamp: string }>;
+  grammarCorrections: Array<{ studentSaid: string; moreNatural: string; explanation: string; highlightWords?: string[] }>;
+  totalTextInTokens: number;
+  totalAudioInTokens: number;
+  totalAudioOutTokens: number;
+  totalTextOutTokens: number;
+  totalThoughtsTokens: number;
+  firstConnectedAt: number;
+  hasDispatchedGreeting: boolean;
 }
 
 // Backpressure threshold: 128 KB of queued data
@@ -113,6 +134,7 @@ const HEARTBEAT_TIMEOUT_MS = 30_000;
 export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(LiveGateway.name);
   private readonly clients = new Map<WebSocket, ClientSessionState>();
+  private readonly sessionStateById = new Map<string, PersistentSessionAudioState>();
   private readonly ai: GoogleGenAI;
   private readonly liveModel: string;
 
@@ -192,6 +214,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     client.on('message', async (data: RawData, isBinary: boolean) => {
       try {
+        state.lastPongAt = Date.now();
         if (isBinary) {
           // Direct binary PCM 16kHz audio buffer
           const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data as any);
@@ -272,19 +295,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           this.logger.warn(`[${sid}] Failed to save diagnostics: ${e?.message}`);
         });
 
-      // If user was still speaking when call closed, commit final turn audio
-      if (state.currentUserTurnAudioChunks.length > 0) {
-        const turnBuffer = Buffer.concat(state.currentUserTurnAudioChunks);
-        state.userTurnAudioMap.set(state.userTurnCount, turnBuffer);
-        state.chronologicalAudioTurns.push({
-          speaker: 'user',
-          turnIdx: state.userTurnCount,
-          pcm: turnBuffer,
-          sampleRate: 16000,
-        });
-        state.userTurnCount++;
-        state.currentUserTurnAudioChunks = [];
-      }
+      // Flush any final verified pending user turn audio (only commits if student speech was transcribed)
+      this.commitPendingUserTurnAudio(state);
+      state.currentUserTurnAudioChunks = [];
 
       // If model was still speaking when call closed, commit final turn audio
       if (state.currentModelTurnAudioChunks.length > 0) {
@@ -300,15 +313,23 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         state.currentModelTurnAudioChunks = [];
       }
 
-      // Flush any final pending user turn audio
-      this.commitPendingUserTurnAudio(state);
+      this.syncPersistentSessionState(state);
+
+      const hasAnotherActiveSocketForSession = Array.from(this.clients.entries()).some(
+        ([otherClient, otherState]) =>
+          otherClient !== client &&
+          otherState.sessionId === state.sessionId &&
+          otherClient.readyState === WebSocket.OPEN,
+      );
+      const isSupersededReconnect = Boolean(state.supersededByReconnect || hasAnotherActiveSocketForSession);
 
       // Save user, model, per-turn audio recordings, and chronological conversation to Supabase Storage
       if (
-        state.userAudioChunks.length > 0 ||
-        state.modelAudioChunks.length > 0 ||
-        state.userTurnAudioMap.size > 0 ||
-        state.modelTurnAudioMap.size > 0
+        !isSupersededReconnect &&
+        (state.userAudioChunks.length > 0 ||
+          state.modelAudioChunks.length > 0 ||
+          state.userTurnAudioMap.size > 0 ||
+          state.modelTurnAudioMap.size > 0)
       ) {
         const userPcm = state.userAudioChunks.length > 0 ? Buffer.concat(state.userAudioChunks) : undefined;
         const modelPcm = state.modelAudioChunks.length > 0 ? Buffer.concat(state.modelAudioChunks) : undefined;
@@ -332,9 +353,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Persist server-authoritative conversation turns directly to DB and conversation.json
       if (state.authoritativeTurns && state.authoritativeTurns.length > 0) {
         this.sessionsService.setAuthoritativeTurns(state.sessionId, state.authoritativeTurns);
-        this.sessionsService.saveSessionTurns(state.sessionId, state.authoritativeTurns, state.dto?.topic).catch((e: any) => {
-          this.logger.warn(`[${sid}] Failed saving authoritative turns on disconnect: ${e?.message}`);
-        });
+        if (!isSupersededReconnect) {
+          this.sessionsService.saveSessionTurns(state.sessionId, state.authoritativeTurns, state.dto?.topic).catch((e: any) => {
+            this.logger.warn(`[${sid}] Failed saving authoritative turns on disconnect: ${e?.message}`);
+          });
+        }
       }
 
       // Auto-finalize session on server disconnect if real conversation/audio activity occurred.
@@ -342,11 +365,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // the session is marked completed in public.sessions, recorded in usage_ledger (Admin Usage),
       // and practice minutes are accurately calculated and deducted from profiles.minutes_balance.
       const hadActivity =
-        (state.authoritativeTurns && state.authoritativeTurns.length > 0) ||
-        state.userTurnCount > 0 ||
-        state.modelTurnCount > 0 ||
-        state.totalAudioInTokens > 0 ||
-        state.totalAudioOutTokens > 0;
+        !isSupersededReconnect &&
+        ((state.authoritativeTurns && state.authoritativeTurns.length > 0) ||
+          state.userTurnCount > 0 ||
+          state.modelTurnCount > 0 ||
+          state.totalAudioInTokens > 0 ||
+          state.totalAudioOutTokens > 0);
 
       if (hadActivity) {
         const isHeartbeatTimeout = state.sessionLog.some((e) => e.event === 'heartbeat_timeout');
@@ -438,6 +462,101 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       state.opusPcmBuffer = Buffer.alloc(0);
     }
     this.clients.delete(client);
+  }
+
+  // ─── PERSISTENT SESSION STATE ACROSS RECONNECTS ──────────────────────────────
+
+  private bindAndRestorePersistentSessionState(client: WebSocket, state: ClientSessionState) {
+    const sid = state.sessionId;
+
+    // If an older socket for the same sessionId is still open (e.g. half-open socket replaced by reconnect),
+    // flush its verified audio turns, mark it superseded, and close it cleanly.
+    for (const [otherClient, otherState] of this.clients.entries()) {
+      if (otherClient !== client && otherState.sessionId === sid) {
+        otherState.supersededByReconnect = true;
+        this.commitPendingUserTurnAudio(otherState);
+        otherState.currentUserTurnAudioChunks = [];
+        if (otherState.currentModelTurnAudioChunks.length > 0) {
+          const modelBuffer = Buffer.concat(otherState.currentModelTurnAudioChunks);
+          otherState.modelTurnAudioMap.set(otherState.modelTurnCount, modelBuffer);
+          otherState.chronologicalAudioTurns.push({
+            speaker: 'model',
+            turnIdx: otherState.modelTurnCount,
+            pcm: modelBuffer,
+            sampleRate: 24000,
+          });
+          otherState.modelTurnCount++;
+          otherState.currentModelTurnAudioChunks = [];
+        }
+        this.syncPersistentSessionState(otherState);
+        this.stopHeartbeat(otherState);
+        try {
+          otherClient.close(1000, 'Superseded by reconnected session');
+        } catch {}
+      }
+    }
+
+    let persistent = this.sessionStateById.get(sid);
+    if (!persistent) {
+      persistent = {
+        userAudioChunks: state.userAudioChunks,
+        userTurnAudioMap: state.userTurnAudioMap,
+        userTurnTranscriptMap: new Map<number, string>(),
+        userTurnCount: state.userTurnCount,
+        modelAudioChunks: state.modelAudioChunks,
+        modelTurnAudioMap: state.modelTurnAudioMap,
+        modelTurnCount: state.modelTurnCount,
+        chronologicalAudioTurns: state.chronologicalAudioTurns,
+        authoritativeTurns: state.authoritativeTurns,
+        grammarCorrections: state.grammarCorrections,
+        totalTextInTokens: state.totalTextInTokens,
+        totalAudioInTokens: state.totalAudioInTokens,
+        totalAudioOutTokens: state.totalAudioOutTokens,
+        totalTextOutTokens: state.totalTextOutTokens,
+        totalThoughtsTokens: state.totalThoughtsTokens,
+        firstConnectedAt: state.connectedAt,
+        hasDispatchedGreeting: state.hasDispatchedGreeting,
+      };
+      this.sessionStateById.set(sid, persistent);
+    } else {
+      // Merge any early audio chunks captured before start_session arrived into the persistent buffers
+      if (state.userAudioChunks.length > 0 && state.userAudioChunks !== persistent.userAudioChunks) {
+        persistent.userAudioChunks.push(...state.userAudioChunks);
+      }
+      state.userAudioChunks = persistent.userAudioChunks;
+      state.userTurnAudioMap = persistent.userTurnAudioMap;
+      state.userTurnCount = persistent.userTurnCount;
+      state.modelAudioChunks = persistent.modelAudioChunks;
+      state.modelTurnAudioMap = persistent.modelTurnAudioMap;
+      state.modelTurnCount = persistent.modelTurnCount;
+      state.chronologicalAudioTurns = persistent.chronologicalAudioTurns;
+      state.authoritativeTurns = persistent.authoritativeTurns;
+      state.grammarCorrections = persistent.grammarCorrections;
+      state.totalTextInTokens = persistent.totalTextInTokens;
+      state.totalAudioInTokens = persistent.totalAudioInTokens;
+      state.totalAudioOutTokens = persistent.totalAudioOutTokens;
+      state.totalTextOutTokens = persistent.totalTextOutTokens;
+      state.totalThoughtsTokens = persistent.totalThoughtsTokens;
+      state.connectedAt = persistent.firstConnectedAt;
+      state.hasDispatchedGreeting = persistent.hasDispatchedGreeting;
+
+      this.logger.log(
+        `[${sid}] 🔄 Restored cumulative session state on reconnect: ${state.userTurnCount} user turns, ${state.modelTurnCount} model turns, ${state.chronologicalAudioTurns.length} chronological audio segments, ${state.authoritativeTurns.length} transcript turns`,
+      );
+    }
+  }
+
+  private syncPersistentSessionState(state: ClientSessionState) {
+    const persistent = this.sessionStateById.get(state.sessionId);
+    if (!persistent) return;
+    persistent.userTurnCount = Math.max(persistent.userTurnCount, state.userTurnCount);
+    persistent.modelTurnCount = Math.max(persistent.modelTurnCount, state.modelTurnCount);
+    persistent.totalTextInTokens = Math.max(persistent.totalTextInTokens, state.totalTextInTokens);
+    persistent.totalAudioInTokens = Math.max(persistent.totalAudioInTokens, state.totalAudioInTokens);
+    persistent.totalAudioOutTokens = Math.max(persistent.totalAudioOutTokens, state.totalAudioOutTokens);
+    persistent.totalTextOutTokens = Math.max(persistent.totalTextOutTokens, state.totalTextOutTokens);
+    persistent.totalThoughtsTokens = Math.max(persistent.totalThoughtsTokens, state.totalThoughtsTokens);
+    persistent.hasDispatchedGreeting = persistent.hasDispatchedGreeting || state.hasDispatchedGreeting;
   }
 
   // ─── HEARTBEAT ───────────────────────────────────────────────────────────────
@@ -555,10 +674,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     switch (message.type) {
       case 'start_session': {
         const dto: CreateSessionTokenDto = message.options || {};
-        if (message.options?.sessionId) {
-          state.sessionId = toValidUuid(message.options.sessionId);
+        const rawSessionId = message.options?.sessionId || message.sessionId;
+        if (rawSessionId) {
+          state.sessionId = toValidUuid(rawSessionId);
         }
         state.dto = dto;
+        this.bindAndRestorePersistentSessionState(client, state);
 
         // Verify user token & quota balance if token is provided
         let resolvedUserId: string | undefined;
@@ -899,10 +1020,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         `[${state.sessionId}] 🎙️ Committed verified user turn ${currentTurnIdx} audio (${(turnBuffer.length / 1024).toFixed(1)} KB) for speech: "${transcribedText.slice(0, 50)}"`
       );
       state.userTurnCount++;
+      this.syncPersistentSessionState(state);
 
       // Progressively upload turn audio in background so it is instantly available in Cloud storage
       this.sessionsService
-        .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, turnBuffer, 'user')
+        .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, turnBuffer, 'user', transcribedText)
         .catch(() => {});
     }
   }
@@ -1441,13 +1563,15 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           this.logger.log(`[${state.sessionId}] 🤖 Captured model turn ${currentTurnIdx} audio (${(modelTurnBuffer.length / 1024).toFixed(1)} KB)`);
           state.modelTurnCount++;
           state.currentModelTurnAudioChunks = [];
+          this.syncPersistentSessionState(state);
 
           this.sessionsService
-            .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, modelTurnBuffer, 'model')
+            .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, modelTurnBuffer, 'model', modelText)
             .catch(() => {});
         } else if (modelText) {
           // Model turn completed with text only (no TTS per user constraint)
           state.modelTurnCount++;
+          this.syncPersistentSessionState(state);
         }
 
         // Record authoritative server-verified conversation turns

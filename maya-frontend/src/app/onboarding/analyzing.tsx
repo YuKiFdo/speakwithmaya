@@ -362,9 +362,17 @@ export default function AnalyzingScreen() {
           if (data?.items && Array.isArray(data.items)) {
             const rawSupabaseUrl = data.userAudioUrl || '';
             const supabaseAudioUrl = rawSupabaseUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+            const userOnlyTurns = (report?.sessionTurns || []).filter((t) => t.role === 'user');
             const itemsWithAudio: FeedbackItem[] = data.items.map((item: any) => {
-              const matchingTurn = report?.sessionTurns?.find((t) => t.turnIndex === item.userTurnIndex);
-              const rawCandidate = item.userAudioUrl || supabaseAudioUrl || matchingTurn?.audioUrl || (activeSessionId ? `${backendBaseUrl}/v1/sessions/${activeSessionId}/recording-audio?type=turn&speaker=user&index=${item.userTurnIndex ?? 0}` : '');
+              const matchingTurn =
+                userOnlyTurns[item.userTurnIndex ?? 0] ||
+                report?.sessionTurns?.find((t) => t.turnIndex === item.userTurnIndex);
+              const rawCandidate =
+                item.userAudioUrl ||
+                matchingTurn?.audioUrl ||
+                (activeSessionId
+                  ? `${backendBaseUrl}/v1/sessions/${activeSessionId}/recording-audio?type=turn&speaker=user&index=${item.userTurnIndex ?? 0}`
+                  : '');
               const candidate = rawCandidate.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
               // Strictly avoid dead in-memory blob URLs (blob:http://...) which fail with net::ERR_FILE_NOT_FOUND
               const safeAudioUrl = candidate && !candidate.startsWith('blob:') ? candidate : '';
