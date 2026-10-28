@@ -65,6 +65,14 @@ export interface UserSummaryItem {
   nativeLanguage: string;
   employmentStatus?: string;
   dailyGoalMinutes: number;
+  isTestAccount?: boolean;
+  hasActiveTelcoSub?: boolean;
+  telcoProvider?: 'ideamart' | 'mspace' | null;
+  telcoOperatorName?: string | null;
+  hasActivePayhereSub?: boolean;
+  payherePlanTier?: string | null;
+  payhereSubscriptionId?: string | null;
+  activeSubscriptionType?: 'telco' | 'payhere' | 'none';
   baselineScores: {
     overall: number;
     fluency: number;
@@ -384,10 +392,60 @@ export default function AdminUsersScreen() {
   };
 
   const handleDeleteUser = async (u: UserSummaryItem) => {
+    const isTest = Boolean(u.isTestAccount || isTestAccount(u.phoneNumber));
+    const studentName = u.displayName || 'Student';
+    const studentRef = u.phoneNumber || u.id;
+
+    let confirmTitle = 'Delete Student Profile';
+    let confirmMessage = `Permanently delete student "${studentName}" (${studentRef}) and all their practice data? This cannot be undone.`;
+    let confirmButtonText = 'Delete Permanently';
+
+    if (!isTest) {
+      const hasPayhere = Boolean(
+        u.hasActivePayhereSub || (u.planTier && u.planTier !== 'starter' && u.planStatus === 'active')
+      );
+      const hasTelco = Boolean(
+        u.hasActiveTelcoSub || (!hasPayhere && u.planTier === 'starter' && u.planStatus === 'active')
+      );
+      const paidTierLabel = (u.payherePlanTier || u.planTier || 'PRO').toUpperCase();
+      const telcoLabel = u.telcoOperatorName || 'Mobile Carrier (Dialog / Mobitel / Hutch)';
+
+      if (hasPayhere && hasTelco) {
+        confirmTitle = 'Active Paid & Telco Subscriptions Detected';
+        confirmMessage =
+          `Permanently delete "${studentName}" (${studentRef})?\n\n` +
+          `• Subscription Status: Active ${paidTierLabel} (PayHere Paid) + Starter Telco (${telcoLabel})\n` +
+          `• Auto-Unsubscribe: Confirming deletion will automatically unsubscribe both their PayHere ${paidTierLabel} subscription and Starter Telco subscription before deleting the account.\n\n` +
+          `This action cannot be undone.`;
+        confirmButtonText = 'Unsubscribe & Delete';
+      } else if (hasPayhere) {
+        confirmTitle = `Active ${paidTierLabel} (PayHere) Subscription Detected`;
+        confirmMessage =
+          `Permanently delete "${studentName}" (${studentRef})?\n\n` +
+          `• Subscription Status: Active ${paidTierLabel} Plan (PayHere Paid Subscription)\n` +
+          `• Auto-Unsubscribe: Confirming deletion will automatically cancel/unsubscribe their active PayHere ${paidTierLabel} subscription so no future charges occur.\n\n` +
+          `This action cannot be undone.`;
+        confirmButtonText = 'Unsubscribe & Delete';
+      } else if (hasTelco) {
+        confirmTitle = 'Active Starter Telco Subscription Detected';
+        confirmMessage =
+          `Permanently delete "${studentName}" (${studentRef})?\n\n` +
+          `• Subscription Status: Active Starter Telco Subscription (${telcoLabel})\n` +
+          `• Auto-Unsubscribe: Confirming deletion will automatically unsubscribe their Starter Telco daily subscription so mobile balance deductions stop immediately.\n\n` +
+          `This action cannot be undone.`;
+        confirmButtonText = 'Unsubscribe & Delete';
+      } else {
+        confirmMessage =
+          `Permanently delete "${studentName}" (${studentRef})?\n\n` +
+          `• Subscription Status: No active Starter Telco or Pro (PayHere) subscription available.\n\n` +
+          `All practice data and account history will be permanently removed. This cannot be undone.`;
+      }
+    }
+
     const confirmed = await mayaAlert.confirm({
-      title: 'Delete Student Profile',
-      message: `Permanently delete student "${u.displayName || 'Student'}" (${u.phoneNumber || u.id}) and all their practice data? This cannot be undone.`,
-      confirmText: 'Delete Permanently',
+      title: confirmTitle,
+      message: confirmMessage,
+      confirmText: confirmButtonText,
       cancelText: 'Cancel',
       isDestructive: true,
     });
@@ -399,7 +457,11 @@ export default function AdminUsersScreen() {
         method: 'DELETE',
       });
       if (res.ok) {
-        await mayaAlert.success(`Student profile deleted successfully.`, 'Deleted');
+        const resJson = await res.json().catch(() => ({}));
+        await mayaAlert.success(
+          resJson.message || 'Student profile deleted successfully.',
+          'Deleted'
+        );
         if (selectedUserId === u.id) {
           closeUserDetail();
         }

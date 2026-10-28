@@ -1879,9 +1879,10 @@ export class AuthService {
       }
 
       const allProfiles = (profiles || []) as UserProfileData[];
-      const [extrasMap, registeredTestAccounts] = await Promise.all([
+      const [extrasMap, registeredTestAccounts, appConfig] = await Promise.all([
         this.getProfileExtrasMap(),
         this.getTestAccounts().catch(() => [] as TestAccountItem[]),
+        this.getAppConfig(),
       ]);
 
       const testPhoneDigitsSet = new Set<string>(
@@ -1908,15 +1909,41 @@ export class AuthService {
         .from('usage_ledger')
         .select('user_id, session_id, total_tokens, cost_lkr, cost_usd');
 
-      // 4. Fetch subscriptions
-      const { data: subs } = await this.supabase
-        .from('subscriptions')
-        .select('id, user_id, plan_tier, status, amount_lkr, next_billing_date, updated_at');
+      // 4. Fetch subscriptions & verified Telco OTP records
+      const [{ data: subs }, { data: telcoVerifs }] = await Promise.all([
+        this.supabase
+          .from('subscriptions')
+          .select('id, user_id, plan_tier, status, amount_lkr, next_billing_date, payhere_subscription_id, updated_at'),
+        this.supabase
+          .from('phone_verifications')
+          .select('phone_number, otp_hash, verified_at, created_at')
+          .eq('is_verified', true)
+          .like('otp_hash', 'TELCO:%')
+          .order('created_at', { ascending: false }),
+      ]);
 
       // 5. Fetch roadmap progress
       const { data: progress } = await this.supabase
         .from('user_roadmap_progress')
         .select('user_id, roadmap_level_id, status, is_passed, score_percent, completed_at');
+
+      // Index verified TELCO OTP records by normalized digits
+      const telcoVerifByDigits = new Map<string, { provider: 'ideamart' | 'mspace'; verifiedAt: string; referenceNo: string }>();
+      for (const v of telcoVerifs || []) {
+        const digits = String(v.phone_number || '').replace(/\D/g, '');
+        if (!digits) continue;
+        const parts = String(v.otp_hash || '').split(':');
+        const prov = (parts[1] === 'mspace' ? 'mspace' : 'ideamart') as 'ideamart' | 'mspace';
+        const refNo = parts.slice(2).join(':');
+        if (!telcoVerifByDigits.has(digits)) {
+          telcoVerifByDigits.set(digits, {
+            provider: prov,
+            verifiedAt: v.verified_at || v.created_at,
+            referenceNo: refNo,
+          });
+        }
+      }
+      const isTelcoGatewayActive = appConfig.smsGateway === 'ideamart' || appConfig.smsGateway === 'mspace';
 
       // Map sessions by user_id
       const sessionsByUser = new Map<string, any[]>();
@@ -1977,6 +2004,63 @@ export class AuthService {
         const extra = extrasMap[p.id] || {};
         const email = (p as any).email || extra.email || null;
         const avatarUrl = (p as any).avatar_url || extra.avatarUrl || null;
+        const isTestAccount = isTestProfile(p);
+
+        // Determine active subscription state for non-test accounts
+        const hasActivePayhereSub =
+          !isTestAccount &&
+          Boolean(
+            (activeSub && (activeSub.status === 'ACTIVE' || activeSub.status === 'PAST_DUE')) ||
+              (p.plan_tier && p.plan_tier !== 'starter' && p.plan_status === 'active'),
+          );
+        const payherePlanTier = hasActivePayhereSub
+          ? activeSub?.plan_tier || (p.plan_tier !== 'starter' ? p.plan_tier : 'pro')
+          : null;
+        const payhereSubscriptionId = hasActivePayhereSub
+          ? activeSub?.payhere_subscription_id || activeSub?.id || null
+          : null;
+
+        const digits = String(p.phone_number || '').replace(/\D/g, '');
+        const verif = digits ? telcoVerifByDigits.get(digits) : undefined;
+        const hasExplicitTelco = Boolean(
+          p.telco_subscriber_id ||
+            p.telco_provider ||
+            extra.telcoSubscriberId ||
+            extra.telcoProvider ||
+            verif,
+        );
+        const isImplicitTelcoDailyStarter =
+          isTelcoGatewayActive &&
+          (p.billing_cycle === 'daily' || p.plan_tier === 'starter') &&
+          !hasActivePayhereSub;
+        const isTelcoCancelledOrUpgraded =
+          hasActivePayhereSub ||
+          p.plan_status === 'canceled' ||
+          p.plan_status === 'expired' ||
+          extra.telcoStatus === 'CANCELLED' ||
+          extra.telcoStatus === 'UPGRADED';
+
+        const hasActiveTelcoSub =
+          !isTestAccount &&
+          Boolean(
+            ((hasExplicitTelco || isImplicitTelcoDailyStarter) && !isTelcoCancelledOrUpgraded) ||
+              (p.telco_subscriber_id && extra.telcoStatus !== 'CANCELLED'),
+          );
+
+        const detectedProvider: 'ideamart' | 'mspace' =
+          (p.telco_provider as any) ||
+          extra.telcoProvider ||
+          verif?.provider ||
+          this.telcoService.detectProvider(p.phone_number);
+        const telcoOperatorName =
+          !isTestAccount && (hasActiveTelcoSub || hasExplicitTelco)
+            ? this.getTelcoOperatorLabel(p.phone_number, detectedProvider)
+            : null;
+        const activeSubscriptionType: 'payhere' | 'telco' | 'none' = hasActivePayhereSub
+          ? 'payhere'
+          : hasActiveTelcoSub
+          ? 'telco'
+          : 'none';
 
         return {
           id: p.id,
@@ -1997,6 +2081,14 @@ export class AuthService {
           nativeLanguage: p.native_language || 'sinhala',
           employmentStatus: p.employment_status,
           dailyGoalMinutes: p.daily_goal_minutes ?? 10,
+          isTestAccount,
+          hasActiveTelcoSub,
+          telcoProvider: hasActiveTelcoSub ? detectedProvider : null,
+          telcoOperatorName,
+          hasActivePayhereSub,
+          payherePlanTier,
+          payhereSubscriptionId,
+          activeSubscriptionType,
           baselineScores: {
             overall: Math.round(((p.baseline_fluency_score || 0) + (p.baseline_grammar_score || 0) + (p.baseline_pronunciation_score || 0)) / 3) || 75,
             fluency: p.baseline_fluency_score || 70,
@@ -2597,17 +2689,79 @@ export class AuthService {
     };
   }
 
+  private getTelcoOperatorLabel(phone: string, provider?: string | null): string {
+    const digits = (phone || '').replace(/\D/g, '');
+    const prefix = digits.startsWith('94')
+      ? digits.slice(2, 4)
+      : digits.startsWith('0')
+      ? digits.slice(1, 3)
+      : digits.slice(0, 2);
+    if (prefix === '70' || prefix === '71' || provider === 'mspace') {
+      return 'Mobitel (mSpace)';
+    }
+    if (prefix === '78' || prefix === '72') {
+      return 'Hutch (IdeaMart)';
+    }
+    if (prefix === '75') {
+      return 'Airtel (IdeaMart)';
+    }
+    return 'Dialog (IdeaMart)';
+  }
+
+  private async cancelPayHereRemoteSubscription(payhereSubscriptionId: string): Promise<void> {
+    if (!payhereSubscriptionId) return;
+    const appId = process.env.PAYHERE_APP_ID || '';
+    const appSecret = process.env.PAYHERE_APP_SECRET || '';
+    if (!appId || !appSecret) return;
+
+    const sandbox = process.env.PAYHERE_SANDBOX !== 'false';
+    const baseUrl = sandbox ? 'https://sandbox.payhere.lk' : 'https://www.payhere.lk';
+    const authCode = Buffer.from(`${appId}:${appSecret}`).toString('base64');
+
+    const tokenRes = await fetch(`${baseUrl}/merchant/v1/oauth/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${authCode}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    });
+
+    if (!tokenRes.ok) return;
+    const tokenData: any = await tokenRes.json();
+    const accessToken = tokenData?.access_token;
+    if (!accessToken) return;
+
+    await fetch(`${baseUrl}/merchant/v1/subscription/cancel`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ subscription_id: payhereSubscriptionId }),
+    });
+  }
+
   /**
-   * Admin: Permanently delete a user profile and all associated data
+   * Admin: Permanently delete a user profile and all associated data.
+   * For non-test accounts, automatically unsubscribes active Starter Telco
+   * and/or Pro/Paid PayHere subscriptions before deleting records.
    */
-  async deleteUser(userId: string): Promise<{ success: boolean; message: string }> {
+  async deleteUser(userId: string): Promise<{
+    success: boolean;
+    message: string;
+    unsubscribedTelco?: boolean;
+    unsubscribedPayhere?: boolean;
+  }> {
     if (!this.supabase) {
       throw new InternalServerErrorException('Supabase database client not configured.');
     }
 
     const { data: profile, error: pErr } = await this.supabase
       .from('profiles')
-      .select('id, phone_number, display_name')
+      .select(
+        'id, phone_number, display_name, plan_tier, plan_status, billing_cycle, monthly_minutes_allowance, minutes_balance, telco_subscriber_id, telco_provider',
+      )
       .eq('id', userId)
       .maybeSingle();
 
@@ -2615,22 +2769,135 @@ export class AuthService {
       throw new NotFoundException(`User with ID ${userId} not found.`);
     }
 
-    // 1. Remove from sys_app_settings.testAccounts if present
+    let isTestAccount =
+      (profile.monthly_minutes_allowance || 0) >= 9000 ||
+      (profile.minutes_balance || 0) >= 9000;
+    let config: AppConfigData = { ...DEFAULT_APP_CONFIG };
+
+    // 1. Check & remove from sys_app_settings.testAccounts if present
     try {
-      const config = await this.getAppConfig();
+      config = await this.getAppConfig();
       const cleanPhoneDigits = (profile.phone_number || '').replace(/\D/g, '');
-      const filteredTestAccounts = (config.testAccounts || []).filter((t: any) => {
+      const existingTestAccounts = config.testAccounts || [];
+      if (
+        existingTestAccounts.some((t: any) => {
+          const tDigits = (t.phoneNumber || '').replace(/\D/g, '');
+          return (cleanPhoneDigits && tDigits === cleanPhoneDigits) || t.id === userId;
+        })
+      ) {
+        isTestAccount = true;
+      }
+
+      const filteredTestAccounts = existingTestAccounts.filter((t: any) => {
         const tDigits = (t.phoneNumber || '').replace(/\D/g, '');
         return tDigits !== cleanPhoneDigits && t.id !== userId;
       });
-      if (filteredTestAccounts.length !== (config.testAccounts || []).length) {
+      if (filteredTestAccounts.length !== existingTestAccounts.length) {
         await this.updateAppConfig({ testAccounts: filteredTestAccounts });
       }
     } catch (err: any) {
       this.logger.warn(`Could not sync test accounts on user deletion: ${err.message}`);
     }
 
-    // 2. Clean up child records across all dependent tables
+    let unsubscribedTelco = false;
+    let unsubscribedPayhere = false;
+    let cancelledPayhereTier: string | null = null;
+
+    // 2. For real (non-test) accounts, automatically unsubscribe active Telco & PayHere subscriptions
+    if (!isTestAccount) {
+      try {
+        const extrasMap = await this.getProfileExtrasMap();
+        const extra = extrasMap[userId] || {};
+
+        // 2a. Auto-unsubscribe Starter Telco subscription if present
+        const subscriberId = profile.telco_subscriber_id || extra.telcoSubscriberId;
+        const provider = ((profile.telco_provider as any) ||
+          extra.telcoProvider ||
+          this.telcoService.detectProvider(profile.phone_number)) as 'ideamart' | 'mspace';
+        const isTelcoAlreadyCancelled =
+          extra.telcoStatus === 'CANCELLED' ||
+          (profile.plan_tier === 'starter' &&
+            (profile.plan_status === 'canceled' || profile.plan_status === 'expired') &&
+            !profile.telco_subscriber_id);
+
+        if (subscriberId && !isTelcoAlreadyCancelled && this.telcoService) {
+          try {
+            await this.telcoService.unsubscribe(provider, subscriberId, config);
+            unsubscribedTelco = true;
+            this.logger.log(
+              `[AdminDelete] Automatically unsubscribed ${provider.toUpperCase()} Telco subscription for user ${userId}`,
+            );
+          } catch (telcoErr: any) {
+            unsubscribedTelco = true;
+            this.logger.warn(
+              `[AdminDelete] Telco unsubscribe gateway warning for user ${userId}: ${telcoErr?.message}`,
+            );
+          }
+        } else if (
+          !isTelcoAlreadyCancelled &&
+          profile.plan_tier === 'starter' &&
+          profile.plan_status === 'active' &&
+          (config.smsGateway === 'ideamart' || config.smsGateway === 'mspace')
+        ) {
+          unsubscribedTelco = true;
+        }
+
+        // 2b. Auto-cancel active Paid / Pro PayHere subscription if present
+        const { data: userSubs } = await this.supabase
+          .from('subscriptions')
+          .select('*')
+          .eq('user_id', userId);
+
+        for (const sub of userSubs || []) {
+          const isActiveOrPastDue = sub.status === 'ACTIVE' || sub.status === 'PAST_DUE';
+          if (isActiveOrPastDue || (sub.payhere_subscription_id && sub.status !== 'CANCELLED')) {
+            if (sub.payhere_subscription_id) {
+              try {
+                await this.cancelPayHereRemoteSubscription(sub.payhere_subscription_id);
+                this.logger.log(
+                  `[AdminDelete] Automatically cancelled PayHere subscription ${sub.payhere_subscription_id} for user ${userId}`,
+                );
+              } catch (phErr: any) {
+                this.logger.warn(
+                  `[AdminDelete] PayHere cancel API warning for user ${userId}: ${phErr?.message}`,
+                );
+              }
+            }
+            unsubscribedPayhere = true;
+            cancelledPayhereTier = sub.plan_tier || profile.plan_tier || 'pro';
+          }
+        }
+
+        if (
+          !unsubscribedPayhere &&
+          profile.plan_tier &&
+          profile.plan_tier !== 'starter' &&
+          profile.plan_status === 'active'
+        ) {
+          unsubscribedPayhere = true;
+          cancelledPayhereTier = profile.plan_tier;
+        }
+
+        // Clean up user entry from sys_user_profile_extras
+        if (extrasMap[userId]) {
+          delete extrasMap[userId];
+          await this.supabase.from('roadmap_levels').upsert({
+            id: 'sys_user_profile_extras',
+            level_number: 9998,
+            title: 'USER_PROFILE_EXTRAS',
+            is_published: false,
+            canonical_content: JSON.stringify(extrasMap),
+            updated_at: new Date().toISOString(),
+          });
+        }
+      } catch (subCleanupErr: any) {
+        this.logger.warn(
+          `[AdminDelete] Warning during subscription auto-unsubscribe for user ${userId}: ${subCleanupErr?.message}`,
+        );
+      }
+    }
+
+    // 3. Clean up child records across all dependent tables
     try {
       const { data: userSessions } = await this.supabase
         .from('sessions')
@@ -2657,7 +2924,7 @@ export class AuthService {
       this.logger.warn(`Error cleaning up child records for user ${userId}: ${err.message}`);
     }
 
-    // 3. Delete from profiles
+    // 4. Delete from profiles
     const { error: delError } = await this.supabase
       .from('profiles')
       .delete()
@@ -2668,10 +2935,24 @@ export class AuthService {
       throw new InternalServerErrorException(`Failed to delete user profile: ${delError.message}`);
     }
 
-    this.logger.log(`[Admin] Deleted profile "${profile.display_name}" (${profile.phone_number}, ID: ${userId})`);
+    const userLabel = profile.display_name || profile.phone_number;
+    let message = `User ${userLabel} successfully deleted.`;
+    if (!isTestAccount) {
+      if (unsubscribedPayhere && unsubscribedTelco) {
+        message = `User ${userLabel} deleted. Active ${(cancelledPayhereTier || 'PRO').toUpperCase()} (PayHere) and Starter Telco subscriptions were automatically unsubscribed.`;
+      } else if (unsubscribedPayhere) {
+        message = `User ${userLabel} deleted and their active ${(cancelledPayhereTier || 'PRO').toUpperCase()} (PayHere) subscription was automatically unsubscribed.`;
+      } else if (unsubscribedTelco) {
+        message = `User ${userLabel} deleted and their Starter Telco subscription was automatically unsubscribed.`;
+      }
+    }
+
+    this.logger.log(`[Admin] ${message} (ID: ${userId})`);
     return {
       success: true,
-      message: `User ${profile.display_name || profile.phone_number} successfully deleted.`,
+      message,
+      unsubscribedTelco,
+      unsubscribedPayhere,
     };
   }
 
