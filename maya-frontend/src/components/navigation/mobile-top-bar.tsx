@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
   },
   brandAccent: {
-    color: '#0085db',
+    color: '#0052FF',
   },
   brandTaglineMobile: {
     ...fontStyle('outfit', 'medium'),
