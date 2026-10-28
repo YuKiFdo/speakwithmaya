@@ -22,6 +22,7 @@ import { MayaPrimaryButton } from '@/components/ui';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { authService } from '@/services/auth/auth-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
+import { trackSignUp } from '@/utils/analytics';
 
 const OTP_LENGTH = 6;
 
@@ -205,6 +206,10 @@ export default function OtpScreen() {
 
     try {
       const res = await authService.verifyOtp(displayPhone, code, { isLoginMode });
+
+      if (!isLoginMode && res.isNewUser) {
+        trackSignUp({ userId: res.user?.id, method: 'phone_otp' });
+      }
 
       // If user had finished onboarding or logged in as existing user:
       // When isLoginMode or isCompleted is true, direct straight to dashboard.

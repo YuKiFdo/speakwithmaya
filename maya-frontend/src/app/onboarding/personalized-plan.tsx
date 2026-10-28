@@ -27,6 +27,19 @@ import { OnboardingStore, useOnboardingStore } from '@/services/store/onboarding
 import { paymentApi } from '@/services/payment/payment-api';
 import { payHereGateway } from '@/services/payment/payhere-gateway';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import {
+  resolvePlanAnalyticsDetails,
+  getPendingCheckoutContext,
+  trackOnboardingComplete,
+  trackViewPlanSelection,
+  trackViewAllPlans,
+  trackSelectPlan,
+  trackBeginCheckout,
+  trackContinueStarter,
+  trackVerifiedPurchase,
+  trackPaymentFailed,
+  trackPaymentCancelled,
+} from '@/utils/analytics';
 
 const CLOCK_IMAGE = require('@/assets/images/offer-expired-clock.png');
 
@@ -206,23 +219,75 @@ export default function PersonalizedPlanScreen() {
       if (!orderId) orderId = q.get('order_id') || undefined;
     }
 
-    if (!paymentStatus) return;
+    if (!paymentStatus) {
+      trackOnboardingComplete(onboardingState.user?.id);
+      trackViewPlanSelection();
+      return;
+    }
+
+    // Immediately clean URL query on web to prevent duplicate processing on browser refresh
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
 
     const handleReturn = async () => {
+      const pendingCtx = getPendingCheckoutContext();
+      const effectiveOrderId = orderId || pendingCtx?.transaction_id;
+
       if (paymentStatus === 'success') {
-        if (orderId) {
-          try {
-            await paymentApi.verifyOrder(orderId);
-          } catch (e) {
-            // fallback gracefully
-          }
+        if (!effectiveOrderId) {
+          mayaAlert.error(
+            'Unable to verify payment reference. Please check your account status or try again.',
+            'Verification Required'
+          );
+          return;
         }
-        await authService.fetchUserProfile();
-        router.replace({
-          pathname: '/onboarding/complete' as any,
-          params: { plan: '3-months-pro' },
-        });
+
+        const verifyRes = await paymentApi.verifyOrderWithRetry(effectiveOrderId);
+        if (verifyRes.verified && verifyRes.transaction) {
+          if (verifyRes.firstVerifiedForAnalytics !== false) {
+            trackVerifiedPurchase({
+              transaction_id: verifyRes.transaction.transactionId,
+              event_id: verifyRes.transaction.eventId,
+              plan_name: verifyRes.transaction.planName,
+              billing_period: verifyRes.transaction.billingPeriod,
+              value: verifyRes.transaction.value,
+              currency: 'LKR',
+            });
+          }
+          await authService.fetchUserProfile();
+          router.replace({
+            pathname: '/onboarding/complete' as any,
+            params: { plan: '3-months-pro' },
+          });
+        } else if (verifyRes.status === 'PAYMENT_FAILED') {
+          trackPaymentFailed(
+            verifyRes.transaction
+              ? {
+                  plan_name: verifyRes.transaction.planName,
+                  billing_period: verifyRes.transaction.billingPeriod,
+                  value: verifyRes.transaction.value,
+                  currency: 'LKR',
+                  transaction_id: verifyRes.transaction.transactionId,
+                }
+              : { transaction_id: effectiveOrderId }
+          );
+          mayaAlert.error(
+            verifyRes.message || 'Your payment could not be completed. Please try again.',
+            'Payment Failed'
+          );
+        } else {
+          mayaAlert.alert(
+            'Your payment is still being verified by the payment gateway. Please check your account shortly.',
+            'Verification Pending',
+            'info'
+          );
+        }
       } else if (paymentStatus === 'cancelled') {
+        trackPaymentCancelled({
+          ...(pendingCtx || {}),
+          ...(effectiveOrderId ? { transaction_id: effectiveOrderId } : {}),
+        });
         mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
       }
     };
@@ -371,6 +436,13 @@ export default function PersonalizedPlanScreen() {
       playAnalysisCompleteSound();
     } catch {}
 
+    const planAnalytics = resolvePlanAnalyticsDetails({
+      planId: selectedPlanId,
+      planName: selectedPlan?.name,
+      billedInfo: selectedPlan?.billedInfo,
+      priceText: selectedPlan?.pricePerMonth,
+    });
+
     setIsUpgrading(true);
     try {
       // 1. Save onboarding preferences first
@@ -403,32 +475,95 @@ export default function PersonalizedPlanScreen() {
         });
 
         if (confirmed) {
-          await paymentApi.chargeSavedCard({ planTier: selectedPlanId as any });
-          await authService.fetchUserProfile();
-          router.replace({
-            pathname: '/onboarding/complete' as any,
-            params: { plan: selectedPlanId },
-          });
-          return;
+          trackBeginCheckout(planAnalytics);
+          try {
+            const chargeRes = await paymentApi.chargeSavedCard({ planTier: selectedPlanId as any });
+            if (
+              chargeRes.verified &&
+              chargeRes.transaction &&
+              chargeRes.firstVerifiedForAnalytics !== false
+            ) {
+              trackVerifiedPurchase({
+                transaction_id: chargeRes.transaction.transactionId,
+                event_id: chargeRes.transaction.eventId,
+                plan_name: chargeRes.transaction.planName,
+                billing_period: chargeRes.transaction.billingPeriod,
+                value: chargeRes.transaction.value,
+                currency: 'LKR',
+              });
+            }
+            await authService.fetchUserProfile();
+            router.replace({
+              pathname: '/onboarding/complete' as any,
+              params: { plan: selectedPlanId },
+            });
+            return;
+          } catch (chargeErr: any) {
+            trackPaymentFailed(planAnalytics);
+            throw chargeErr;
+          }
         } else {
           return;
         }
       }
 
       // 3. Fallback to standard PayHere Payment Gateway checkout if no card saved yet
-      const params = await paymentApi.getCheckoutParams(selectedPlanId as any);
+      const checkoutParams = await paymentApi.getCheckoutParams(selectedPlanId as any);
+      const checkoutAnalytics = resolvePlanAnalyticsDetails({
+        planId: selectedPlanId,
+        planName: selectedPlan?.name,
+        amount: checkoutParams.amount,
+        billedInfo: selectedPlan?.billedInfo,
+        priceText: selectedPlan?.pricePerMonth,
+      });
+
+      trackBeginCheckout({
+        ...checkoutAnalytics,
+        transaction_id: checkoutParams.order_id,
+      });
 
       // 4. Launch PayHere Gateway (JS SDK popup modal on Web, Native SDK on mobile)
-      const result = await payHereGateway.startPayment(params);
+      const result = await payHereGateway.startPayment(checkoutParams);
 
       if (result.status === 'completed') {
-        await new Promise((r) => setTimeout(r, 1200));
-        await authService.fetchUserProfile();
-        router.replace({
-          pathname: '/onboarding/complete' as any,
-          params: { plan: selectedPlanId },
+        const txOrderId = result.orderId || checkoutParams.order_id;
+        const verifyRes = await paymentApi.verifyOrderWithRetry(txOrderId);
+        if (verifyRes.verified && verifyRes.transaction) {
+          if (verifyRes.firstVerifiedForAnalytics !== false) {
+            trackVerifiedPurchase({
+              transaction_id: verifyRes.transaction.transactionId,
+              event_id: verifyRes.transaction.eventId,
+              plan_name: verifyRes.transaction.planName,
+              billing_period: verifyRes.transaction.billingPeriod,
+              value: verifyRes.transaction.value,
+              currency: 'LKR',
+            });
+          }
+          await authService.fetchUserProfile();
+          router.replace({
+            pathname: '/onboarding/complete' as any,
+            params: { plan: selectedPlanId },
+          });
+        } else {
+          trackPaymentFailed({
+            ...checkoutAnalytics,
+            transaction_id: txOrderId,
+          });
+          await mayaAlert.error(
+            verifyRes.message || 'Payment could not be verified. Please try again.',
+            'Payment Error'
+          );
+        }
+      } else if (result.status === 'dismissed') {
+        trackPaymentCancelled({
+          ...checkoutAnalytics,
+          transaction_id: checkoutParams.order_id,
         });
       } else if (result.status === 'error') {
+        trackPaymentFailed({
+          ...checkoutAnalytics,
+          transaction_id: checkoutParams.order_id,
+        });
         const errorMsg = result.error || 'Payment could not be completed. Please try again.';
         await mayaAlert.error(errorMsg, 'Payment Error');
       }
@@ -444,6 +579,9 @@ export default function PersonalizedPlanScreen() {
     try {
       playOtherButtonSound();
     } catch {}
+
+    trackOnboardingComplete(OnboardingStore.getState().user?.id);
+    trackContinueStarter();
 
     const state = OnboardingStore.getState();
     await authService.savePreferences({
@@ -513,7 +651,17 @@ export default function PersonalizedPlanScreen() {
                 return (
                   <Pressable
                     key={plan.id}
-                    onPress={() => setSelectedPlanId(plan.id)}
+                    onPress={() => {
+                      setSelectedPlanId(plan.id);
+                      trackSelectPlan(
+                        resolvePlanAnalyticsDetails({
+                          planId: plan.id,
+                          planName: plan.name,
+                          billedInfo: plan.billedInfo,
+                          priceText: plan.pricePerMonth,
+                        })
+                      );
+                    }}
                     style={[
                       styles.planCard,
                       isSelected && styles.planCardSelected,
@@ -552,7 +700,17 @@ export default function PersonalizedPlanScreen() {
             ) : (
               // Collapsed: Show only featured 3 Months Pro card
               <Pressable
-                onPress={() => setSelectedPlanId(selectedPlan.id)}
+                onPress={() => {
+                  setSelectedPlanId(selectedPlan.id);
+                  trackSelectPlan(
+                    resolvePlanAnalyticsDetails({
+                      planId: selectedPlan.id,
+                      planName: selectedPlan.name,
+                      billedInfo: selectedPlan.billedInfo,
+                      priceText: selectedPlan.pricePerMonth,
+                    })
+                  );
+                }}
                 style={[styles.planCard, styles.planCardSelected]}
               >
                 {selectedPlan.saveBadge && (
@@ -591,7 +749,13 @@ export default function PersonalizedPlanScreen() {
                 try {
                   playOtherButtonSound();
                 } catch {}
-                setShowAllPlans((prev) => !prev);
+                setShowAllPlans((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    trackViewAllPlans();
+                  }
+                  return next;
+                });
               }}
               style={styles.togglePlansButton}
             >

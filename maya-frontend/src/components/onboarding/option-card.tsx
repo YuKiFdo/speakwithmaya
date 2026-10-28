@@ -102,13 +102,13 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   cardSelected: {
-    backgroundColor: '#f0f9ff',
-    borderColor: '#0085db',
-    borderWidth: 2,
-    shadowColor: '#0085db',
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 2,
+    backgroundColor: '#EFF6FF',
+    borderColor: '#2563EB',
+    borderWidth: 1.5,
+    shadowColor: '#2563EB',
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    elevation: 3,
   },
   cardPressed: {
     opacity: 0.92,
@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   badge: {
-    backgroundColor: '#0085db',
+    backgroundColor: '#2563EB',
     paddingHorizontal: 9,
     paddingVertical: 3,
     borderRadius: 12,
@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   titleSelected: {
-    color: '#0085db',
+    color: '#1D4ED8',
   },
   subtitle: {
     fontSize: 13.5,
@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#0085db',
+    backgroundColor: '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
   },

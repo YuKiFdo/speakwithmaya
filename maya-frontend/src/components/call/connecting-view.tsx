@@ -452,7 +452,7 @@ export function ConnectingView({
                     ]}
                   >
                     <Image
-                      source={require('@/assets/images/maya-wave-cheer.png')}
+                      source={require('@/assets/images/maya-connecting.png')}
                       style={styles.avatarImage}
                       resizeMode="cover"
                       accessibilityLabel="Maya AI Tutor"
@@ -706,7 +706,7 @@ const styles = StyleSheet.create({
   avatarContainer: {
     borderWidth: 4.5,
     borderColor: '#ffffff',
-    backgroundColor: '#52b1ff',
+    backgroundColor: '#D5E9FD',
     alignItems: 'center',
     justifyContent: 'center',
     ...Platform.select({
@@ -726,13 +726,13 @@ const styles = StyleSheet.create({
   },
   avatarInnerCircle: {
     overflow: 'hidden',
-    backgroundColor: '#52b1ff',
+    backgroundColor: '#D5E9FD',
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarImage: {
-    width: '130%',
-    height: '130%',
+    width: '100%',
+    height: '100%',
   },
   textSection: {
     alignItems: 'center',

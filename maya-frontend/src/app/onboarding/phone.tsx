@@ -434,9 +434,7 @@ export default function PhoneScreen() {
                         </>
                       ) : (
                         <>
-                          To continue, enter your phone number{'\n'}
-                          and enable your{' '}
-                          <Text style={styles.starterPlanHighlight}>Starter Plan</Text>
+                          To continue, enter your phone number and enable your <Text style={styles.starterPlanHighlight}>Starter Plan</Text>
                         </>
                       )}
                     </Text>

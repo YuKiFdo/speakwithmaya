@@ -14,6 +14,7 @@ import { router } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
+import { Ionicons } from '@expo/vector-icons';
 import {
   playMayaLevelPromptVoice,
   stopMayaLevelPromptVoice,
@@ -61,9 +62,7 @@ const LEVEL_OPTIONS: LevelOption[] = [
 
 export default function LevelScreen() {
   const { isTablet, isDesktop } = useBreakpoint();
-  const [selectedLevel, setSelectedLevel] = useState<string | null>(
-    OnboardingStore.getState().level || null,
-  );
+  const [selectedLevel, setSelectedLevel] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Staggered Entrance Animations
@@ -210,7 +209,7 @@ export default function LevelScreen() {
             ]}
           >
             <Text style={styles.title}>What's your current level?</Text>
-            <Text style={styles.subtitle}>Be honest - Maya will meet you there.</Text>
+            <Text style={styles.subtitle}>Be honest about your English.</Text>
           </Animated.View>
 
           {/* Level Options List with Staggered Entrance */}
@@ -234,7 +233,7 @@ export default function LevelScreen() {
                     style={({ pressed }) => [
                       styles.card,
                       isSelected && styles.cardSelected,
-                      pressed && styles.cardPressed,
+                      pressed && !isSelected && styles.cardPressed,
                     ]}
                     onPress={() => handleSelectLevel(item, index)}
                     android_ripple={{ color: '#E2E8F0', borderless: false }}
@@ -253,6 +252,13 @@ export default function LevelScreen() {
                         </Text>
                       </View>
                     </View>
+
+                    {/* Brand Blue Checkmark Indicator when selected */}
+                    {isSelected && (
+                      <View style={styles.checkmarkWrapper}>
+                        <Ionicons name="checkmark-circle" size={24} color="#2563EB" />
+                      </View>
+                    )}
                   </Pressable>
                 </Animated.View>
               );
@@ -272,112 +278,122 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     width: '100%',
+    maxWidth: 440,
+    paddingHorizontal: 24,
+    paddingTop: Platform.OS === 'web' ? 20 : 12,
+    paddingBottom: 24,
+    alignSelf: 'center',
   },
   desktopContainer: {
-    maxWidth: 520,
+    maxWidth: 440,
     alignSelf: 'center',
-    backgroundColor: '#F8FAFC',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 16,
-    elevation: 2,
   },
   progressContainer: {
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 8,
+    width: '100%',
+    paddingTop: 8,
+    paddingBottom: 28,
   },
   scrollArea: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 40,
+    paddingBottom: 32,
   },
   header: {
-    marginBottom: 28,
+    marginBottom: 24,
   },
   title: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 28,
-    lineHeight: 34,
+    ...fontStyle('outfit', 'extraBold'),
+    fontSize: 30,
+    lineHeight: 38,
     color: '#0F172A',
-    letterSpacing: -0.5,
-    marginBottom: 8,
+    letterSpacing: -0.6,
   },
   subtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 15,
+    fontSize: 15.5,
     lineHeight: 22,
     color: '#64748B',
+    marginTop: 8,
   },
   optionsList: {
     gap: 12,
   },
   card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: 22,
     paddingHorizontal: 20,
     paddingVertical: 18,
     borderWidth: 1.5,
-    borderColor: '#F1F5F9',
+    borderColor: '#E2E8F0',
     ...Platform.select({
-      ios: {
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 1,
-      },
       web: {
-        boxShadow: '0 2px 8px rgba(15, 23, 42, 0.04)',
+        boxShadow: '0 4px 18px rgba(15, 23, 42, 0.04)',
         cursor: 'pointer',
         transition: 'all 0.15s ease',
+      } as any,
+      default: {
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.04,
+        shadowRadius: 12,
+        elevation: 2,
       },
     }),
   },
   cardSelected: {
-    borderColor: '#4338CA',
-    backgroundColor: '#EEF2FF',
+    borderColor: '#2563EB',
+    backgroundColor: '#EFF6FF',
     ...Platform.select({
       web: {
-        boxShadow: '0 4px 14px rgba(67, 56, 202, 0.12)',
+        boxShadow: '0 6px 20px rgba(37, 99, 235, 0.16)',
+      } as any,
+      default: {
+        shadowColor: '#2563EB',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.16,
+        shadowRadius: 14,
+        elevation: 3,
       },
     }),
   },
   cardPressed: {
-    opacity: 0.94,
-    transform: [{ scale: 0.99 }],
+    transform: [{ scale: 0.985 }],
+    backgroundColor: '#F8FAFC',
   },
   cardContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
   },
   cardEmoji: {
-    fontSize: 26,
+    fontSize: 28,
     marginRight: 16,
   },
   textContainer: {
     flex: 1,
+    gap: 2,
   },
   cardTitle: {
-    ...fontStyle('outfit', 'semiBold'),
-    fontSize: 17,
-    lineHeight: 22,
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 17.5,
+    lineHeight: 23,
     color: '#0F172A',
-    marginBottom: 3,
+    letterSpacing: -0.2,
   },
   cardTitleSelected: {
-    color: '#312E81',
+    color: '#1D4ED8',
   },
   cardSubtitle: {
     ...fontStyle('inter', 'regular'),
     fontSize: 13.5,
     lineHeight: 18,
     color: '#64748B',
+  },
+  checkmarkWrapper: {
+    marginLeft: 12,
   },
 });

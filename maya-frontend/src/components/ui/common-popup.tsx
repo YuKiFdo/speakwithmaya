@@ -19,6 +19,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { paymentApi } from '@/services/payment/payment-api';
 import { payHereGateway } from '@/services/payment/payhere-gateway';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import {
+  resolvePlanAnalyticsDetails,
+  trackSelectPlan,
+  trackBeginCheckout,
+  trackVerifiedPurchase,
+  trackPaymentFailed,
+  trackPaymentCancelled,
+} from '@/utils/analytics';
 import Svg, {
   Path,
   Polygon,
@@ -400,6 +408,12 @@ export function CommonPopup({
       return;
     }
 
+    const pkgAnalytics = resolvePlanAnalyticsDetails({
+      planId: pkg.id,
+      priceText: pkg.price,
+    });
+    trackSelectPlan(pkgAnalytics);
+
     setPurchasingPkgId(pkg.id);
     try {
       // 1. Check if user has a verified pre-approved customer token for 1-click charging
@@ -415,13 +429,29 @@ export function CommonPopup({
         });
 
         if (confirmed) {
-          const res = await paymentApi.chargeSavedCard({ packageId: pkg.id as any });
-          onClose();
-          await mayaAlert.success(res.message || `+${pkg.minutes} minutes added!`, 'Top-up Successful');
-          if (Platform.OS === 'web') {
-            window.location.reload();
+          trackBeginCheckout(pkgAnalytics);
+          try {
+            const res = await paymentApi.chargeSavedCard({ packageId: pkg.id as any });
+            if (res.verified && res.transaction && res.firstVerifiedForAnalytics !== false) {
+              trackVerifiedPurchase({
+                transaction_id: res.transaction.transactionId,
+                event_id: res.transaction.eventId,
+                plan_name: res.transaction.planName,
+                billing_period: res.transaction.billingPeriod,
+                value: res.transaction.value,
+                currency: 'LKR',
+              });
+            }
+            onClose();
+            await mayaAlert.success(res.message || `+${pkg.minutes} minutes added!`, 'Top-up Successful');
+            if (Platform.OS === 'web') {
+              window.location.reload();
+            }
+            return;
+          } catch (chargeErr: any) {
+            trackPaymentFailed(pkgAnalytics);
+            throw chargeErr;
           }
-          return;
         } else {
           return;
         }
@@ -429,15 +459,58 @@ export function CommonPopup({
 
       // 2. Fallback to standard PayHere payment gateway checkout if no card saved yet
       const params = await paymentApi.getCheckoutParams(pkg.id as any);
+      const checkoutAnalytics = resolvePlanAnalyticsDetails({
+        planId: pkg.id,
+        amount: params.amount,
+        priceText: pkg.price,
+      });
+
+      trackBeginCheckout({
+        ...checkoutAnalytics,
+        transaction_id: params.order_id,
+      });
+
       const result = await payHereGateway.startPayment(params);
 
       if (result.status === 'completed') {
-        onClose();
-        await mayaAlert.success(`+${pkg.minutes} minutes have been added to your talk time!`, 'Top-up Successful');
-        if (Platform.OS === 'web') {
-          window.location.reload();
+        const txOrderId = result.orderId || params.order_id;
+        const verifyRes = await paymentApi.verifyOrderWithRetry(txOrderId);
+        if (verifyRes.verified && verifyRes.transaction) {
+          if (verifyRes.firstVerifiedForAnalytics !== false) {
+            trackVerifiedPurchase({
+              transaction_id: verifyRes.transaction.transactionId,
+              event_id: verifyRes.transaction.eventId,
+              plan_name: verifyRes.transaction.planName,
+              billing_period: verifyRes.transaction.billingPeriod,
+              value: verifyRes.transaction.value,
+              currency: 'LKR',
+            });
+          }
+          onClose();
+          await mayaAlert.success(`+${pkg.minutes} minutes have been added to your talk time!`, 'Top-up Successful');
+          if (Platform.OS === 'web') {
+            window.location.reload();
+          }
+        } else {
+          trackPaymentFailed({
+            ...checkoutAnalytics,
+            transaction_id: txOrderId,
+          });
+          await mayaAlert.error(
+            verifyRes.message || 'Top-up payment could not be verified. Please try again.',
+            'Payment Error'
+          );
         }
+      } else if (result.status === 'dismissed') {
+        trackPaymentCancelled({
+          ...checkoutAnalytics,
+          transaction_id: params.order_id,
+        });
       } else if (result.status === 'error') {
+        trackPaymentFailed({
+          ...checkoutAnalytics,
+          transaction_id: params.order_id,
+        });
         const errorMsg = result.error || 'Payment was not completed. Please try again.';
         await mayaAlert.error(errorMsg, 'Payment Error');
       }

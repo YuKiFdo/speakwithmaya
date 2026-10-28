@@ -60,9 +60,7 @@ const CHALLENGE_OPTIONS: ChallengeOption[] = [
 ];
 
 export default function ChallengeScreen() {
-  const [selectedChallenge, setSelectedChallenge] = useState<string | null>(
-    OnboardingStore.getState().challenge || null,
-  );
+  const [selectedChallenge, setSelectedChallenge] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Staggered Entrance Animations

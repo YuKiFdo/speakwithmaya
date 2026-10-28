@@ -64,4 +64,53 @@ describe('PayHereService Signature & Telemetry', () => {
       BadRequestException
     );
   });
+
+  it('builds normalized GA4/Meta transaction metadata for monthly and 3-month plans', () => {
+    const buildTx = (service as any).buildAnalyticsTransaction.bind(service);
+
+    const proQuarterly = buildTx({
+      gateway_payment_id: 'MAYA-PREAUTH-3-MONTHS-PRO-1700000-1234',
+      plan_tier: 'pro',
+      order_type: 'subscription_new',
+      amount_lkr: 8640,
+      minutes_credited: 1800,
+    });
+    expect(proQuarterly).toEqual({
+      transactionId: 'MAYA-PREAUTH-3-MONTHS-PRO-1700000-1234',
+      eventId: 'purchase_MAYA-PREAUTH-3-MONTHS-PRO-1700000-1234',
+      planName: 'Pro',
+      billingPeriod: '3_months',
+      value: 8640,
+      currency: 'LKR',
+      orderType: 'subscription_new',
+      isCardUpdate: false,
+    });
+
+    const basicMonthly = buildTx({
+      gateway_payment_id: 'MAYA-PREAUTH-BASIC-1700000-5678',
+      plan_tier: 'basic',
+      order_type: 'subscription_new',
+      amount_lkr: 3600,
+      minutes_credited: 450,
+    });
+    expect(basicMonthly).toEqual({
+      transactionId: 'MAYA-PREAUTH-BASIC-1700000-5678',
+      eventId: 'purchase_MAYA-PREAUTH-BASIC-1700000-5678',
+      planName: 'Basic',
+      billingPeriod: 'monthly',
+      value: 3600,
+      currency: 'LKR',
+      orderType: 'subscription_new',
+      isCardUpdate: false,
+    });
+
+    const cardUpdate = buildTx({
+      gateway_payment_id: 'MAYA-CARD-UPDATE-1700000-9999',
+      plan_tier: 'card-update',
+      order_type: 'subscription_renewal',
+      amount_lkr: 0,
+      minutes_credited: 0,
+    });
+    expect(cardUpdate.isCardUpdate).toBe(true);
+  });
 });

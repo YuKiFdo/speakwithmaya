@@ -393,7 +393,7 @@ export default function SocialProofScreen() {
                   <Defs>
                     {/* Linear Gradient for Curve Area Fill */}
                     <LinearGradient id="curveGradient" x1="0" y1="0" x2="0" y2="1">
-                      <Stop offset="0%" stopColor="#4355F9" stopOpacity="0.22" />
+                      <Stop offset="0%" stopColor="#2563EB" stopOpacity="0.22" />
                       <Stop offset="80%" stopColor="#60A5FA" stopOpacity="0.06" />
                       <Stop offset="100%" stopColor="#EFF6FF" stopOpacity="0.0" />
                     </LinearGradient>
@@ -434,7 +434,7 @@ export default function SocialProofScreen() {
                       y1="98"
                       x2="188"
                       y2="158"
-                      stroke="#4355F9"
+                      stroke="#2563EB"
                       strokeWidth="1.8"
                       strokeDasharray="3, 3"
                     />
@@ -445,7 +445,7 @@ export default function SocialProofScreen() {
                       y1="38"
                       x2="288"
                       y2="158"
-                      stroke="#4355F9"
+                      stroke="#2563EB"
                       strokeWidth="1.8"
                       strokeDasharray="3, 3"
                     />
@@ -453,20 +453,20 @@ export default function SocialProofScreen() {
                     {/* Smooth Continuous Trajectory Curve */}
                     <Path
                       d="M 38 142 C 100 142, 145 108, 188 98 C 228 88, 252 52, 288 38"
-                      stroke="#4355F9"
+                      stroke="#2563EB"
                       strokeWidth="3.5"
                       strokeLinecap="round"
                       fill="none"
                     />
 
                     {/* Milestone 1 Dot at (38, 142) */}
-                    <Circle cx="38" cy="142" r="5" fill="#4355F9" stroke="#FFFFFF" strokeWidth="2.5" />
+                    <Circle cx="38" cy="142" r="5" fill="#2563EB" stroke="#FFFFFF" strokeWidth="2.5" />
 
                     {/* Milestone 2 Dot at (188, 98) */}
-                    <Circle cx="188" cy="98" r="5.5" fill="#4355F9" stroke="#FFFFFF" strokeWidth="2.5" />
+                    <Circle cx="188" cy="98" r="5.5" fill="#2563EB" stroke="#FFFFFF" strokeWidth="2.5" />
 
                     {/* Milestone 3 Dot at (288, 38) */}
-                    <Circle cx="288" cy="38" r="6" fill="#4355F9" stroke="#FFFFFF" strokeWidth="2.5" />
+                    <Circle cx="288" cy="38" r="6" fill="#2563EB" stroke="#FFFFFF" strokeWidth="2.5" />
                   </G>
 
                   {/* Base Axis Line */}
@@ -489,7 +489,7 @@ export default function SocialProofScreen() {
 
                   {/* Milestone 2 Callout Pill ("Feel more confident") directly above (188, 98) */}
                   <G opacity={m2Visible ? 1 : 0}>
-                    <Rect x="146" y="50" width="84" height="32" rx="9" fill="#EEF2FF" stroke="#C7D2FE" strokeWidth="1" />
+                    <Rect x="146" y="50" width="84" height="32" rx="9" fill="#EFF6FF" stroke="#DBEAFE" strokeWidth="1" />
                     <SvgText x="188" y="63" textAnchor="middle" fontSize="9.5" fontFamily="Inter" fontWeight="400" fill="#10213D">Feel more</SvgText>
                     <SvgText x="188" y="75" textAnchor="middle" fontSize="9.5" fontFamily="Inter" fontWeight="400" fill="#10213D">confident</SvgText>
                   </G>
@@ -621,7 +621,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.84,
   },
   titleHighlight: {
-    color: '#4338CA',
+    color: '#2563EB',
     ...fontStyle('inter', 'extraBold'),
   },
   subtitle: {
@@ -680,7 +680,7 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'extraBold'),
     fontSize: 28,
     lineHeight: 42,
-    color: '#4338CA',
+    color: '#2563EB',
     textAlign: 'center',
     letterSpacing: -0.84,
   },

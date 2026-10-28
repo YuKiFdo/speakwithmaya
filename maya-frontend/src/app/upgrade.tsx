@@ -26,6 +26,17 @@ import { useUserStats } from '@/hooks/useUserStats';
 import { paymentApi } from '@/services/payment/payment-api';
 import { payHereGateway } from '@/services/payment/payhere-gateway';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import {
+  resolvePlanAnalyticsDetails,
+  getPendingCheckoutContext,
+  trackViewPlanSelection,
+  trackViewAllPlans,
+  trackSelectPlan,
+  trackBeginCheckout,
+  trackVerifiedPurchase,
+  trackPaymentFailed,
+  trackPaymentCancelled,
+} from '@/utils/analytics';
 
 // ─── Plan Data ───────────────────────────────────────────────────────────────
 
@@ -364,27 +375,75 @@ export default function UpgradeScreen() {
       if (!orderId) orderId = q.get('order_id') || undefined;
     }
 
-    if (!paymentStatus) return;
+    if (!paymentStatus) {
+      trackViewPlanSelection();
+      return;
+    }
+
+    // Clean URL query on web immediately to avoid repeat triggers on page reload
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
 
     const handleReturn = async () => {
-      if (paymentStatus === 'success') {
-        // Resilient gateway reconciliation: ensures instant credit even if server was restarted or webhook delayed
-        if (orderId) {
-          try {
-            await paymentApi.verifyOrder(orderId);
-          } catch (e) {
-            // fallback gracefully
-          }
-        }
-        await stats.refreshStats();
-        mayaAlert.success('Your subscription has been processed successfully! Enjoy your practice time.', 'Payment Successful');
-      } else if (paymentStatus === 'cancelled') {
-        mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
-      }
+      const pendingCtx = getPendingCheckoutContext();
+      const effectiveOrderId = orderId || pendingCtx?.transaction_id;
 
-      // Clean URL query on web to avoid repeat triggers on page reload
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.history.replaceState({}, document.title, window.location.pathname);
+      if (paymentStatus === 'success') {
+        if (!effectiveOrderId) {
+          mayaAlert.error(
+            'Unable to verify payment reference. Please check your account status or try again.',
+            'Verification Required'
+          );
+          return;
+        }
+
+        const verifyRes = await paymentApi.verifyOrderWithRetry(effectiveOrderId);
+        if (verifyRes.verified && verifyRes.transaction) {
+          if (verifyRes.firstVerifiedForAnalytics !== false) {
+            trackVerifiedPurchase({
+              transaction_id: verifyRes.transaction.transactionId,
+              event_id: verifyRes.transaction.eventId,
+              plan_name: verifyRes.transaction.planName,
+              billing_period: verifyRes.transaction.billingPeriod,
+              value: verifyRes.transaction.value,
+              currency: 'LKR',
+            });
+          }
+          await stats.refreshStats();
+          mayaAlert.success(
+            'Your subscription has been processed successfully! Enjoy your practice time.',
+            'Payment Successful'
+          );
+        } else if (verifyRes.status === 'PAYMENT_FAILED') {
+          trackPaymentFailed(
+            verifyRes.transaction
+              ? {
+                  plan_name: verifyRes.transaction.planName,
+                  billing_period: verifyRes.transaction.billingPeriod,
+                  value: verifyRes.transaction.value,
+                  currency: 'LKR',
+                  transaction_id: verifyRes.transaction.transactionId,
+                }
+              : { transaction_id: effectiveOrderId }
+          );
+          mayaAlert.error(
+            verifyRes.message || 'Your payment could not be completed. Please try again.',
+            'Payment Failed'
+          );
+        } else {
+          mayaAlert.alert(
+            'Your payment is still being verified by the payment gateway. Please check your account shortly.',
+            'Verification Pending',
+            'info'
+          );
+        }
+      } else if (paymentStatus === 'cancelled') {
+        trackPaymentCancelled({
+          ...(pendingCtx || {}),
+          ...(effectiveOrderId ? { transaction_id: effectiveOrderId } : {}),
+        });
+        mayaAlert.alert('Subscription checkout was cancelled.', 'Cancelled', 'info');
       }
     };
 
@@ -522,6 +581,14 @@ export default function UpgradeScreen() {
         ? 'LKR 8,640 for 3 months'
         : `${targetPlan?.price || 'LKR 5,400'}${targetPlan?.period || ' / month'}`;
 
+    const planAnalytics = resolvePlanAnalyticsDetails({
+      planId,
+      planName: targetPlan?.name || planName,
+      priceText: planId === '3-months-pro' ? 'LKR 8,640' : targetPlan?.price,
+    });
+
+    trackSelectPlan(planAnalytics);
+
     if (isDowngrade) {
       const confirmed = await mayaAlert.confirm({
         title: 'Confirm Plan Switch',
@@ -556,11 +623,27 @@ export default function UpgradeScreen() {
         });
 
         if (confirmed) {
-          const res = await paymentApi.chargeSavedCard({ planTier: planId as any });
-          await stats.refreshStats();
-          await mayaAlert.success(res.message || `Upgraded to ${planName}!`, 'Plan Updated');
-          router.replace('/(tabs)/account');
-          return;
+          trackBeginCheckout(planAnalytics);
+          try {
+            const res = await paymentApi.chargeSavedCard({ planTier: planId as any });
+            if (res.verified && res.transaction && res.firstVerifiedForAnalytics !== false) {
+              trackVerifiedPurchase({
+                transaction_id: res.transaction.transactionId,
+                event_id: res.transaction.eventId,
+                plan_name: res.transaction.planName,
+                billing_period: res.transaction.billingPeriod,
+                value: res.transaction.value,
+                currency: 'LKR',
+              });
+            }
+            await stats.refreshStats();
+            await mayaAlert.success(res.message || `Upgraded to ${planName}!`, 'Plan Updated');
+            router.replace('/(tabs)/account');
+            return;
+          } catch (chargeErr: any) {
+            trackPaymentFailed(planAnalytics);
+            throw chargeErr;
+          }
         } else {
           return;
         }
@@ -568,14 +651,57 @@ export default function UpgradeScreen() {
 
       // 2. Fallback to standard PayHere payment gateway checkout if no card saved yet
       const params = await paymentApi.getCheckoutParams(planId as any);
+      const checkoutAnalytics = resolvePlanAnalyticsDetails({
+        planId,
+        planName: targetPlan?.name || planName,
+        amount: params.amount,
+        priceText: planId === '3-months-pro' ? 'LKR 8,640' : targetPlan?.price,
+      });
+
+      trackBeginCheckout({
+        ...checkoutAnalytics,
+        transaction_id: params.order_id,
+      });
+
       const result = await payHereGateway.startPayment(params);
 
       if (result.status === 'completed') {
-        await new Promise((r) => setTimeout(r, 1200));
-        await stats.refreshStats();
-        await mayaAlert.success(`You are now subscribed to the ${planId.toUpperCase()} plan!`, 'Payment Successful');
-        router.replace('/(tabs)/account');
+        const txOrderId = result.orderId || params.order_id;
+        const verifyRes = await paymentApi.verifyOrderWithRetry(txOrderId);
+        if (verifyRes.verified && verifyRes.transaction) {
+          if (verifyRes.firstVerifiedForAnalytics !== false) {
+            trackVerifiedPurchase({
+              transaction_id: verifyRes.transaction.transactionId,
+              event_id: verifyRes.transaction.eventId,
+              plan_name: verifyRes.transaction.planName,
+              billing_period: verifyRes.transaction.billingPeriod,
+              value: verifyRes.transaction.value,
+              currency: 'LKR',
+            });
+          }
+          await stats.refreshStats();
+          await mayaAlert.success(`You are now subscribed to the ${planId.toUpperCase()} plan!`, 'Payment Successful');
+          router.replace('/(tabs)/account');
+        } else {
+          trackPaymentFailed({
+            ...checkoutAnalytics,
+            transaction_id: txOrderId,
+          });
+          await mayaAlert.error(
+            verifyRes.message || 'Payment could not be verified. Please try again.',
+            'Payment Error'
+          );
+        }
+      } else if (result.status === 'dismissed') {
+        trackPaymentCancelled({
+          ...checkoutAnalytics,
+          transaction_id: params.order_id,
+        });
       } else if (result.status === 'error') {
+        trackPaymentFailed({
+          ...checkoutAnalytics,
+          transaction_id: params.order_id,
+        });
         const errorMsg = result.error || 'Payment was not completed. Please try again.';
         await mayaAlert.error(errorMsg, 'Payment Error');
       }
@@ -803,7 +929,15 @@ export default function UpgradeScreen() {
                 <View style={styles.seeOtherPlansLine} />
                 <Pressable
                   style={styles.seeOtherPlansButton}
-                  onPress={() => setShowOtherPlans((prev) => !prev)}
+                  onPress={() =>
+                    setShowOtherPlans((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        trackViewAllPlans();
+                      }
+                      return next;
+                    })
+                  }
                 >
                   <Text style={styles.seeOtherPlansText}>See other plans</Text>
                   <Ionicons

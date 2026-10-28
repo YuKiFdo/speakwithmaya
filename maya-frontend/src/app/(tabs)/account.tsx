@@ -31,6 +31,12 @@ import { paymentApi } from '@/services/payment/payment-api';
 import { payHereGateway } from '@/services/payment/payhere-gateway';
 import { SubscriptionRecord } from '@/services/payment/payhere-types';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import {
+  getPendingCheckoutContext,
+  trackVerifiedPurchase,
+  trackPaymentFailed,
+  trackPaymentCancelled,
+} from '@/utils/analytics';
 
 const PLAN_CROWN_IMAGE = require('@/assets/images/plan-crown.png');
 
@@ -384,17 +390,24 @@ export default function AccountScreen() {
 
     if (!cardUpdateStatus && !paymentStatus) return;
 
+    // Clean URL query on web immediately to avoid repeat triggers on page reload
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     // Small delay ensures screen animation, DOM layout, and AlertHost listener are fully settled
     const timer = setTimeout(async () => {
-      if (orderId && (cardUpdateStatus === 'success' || paymentStatus === 'success')) {
-        try {
-          await paymentApi.verifyOrder(orderId);
-        } catch (e) {
-          // fallback gracefully
-        }
-      }
+      const pendingCtx = getPendingCheckoutContext();
+      const effectiveOrderId = orderId || pendingCtx?.transaction_id;
 
       if (cardUpdateStatus === 'success') {
+        if (effectiveOrderId) {
+          try {
+            await paymentApi.verifyOrderWithRetry(effectiveOrderId);
+          } catch (e) {
+            // fallback gracefully
+          }
+        }
         stats.refreshStats();
         fetchSubscription();
         mayaAlert.success(
@@ -404,16 +417,58 @@ export default function AccountScreen() {
       } else if (cardUpdateStatus === 'cancelled') {
         mayaAlert.alert('Card update was cancelled.', 'Cancelled', 'info');
       } else if (paymentStatus === 'success') {
-        stats.refreshStats();
-        fetchSubscription();
-        mayaAlert.success('Your subscription has been activated successfully!', 'Payment Successful');
-      } else if (paymentStatus === 'cancelled') {
-        mayaAlert.alert('Subscription payment was cancelled.', 'Cancelled', 'info');
-      }
+        if (!effectiveOrderId) {
+          mayaAlert.error(
+            'Unable to verify payment reference. Please check your account status or try again.',
+            'Verification Required'
+          );
+          return;
+        }
 
-      // Clean URL query on web to avoid repeat triggers on page reload
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.history.replaceState({}, document.title, window.location.pathname);
+        const verifyRes = await paymentApi.verifyOrderWithRetry(effectiveOrderId);
+        if (verifyRes.verified && verifyRes.transaction) {
+          if (verifyRes.firstVerifiedForAnalytics !== false) {
+            trackVerifiedPurchase({
+              transaction_id: verifyRes.transaction.transactionId,
+              event_id: verifyRes.transaction.eventId,
+              plan_name: verifyRes.transaction.planName,
+              billing_period: verifyRes.transaction.billingPeriod,
+              value: verifyRes.transaction.value,
+              currency: 'LKR',
+            });
+          }
+          stats.refreshStats();
+          fetchSubscription();
+          mayaAlert.success('Your subscription has been activated successfully!', 'Payment Successful');
+        } else if (verifyRes.status === 'PAYMENT_FAILED') {
+          trackPaymentFailed(
+            verifyRes.transaction
+              ? {
+                  plan_name: verifyRes.transaction.planName,
+                  billing_period: verifyRes.transaction.billingPeriod,
+                  value: verifyRes.transaction.value,
+                  currency: 'LKR',
+                  transaction_id: verifyRes.transaction.transactionId,
+                }
+              : { transaction_id: effectiveOrderId }
+          );
+          mayaAlert.error(
+            verifyRes.message || 'Your subscription payment could not be completed.',
+            'Payment Failed'
+          );
+        } else {
+          mayaAlert.alert(
+            'Your payment is still being verified by the payment gateway. Please check your account shortly.',
+            'Verification Pending',
+            'info'
+          );
+        }
+      } else if (paymentStatus === 'cancelled') {
+        trackPaymentCancelled({
+          ...(pendingCtx || {}),
+          ...(effectiveOrderId ? { transaction_id: effectiveOrderId } : {}),
+        });
+        mayaAlert.alert('Subscription payment was cancelled.', 'Cancelled', 'info');
       }
     }, 350);
 

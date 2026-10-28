@@ -27,7 +27,6 @@ import { OnboardingStore } from '@/services/store/onboarding-store';
 export default function WelcomeScreen() {
   const { isDesktop, isTablet } = useBreakpoint();
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [buttonVisible, setButtonVisible] = useState(false);
 
   // Post-auth routes require a valid session to resume into
   const POST_AUTH_ROUTES = [
@@ -113,10 +112,10 @@ export default function WelcomeScreen() {
     // Sequentially pre-download all onboarding voice clips in order
     preloadAllOnboardingVoicesInOrder();
 
-    // 1. Hero Avatar fades in
+    // 1. Hero Avatar fades in immediately
     Animated.timing(heroFadeAnim, {
       toValue: 1,
-      duration: 500,
+      duration: 420,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: Platform.OS !== 'web',
     }).start();
@@ -125,47 +124,44 @@ export default function WelcomeScreen() {
     Animated.parallel([
       Animated.timing(bubbleOpacityAnim, {
         toValue: 1,
-        duration: 450,
-        delay: 200,
+        duration: 380,
+        delay: 80,
         useNativeDriver: Platform.OS !== 'web',
       }),
       Animated.spring(bubbleScaleAnim, {
         toValue: 1,
         friction: 6,
-        tension: 40,
-        delay: 200,
+        tension: 45,
+        delay: 80,
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
 
-    // 3. Text section smoothly slides up
+    // 3. Text section smoothly fades in
     Animated.timing(textFadeAnim, {
       toValue: 1,
-      duration: 600,
-      delay: 350,
+      duration: 420,
+      delay: 60,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: Platform.OS !== 'web',
     }).start();
-  }, []);
 
-  // Show button with smooth spring animation
-  const triggerButtonAppearance = () => {
-    setButtonVisible(true);
+    // 4. Get Started button animates in instantly and smoothly on mount (zero delay)
     Animated.parallel([
       Animated.timing(buttonOpacityAnim, {
         toValue: 1,
-        duration: 450,
+        duration: 360,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: Platform.OS !== 'web',
       }),
       Animated.spring(buttonSlideAnim, {
         toValue: 0,
-        friction: 6,
-        tension: 45,
+        friction: 7,
+        tension: 55,
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
-  };
+  }, []);
 
   // Soundwave animation when Maya is speaking
   useEffect(() => {
@@ -211,16 +207,14 @@ export default function WelcomeScreen() {
       },
       onEnd: () => {
         setIsSpeaking(false);
-        triggerButtonAppearance();
       },
       onError: () => {
         setIsSpeaking(false);
-        triggerButtonAppearance();
       },
     });
   };
 
-  // Autoplay voice greeting on mount and sequence button reveal
+  // Autoplay voice greeting on mount
   useEffect(() => {
     const speechTimer = setTimeout(() => {
       try {
@@ -230,26 +224,18 @@ export default function WelcomeScreen() {
           },
           onEnd: () => {
             setIsSpeaking(false);
-            triggerButtonAppearance();
           },
           onError: () => {
             setIsSpeaking(false);
-            triggerButtonAppearance();
           },
         });
       } catch {
-        triggerButtonAppearance();
+        setIsSpeaking(false);
       }
-    }, 500);
-
-    // Guaranteed fallback: reveal button after 3.2s so user is never blocked
-    const buttonTimer = setTimeout(() => {
-      triggerButtonAppearance();
-    }, 3200);
+    }, 300);
 
     return () => {
       clearTimeout(speechTimer);
-      clearTimeout(buttonTimer);
       stopMayaWelcomeVoice();
     };
   }, []);

@@ -2,6 +2,10 @@
 
 import Image from "next/image";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  trackLandingViewPlanSelection,
+  trackLandingSelectPlan,
+} from "../utils/analytics";
 
 const APP_BASE_URL = "https://app.speakwithmaya.com";
 const SIGN_IN_URL = `${APP_BASE_URL}/onboarding/phone?mode=login`;
@@ -494,6 +498,27 @@ export default function Home() {
       window.removeEventListener("resize", onScroll);
       if (rafId !== null) window.cancelAnimationFrame(rafId);
     };
+  }, []);
+
+  // Track `view_plan_selection` once when the pricing section enters the viewport
+  useEffect(() => {
+    const pricingEl = document.getElementById("pricing");
+    if (!pricingEl || typeof IntersectionObserver === "undefined") return;
+
+    let hasTracked = false;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !hasTracked) {
+          hasTracked = true;
+          trackLandingViewPlanSelection();
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.25 }
+    );
+
+    observer.observe(pricingEl);
+    return () => observer.disconnect();
   }, []);
 
   const testimonials = [
@@ -1518,6 +1543,7 @@ export default function Home() {
 
                   <a
                     href={SIGN_UP_URL}
+                    onClick={() => trackLandingSelectPlan("Basic")}
                     className="w-full py-3 rounded-xl border border-[#E2E8F0] hover:bg-[#F8FAFC] text-[#0F172A] text-[13px] font-bold text-center transition-colors"
                   >
                     Start Basic
@@ -1577,6 +1603,7 @@ export default function Home() {
 
                   <a
                     href={SIGN_UP_URL}
+                    onClick={() => trackLandingSelectPlan("Pro")}
                     className="landing-primary-cta w-full py-3 rounded-xl bg-[#0D4EFD] hover:bg-[#0B42D8] text-white text-[13px] font-bold text-center shadow-[0_6px_16px_rgba(13,78,253,0.28)] transition-all"
                   >
                     Upgrade to Pro
@@ -1641,6 +1668,7 @@ export default function Home() {
 
                   <a
                     href={SIGN_UP_URL}
+                    onClick={() => trackLandingSelectPlan("Premium")}
                     className="w-full py-3 rounded-xl border border-[#E2E8F0] md:border-transparent bg-white md:bg-[#EDF4FF] hover:bg-[#F8FAFC] md:hover:bg-[#E0ECFF] text-[#0F172A] md:text-[#0D4EFD] text-[13px] font-bold text-center transition-colors"
                   >
                     Upgrade to Premium

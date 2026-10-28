@@ -13,10 +13,10 @@ export const Breakpoints = {
 
 export const Colors = {
   brand: {
-    primary: '#0085db',
-    primaryHover: '#0072bc',
-    primaryActive: '#005f9e',
-    light: '#e0f2fe',
+    primary: '#2563EB',
+    primaryHover: '#1D4ED8',
+    primaryActive: '#1E40AF',
+    light: '#EFF6FF',
   },
   text: {
     heading: '#0c1b33',

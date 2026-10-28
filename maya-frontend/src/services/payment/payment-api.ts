@@ -112,6 +112,18 @@ class PaymentApiService {
     planTier?: 'basic' | 'pro' | 'premium' | '3-months-pro';
   }): Promise<{
     success: boolean;
+    verified?: boolean;
+    firstVerifiedForAnalytics?: boolean;
+    transaction?: {
+      transactionId: string;
+      eventId: string;
+      planName: string;
+      billingPeriod: string;
+      value: number;
+      currency: 'LKR';
+      orderType: string;
+      isCardUpdate: boolean;
+    };
     message: string;
     orderId?: string;
     newBalance?: number;
@@ -325,9 +337,21 @@ class PaymentApiService {
    */
   async verifyOrder(orderId: string): Promise<{
     success: boolean;
+    verified?: boolean;
+    firstVerifiedForAnalytics?: boolean;
     status: string;
     message: string;
     order?: any;
+    transaction?: {
+      transactionId: string;
+      eventId: string;
+      planName: string;
+      billingPeriod: string;
+      value: number;
+      currency: 'LKR';
+      orderType: string;
+      isCardUpdate: boolean;
+    };
   }> {
     try {
       const res = await fetch(`${this.baseUrl}/v1/payments/payhere/verify-order/${encodeURIComponent(orderId)}`, {
@@ -340,10 +364,37 @@ class PaymentApiService {
     } catch (err: any) {
       return {
         success: false,
+        verified: false,
         status: 'NETWORK_ERROR',
         message: err.message || 'Network error verifying order',
       };
     }
+  }
+
+  /**
+   * Polls server-side order verification up to `maxAttempts` when PayHere webhook/retrieval
+   * is momentarily still `PENDING_AT_GATEWAY` right after browser redirect or popup completion.
+   */
+  async verifyOrderWithRetry(
+    orderId: string,
+    maxAttempts: number = 4,
+    delayMs: number = 1400
+  ) {
+    let lastResult = await this.verifyOrder(orderId);
+    for (let attempt = 1; attempt < maxAttempts; attempt++) {
+      if (
+        lastResult.verified ||
+        lastResult.status === 'ALREADY_COMPLETED' ||
+        lastResult.status === 'RECONCILED_SUCCESS' ||
+        lastResult.status === 'PAYMENT_FAILED' ||
+        lastResult.status === 'NOT_FOUND'
+      ) {
+        return lastResult;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      lastResult = await this.verifyOrder(orderId);
+    }
+    return lastResult;
   }
 }
 

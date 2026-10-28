@@ -68,11 +68,20 @@ export class PayHereGatewayWeb {
       const currentOrigin = window.location.origin;
       const currentPath = window.location.pathname;
 
-      const returnUrl =
-        params.return_url ||
-        `${currentOrigin}${currentPath}?payment=success&order_id=${encodeURIComponent(params.order_id)}`;
-      const cancelUrl =
-        params.cancel_url || `${currentOrigin}${currentPath}?payment=cancelled`;
+      const ensureOrderIdParam = (url: string, orderId: string): string => {
+        if (!orderId || url.includes('order_id=')) return url;
+        const sep = url.includes('?') ? '&' : '?';
+        return `${url}${sep}order_id=${encodeURIComponent(orderId)}`;
+      };
+
+      const returnUrl = ensureOrderIdParam(
+        params.return_url || `${currentOrigin}${currentPath}?payment=success`,
+        params.order_id
+      );
+      const cancelUrl = ensureOrderIdParam(
+        params.cancel_url || `${currentOrigin}${currentPath}?payment=cancelled`,
+        params.order_id
+      );
 
       const form = document.createElement('form');
       form.method = 'POST';

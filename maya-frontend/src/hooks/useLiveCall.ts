@@ -24,6 +24,7 @@ import { sanitizeModelText } from '@/utils/text-sanitizer';
 import { createWavBlobUrlFromPcm } from '@/utils/audio-wav';
 import { registerMicSuppressor } from '@/services/sound/sound-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
+import { trackSessionStart, trackSessionComplete } from '@/utils/analytics';
 
 // Default to true (Server-to-Server NestJS Gateway) unless explicitly set to 'false'
 const USE_SERVER_LIVE = process.env.EXPO_PUBLIC_USE_SERVER_LIVE !== 'false';
@@ -652,6 +653,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           onOpen: () => {
             console.log('[useLiveCall] Gemini Live transport connection established');
             setIsConnected(true);
+            trackSessionStart(sessionIdRef.current);
             reconnectAttemptsRef.current = 0;
             if (reconnectTimerRef.current) {
               clearTimeout(reconnectTimerRef.current);
@@ -1484,6 +1486,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     };
 
     setMissionReport(report);
+    if (shouldNavigate) {
+      trackSessionComplete(secs, sessionIdRef.current);
+    }
     if (options.onCallCompleted) {
       options.onCallCompleted(report);
     }

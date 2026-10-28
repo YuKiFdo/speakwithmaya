@@ -282,13 +282,13 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   ctaButton: {
-    backgroundColor: '#0085db',
+    backgroundColor: '#2563EB',
     width: '100%',
     height: 56,
     borderRadius: Radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0085db',
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.32,
     shadowRadius: 12,
@@ -300,7 +300,7 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   ctaButtonPressed: {
-    backgroundColor: '#0072bc',
+    backgroundColor: '#1D4ED8',
     transform: [{ scale: 0.99 }],
   },
   ctaButtonText: {

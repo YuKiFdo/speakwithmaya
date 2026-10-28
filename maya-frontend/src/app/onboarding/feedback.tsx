@@ -690,8 +690,8 @@ export default function SessionFeedbackScreen() {
       };
     }
     return {
-      bg: '#EEF2FF',
-      text: '#4F46E5',
+      bg: '#EFF6FF',
+      text: '#2563EB',
       iconName: 'chatbubble' as const,
       iconFamily: 'ionicons' as const,
       whyTitle: 'Why this sounds more fluent',

@@ -266,12 +266,19 @@ export class PayHereService {
       ? 'https://sandbox.payhere.lk/pay/preapprove'
       : 'https://www.payhere.lk/pay/preapprove';
 
+    const appendOrderId = (url?: string): string => {
+      if (!url) return '';
+      if (url.includes('order_id=')) return url;
+      const separator = url.includes('?') ? '&' : '?';
+      return `${url}${separator}order_id=${encodeURIComponent(orderId)}`;
+    };
+
     return {
       sandbox: this.isSandbox,
       action_url: isPreapproval ? preapprovalUrl : undefined,
       merchant_id: this.merchantId,
-      return_url: dto.returnUrl || '',
-      cancel_url: dto.cancelUrl || '',
+      return_url: appendOrderId(dto.returnUrl),
+      cancel_url: appendOrderId(dto.cancelUrl),
       notify_url: this.notifyUrl,
       order_id: orderId,
       items: isCardUpdate
@@ -657,10 +664,34 @@ export class PayHereService {
             last_payment_id: payload.payment_id,
           });
 
+          await this.supabase
+            .from('orders')
+            .update({
+              status: 'failed',
+              payhere_payment_id: payload.payment_id,
+              md5sig: payload.md5sig,
+              raw_payload: {
+                ...payload,
+                chargeError: chargeErrorMessage,
+              },
+            })
+            .eq('gateway_payment_id', payload.order_id);
+
           return { received: true, status: 'FIRST_CHARGE_FAILED', error: chargeErrorMessage };
         }
       } else {
         this.logger.warn(`[PayHereWebhook] Preapproval failed: status=${statusCode}`);
+        if (statusCode === -2 || statusCode === -1 || statusCode === -3) {
+          await this.supabase
+            .from('orders')
+            .update({
+              status: 'failed',
+              payhere_payment_id: payload.payment_id,
+              md5sig: payload.md5sig,
+              raw_payload: payload,
+            })
+            .eq('gateway_payment_id', payload.order_id);
+        }
         return { received: true, status: 'PREAPPROVAL_FAILED' };
       }
     }
@@ -723,6 +754,17 @@ export class PayHereService {
         return { received: true, status: 'TOPUP_COMPLETED' };
       } else {
         this.logger.warn(`[PayHereWebhook] Topup payment failed or cancelled with status=${statusCode}`);
+        if (statusCode === -2 || statusCode === -1 || statusCode === -3) {
+          await this.supabase
+            .from('orders')
+            .update({
+              status: 'failed',
+              payhere_payment_id: payload.payment_id,
+              md5sig: payload.md5sig,
+              raw_payload: payload,
+            })
+            .eq('gateway_payment_id', payload.order_id);
+        }
         return { received: true, status: 'TOPUP_FAILED' };
       }
     }
@@ -1663,6 +1705,14 @@ export class PayHereService {
     }
 
     // 5. Record order entry with complete dispute-proof customer authorization audit payload
+    const transaction = this.buildAnalyticsTransaction({
+      gateway_payment_id: orderId,
+      plan_tier: dto.planTier || normalizedPlanTier || sub.plan_tier,
+      order_type: isTopup ? 'add_on_topup' : 'subscription_upgrade',
+      amount_lkr: amount,
+      minutes_credited: allowance,
+    });
+
     await this.supabase.from('orders').insert({
       user_id: userId,
       subscription_id: sub.id,
@@ -1677,11 +1727,16 @@ export class PayHereService {
       raw_payload: {
         gatewayResponse: chargeResult.data,
         authorizationAudit,
+        analytics_purchase_emitted: true,
+        analytics_emitted_at: new Date().toISOString(),
       },
     });
 
     return {
       success: true,
+      verified: true,
+      firstVerifiedForAnalytics: true,
+      transaction,
       message: isTopup
         ? `Successfully charged Rs. ${amount.toLocaleString()} to your card (${cardMasked}). +${allowance} minutes added!`
         : `Successfully activated ${isQuarterly ? '3 Months Pro' : normalizedPlanTier?.toUpperCase()} Plan! Rs. ${amount.toLocaleString()} charged to your card (${cardMasked}).`,
@@ -1854,13 +1909,85 @@ export class PayHereService {
   }
 
   /**
+   * Builds normalized GA4 / Meta Pixel transaction metadata from an order row.
+   */
+  private buildAnalyticsTransaction(order: {
+    id?: string;
+    gateway_payment_id?: string;
+    plan_tier?: string | null;
+    order_type?: string | null;
+    amount_lkr?: number | string | null;
+    minutes_credited?: number | null;
+  }) {
+    const transactionId = String(order.gateway_payment_id || order.id || '');
+    const eventId = `purchase_${transactionId}`;
+    const value = Number(order.amount_lkr || 0);
+    const rawTier = String(order.plan_tier || '').toLowerCase();
+    const isCardUpdate =
+      transactionId.startsWith('MAYA-CARD-UPDATE') ||
+      rawTier === 'card-update' ||
+      value === 0;
+    const isTopup =
+      order.order_type === 'add_on_topup' ||
+      order.order_type === 'topup_minutes' ||
+      transactionId.startsWith('MAYA-TOPUP') ||
+      rawTier === 'topup';
+    const isQuarterly =
+      rawTier === '3-months-pro' ||
+      transactionId.includes('3-MONTHS-PRO') ||
+      (rawTier === 'pro' && value === 8640);
+
+    let planName = 'Pro';
+    let billingPeriod = 'monthly';
+
+    if (isQuarterly) {
+      planName = 'Pro';
+      billingPeriod = '3_months';
+    } else if (rawTier === 'basic') {
+      planName = 'Basic';
+      billingPeriod = 'monthly';
+    } else if (rawTier === 'premium') {
+      planName = 'Premium';
+      billingPeriod = 'monthly';
+    } else if (rawTier === 'pro') {
+      planName = 'Pro';
+      billingPeriod = 'monthly';
+    } else if (isTopup) {
+      const mins =
+        order.minutes_credited ||
+        (value >= 2000 ? 300 : value >= 900 ? 120 : 30);
+      planName = `Extra_${mins}m`;
+      billingPeriod = 'one_time';
+    }
+
+    return {
+      transactionId,
+      eventId,
+      planName,
+      billingPeriod,
+      value,
+      currency: 'LKR' as const,
+      orderType: String(order.order_type || 'subscription_new'),
+      isCardUpdate,
+    };
+  }
+
+  /**
    * Automated Recovery & Resilience Engine:
    * Reconciles a pending or interrupted order by verifying directly against PayHere Gateway.
    * Handles server crash/reboot during checkout, dropped webhooks, and manual syncs.
    */
   async reconcilePendingOrder(
     orderId: string
-  ): Promise<{ success: boolean; status: string; message: string; order?: any }> {
+  ): Promise<{
+    success: boolean;
+    verified?: boolean;
+    firstVerifiedForAnalytics?: boolean;
+    status: string;
+    message: string;
+    order?: any;
+    transaction?: ReturnType<PayHereService['buildAnalyticsTransaction']>;
+  }> {
     this.logger.log(`[PayHereRecovery] 🔄 Reconciling order status for ${orderId}...`);
 
     // 1. Fetch order from local database
@@ -1875,18 +2002,62 @@ export class PayHereService {
 
     if (orderErr) {
       this.logger.error(`[PayHereRecovery] Database error looking up order ${orderId}: ${orderErr.message}`);
-      return { success: false, status: 'DB_ERROR', message: orderErr.message };
+      return { success: false, verified: false, status: 'DB_ERROR', message: orderErr.message };
     }
 
     if (!order) {
       this.logger.warn(`[PayHereRecovery] Order ${orderId} not found in database.`);
-      return { success: false, status: 'NOT_FOUND', message: 'Order record not found in system.' };
+      return { success: false, verified: false, status: 'NOT_FOUND', message: 'Order record not found in system.' };
     }
 
-    // If order is already completed, return immediately (idempotent)
+    const transaction = this.buildAnalyticsTransaction(order);
+
+    // If order is already completed (e.g. via PayHere webhook), return verified status & enforce server-side analytics deduplication
     if (order.status === 'completed') {
-      this.logger.log(`[PayHereRecovery] ⏩ Order ${orderId} is already completed. No action needed.`);
-      return { success: true, status: 'ALREADY_COMPLETED', message: 'Order is already completed.', order };
+      const existingRaw =
+        order.raw_payload && typeof order.raw_payload === 'object'
+          ? order.raw_payload
+          : {};
+      const alreadyEmitted = Boolean(existingRaw.analytics_purchase_emitted);
+      const firstVerifiedForAnalytics = !transaction.isCardUpdate && !alreadyEmitted;
+
+      if (firstVerifiedForAnalytics) {
+        await this.supabase
+          .from('orders')
+          .update({
+            raw_payload: {
+              ...existingRaw,
+              analytics_purchase_emitted: true,
+              analytics_emitted_at: new Date().toISOString(),
+            },
+          })
+          .eq('id', order.id);
+      }
+
+      this.logger.log(`[PayHereRecovery] ⏩ Order ${orderId} is already completed (firstVerifiedForAnalytics=${firstVerifiedForAnalytics}).`);
+      return {
+        success: true,
+        verified: !transaction.isCardUpdate,
+        firstVerifiedForAnalytics,
+        status: 'ALREADY_COMPLETED',
+        message: 'Order is already completed.',
+        order,
+        transaction,
+      };
+    }
+
+    // If order was already marked failed by webhook
+    if (order.status === 'failed') {
+      this.logger.warn(`[PayHereRecovery] ❌ Order ${orderId} is already marked failed in database.`);
+      return {
+        success: false,
+        verified: false,
+        firstVerifiedForAnalytics: false,
+        status: 'PAYMENT_FAILED',
+        message: 'Payment failed at gateway.',
+        order,
+        transaction,
+      };
     }
 
     // 2. Query PayHere Retrieval API
@@ -1896,9 +2067,12 @@ export class PayHereService {
       this.logger.log(`[PayHereRecovery] ⏳ Order ${orderId} has no confirmed payment record at PayHere yet.`);
       return {
         success: false,
+        verified: false,
+        firstVerifiedForAnalytics: false,
         status: 'PENDING_AT_GATEWAY',
         message: 'Payment has not been completed or received at gateway yet.',
         order,
+        transaction,
       };
     }
 
@@ -1920,17 +2094,24 @@ export class PayHereService {
 
       return {
         success: false,
+        verified: false,
+        firstVerifiedForAnalytics: false,
         status: 'PAYMENT_FAILED',
         message: `Payment marked as ${rawStatus} by payment gateway.`,
+        order,
+        transaction,
       };
     }
 
     if (!isSuccess) {
       return {
         success: false,
+        verified: false,
+        firstVerifiedForAnalytics: false,
         status: rawStatus || 'PENDING',
         message: `Gateway payment status is ${rawStatus}.`,
         order,
+        transaction,
       };
     }
 
@@ -1985,7 +2166,14 @@ export class PayHereService {
         })
         .eq('id', order.id);
 
-      return { success: true, status: 'RECONCILED_SUCCESS', message: 'Card details successfully updated.' };
+      return {
+        success: true,
+        verified: false,
+        firstVerifiedForAnalytics: false,
+        status: 'RECONCILED_SUCCESS',
+        message: 'Card details successfully updated.',
+        transaction,
+      };
     }
 
     if (isTopup) {
@@ -2019,12 +2207,23 @@ export class PayHereService {
         .update({
           status: 'completed',
           payhere_payment_id: paymentIdStr,
-          raw_payload: payhereData,
+          raw_payload: {
+            ...(typeof payhereData === 'object' && payhereData ? payhereData : {}),
+            analytics_purchase_emitted: true,
+            analytics_emitted_at: new Date().toISOString(),
+          },
         })
         .eq('id', order.id);
 
       this.logger.log(`[PayHereRecovery] ⏱️ Credited +${allowance}m to user ${userId} via recovery!`);
-      return { success: true, status: 'RECONCILED_SUCCESS', message: `Successfully credited +${allowance} minutes.` };
+      return {
+        success: true,
+        verified: true,
+        firstVerifiedForAnalytics: true,
+        status: 'RECONCILED_SUCCESS',
+        message: `Successfully credited +${allowance} minutes.`,
+        transaction,
+      };
     }
 
     // Case 3: Subscription / Preauth Plan Activation
@@ -2121,15 +2320,22 @@ export class PayHereService {
         status: 'completed',
         subscription_id: subId || order.subscription_id,
         payhere_payment_id: paymentIdStr,
-        raw_payload: payhereData,
+        raw_payload: {
+          ...(typeof payhereData === 'object' && payhereData ? payhereData : {}),
+          analytics_purchase_emitted: true,
+          analytics_emitted_at: new Date().toISOString(),
+        },
       })
       .eq('id', order.id);
 
     this.logger.log(`[PayHereRecovery] 🚀 Order ${orderId} successfully reconciled and activated! User: ${userId}, Tier: ${planTier}`);
     return {
       success: true,
+      verified: true,
+      firstVerifiedForAnalytics: true,
       status: 'RECONCILED_SUCCESS',
       message: `Plan ${planTier.toUpperCase()} successfully activated via gateway reconciliation.`,
+      transaction,
     };
   }
 }

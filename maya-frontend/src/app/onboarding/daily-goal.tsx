@@ -14,6 +14,7 @@ import { router } from 'expo-router';
 import { ProgressBar } from '@/components/onboarding/progress-bar';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
+import { Ionicons } from '@expo/vector-icons';
 import {
   playMayaDailyGoalPromptVoice,
   stopMayaDailyGoalPromptVoice,
@@ -57,9 +58,7 @@ const PRACTICE_OPTIONS: PracticeOption[] = [
 
 export default function DailyGoalScreen() {
   const { isTablet, isDesktop } = useBreakpoint();
-  const [selectedGoal, setSelectedGoal] = useState<string | null>(
-    OnboardingStore.getState().dailyGoalMinutes ? `${OnboardingStore.getState().dailyGoalMinutes}-min` : null,
-  );
+  const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Staggered Entrance Animations
@@ -232,37 +231,46 @@ export default function DailyGoalScreen() {
                     style={({ pressed }) => [
                       styles.card,
                       isSelected && styles.cardSelected,
-                      pressed && styles.cardPressed,
+                      pressed && !isSelected && styles.cardPressed,
                     ]}
                     onPress={() => handleSelectGoal(item, index)}
                     android_ripple={{ color: '#E2E8F0', borderless: false }}
                   >
-                    {/* Badge Pill for Recommended */}
-                    {item.badge && (
-                      <View style={styles.badgePill}>
-                        <Text style={styles.badgeText}>{item.badge}</Text>
+                    <View style={styles.cardLeftCol}>
+                      {/* Badge Pill for Recommended */}
+                      {item.badge && (
+                        <View style={styles.badgePill}>
+                          <Text style={styles.badgeText}>{item.badge}</Text>
+                        </View>
+                      )}
+
+                      {/* Title */}
+                      <Text
+                        style={[
+                          styles.cardTitle,
+                          isSelected && styles.cardTitleActive,
+                        ]}
+                      >
+                        {item.title}
+                      </Text>
+
+                      {/* Subtitle */}
+                      <Text
+                        style={[
+                          styles.cardSubtitle,
+                          isSelected && styles.cardSubtitleActive,
+                        ]}
+                      >
+                        {item.subtitle}
+                      </Text>
+                    </View>
+
+                    {/* Brand Blue Checkmark Indicator when selected */}
+                    {isSelected && (
+                      <View style={styles.checkmarkWrapper}>
+                        <Ionicons name="checkmark-circle" size={24} color="#2563EB" />
                       </View>
                     )}
-
-                    {/* Title */}
-                    <Text
-                      style={[
-                        styles.cardTitle,
-                        isSelected && styles.cardTitleActive,
-                      ]}
-                    >
-                      {item.title}
-                    </Text>
-
-                    {/* Subtitle */}
-                    <Text
-                      style={[
-                        styles.cardSubtitle,
-                        isSelected && styles.cardSubtitleActive,
-                      ]}
-                    >
-                      {item.subtitle}
-                    </Text>
                   </Pressable>
                 </Animated.View>
               );
@@ -282,94 +290,100 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     width: '100%',
+    maxWidth: 440,
+    paddingHorizontal: 24,
+    paddingTop: Platform.OS === 'web' ? 20 : 12,
+    paddingBottom: 24,
+    alignSelf: 'center',
   },
   desktopContainer: {
-    maxWidth: 520,
+    maxWidth: 440,
     alignSelf: 'center',
-    backgroundColor: '#F8FAFC',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 16,
-    elevation: 2,
   },
   progressContainer: {
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 8,
+    width: '100%',
+    paddingTop: 8,
+    paddingBottom: 28,
   },
   scrollArea: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 40,
+    paddingBottom: 32,
   },
   header: {
-    marginBottom: 28,
+    marginBottom: 24,
   },
   title: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 28,
-    lineHeight: 36,
+    ...fontStyle('outfit', 'extraBold'),
+    fontSize: 30,
+    lineHeight: 38,
     color: '#0F172A',
-    letterSpacing: -0.5,
+    letterSpacing: -0.6,
   },
   optionsList: {
-    gap: 14,
+    gap: 12,
   },
   card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: 22,
     paddingHorizontal: 20,
     paddingVertical: 18,
     borderWidth: 1.5,
-    borderColor: '#F1F5F9',
+    borderColor: '#E2E8F0',
     ...Platform.select({
-      ios: {
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 1,
-      },
       web: {
-        boxShadow: '0 2px 8px rgba(15, 23, 42, 0.04)',
+        boxShadow: '0 4px 18px rgba(15, 23, 42, 0.04)',
         cursor: 'pointer',
         transition: 'all 0.15s ease',
+      } as any,
+      default: {
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.04,
+        shadowRadius: 12,
+        elevation: 2,
       },
     }),
   },
+  cardLeftCol: {
+    flex: 1,
+  },
   cardRecommended: {
-    borderColor: '#4338CA',
-    borderWidth: 2,
-    backgroundColor: '#EEF2FF',
+    borderColor: '#2563EB',
+    backgroundColor: '#EFF6FF',
     ...Platform.select({
       web: {
-        boxShadow: '0 4px 14px rgba(67, 56, 202, 0.12)',
-      },
+        boxShadow: '0 6px 20px rgba(37, 99, 235, 0.16)',
+      } as any,
     }),
   },
   cardSelected: {
-    borderColor: '#4338CA',
-    borderWidth: 2,
-    backgroundColor: '#EEF2FF',
+    borderColor: '#2563EB',
+    backgroundColor: '#EFF6FF',
     ...Platform.select({
       web: {
-        boxShadow: '0 4px 14px rgba(67, 56, 202, 0.12)',
+        boxShadow: '0 6px 20px rgba(37, 99, 235, 0.16)',
+      } as any,
+      default: {
+        shadowColor: '#2563EB',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.16,
+        shadowRadius: 14,
+        elevation: 3,
       },
     }),
   },
   cardPressed: {
-    opacity: 0.94,
-    transform: [{ scale: 0.99 }],
+    transform: [{ scale: 0.985 }],
+    backgroundColor: '#F8FAFC',
   },
   badgePill: {
     alignSelf: 'flex-start',
-    backgroundColor: '#3730A3',
+    backgroundColor: '#2563EB',
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -384,21 +398,25 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 20,
-    lineHeight: 26,
+    fontSize: 19,
+    lineHeight: 25,
     color: '#0F172A',
-    marginBottom: 4,
+    marginBottom: 2,
+    letterSpacing: -0.2,
   },
   cardTitleActive: {
-    color: '#312E81',
+    color: '#1D4ED8',
   },
   cardSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13.5,
+    lineHeight: 18,
     color: '#64748B',
   },
   cardSubtitleActive: {
-    color: '#4338CA',
+    color: '#64748B',
+  },
+  checkmarkWrapper: {
+    marginLeft: 12,
   },
 });

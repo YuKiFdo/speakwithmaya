@@ -22,6 +22,8 @@ import {
   playAnalysisCompleteSound,
 } from '@/services/sound/sound-service';
 import { authService } from '@/services/auth/auth-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
+import { trackOnboardingComplete } from '@/utils/analytics';
 
 // Enable smooth LayoutAnimation on Android for pagination dot morphing
 if (
@@ -376,6 +378,7 @@ export default function BuildingPlanScreen() {
       ]).start();
 
       // Transition to Special One-Time Offer (Spin Wheel) Screen
+      trackOnboardingComplete(OnboardingStore.getState().user?.id);
       redirectTimeoutRef.current = setTimeout(() => {
         router.replace('/onboarding/special-offer' as any);
       }, 550);

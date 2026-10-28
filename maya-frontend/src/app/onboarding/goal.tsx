@@ -66,9 +66,7 @@ const GOAL_OPTIONS: GoalOption[] = [
 ];
 
 export default function GoalScreen() {
-  const [selectedGoal, setSelectedGoal] = useState<string | null>(
-    OnboardingStore.getState().goal || null,
-  );
+  const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Staggered Entrance Animations
