@@ -529,18 +529,35 @@ export default function UpgradeScreen() {
 
   // Subtle vertical attention animation for "See more Plans" chevron
   useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const styleId = 'maya-smooth-chevron-keyframes';
+      let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = styleId;
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent = `
+        @keyframes mayaChevronFloat {
+          0%, 100% { transform: translate3d(0, 0px, 0); }
+          50% { transform: translate3d(0, 1.8px, 0); }
+        }
+      `;
+      return;
+    }
+
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(chevronBounce, {
-          toValue: 1.1,
-          duration: 750,
-          easing: Easing.inOut(Easing.ease),
+          toValue: 1.8,
+          duration: 850,
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(chevronBounce, {
           toValue: 0,
-          duration: 750,
-          easing: Easing.inOut(Easing.ease),
+          duration: 850,
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
@@ -966,10 +983,21 @@ export default function UpgradeScreen() {
                     {showOtherPlans ? 'Show fewer plans' : 'See more Plans'}
                   </Text>
                   <Animated.View
-                    style={{
-                      marginLeft: 5,
-                      transform: [{ translateY: showOtherPlans ? 0 : chevronBounce }],
-                    }}
+                    style={
+                      Platform.OS === 'web'
+                        ? ({
+                            marginLeft: 5,
+                            display: 'inline-flex',
+                            willChange: 'transform',
+                            animation: showOtherPlans
+                              ? 'none'
+                              : 'mayaChevronFloat 1.6s ease-in-out infinite',
+                          } as any)
+                        : {
+                            marginLeft: 5,
+                            transform: [{ translateY: showOtherPlans ? 0 : chevronBounce }],
+                          }
+                    }
                   >
                     <Ionicons
                       name={showOtherPlans ? 'chevron-up' : 'chevron-down'}

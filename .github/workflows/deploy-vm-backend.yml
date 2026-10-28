@@ -51,8 +51,11 @@ jobs:
             --exclude '.env' \
             ./maya-backend/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-backend/"
 
-          # Install production dependencies and start/restart PM2
+          # Install espeak-ng (for Piper TTS phonemization), production dependencies, and start/restart PM2
           ssh "$VM_USER@$VM_IP" "bash -l -c '
+            if ! command -v espeak-ng >/dev/null 2>&1; then
+              sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends espeak-ng || true
+            fi
             cd /home/$VM_USER/apps/maya-backend
             npm ci --omit=dev --legacy-peer-deps --ignore-scripts
             pm2 startOrReload ecosystem.config.cjs --update-env

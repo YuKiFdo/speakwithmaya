@@ -3391,13 +3391,21 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
         this.piperConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         this.piperSession = await ortModule.InferenceSession.create(modelPath);
 
-        // Verify espeak-ng is available
-        try {
-          const { execSync } = await import('child_process');
-          execSync('espeak-ng --version', { stdio: 'pipe' });
-          this.piperG2p = 'espeak-ng'; // marker that espeak-ng is available
-          this.logger.log(`[PiperTTS] espeak-ng phonemizer verified`);
-        } catch {
+        // Verify espeak-ng is available (check standard Linux binary paths in case PM2 PATH is minimal)
+        const espeakCandidates = ['espeak-ng', '/usr/bin/espeak-ng', '/usr/local/bin/espeak-ng'];
+        let verifiedEspeakCmd: string | null = null;
+        for (const cmd of espeakCandidates) {
+          try {
+            execSync(`${cmd} --version`, { stdio: 'pipe' });
+            verifiedEspeakCmd = cmd;
+            break;
+          } catch {}
+        }
+
+        if (verifiedEspeakCmd) {
+          this.piperG2p = verifiedEspeakCmd; // store resolved binary path
+          this.logger.log(`[PiperTTS] espeak-ng phonemizer verified (${verifiedEspeakCmd})`);
+        } else {
           this.logger.warn(`[PiperTTS] espeak-ng not installed, falling back to basic G2P`);
           // Fall back to @piper-plus/g2p if espeak-ng not available (dev environment)
           try {
@@ -3432,8 +3440,9 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
     // --ipa: output IPA, -q: quiet (no audio), -v: voice
     // espeak-ng outputs IPA with stress marks, word boundaries, etc.
     const cleanText = text.replace(/"/g, '\\"').replace(/\n/g, ' ').substring(0, 2000);
+    const cmd = typeof this.piperG2p === 'string' && this.piperG2p.includes('espeak') ? this.piperG2p : 'espeak-ng';
     try {
-      const result = execSync(`espeak-ng --ipa -q -v ${voice} "${cleanText}"`, {
+      const result = execSync(`${cmd} --ipa -q -v ${voice} "${cleanText}"`, {
         encoding: 'utf8',
         timeout: 5000,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -3539,7 +3548,7 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
           const seg = segments[i];
           let phonemeIds: number[] = [];
 
-          if (this.piperG2p === 'espeak-ng') {
+          if (typeof this.piperG2p === 'string' && this.piperG2p.includes('espeak')) {
             const espeakVoice = this.piperConfig.espeak?.voice || 'en-us';
             const ipa = this.espeakTextToIpa(seg.text, espeakVoice);
             if (ipa) {

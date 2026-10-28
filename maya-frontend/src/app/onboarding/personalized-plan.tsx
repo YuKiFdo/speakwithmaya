@@ -326,6 +326,23 @@ export default function PersonalizedPlanScreen() {
 
   // Subtle vertical nudge animation on "See more Plans" chevron when collapsed
   useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const styleId = 'maya-smooth-chevron-keyframes';
+      let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = styleId;
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent = `
+        @keyframes mayaChevronFloat {
+          0%, 100% { transform: translate3d(0, 0px, 0); }
+          50% { transform: translate3d(0, 1.8px, 0); }
+        }
+      `;
+      return;
+    }
+
     if (showAllPlans) {
       chevronBounceAnim.stopAnimation();
       chevronBounceAnim.setValue(0);
@@ -335,16 +352,16 @@ export default function PersonalizedPlanScreen() {
     const bounceLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(chevronBounceAnim, {
-          toValue: 1.1,
+          toValue: 1.8,
           duration: 850,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: true,
         }),
         Animated.timing(chevronBounceAnim, {
           toValue: 0,
           duration: 850,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: true,
         }),
       ])
     );
@@ -813,9 +830,19 @@ export default function PersonalizedPlanScreen() {
                 {showAllPlans ? 'Collapse' : 'See more Plans'}
               </Text>
               <Animated.View
-                style={{
-                  transform: [{ translateY: chevronBounceAnim }],
-                }}
+                style={
+                  Platform.OS === 'web'
+                    ? ({
+                        display: 'inline-flex',
+                        willChange: 'transform',
+                        animation: showAllPlans
+                          ? 'none'
+                          : 'mayaChevronFloat 1.6s ease-in-out infinite',
+                      } as any)
+                    : {
+                        transform: [{ translateY: chevronBounceAnim }],
+                      }
+                }
               >
                 <Ionicons
                   name={showAllPlans ? 'chevron-up' : 'chevron-down'}
