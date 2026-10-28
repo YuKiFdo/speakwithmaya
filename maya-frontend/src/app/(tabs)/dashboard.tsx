@@ -955,6 +955,7 @@ export default function DashboardScreen() {
           scenarioId={selectedScenario?.id}
           scenarioTitle={selectedScenario?.title}
           isPro={isPro}
+          planTier={stats.planTier}
           onUpgradePrompt={() => {
             setCreateSessionVisible(false);
             setActivePopup('unlock-premium');

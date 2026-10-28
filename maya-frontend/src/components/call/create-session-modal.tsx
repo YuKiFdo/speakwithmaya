@@ -12,9 +12,11 @@ import {
   Easing,
 } from 'react-native';
 import { Ionicons, Feather } from '@expo/vector-icons';
+import Svg, { Path } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
+import { useOnboardingStore } from '@/services/store/onboarding-store';
 
-export type SessionDurationMinutes = 5 | 10 | 15 | 30;
+export type SessionDurationMinutes = 3 | 5 | 10 | 15 | 30;
 export type LanguageHelpMode = 'sinhala' | 'english';
 export type SinhalaStyleMode = 'balanced' | 'deep_guidance';
 export type AICorrectionsMode = 'end_review' | 'balanced' | 'instant';
@@ -42,21 +44,22 @@ export interface CreateSessionModalProps {
   scenarioTitle?: string;
   initialTopic?: string;
   isPro?: boolean;
+  planTier?: 'starter' | 'basic' | 'pro' | 'premium';
   onUpgradePrompt?: () => void;
 }
 
 interface DurationOption {
   minutes: SessionDurationMinutes;
-  tierLabel: string;
-  isPremium?: boolean;
+  tierLabel: 'Starter' | 'Basic' | 'Pro' | 'Premium';
+  requiredTier: 'starter' | 'basic' | 'pro' | 'premium';
 }
 
-const DURATION_OPTIONS: DurationOption[] = [
-  { minutes: 5, tierLabel: 'Starter' },
-  { minutes: 10, tierLabel: 'Pro' },
-  { minutes: 15, tierLabel: 'Premium', isPremium: true },
-  { minutes: 30, tierLabel: 'Premium', isPremium: true },
-];
+const TIER_RANK: Record<'starter' | 'basic' | 'pro' | 'premium', number> = {
+  starter: 0,
+  basic: 1,
+  pro: 2,
+  premium: 3,
+};
 
 interface LanguageOptionConfig {
   id: LanguageHelpOption;
@@ -138,15 +141,31 @@ export function CreateSessionModal({
   scenarioTitle,
   initialTopic = '',
   isPro = false,
+  planTier: propPlanTier,
   onUpgradePrompt,
 }: CreateSessionModalProps) {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isDesktop = windowWidth >= 768;
+  const store = useOnboardingStore();
 
-  // Selected State (Defaults match the uploaded design)
-  const [selectedMinutes, setSelectedMinutes] = useState<SessionDurationMinutes>(5);
+  const effectivePlanTier: 'starter' | 'basic' | 'pro' | 'premium' =
+    propPlanTier ||
+    ((store.user?.planTier?.toLowerCase() as any) || (isPro ? 'pro' : 'starter'));
+  const userTierRank = TIER_RANK[effectivePlanTier] ?? 0;
+  const isStarterUser = userTierRank === 0;
+  const starterMinutes: SessionDurationMinutes = isStarterUser ? 3 : 5;
+
+  const durationOptions: DurationOption[] = [
+    { minutes: starterMinutes, tierLabel: 'Starter', requiredTier: 'starter' },
+    { minutes: 10, tierLabel: 'Basic', requiredTier: 'basic' },
+    { minutes: 15, tierLabel: 'Pro', requiredTier: 'pro' },
+    { minutes: 30, tierLabel: 'Premium', requiredTier: 'premium' },
+  ];
+
+  // Selected State (Defaults match the Figma design)
+  const [selectedMinutes, setSelectedMinutes] = useState<SessionDurationMinutes>(starterMinutes);
   const [languageHelp, setLanguageHelp] = useState<LanguageHelpOption>('english_only');
-  const [aiCorrections, setAiCorrections] = useState<AICorrectionOption>('keep_on_track');
+  const [aiCorrections, setAiCorrections] = useState<AICorrectionOption>('let_me_speak');
   const [pickerModal, setPickerModal] = useState<'language' | 'corrections' | null>(null);
 
   // Smooth Entry / Exit Animations
@@ -155,9 +174,9 @@ export function CreateSessionModal({
 
   useEffect(() => {
     if (visible) {
-      setSelectedMinutes(5);
+      setSelectedMinutes(starterMinutes);
       setLanguageHelp('english_only');
-      setAiCorrections('keep_on_track');
+      setAiCorrections('let_me_speak');
       setPickerModal(null);
       modalAnim.setValue(0);
       Animated.spring(modalAnim, {
@@ -167,7 +186,7 @@ export function CreateSessionModal({
         useNativeDriver: Platform.OS !== 'web',
       }).start();
     }
-  }, [visible]);
+  }, [visible, starterMinutes]);
 
   const handleClose = () => {
     if (pickerModal) {
@@ -207,16 +226,36 @@ export function CreateSessionModal({
     });
   };
 
+  const isDurationLocked = (opt: DurationOption): boolean => {
+    return userTierRank < (TIER_RANK[opt.requiredTier] ?? 0);
+  };
+
+  const isLanguageOptionLocked = (optId: LanguageHelpOption): boolean => {
+    // Deep Guidance unlocks for any Pro/Paid plan (Basic, Pro, Premium)
+    if (optId === 'deep_guidance') {
+      return userTierRank < TIER_RANK.basic;
+    }
+    return false;
+  };
+
   const handleSelectDuration = (opt: DurationOption) => {
-    if (opt.isPremium && !isPro) {
+    if (isDurationLocked(opt)) {
       if (onUpgradePrompt) {
         onUpgradePrompt();
-      } else {
-        setSelectedMinutes(opt.minutes);
       }
       return;
     }
     setSelectedMinutes(opt.minutes);
+  };
+
+  const handleSelectLanguageHelp = (optId: LanguageHelpOption) => {
+    if (isLanguageOptionLocked(optId)) {
+      if (onUpgradePrompt) {
+        onUpgradePrompt();
+      }
+      return;
+    }
+    setLanguageHelp(optId);
   };
 
   const handleStart = () => {
@@ -348,15 +387,8 @@ export function CreateSessionModal({
               </Pressable>
             </View>
 
-            {/* Content Container (fits to content on mobile, scrolls only on tiny screens) */}
-            <ScrollView
-              style={[styles.scrollArea, !isDesktop && styles.scrollAreaMobile]}
-              contentContainerStyle={[styles.scrollContent, !isDesktop && styles.scrollContentMobile]}
-              showsVerticalScrollIndicator={false}
-              bounces={false}
-              overScrollMode="never"
-              scrollEnabled={true}
-            >
+            {/* Content Container (No Scrollbar) */}
+            <View style={[styles.scrollContent, !isDesktop && styles.scrollContentMobile]}>
               {/* SECTION 1: Practice Time */}
               <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
                 <View style={styles.sectionHeader}>
@@ -369,15 +401,62 @@ export function CreateSessionModal({
                   </View>
                 </View>
 
-                {/* 4 Duration Cards Grid */}
+                {/* 4 Duration Cards Grid (Figma Spec) */}
                 <View style={[styles.durationRow, !isDesktop && styles.durationRowMobile]}>
-                  {DURATION_OPTIONS.map((opt) => {
-                    const isSelected = selectedMinutes === opt.minutes;
+                  {durationOptions.map((opt) => {
+                    const locked = isDurationLocked(opt);
+                    const isSelected = !locked && selectedMinutes === opt.minutes;
+
+                    if (locked) {
+                      return (
+                        <Pressable
+                          key={opt.tierLabel}
+                          style={({ pressed }) => [
+                            styles.durationCard,
+                            styles.durationCardLocked,
+                            pressed && styles.btnPressed,
+                          ]}
+                          onPress={() => handleSelectDuration(opt)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${opt.minutes} minutes ${opt.tierLabel} locked. Tap to upgrade.`}
+                        >
+                          {/* Top-Right Lock Icon */}
+                          <View style={styles.cardTopRightIndicator}>
+                            <Ionicons name="lock-closed" size={14} color="#475569" />
+                          </View>
+
+                          {/* Middle Row: Gray Clock Circle + Minutes & Crown Tier */}
+                          <View style={styles.durationCardMainRow}>
+                            <View style={styles.durationClockCircleLocked}>
+                              <Ionicons name="time-outline" size={18} color="#475569" />
+                            </View>
+                            <View style={styles.durationTextCol}>
+                              <Text style={styles.durationMinutesTextLocked}>
+                                {opt.minutes} min
+                              </Text>
+                              <View style={styles.durationTierCrownRow}>
+                                <SmallCrownSvg color="#D97706" size={12} />
+                                <Text style={styles.durationTierTextLocked}>
+                                  {opt.tierLabel}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+
+                          {/* Bottom Upgrade Pill Button */}
+                          <View style={styles.cardUpgradePill}>
+                            <Text style={styles.cardUpgradePillText}>Upgrade</Text>
+                          </View>
+                        </Pressable>
+                      );
+                    }
+
                     return (
                       <Pressable
-                        key={opt.minutes}
+                        key={opt.tierLabel}
                         style={({ pressed }) => [
                           styles.durationCard,
+                          styles.durationCardUnlocked,
                           isSelected && styles.durationCardSelected,
                           pressed && styles.btnPressed,
                         ]}
@@ -385,32 +464,44 @@ export function CreateSessionModal({
                         accessibilityRole="button"
                         accessibilityLabel={`${opt.minutes} minutes ${opt.tierLabel}`}
                       >
-                        {opt.isPremium && (
-                          <View style={styles.cardTopRightBadges}>
-                            <Ionicons name="sparkles" size={12} color="#F59E0B" />
-                            <Ionicons name="lock-closed-outline" size={12} color="#94A3B8" />
+                        {/* Top-Right Radio Indicator */}
+                        <View style={styles.cardTopRightIndicator}>
+                          <RadioIndicator selected={isSelected} />
+                        </View>
+
+                        {/* Middle Row: Blue Clock Circle + Minutes & Tier */}
+                        <View style={styles.durationCardMainRow}>
+                          <View
+                            style={[
+                              styles.durationClockCircleUnlocked,
+                              isSelected && styles.durationClockCircleSelected,
+                            ]}
+                          >
+                            <Ionicons
+                              name="time-outline"
+                              size={19}
+                              color={isSelected ? '#0D4EFD' : '#64748B'}
+                            />
                           </View>
-                        )}
-                        <Text
-                          style={[
-                            styles.durationMinutesText,
-                            isSelected && styles.durationMinutesTextSelected,
-                          ]}
-                        >
-                          {opt.minutes} min
-                        </Text>
-                        <Text
-                          style={[
-                            styles.durationTierText,
-                            opt.isPremium
-                              ? styles.durationTierPremium
-                              : isSelected
-                              ? styles.durationTierSelected
-                              : null,
-                          ]}
-                        >
-                          {opt.tierLabel}
-                        </Text>
+                          <View style={styles.durationTextCol}>
+                            <Text
+                              style={[
+                                styles.durationMinutesText,
+                                isSelected && styles.durationMinutesTextSelected,
+                              ]}
+                            >
+                              {opt.minutes} min
+                            </Text>
+                            <Text
+                              style={[
+                                styles.durationTierText,
+                                isSelected && styles.durationTierSelected,
+                              ]}
+                            >
+                              {opt.tierLabel}
+                            </Text>
+                          </View>
+                        </View>
                       </Pressable>
                     );
                   })}
@@ -434,32 +525,52 @@ export function CreateSessionModal({
                 {isDesktop ? (
                   <View style={styles.threeColRow}>
                     {LANGUAGE_OPTIONS.map((opt) => {
-                      const isSelected = languageHelp === opt.id;
+                      const locked = isLanguageOptionLocked(opt.id);
+                      const isSelected = !locked && languageHelp === opt.id;
                       return (
                         <Pressable
                           key={opt.id}
                           style={({ pressed }) => [
                             styles.choiceCard,
+                            locked && styles.choiceCardLocked,
                             isSelected && styles.choiceCardSelected,
                             pressed && styles.btnPressed,
                           ]}
-                          onPress={() => setLanguageHelp(opt.id)}
+                          onPress={() => handleSelectLanguageHelp(opt.id)}
                           accessibilityRole="button"
                         >
-                          <View style={[styles.choiceIconCircle, { backgroundColor: opt.iconBg }]}>
-                            <Ionicons name={opt.iconName} size={18} color={opt.iconColor} />
+                          {/* Top-Right Radio or Lock */}
+                          <View style={styles.cardTopRightIndicator}>
+                            {locked ? (
+                              <Ionicons name="lock-closed" size={14} color="#475569" />
+                            ) : (
+                              <RadioIndicator selected={isSelected} />
+                            )}
                           </View>
-                          <View style={styles.choiceTextCol}>
-                            <Text
-                              style={[
-                                styles.choiceTitle,
-                                isSelected && styles.choiceTitleSelected,
-                              ]}
-                            >
-                              {opt.title}
-                            </Text>
-                            <Text style={styles.choiceSubtitle}>{opt.subtitle}</Text>
+
+                          <View style={styles.choiceTopRow}>
+                            <View style={[styles.choiceIconCircle, { backgroundColor: opt.iconBg }]}>
+                              <Ionicons name={opt.iconName} size={18} color={opt.iconColor} />
+                            </View>
+                            <View style={styles.choiceTextCol}>
+                              <Text
+                                style={[
+                                  styles.choiceTitle,
+                                  locked && styles.choiceTitleLocked,
+                                  isSelected && styles.choiceTitleSelected,
+                                ]}
+                              >
+                                {opt.title}
+                              </Text>
+                              <Text style={styles.choiceSubtitle}>{opt.subtitle}</Text>
+                            </View>
                           </View>
+
+                          {locked && (
+                            <View style={[styles.cardUpgradePill, { marginTop: 8, width: '78%', alignSelf: 'center' }]}>
+                              <Text style={styles.cardUpgradePillText}>Upgrade</Text>
+                            </View>
+                          )}
                         </Pressable>
                       );
                     })}
@@ -483,7 +594,7 @@ export function CreateSessionModal({
                     </View>
                     <View style={styles.changeActionRow}>
                       <Text style={styles.changeText}>Change</Text>
-                      <Ionicons name="chevron-forward" size={16} color="#2B5BFF" />
+                      <Ionicons name="chevron-forward" size={16} color="#0D4EFD" />
                     </View>
                   </Pressable>
                 )}
@@ -518,25 +629,32 @@ export function CreateSessionModal({
                           onPress={() => setAiCorrections(opt.id)}
                           accessibilityRole="button"
                         >
-                          <View style={[styles.choiceIconCircle, { backgroundColor: opt.iconBg }]}>
-                            {opt.iconType === 'scale-balance' ? (
-                              <Ionicons name="options-outline" size={19} color={opt.iconColor} />
-                            ) : opt.iconType === 'sprout' ? (
-                              <Ionicons name="leaf-outline" size={19} color={opt.iconColor} />
-                            ) : (
-                              <Ionicons name="flash-outline" size={18} color={opt.iconColor} />
-                            )}
+                          {/* Top-Right Radio Indicator */}
+                          <View style={styles.cardTopRightIndicator}>
+                            <RadioIndicator selected={isSelected} />
                           </View>
-                          <View style={styles.choiceTextCol}>
-                            <Text
-                              style={[
-                                styles.choiceTitle,
-                                isSelected && styles.choiceTitleSelected,
-                              ]}
-                            >
-                              {opt.title}
-                            </Text>
-                            <Text style={styles.choiceSubtitle}>{opt.subtitle}</Text>
+
+                          <View style={styles.choiceTopRow}>
+                            <View style={[styles.choiceIconCircle, { backgroundColor: opt.iconBg }]}>
+                              {opt.iconType === 'scale-balance' ? (
+                                <Ionicons name="options-outline" size={19} color={opt.iconColor} />
+                              ) : opt.iconType === 'sprout' ? (
+                                <Ionicons name="leaf-outline" size={19} color={opt.iconColor} />
+                              ) : (
+                                <Ionicons name="flash-outline" size={18} color={opt.iconColor} />
+                              )}
+                            </View>
+                            <View style={styles.choiceTextCol}>
+                              <Text
+                                style={[
+                                  styles.choiceTitle,
+                                  isSelected && styles.choiceTitleSelected,
+                                ]}
+                              >
+                                {opt.title}
+                              </Text>
+                              <Text style={styles.choiceSubtitle}>{opt.subtitle}</Text>
+                            </View>
                           </View>
                         </Pressable>
                       );
@@ -572,7 +690,7 @@ export function CreateSessionModal({
                   </Pressable>
                 )}
               </View>
-            </ScrollView>
+            </View>
 
             {/* Bottom Actions Bar */}
             <View style={[styles.footerRow, !isDesktop && styles.footerRowMobile]}>
@@ -675,16 +793,24 @@ export function CreateSessionModal({
                   <View style={styles.pickerOptionsList}>
                     {pickerModal === 'language'
                       ? LANGUAGE_OPTIONS.map((opt) => {
-                          const isSelected = languageHelp === opt.id;
+                          const locked = isLanguageOptionLocked(opt.id);
+                          const isSelected = !locked && languageHelp === opt.id;
                           return (
                             <Pressable
                               key={opt.id}
                               style={({ pressed }) => [
                                 styles.pickerItemCard,
+                                locked && styles.choiceCardLocked,
                                 isSelected && styles.pickerItemCardSelected,
                                 pressed && styles.btnPressed,
                               ]}
                               onPress={() => {
+                                if (locked) {
+                                  closePicker(() => {
+                                    if (onUpgradePrompt) onUpgradePrompt();
+                                  });
+                                  return;
+                                }
                                 setLanguageHelp(opt.id);
                                 closePicker();
                               }}
@@ -697,6 +823,7 @@ export function CreateSessionModal({
                                 <Text
                                   style={[
                                     styles.choiceTitle,
+                                    locked && styles.choiceTitleLocked,
                                     isSelected && styles.choiceTitleSelected,
                                   ]}
                                 >
@@ -704,10 +831,15 @@ export function CreateSessionModal({
                                 </Text>
                                 <Text style={styles.choiceSubtitle}>{opt.subtitle}</Text>
                               </View>
-                              {isSelected ? (
-                                <Ionicons name="checkmark-circle" size={22} color="#2B5BFF" />
+                              {locked ? (
+                                <View style={{ alignItems: 'flex-end', gap: 5 }}>
+                                  <Ionicons name="lock-closed" size={14} color="#475569" />
+                                  <View style={[styles.cardUpgradePill, { paddingHorizontal: 10, height: 24 }]}>
+                                    <Text style={styles.cardUpgradePillText}>Upgrade</Text>
+                                  </View>
+                                </View>
                               ) : (
-                                <View style={styles.radioUnchecked} />
+                                <RadioIndicator selected={isSelected} />
                               )}
                             </Pressable>
                           );
@@ -767,6 +899,28 @@ export function CreateSessionModal({
   );
 }
 
+function RadioIndicator({ selected }: { selected: boolean }) {
+  return (
+    <View style={[styles.radioCircleOuter, selected && styles.radioCircleOuterSelected]}>
+      {selected && <View style={styles.radioCircleInnerDot} />}
+    </View>
+  );
+}
+
+function SmallCrownSvg({ color = '#D97706', size = 12 }: { color?: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Path
+        d="M2 12.5L3.2 5.5L6.2 8.2L8 3.5L9.8 8.2L12.8 5.5L14 12.5H2Z"
+        stroke={color}
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
@@ -796,11 +950,11 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 26,
+    borderRadius: 20,
     width: '100%',
-    paddingHorizontal: 25,
-    paddingTop: 22,
-    paddingBottom: 22,
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 14,
     ...(Platform.OS === 'web'
       ? ({
           boxShadow: '0 22px 55px -12px rgba(15, 23, 42, 0.26), 0 0 1px rgba(15, 23, 42, 0.1)',
@@ -814,19 +968,18 @@ const styles = StyleSheet.create({
         }),
   },
   cardDesktop: {
-    maxWidth: 630,
+    maxWidth: 600,
   },
   cardMobile: {
     maxWidth: '100%',
     width: '100%',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 16,
-    paddingTop: 18,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    maxHeight: '92%',
+    paddingHorizontal: 15,
+    paddingTop: 14,
+    paddingBottom: Platform.OS === 'ios' ? 26 : 16,
   },
 
   /* Header */
@@ -834,27 +987,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 8,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 13,
+    gap: 10,
     flex: 1,
   },
   avatarCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#2B5BFF',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#0D4EFD',
     justifyContent: 'center',
     alignItems: 'center',
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 6px 16px rgba(43, 91, 255, 0.32)',
+          boxShadow: '0 5px 14px rgba(13, 78, 253, 0.28)',
         } as any)
       : {
-          shadowColor: '#2B5BFF',
+          shadowColor: '#0D4EFD',
           shadowOffset: { width: 0, height: 3 },
           shadowOpacity: 0.25,
           shadowRadius: 6,
@@ -866,93 +1019,84 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 20.5,
+    fontSize: 17.5,
     color: '#0F172A',
     letterSpacing: -0.3,
   },
   headerHighlight: {
-    color: '#2B5BFF',
+    color: '#0D4EFD',
   },
   headerSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 12.5,
+    fontSize: 11,
     color: '#64748B',
-    marginTop: 1,
+    marginTop: 0.5,
   },
   closeBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: '#F1F5F9',
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 10,
   },
 
-  /* Scrollable Area */
+  /* Content Area */
   scrollArea: {
-    maxHeight: 600,
+    flexShrink: 1,
   },
   scrollAreaMobile: {
     flexGrow: 0,
     flexShrink: 1,
-    maxHeight: undefined,
-    ...(Platform.OS === 'web'
-      ? ({
-          scrollbarWidth: 'none',
-          msOverflowStyle: 'none',
-        } as any)
-      : {}),
   },
   scrollContent: {
-    gap: 12,
-    paddingBottom: 6,
+    gap: 7,
+    paddingBottom: 0,
   },
   scrollContentMobile: {
-    gap: 10,
-    paddingBottom: 4,
+    gap: 7,
+    paddingBottom: 0,
   },
 
   /* Section Containers */
   sectionContainer: {
     width: '100%',
-    borderRadius: 16,
-    borderWidth: 0.63,
+    borderRadius: 13,
+    borderWidth: 1,
     borderColor: '#F1F5F9',
-    borderTopWidth: 0.63,
-    borderTopColor: '#F1F5F9',
-    paddingHorizontal: 16,
-    paddingVertical: 13,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     backgroundColor: '#FFFFFF',
     alignSelf: 'center',
     ...(Platform.OS === 'web'
       ? ({
           boxShadow:
-            '0px 0.63px 1.25px -0.63px rgba(0, 0, 0, 0.08), 0px 0.63px 1.88px 0px rgba(0, 0, 0, 0.08)',
+            '0px 1px 2px rgba(15, 23, 42, 0.05)',
         } as any)
       : {
           shadowColor: '#000000',
           shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.06,
+          shadowOpacity: 0.05,
           shadowRadius: 2,
           elevation: 1,
         }),
   },
   sectionContainerMobile: {
-    paddingHorizontal: 13,
-    paddingVertical: 10,
-    borderRadius: 14,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    borderRadius: 12,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 11,
-    marginBottom: 11,
+    gap: 8,
+    marginBottom: 6,
   },
   sectionIconBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 27,
+    height: 27,
+    borderRadius: 13.5,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -961,122 +1105,217 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 14.5,
+    fontSize: 13,
     color: '#0F172A',
   },
   sectionSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 12,
+    fontSize: 10.8,
     color: '#64748B',
-    marginTop: 1,
+    marginTop: 0.5,
   },
 
-  /* Duration Options (Section 1) */
+  /* Duration Options (Section 1 - Figma Spec, Compact) */
   durationRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 7,
   },
   durationRowMobile: {
-    gap: 7,
+    flexWrap: 'wrap',
+    gap: 6,
   },
   durationCard: {
     flex: 1,
-    height: 66,
-    borderRadius: 14,
-    borderWidth: 1.2,
+    minWidth: 105,
+    minHeight: 64,
+    borderRadius: 11,
+    borderWidth: 1.4,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 7,
+    justifyContent: 'space-between',
     position: 'relative',
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
+  durationCardUnlocked: {
+    justifyContent: 'center',
+  },
   durationCardSelected: {
-    borderColor: '#2B5BFF',
-    backgroundColor: '#FFFFFF',
+    borderColor: '#0D4EFD',
+    backgroundColor: '#F5F9FF',
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 0 0 1px #2B5BFF, 0 3px 12px rgba(43, 91, 255, 0.12)',
+          boxShadow: '0 2px 10px rgba(13, 78, 253, 0.08)',
         } as any)
       : {
-          shadowColor: '#2B5BFF',
+          shadowColor: '#0D4EFD',
           shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.2,
-          shadowRadius: 5,
+          shadowOpacity: 0.12,
+          shadowRadius: 4,
           elevation: 2,
         }),
   },
-  cardTopRightBadges: {
+  durationCardLocked: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+    borderWidth: 1,
+  },
+  cardTopRightIndicator: {
     position: 'absolute',
     top: 5,
-    right: 7,
+    right: 5,
+    zIndex: 2,
+  },
+  radioCircleOuter: {
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
+    borderWidth: 1.5,
+    borderColor: '#94A3B8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  radioCircleOuterSelected: {
+    borderColor: '#0D4EFD',
+  },
+  radioCircleInnerDot: {
+    width: 6.5,
+    height: 6.5,
+    borderRadius: 3.25,
+    backgroundColor: '#0D4EFD',
+  },
+  durationCardMainRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    gap: 6,
+    marginTop: 1,
+  },
+  durationClockCircleUnlocked: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  durationClockCircleSelected: {
+    backgroundColor: '#DCEBFF',
+  },
+  durationClockCircleLocked: {
+    width: 25,
+    height: 25,
+    borderRadius: 12.5,
+    backgroundColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  durationTextCol: {
+    flex: 1,
   },
   durationMinutesText: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 16,
+    fontSize: 13,
     color: '#0F172A',
   },
   durationMinutesTextSelected: {
-    color: '#2B5BFF',
+    color: '#0D4EFD',
+  },
+  durationMinutesTextLocked: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 13,
+    color: '#475569',
+  },
+  durationTierCrownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: 0.5,
   },
   durationTierText: {
     ...fontStyle('inter', 'medium'),
-    fontSize: 11.5,
+    fontSize: 10,
     color: '#64748B',
-    marginTop: 2,
+    marginTop: 0.5,
   },
   durationTierSelected: {
-    color: '#2B5BFF',
+    color: '#0D4EFD',
   },
-  durationTierPremium: {
-    color: '#D97706',
+  durationTierTextLocked: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 10,
+    color: '#64748B',
+  },
+  cardUpgradePill: {
+    marginTop: 5,
+    height: 20,
+    borderRadius: 999,
+    backgroundColor: '#FDEBD0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  cardUpgradePillText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 10,
+    color: '#B45309',
   },
 
-  /* 3-Column Choice Row (Sections 2 & 3) */
+  /* 3-Column Choice Row (Sections 2 & 3, Compact) */
   threeColRow: {
     flexDirection: 'row',
-    gap: 9,
+    gap: 7,
   },
   threeColRowMobile: {
     flexDirection: 'column',
-    gap: 7,
+    gap: 6,
   },
   choiceCard: {
     flex: 1,
-    minHeight: 65,
-    borderRadius: 14,
-    borderWidth: 1.2,
+    minHeight: 58,
+    borderRadius: 11,
+    borderWidth: 1.4,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 11,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 7,
+    justifyContent: 'center',
+    position: 'relative',
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
+  choiceCardLocked: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+    borderWidth: 1,
+  },
   choiceCardSelected: {
-    borderColor: '#2B5BFF',
-    backgroundColor: '#FFFFFF',
+    borderColor: '#0D4EFD',
+    backgroundColor: '#F5F9FF',
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 0 0 1px #2B5BFF, 0 3px 12px rgba(43, 91, 255, 0.12)',
+          boxShadow: '0 2px 10px rgba(13, 78, 253, 0.08)',
         } as any)
       : {
-          shadowColor: '#2B5BFF',
+          shadowColor: '#0D4EFD',
           shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.2,
-          shadowRadius: 5,
+          shadowOpacity: 0.12,
+          shadowRadius: 4,
           elevation: 2,
         }),
   },
+  choiceTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingRight: 10,
+  },
   choiceIconCircle: {
-    width: 33,
-    height: 33,
-    borderRadius: 16.5,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1085,39 +1324,42 @@ const styles = StyleSheet.create({
   },
   choiceTitle: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 13,
+    fontSize: 11.5,
     color: '#0F172A',
   },
+  choiceTitleLocked: {
+    color: '#475569',
+  },
   choiceTitleSelected: {
-    color: '#2B5BFF',
+    color: '#0D4EFD',
   },
   choiceSubtitle: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 10.8,
+    fontSize: 9.8,
     color: '#64748B',
-    lineHeight: 14,
-    marginTop: 1.5,
+    lineHeight: 12.5,
+    marginTop: 1,
   },
 
   /* Bottom Actions Bar */
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginTop: 16,
-    paddingTop: 14,
+    gap: 10,
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
   },
   footerRowMobile: {
-    marginTop: 12,
-    paddingTop: 10,
+    marginTop: 8,
+    paddingTop: 8,
     gap: 10,
   },
   cancelBtn: {
     flex: 1,
-    height: 48,
-    borderRadius: 13,
+    height: 40,
+    borderRadius: 10,
     borderWidth: 1.2,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
@@ -1127,34 +1369,34 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: {
     ...fontStyle('inter', 'semiBold'),
-    fontSize: 14,
+    fontSize: 13,
     color: '#0F172A',
   },
   startBtn: {
     flex: 2,
-    height: 48,
-    borderRadius: 13,
-    backgroundColor: '#2B5BFF',
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#0D4EFD',
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 7,
+    gap: 6,
     ...(Platform.OS === 'web'
       ? ({
           cursor: 'pointer',
-          boxShadow: '0 6px 18px rgba(43, 91, 255, 0.32)',
+          boxShadow: '0 6px 16px rgba(13, 78, 253, 0.28)',
         } as any)
       : {
-          shadowColor: '#2B5BFF',
+          shadowColor: '#0D4EFD',
           shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.3,
+          shadowOpacity: 0.28,
           shadowRadius: 8,
           elevation: 5,
         }),
   },
   startBtnText: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 14,
+    fontSize: 13,
     color: '#FFFFFF',
   },
   startBtnPressed: {

@@ -224,8 +224,10 @@ export function useUserStats(): UserStats {
   const planTier = (user?.planTier || 'starter').toLowerCase() as 'starter' | 'basic' | 'pro' | 'premium';
   const isStarter = planTier === 'starter';
   const isPro = planTier === 'pro' || planTier === 'premium' || planTier === 'basic';
-  const defaultMonthlyAllowance = planTier === 'premium' ? 1200 : planTier === 'pro' ? 600 : planTier === 'basic' ? 450 : 5;
-  const monthlyMinutesAllowance = user?.monthlyMinutesAllowance ?? defaultMonthlyAllowance;
+  const defaultMonthlyAllowance = planTier === 'premium' ? 1200 : planTier === 'pro' ? 600 : planTier === 'basic' ? 450 : 3;
+  const monthlyMinutesAllowance = isStarter
+    ? Math.min(3, user?.monthlyMinutesAllowance ?? 3)
+    : (user?.monthlyMinutesAllowance ?? defaultMonthlyAllowance);
   const addOnMinutesBalance = user?.addOnMinutesBalance ?? 0;
   const minutesBalance = user?.minutesBalance ?? (monthlyMinutesAllowance + addOnMinutesBalance);
 
