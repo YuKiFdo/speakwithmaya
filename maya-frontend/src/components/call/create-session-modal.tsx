@@ -413,6 +413,7 @@ export function CreateSessionModal({
                           key={opt.tierLabel}
                           style={({ pressed }) => [
                             styles.durationCard,
+                            !isDesktop && styles.durationCardMobile,
                             styles.durationCardLocked,
                             pressed && styles.btnPressed,
                           ]}
@@ -456,6 +457,7 @@ export function CreateSessionModal({
                         key={opt.tierLabel}
                         style={({ pressed }) => [
                           styles.durationCard,
+                          !isDesktop && styles.durationCardMobile,
                           styles.durationCardUnlocked,
                           isSelected && styles.durationCardSelected,
                           pressed && styles.btnPressed,
@@ -1122,7 +1124,8 @@ const styles = StyleSheet.create({
   },
   durationRowMobile: {
     flexWrap: 'wrap',
-    gap: 6,
+    justifyContent: 'space-between',
+    gap: 8,
   },
   durationCard: {
     flex: 1,
@@ -1138,6 +1141,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     position: 'relative',
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  durationCardMobile: {
+    flexBasis: '48%',
+    minWidth: '47%',
+    maxWidth: '49%',
   },
   durationCardUnlocked: {
     justifyContent: 'center',

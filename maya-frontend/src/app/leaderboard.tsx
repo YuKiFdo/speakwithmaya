@@ -19,6 +19,7 @@ import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-si
 import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { useUserStats } from '@/hooks/useUserStats';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
@@ -412,151 +413,212 @@ export default function LeaderboardScreen() {
 
             {/* TOP 3 PODIUM CARD */}
             <View style={[styles.podiumCard, isDesktop && styles.podiumCardDesktop]}>
-              <View style={[styles.podiumColumnsRow, isDesktop && styles.podiumColumnsRowDesktop]}>
-                {/* LEFT COLUMN: RANK 2 */}
-                <View style={[styles.podiumCol, styles.podiumColSide]}>
-                  {top2 ? (
-                    <>
-                      <View style={styles.podiumAvatarWrap}>
-                        <View style={[styles.podiumAvatarHalo, styles.podiumAvatarHaloSilver]}>
-                          <LearnerAvatar
-                            name={top2.displayName}
-                            avatarUrl={top2.avatarUrl}
-                            size={isDesktop ? 64 : 54}
-                            index={1}
-                            isCurrentUser={top2.isCurrentUser}
-                          />
-                        </View>
-                        <View style={styles.podiumMedalBadgeWrap}>
-                          <RosetteMedalSvg rank={2} size={isDesktop ? 27 : 24} />
-                        </View>
-                      </View>
+              {isLoading ? (
+                <View style={[styles.podiumColumnsRow, isDesktop && styles.podiumColumnsRowDesktop]}>
+                  {/* Skeleton Rank 2 */}
+                  <View style={[styles.podiumCol, styles.podiumColSide]}>
+                    <View style={styles.podiumAvatarWrap}>
+                      <Skeleton
+                        width={isDesktop ? 72 : 62}
+                        height={isDesktop ? 72 : 62}
+                        borderRadius={isDesktop ? 36 : 31}
+                      />
+                    </View>
+                    <View style={[styles.podiumPedestal, styles.podiumPedestalSilver, { gap: 6 }]}>
+                      <Skeleton width={68} height={14} borderRadius={6} />
+                      <Skeleton width={52} height={12} borderRadius={5} />
+                      <Skeleton width={60} height={10} borderRadius={4} />
+                    </View>
+                  </View>
 
-                      <View style={[styles.podiumPedestal, styles.podiumPedestalSilver]}>
-                        <Text
-                          style={[styles.podiumNameText, !isDesktop && styles.podiumNameTextMobile]}
-                          numberOfLines={1}
-                        >
-                          {top2.displayName.split(' ')[0]}
-                        </Text>
-                        <Text style={[styles.podiumXpText, !isDesktop && styles.podiumXpTextMobile]}>
-                          {top2.xp.toLocaleString()} XP
-                        </Text>
-                        <Text style={styles.podiumMinutesSubText}>
-                          {top2.minutesConsumed ?? 0}m practiced
-                        </Text>
-                      </View>
-                    </>
-                  ) : (
-                    <View style={{ height: 90 }} />
-                  )}
+                  {/* Skeleton Rank 1 */}
+                  <View style={[styles.podiumCol, styles.podiumColCenter]}>
+                    <View style={{ marginBottom: 6 }}>
+                      <Skeleton width={28} height={20} borderRadius={6} />
+                    </View>
+                    <View style={styles.podiumAvatarWrap}>
+                      <Skeleton
+                        width={isDesktop ? 84 : 72}
+                        height={isDesktop ? 84 : 72}
+                        borderRadius={isDesktop ? 42 : 36}
+                      />
+                    </View>
+                    <View style={[styles.podiumPedestal, styles.podiumPedestalGold, { gap: 6 }]}>
+                      <Skeleton width={76} height={15} borderRadius={6} />
+                      <Skeleton width={56} height={12} borderRadius={5} />
+                      <Skeleton width={64} height={10} borderRadius={4} />
+                    </View>
+                  </View>
+
+                  {/* Skeleton Rank 3 */}
+                  <View style={[styles.podiumCol, styles.podiumColSide]}>
+                    <View style={styles.podiumAvatarWrap}>
+                      <Skeleton
+                        width={isDesktop ? 72 : 62}
+                        height={isDesktop ? 72 : 62}
+                        borderRadius={isDesktop ? 36 : 31}
+                      />
+                    </View>
+                    <View
+                      style={[
+                        styles.podiumPedestal,
+                        isDesktop ? styles.podiumPedestalBronzeDesktop : styles.podiumPedestalBronzeMobile,
+                        { gap: 6 },
+                      ]}
+                    >
+                      <Skeleton width={68} height={14} borderRadius={6} />
+                      <Skeleton width={52} height={12} borderRadius={5} />
+                      <Skeleton width={60} height={10} borderRadius={4} />
+                    </View>
+                  </View>
                 </View>
-
-                {/* CENTER COLUMN: RANK 1 */}
-                <View style={[styles.podiumCol, styles.podiumColCenter]}>
-                  {top1 && (
-                    <>
-                      <View style={styles.podiumWinnerAvatarSection}>
-                        <View style={styles.podiumWinnerCrownWrap}>
-                          <CrownSvg size={isDesktop ? 26 : 22} />
-                        </View>
-
-                        {/* Arc Confetti Ticks around #1 Avatar */}
-                        <View style={styles.confettiOverlayWrap} pointerEvents="none">
-                          <ConfettiArcSvg
-                            width={isDesktop ? 132 : 112}
-                            height={isDesktop ? 84 : 72}
-                          />
-                        </View>
-
+              ) : (
+                <View style={[styles.podiumColumnsRow, isDesktop && styles.podiumColumnsRowDesktop]}>
+                  {/* LEFT COLUMN: RANK 2 */}
+                  <View style={[styles.podiumCol, styles.podiumColSide]}>
+                    {top2 ? (
+                      <>
                         <View style={styles.podiumAvatarWrap}>
-                          <View style={[styles.podiumAvatarHalo, styles.podiumAvatarHaloGold]}>
+                          <View style={[styles.podiumAvatarHalo, styles.podiumAvatarHaloSilver]}>
                             <LearnerAvatar
-                              name={top1.displayName}
-                              avatarUrl={top1.avatarUrl}
-                              size={isDesktop ? 76 : 64}
-                              index={0}
-                              isCurrentUser={top1.isCurrentUser}
+                              name={top2.displayName}
+                              avatarUrl={top2.avatarUrl}
+                              size={isDesktop ? 64 : 54}
+                              index={1}
+                              isCurrentUser={top2.isCurrentUser}
                             />
                           </View>
                           <View style={styles.podiumMedalBadgeWrap}>
-                            <RosetteMedalSvg rank={1} size={isDesktop ? 30 : 26} />
+                            <RosetteMedalSvg rank={2} size={isDesktop ? 27 : 24} />
                           </View>
                         </View>
-                      </View>
 
-                      <View style={[styles.podiumPedestal, styles.podiumPedestalGold]}>
-                        <Text
-                          style={[
-                            styles.podiumNameText,
-                            styles.podiumNameTextWinner,
-                            !isDesktop && styles.podiumNameTextWinnerMobile,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {top1.displayName.split(' ')[0]}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.podiumXpText,
-                            styles.podiumXpTextWinner,
-                            !isDesktop && styles.podiumXpTextMobile,
-                          ]}
-                        >
-                          {top1.xp.toLocaleString()} XP
-                        </Text>
-                        <Text style={styles.podiumMinutesSubText}>
-                          {top1.minutesConsumed ?? 0}m practiced
-                        </Text>
-                      </View>
-                    </>
-                  )}
-                </View>
-
-                {/* RIGHT COLUMN: RANK 3 */}
-                <View style={[styles.podiumCol, styles.podiumColSide]}>
-                  {top3 ? (
-                    <>
-                      <View style={styles.podiumAvatarWrap}>
-                        <View style={[styles.podiumAvatarHalo, styles.podiumAvatarHaloBronze]}>
-                          <LearnerAvatar
-                            name={top3.displayName}
-                            avatarUrl={top3.avatarUrl}
-                            size={isDesktop ? 64 : 54}
-                            index={2}
-                            isCurrentUser={top3.isCurrentUser}
-                          />
+                        <View style={[styles.podiumPedestal, styles.podiumPedestalSilver]}>
+                          <Text
+                            style={[styles.podiumNameText, !isDesktop && styles.podiumNameTextMobile]}
+                            numberOfLines={1}
+                          >
+                            {top2.displayName.split(' ')[0]}
+                          </Text>
+                          <Text style={[styles.podiumXpText, !isDesktop && styles.podiumXpTextMobile]}>
+                            {top2.xp.toLocaleString()} XP
+                          </Text>
+                          <Text style={styles.podiumMinutesSubText}>
+                            {top2.minutesConsumed ?? 0}m practiced
+                          </Text>
                         </View>
-                        <View style={styles.podiumMedalBadgeWrap}>
-                          <RosetteMedalSvg rank={3} size={isDesktop ? 27 : 24} />
-                        </View>
-                      </View>
+                      </>
+                    ) : (
+                      <View style={{ height: 90 }} />
+                    )}
+                  </View>
 
-                      <View
-                        style={[
-                          styles.podiumPedestal,
-                          isDesktop ? styles.podiumPedestalBronzeDesktop : styles.podiumPedestalBronzeMobile,
-                        ]}
-                      >
-                        <Text
-                          style={[styles.podiumNameText, !isDesktop && styles.podiumNameTextMobile]}
-                          numberOfLines={1}
+                  {/* CENTER COLUMN: RANK 1 */}
+                  <View style={[styles.podiumCol, styles.podiumColCenter]}>
+                    {top1 && (
+                      <>
+                        <View style={styles.podiumWinnerAvatarSection}>
+                          <View style={styles.podiumWinnerCrownWrap}>
+                            <CrownSvg size={isDesktop ? 26 : 22} />
+                          </View>
+
+                          {/* Arc Confetti Ticks around #1 Avatar */}
+                          <View style={styles.confettiOverlayWrap} pointerEvents="none">
+                            <ConfettiArcSvg
+                              width={isDesktop ? 132 : 112}
+                              height={isDesktop ? 84 : 72}
+                            />
+                          </View>
+
+                          <View style={styles.podiumAvatarWrap}>
+                            <View style={[styles.podiumAvatarHalo, styles.podiumAvatarHaloGold]}>
+                              <LearnerAvatar
+                                name={top1.displayName}
+                                avatarUrl={top1.avatarUrl}
+                                size={isDesktop ? 76 : 64}
+                                index={0}
+                                isCurrentUser={top1.isCurrentUser}
+                              />
+                            </View>
+                            <View style={styles.podiumMedalBadgeWrap}>
+                              <RosetteMedalSvg rank={1} size={isDesktop ? 30 : 26} />
+                            </View>
+                          </View>
+                        </View>
+
+                        <View style={[styles.podiumPedestal, styles.podiumPedestalGold]}>
+                          <Text
+                            style={[
+                              styles.podiumNameText,
+                              styles.podiumNameTextWinner,
+                              !isDesktop && styles.podiumNameTextWinnerMobile,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {top1.displayName.split(' ')[0]}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.podiumXpText,
+                              styles.podiumXpTextWinner,
+                              !isDesktop && styles.podiumXpTextMobile,
+                            ]}
+                          >
+                            {top1.xp.toLocaleString()} XP
+                          </Text>
+                          <Text style={styles.podiumMinutesSubText}>
+                            {top1.minutesConsumed ?? 0}m practiced
+                          </Text>
+                        </View>
+                      </>
+                    )}
+                  </View>
+
+                  {/* RIGHT COLUMN: RANK 3 */}
+                  <View style={[styles.podiumCol, styles.podiumColSide]}>
+                    {top3 ? (
+                      <>
+                        <View style={styles.podiumAvatarWrap}>
+                          <View style={[styles.podiumAvatarHalo, styles.podiumAvatarHaloBronze]}>
+                            <LearnerAvatar
+                              name={top3.displayName}
+                              avatarUrl={top3.avatarUrl}
+                              size={isDesktop ? 64 : 54}
+                              index={2}
+                              isCurrentUser={top3.isCurrentUser}
+                            />
+                          </View>
+                          <View style={styles.podiumMedalBadgeWrap}>
+                            <RosetteMedalSvg rank={3} size={isDesktop ? 27 : 24} />
+                          </View>
+                        </View>
+
+                        <View
+                          style={[
+                            styles.podiumPedestal,
+                            isDesktop ? styles.podiumPedestalBronzeDesktop : styles.podiumPedestalBronzeMobile,
+                          ]}
                         >
-                          {top3.displayName.split(' ')[0]}
-                        </Text>
-                        <Text style={[styles.podiumXpText, !isDesktop && styles.podiumXpTextMobile]}>
-                          {top3.xp.toLocaleString()} XP
-                        </Text>
-                        <Text style={styles.podiumMinutesSubText}>
-                          {top3.minutesConsumed ?? 0}m practiced
-                        </Text>
-                      </View>
-                    </>
-                  ) : (
-                    <View style={{ height: 90 }} />
-                  )}
+                          <Text
+                            style={[styles.podiumNameText, !isDesktop && styles.podiumNameTextMobile]}
+                            numberOfLines={1}
+                          >
+                            {top3.displayName.split(' ')[0]}
+                          </Text>
+                          <Text style={[styles.podiumXpText, !isDesktop && styles.podiumXpTextMobile]}>
+                            {top3.xp.toLocaleString()} XP
+                          </Text>
+                          <Text style={styles.podiumMinutesSubText}>
+                            {top3.minutesConsumed ?? 0}m practiced
+                          </Text>
+                        </View>
+                      </>
+                    ) : (
+                      <View style={{ height: 90 }} />
+                    )}
+                  </View>
                 </View>
-              </View>
+              )}
             </View>
 
             {/* LEADERBOARD LIST TABLE CARD */}
@@ -590,9 +652,47 @@ export default function LeaderboardScreen() {
                 </Text>
               </View>
 
-              {isLoading && rankedList.length === 0 ? (
-                <View style={{ paddingVertical: 28, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color="#0D4EFD" />
+              {isLoading ? (
+                <View style={styles.tableBodyWrap}>
+                  {[0, 1, 2, 3, 4, 5].map((skeletonIdx) => (
+                    <React.Fragment key={skeletonIdx}>
+                      <View style={[styles.tableRow, !isDesktop && styles.tableRowMobile]}>
+                        <View style={isDesktop ? styles.colRankDesktop : styles.colRankMobile}>
+                          <Skeleton width={18} height={13} borderRadius={4} />
+                        </View>
+
+                        <View
+                          style={[
+                            styles.colLearner,
+                            styles.learnerCellRow,
+                            !isDesktop && styles.learnerCellRowMobile,
+                          ]}
+                        >
+                          <Skeleton
+                            width={isDesktop ? 32 : 28}
+                            height={isDesktop ? 32 : 28}
+                            borderRadius={isDesktop ? 16 : 14}
+                          />
+                          <Skeleton width={isDesktop ? 130 : 95} height={14} borderRadius={5} />
+                        </View>
+
+                        <View style={isDesktop ? styles.colLevelDesktop : styles.colLevelMobile}>
+                          <Skeleton width={44} height={13} borderRadius={4} />
+                        </View>
+
+                        <View
+                          style={[
+                            isDesktop ? styles.colXpDesktop : styles.colXpMobile,
+                            { alignItems: 'flex-end', gap: 4 },
+                          ]}
+                        >
+                          <Skeleton width={52} height={13} borderRadius={4} />
+                          <Skeleton width={42} height={10} borderRadius={3} />
+                        </View>
+                      </View>
+                      {skeletonIdx < 5 && <View style={styles.tableRowDivider} />}
+                    </React.Fragment>
+                  ))}
                 </View>
               ) : (
                 <View style={styles.tableBodyWrap}>
@@ -691,39 +791,66 @@ export default function LeaderboardScreen() {
           {/* STICKY BOTTOM MY RANK BAR */}
           <View style={[styles.stickyBottomMyRankOuter, isDesktop && styles.stickyBottomMyRankOuterDesktop]}>
             <View style={[styles.myRankCard, isDesktop && styles.myRankCardDesktop]}>
-              <View style={styles.myRankLeftCol}>
-                <Text style={styles.myRankLabel}>My Rank</Text>
-                <Text style={[styles.myRankNumber, !isDesktop && styles.myRankNumberMobile]}>
-                  {myEntry.rank && myEntry.rank > 0 ? `#${myEntry.rank}` : 'N/A'}
-                </Text>
-              </View>
+              {isLoading ? (
+                <>
+                  <View style={[styles.myRankLeftCol, { gap: 5 }]}>
+                    <Skeleton width={48} height={11} borderRadius={4} />
+                    <Skeleton width={38} height={24} borderRadius={6} />
+                  </View>
 
-              {isDesktop && <View style={styles.myRankDivider} />}
-              {!isDesktop && <View style={{ width: 16 }} />}
+                  {isDesktop && <View style={styles.myRankDivider} />}
+                  {!isDesktop && <View style={{ width: 16 }} />}
 
-              <View style={styles.myRankAvatarRing}>
-                <LearnerAvatar
-                  name={myEntry.displayName}
-                  avatarUrl={myEntry.avatarUrl}
-                  size={isDesktop ? 42 : 38}
-                  index={0}
-                  isCurrentUser={true}
-                />
-              </View>
+                  <View style={{ marginRight: 11 }}>
+                    <Skeleton
+                      width={isDesktop ? 42 : 38}
+                      height={isDesktop ? 42 : 38}
+                      borderRadius={isDesktop ? 21 : 19}
+                    />
+                  </View>
 
-              <View style={styles.myRankInfoCol}>
-                <Text
-                  style={[styles.myRankUserName, !isDesktop && styles.myRankUserNameMobile]}
-                  numberOfLines={1}
-                >
-                  {myEntry.displayName}
-                </Text>
-                <View style={styles.myRankMetaRow}>
-                  <Text style={styles.myRankMetaText}>Level {myEntry.levelNumber}</Text>
-                  <Text style={styles.myRankMetaXp}>{myEntry.xp.toLocaleString()} XP</Text>
-                  <Text style={styles.myRankMetaMinutes}>• {myEntry.minutesConsumed ?? 0}m practiced</Text>
-                </View>
-              </View>
+                  <View style={[styles.myRankInfoCol, { gap: 6 }]}>
+                    <Skeleton width={130} height={15} borderRadius={5} />
+                    <Skeleton width={155} height={12} borderRadius={4} />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.myRankLeftCol}>
+                    <Text style={styles.myRankLabel}>My Rank</Text>
+                    <Text style={[styles.myRankNumber, !isDesktop && styles.myRankNumberMobile]}>
+                      {myEntry.rank && myEntry.rank > 0 ? `#${myEntry.rank}` : 'N/A'}
+                    </Text>
+                  </View>
+
+                  {isDesktop && <View style={styles.myRankDivider} />}
+                  {!isDesktop && <View style={{ width: 16 }} />}
+
+                  <View style={styles.myRankAvatarRing}>
+                    <LearnerAvatar
+                      name={myEntry.displayName}
+                      avatarUrl={myEntry.avatarUrl}
+                      size={isDesktop ? 42 : 38}
+                      index={0}
+                      isCurrentUser={true}
+                    />
+                  </View>
+
+                  <View style={styles.myRankInfoCol}>
+                    <Text
+                      style={[styles.myRankUserName, !isDesktop && styles.myRankUserNameMobile]}
+                      numberOfLines={1}
+                    >
+                      {myEntry.displayName}
+                    </Text>
+                    <View style={styles.myRankMetaRow}>
+                      <Text style={styles.myRankMetaText}>Level {myEntry.levelNumber}</Text>
+                      <Text style={styles.myRankMetaXp}>{myEntry.xp.toLocaleString()} XP</Text>
+                      <Text style={styles.myRankMetaMinutes}>• {myEntry.minutesConsumed ?? 0}m practiced</Text>
+                    </View>
+                  </View>
+                </>
+              )}
             </View>
           </View>
         </View>
