@@ -922,61 +922,97 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         state.greetingTranscriptReceived = '';
         state.greetingPacketCount = 0;
         state.greetingRawEvents = [];
-        state.greetingDispatchedAt = Date.now();
-
-        const msSinceConnect = state.geminiConnectedAt ? `${Date.now() - state.geminiConnectedAt}ms` : 'unknown';
-        this.logger.log(`[${state.sessionId}] 🚀 [Greeting Dispatch] Sending opening greeting prompt to Gemini Live (Native Audio Mode, +${msSinceConnect} post-connect)`);
-        this.logger.log(`[${state.sessionId}] 📜 [Greeting Prompt Preview]: "${greetingPrompt.slice(0, 150)}..."`);
-        this.addSessionLog(state, 'greeting_dispatched', `+${msSinceConnect}: ${greetingPrompt.slice(0, 100)}`);
-
-        // Start latency timer for greeting response
-        state.turnEndTimestamp = Date.now();
-        state.awaitingGeminiResponse = true;
-
-        // Safety watchdog: after 8s, unlock audio input even if Gemini drops the turn
-        setTimeout(() => {
-          if (state.isGreetingInProgress) {
-            this.logger.warn(
-              `[${state.sessionId}] ⚠️ [Greeting Watchdog] Expired (8s) - unlocking user audio gate\n` +
-              `   Audio chunks received: ${state.greetingAudioChunksReceived} (${(state.greetingAudioBytesReceived / 1024).toFixed(1)} KB)\n` +
-              `   Total packets received: ${state.greetingPacketCount}\n` +
-              `   Raw packet timeline:\n` +
-              (state.greetingRawEvents.length > 0
-                ? state.greetingRawEvents.map((e) => `      - ${e}`).join('\n')
-                : '      (no Gemini packets received during greeting window)'),
-            );
-            state.isGreetingInProgress = false;
-            state.awaitingGeminiResponse = false;
-          }
-        }, 8000);
 
         const scenarioEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : '').trim();
         const voiceDirective = isScenarioRoleplay
           ? `[ACTING & PROSODY DIRECTIVE: Perform this opening line with 100% vocal emotion (${scenarioEmotion || 'Angry, impatient, sharp, fast pace'}). Do NOT sound like a polite AI assistant. Speak immediately in character!]`
           : `[SYSTEM VOICE DIRECTIVE: Speak your response aloud using natural voice output.]`;
 
-        // IMPORTANT: Do NOT wrap sendClientContent with activityStart / PCM audio / activityEnd!
-        // Interleaving realtimeInput (activityStart/activityEnd) with sendClientContent(turnComplete: true)
-        // violates the Gemini Live BidiGenerateContent state machine and causes Google's server to close
-        // the WebSocket with "Precondition check failed."
-        const t0 = Date.now();
-        if (state.userSpeechActive) {
+        // Wait 160ms after setupComplete so Gemini's initial `sessionResumptionUpdate` (+1ms) packet
+        // settles before sending `sendClientContent`. Sending at +0ms races with sessionResumptionUpdate
+        // and causes Gemini to buffer the prompt without triggering audio synthesis until the user speaks.
+        setTimeout(() => {
+          if (!state.isConnectedToGemini || !state.geminiSession) return;
+
+          state.greetingDispatchedAt = Date.now();
+          state.turnEndTimestamp = Date.now();
+          state.awaitingGeminiResponse = true;
+
+          const msSinceConnect = state.geminiConnectedAt ? `${Date.now() - state.geminiConnectedAt}ms` : 'unknown';
+          this.logger.log(`[${state.sessionId}] 🚀 [Greeting Dispatch] Sending opening greeting prompt to Gemini Live (Native Audio Mode, +${msSinceConnect} post-connect)`);
+          this.logger.log(`[${state.sessionId}] 📜 [Greeting Prompt Preview]: "${greetingPrompt.slice(0, 150)}..."`);
+          this.addSessionLog(state, 'greeting_dispatched', `+${msSinceConnect}: ${greetingPrompt.slice(0, 100)}`);
+
+          const t0 = Date.now();
+          if (state.userSpeechActive) {
+            try {
+              session.sendRealtimeInput({ activityEnd: {} });
+            } catch {}
+            state.userSpeechActive = false;
+          }
           try {
-            session.sendRealtimeInput({ activityEnd: {} });
-          } catch {}
-          state.userSpeechActive = false;
-        }
-        session.sendClientContent({
-          turns: [
-            {
-              role: 'user',
-              parts: [{ text: `${greetingPrompt}\n${voiceDirective}` }],
-            },
-          ],
-          turnComplete: true,
-        });
-        const dispatchDurationMs = Date.now() - t0;
-        this.logger.log(`[${state.sessionId}] 📤 [Greeting Dispatch] ClientContent turn delivered in ${dispatchDurationMs}ms (awaiting native Gemini Live audio)`);
+            session.sendClientContent({
+              turns: [
+                {
+                  role: 'user',
+                  parts: [{ text: `${greetingPrompt}\n${voiceDirective}` }],
+                },
+              ],
+              turnComplete: true,
+            });
+            const dispatchDurationMs = Date.now() - t0;
+            this.logger.log(`[${state.sessionId}] 📤 [Greeting Dispatch] ClientContent turn delivered in ${dispatchDurationMs}ms (awaiting native Gemini Live audio)`);
+          } catch (sendErr: any) {
+            this.logger.warn(`[${state.sessionId}] Greeting sendClientContent error: ${sendErr?.message}`);
+          }
+
+          // Fast 2.3s auto-retry nudge: if Gemini buffered the greeting without emitting audio chunks,
+          // re-trigger turnComplete so Maya speaks immediately without waiting for the user to speak first.
+          setTimeout(() => {
+            if (
+              state.isGreetingInProgress &&
+              state.greetingAudioChunksReceived === 0 &&
+              state.isConnectedToGemini &&
+              state.geminiSession
+            ) {
+              this.logger.warn(
+                `[${state.sessionId}] 🔄 [Greeting Auto-Retry] 0 audio chunks after 2.3s — sending wakeup nudge to Gemini Live`,
+              );
+              this.addSessionLog(state, 'greeting_auto_retry_nudge');
+              try {
+                state.turnEndTimestamp = Date.now();
+                state.geminiSession.sendClientContent({
+                  turns: [
+                    {
+                      role: 'user',
+                      parts: [{ text: 'Please start speaking your opening greeting aloud now.' }],
+                    },
+                  ],
+                  turnComplete: true,
+                });
+              } catch (retryErr: any) {
+                this.logger.warn(`[${state.sessionId}] Greeting auto-retry error: ${retryErr?.message}`);
+              }
+            }
+          }, 2300);
+
+          // Safety watchdog: after 8s, unlock audio input even if Gemini drops the turn
+          setTimeout(() => {
+            if (state.isGreetingInProgress) {
+              this.logger.warn(
+                `[${state.sessionId}] ⚠️ [Greeting Watchdog] Expired (8s) - unlocking user audio gate\n` +
+                `   Audio chunks received: ${state.greetingAudioChunksReceived} (${(state.greetingAudioBytesReceived / 1024).toFixed(1)} KB)\n` +
+                `   Total packets received: ${state.greetingPacketCount}\n` +
+                `   Raw packet timeline:\n` +
+                (state.greetingRawEvents.length > 0
+                  ? state.greetingRawEvents.map((e) => `      - ${e}`).join('\n')
+                  : '      (no Gemini packets received during greeting window)'),
+              );
+              state.isGreetingInProgress = false;
+              state.awaitingGeminiResponse = false;
+            }
+          }, 8000);
+        }, 160);
       } else if (hasExistingConversation && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         state.isGreetingInProgress = false;
