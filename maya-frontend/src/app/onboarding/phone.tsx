@@ -558,12 +558,17 @@ export default function PhoneScreen() {
                     pressed && { opacity: 0.7 },
                   ]}
                   accessibilityRole="button"
+                  accessibilityLabel={
+                    isLoginMode
+                      ? "Don't have an account? Create Account"
+                      : 'Already have an account? Login'
+                  }
                 >
                   <Text style={styles.modeSwitchNormal}>
-                    {isLoginMode ? "Don't have an account? " : 'Already have an account? '}
+                    {isLoginMode ? 'Don’t have an account? ' : 'Already have an account? '}
                   </Text>
                   <Text style={styles.modeSwitchBold}>
-                    {isLoginMode ? 'Get Started' : 'Login'}
+                    {isLoginMode ? 'Create Account' : 'Login'}
                   </Text>
                 </Pressable>
               </Animated.View>

@@ -750,6 +750,71 @@ export function playStepPop(stepIndex: number = 0): void {
 }
 
 /**
+ * 2b. Crisp, Ultra-Low-Latency Spin Wheel Ratchet Tick Sound
+ */
+let lastWheelTickTime = 0;
+export function playWheelTickSound(progress: number = 0): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+    // Prevent overlapping audio nodes during high-velocity initial spin
+    if (now - lastWheelTickTime < 0.045) return;
+    lastWheelTickTime = now;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    // Subtle rising pitch as the wheel decelerates toward the winning slice
+    const baseFreq = 680 + Math.min(1, Math.max(0, progress)) * 340;
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(baseFreq * 1.35, now);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.55, now + 0.032);
+
+    gain.gain.setValueAtTime(0.38, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.032);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.034);
+  } catch {}
+}
+
+/**
+ * 2c. Playful "Almost / Try Again" 2-note chime when wheel lands on Try Again
+ */
+export function playTryAgainSound(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+    const notes = [587.33, 493.88]; // D5 -> B4 playful bounce
+    notes.forEach((freq, idx) => {
+      const startTime = now + idx * 0.12;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, startTime);
+
+      gain.gain.setValueAtTime(0.001, startTime);
+      gain.gain.linearRampToValueAtTime(0.32, startTime + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.22);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(startTime);
+      osc.stop(startTime + 0.24);
+    });
+  } catch {}
+}
+
+/**
  * 3. Celebratory Analysis Complete Chime
  */
 export function playAnalysisCompleteSound(): void {

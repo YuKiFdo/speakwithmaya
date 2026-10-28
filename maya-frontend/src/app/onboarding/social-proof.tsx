@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  Pressable,
   Animated,
   Easing,
   Platform,
@@ -30,106 +31,11 @@ import { fontStyle } from '@/theme/fonts';
 import {
   playMayaSocialProofPromptVoice,
   stopMayaSocialProofPromptVoice,
+  playOtherButtonSound,
 } from '@/services/sound/sound-service';
 import { CallSessionStore } from '@/services/store/call-session-store';
 import { authService } from '@/services/auth/auth-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
-
-// 5 Separate Vector Personas for the Social Proof avatar row
-const AVATAR_PROFILES = [
-  {
-    id: 1,
-    bgColor: '#FEF3C7', // Warm amber
-    skinColor: '#FBBF24',
-    hairColor: '#451A03',
-    shirtColor: '#1E293B',
-    accent: '#3B82F6',
-    glasses: true,
-  },
-  {
-    id: 2,
-    bgColor: '#FCE7F3', // Rose peach
-    skinColor: '#F472B6',
-    hairColor: '#831843',
-    shirtColor: '#0F172A',
-    accent: '#EC4899',
-    glasses: false,
-  },
-  {
-    id: 3,
-    bgColor: '#D1FAE5', // Mint emerald
-    skinColor: '#34D399',
-    hairColor: '#064E3B',
-    shirtColor: '#334155',
-    accent: '#10B981',
-    glasses: false,
-  },
-  {
-    id: 4,
-    bgColor: '#EDE9FE', // Soft lilac
-    skinColor: '#A78BFA',
-    hairColor: '#4C1D95',
-    shirtColor: '#1E1B4B',
-    accent: '#8B5CF6',
-    glasses: false,
-  },
-  {
-    id: 5,
-    bgColor: '#E0F2FE', // Sky blue
-    skinColor: '#38BDF8',
-    hairColor: '#0C4A6E',
-    shirtColor: '#1E3A8A',
-    accent: '#0284C7',
-    glasses: false,
-  },
-];
-
-function VectorAvatarItem({ profile, size = 42 }: { profile: typeof AVATAR_PROFILES[0]; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 44 44">
-      {/* Background Circle */}
-      <Circle cx="22" cy="22" r="22" fill={profile.bgColor} />
-
-      {/* Body / Shoulders */}
-      <Path
-        d="M 6 44 C 6 34, 13 28, 22 28 C 31 28, 38 34, 38 44 Z"
-        fill={profile.shirtColor}
-      />
-
-      {/* Neck */}
-      <Rect x="18" y="22" width="8" height="8" rx="2" fill={profile.skinColor} />
-
-      {/* Head */}
-      <Circle cx="22" cy="18" r="9" fill={profile.skinColor} />
-
-      {/* Hair */}
-      <Path
-        d="M 13 17 C 13 10, 16 7, 22 7 C 28 7, 31 10, 31 17 C 31 18, 29 14, 27 14 C 23 14, 21 16, 17 15 C 15 15, 13 18, 13 17 Z"
-        fill={profile.hairColor}
-      />
-
-      {/* Eyes & Smile */}
-      <Circle cx="19" cy="18" r="1.2" fill="#1E293B" />
-      <Circle cx="25" cy="18" r="1.2" fill="#1E293B" />
-      <Path
-        d="M 20 22 Q 22 24.5 24 22"
-        stroke="#1E293B"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        fill="none"
-      />
-
-      {/* Glasses if applicable */}
-      {profile.glasses && (
-        <G stroke="#1E293B" strokeWidth="1" fill="none">
-          <Circle cx="18.5" cy="18" r="3" />
-          <Circle cx="25.5" cy="18" r="3" />
-          <Line x1="21.5" y1="18" x2="22.5" y2="18" />
-        </G>
-      )}
-    </Svg>
-  );
-}
 
 export default function SocialProofScreen() {
   const { isDesktop, isTablet } = useBreakpoint();
@@ -155,14 +61,6 @@ export default function SocialProofScreen() {
   const [m1Visible, setM1Visible] = useState(false);
   const [m2Visible, setM2Visible] = useState(false);
   const [m3Visible, setM3Visible] = useState(false);
-
-  // Separate Avatar Circle Animations (5 separate animated values)
-  const avatarAnims = useRef(
-    AVATAR_PROFILES.map(() => ({
-      scale: new Animated.Value(0),
-      translateY: new Animated.Value(12),
-    }))
-  ).current;
 
   useEffect(() => {
     // 1. Header entrance immediately on mount
@@ -202,7 +100,7 @@ export default function SocialProofScreen() {
       startChartAnimation();
     }, 120);
 
-    // 3. Social Proof Section entrance at ~450ms
+    // 3. Social Proof Section entrance at ~420ms
     const socialTimer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(socialOpacityAnim, {
@@ -218,31 +116,9 @@ export default function SocialProofScreen() {
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
-    }, 450);
+    }, 420);
 
-    // 4. Staggered Avatar Circles pop-in starts at ~650ms (independent timer, before button)
-    const avatarTimers: ReturnType<typeof setTimeout>[] = [];
-    AVATAR_PROFILES.forEach((_, i) => {
-      const t = setTimeout(() => {
-        Animated.parallel([
-          Animated.spring(avatarAnims[i].scale, {
-            toValue: 1,
-            friction: 5,
-            tension: 65,
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-          Animated.spring(avatarAnims[i].translateY, {
-            toValue: 0,
-            friction: 6,
-            tension: 50,
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-        ]).start();
-      }, 650 + i * 80); // Avatars appear at 650, 730, 810, 890, 970ms
-      avatarTimers.push(t);
-    });
-
-    // 5. CTA Button reveals strictly LAST at ~1250ms (all 5 avatars are already popped in)
+    // 4. CTA Button & Skip option reveal smoothly at ~620ms
     const buttonTimer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(buttonOpacityAnim, {
@@ -258,9 +134,9 @@ export default function SocialProofScreen() {
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
-    }, 1250);
+    }, 620);
 
-    // 6. Play Maya's Gemini TTS Voice prompt after ~300ms
+    // 5. Play Maya's Gemini TTS Voice prompt after ~300ms
     const voiceTimer = setTimeout(() => {
       try {
         playMayaSocialProofPromptVoice();
@@ -270,7 +146,6 @@ export default function SocialProofScreen() {
     return () => {
       clearTimeout(cardTimer);
       clearTimeout(socialTimer);
-      avatarTimers.forEach(clearTimeout);
       clearTimeout(buttonTimer);
       clearTimeout(voiceTimer);
       stopMayaSocialProofPromptVoice();
@@ -332,6 +207,27 @@ export default function SocialProofScreen() {
     }).catch(() => {});
     authService.syncStep('/onboarding/call');
     router.replace('/onboarding/call');
+  };
+
+  const handleSkipForNow = () => {
+    try {
+      playOtherButtonSound();
+    } catch {}
+    stopMayaSocialProofPromptVoice();
+    const state = OnboardingStore.getState();
+
+    OnboardingStore.setOnboardingCompleted();
+    authService.savePreferences({
+      displayName: state.name || undefined,
+      nativeLanguage: state.nativeLanguage,
+      level: state.level,
+      goal: state.goal,
+      challenge: state.challenge,
+      employmentStatus: state.employment,
+      dailyGoalMinutes: state.dailyGoalMinutes,
+    }).catch(() => {});
+    authService.syncStep('/onboarding/building-plan');
+    router.replace('/onboarding/building-plan' as any);
   };
 
   return (
@@ -504,7 +400,7 @@ export default function SocialProofScreen() {
               </View>
             </Animated.View>
 
-            {/* Social Proof: "Over 10,000 people already use Maya" + 5 Separate Animated Circles */}
+            {/* Social Proof: "Over 10,000 people already use Maya" */}
             <Animated.View
               style={[
                 styles.socialSection,
@@ -516,36 +412,11 @@ export default function SocialProofScreen() {
             >
               <Text style={styles.socialCountText}>Over 10,000 people</Text>
               <Text style={styles.socialSubText}>already use Maya</Text>
-
-              {/* 5 Separate Animated Circles Row (No flat PNGs, individual staggered spring animations) */}
-              <View style={styles.avatarsRow}>
-                {AVATAR_PROFILES.map((profile, index) => {
-                  const anim = avatarAnims[index];
-                  return (
-                    <Animated.View
-                      key={profile.id}
-                      style={[
-                        styles.avatarCircleWrapper,
-                        index > 0 && styles.avatarOverlap,
-                        {
-                          zIndex: index + 1,
-                          transform: [
-                            { scale: anim.scale },
-                            { translateY: anim.translateY },
-                          ],
-                        },
-                      ]}
-                    >
-                      <VectorAvatarItem profile={profile} size={42} />
-                    </Animated.View>
-                  );
-                })}
-              </View>
             </Animated.View>
           </StepTransition>
         </ScrollView>
 
-        {/* Fixed Bottom CTA Button (Pinned to bottom of screen, appears LAST) */}
+        {/* Fixed Bottom CTA Button & Secondary Skip Option */}
         <Animated.View
           style={[
             styles.fixedBottomButtonWrapper,
@@ -557,11 +428,24 @@ export default function SocialProofScreen() {
         >
           <MayaPrimaryButton
             label="Start Speaking"
-            showArrow={false}
+            showArrow={true}
             onPress={handleStartSpeaking}
             height={56}
-            borderRadius={24}
+            borderRadius={28}
           />
+
+          <Pressable
+            onPress={handleSkipForNow}
+            hitSlop={10}
+            style={({ pressed }) => [
+              styles.skipForNowButton,
+              pressed && styles.skipForNowPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Skip for now"
+          >
+            <Text style={styles.skipForNowText}>Skip for now</Text>
+          </Pressable>
         </Animated.View>
       </View>
     </SafeAreaView>
@@ -674,12 +558,13 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     gap: 4,
-    marginTop: 2,
+    marginTop: 10,
+    marginBottom: 4,
   },
   socialCountText: {
     ...fontStyle('inter', 'extraBold'),
     fontSize: 28,
-    lineHeight: 42,
+    lineHeight: 38,
     color: '#2563EB',
     textAlign: 'center',
     letterSpacing: -0.84,
@@ -687,51 +572,34 @@ const styles = StyleSheet.create({
   socialSubText: {
     ...fontStyle('inter', 'extraBold'),
     fontSize: 16,
-    lineHeight: 26,
+    lineHeight: 24,
     color: '#0F172A',
     textAlign: 'center',
-    letterSpacing: -0.84,
-    marginBottom: 12,
+    letterSpacing: -0.5,
   },
 
-  /* Separate Avatar Circles Row */
-  avatarsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 2,
-  },
-  avatarCircleWrapper: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 2.5,
-    borderColor: '#FFFFFF',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    ...Platform.select({
-      web: {
-        boxShadow: '0 4px 12px rgba(15, 23, 42, 0.08)',
-      } as any,
-      default: {
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 6,
-        elevation: 3,
-      },
-    }),
-  },
-  avatarOverlap: {
-    marginLeft: -10,
-  },
-
-  /* Bottom CTA */
+  /* Bottom CTA & Skip Option */
   fixedBottomButtonWrapper: {
     width: '100%',
-    paddingTop: 10,
+    alignItems: 'center',
+    paddingTop: 12,
     paddingBottom: Platform.OS === 'web' ? 8 : 4,
+  },
+  skipForNowButton: {
+    marginTop: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  skipForNowPressed: {
+    opacity: 0.65,
+  },
+  skipForNowText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#64748B',
+    textAlign: 'center',
   },
 });

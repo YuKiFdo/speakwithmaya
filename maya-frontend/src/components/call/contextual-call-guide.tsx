@@ -213,116 +213,144 @@ export function ContextualCallGuide({
     <Animated.View
       pointerEvents="box-none"
       style={[
-        styles.container,
-        isDesktop ? styles.containerDesktop : styles.containerMobile,
-        verticalStyle,
+        styles.backdropOverlay,
         {
           opacity: cardOpacity,
-          transform: [{ scale: cardScale }],
         },
       ]}
     >
-      <View style={styles.card}>
-        {/* Main Content Row */}
-        <Animated.View
-          style={[
-            styles.bodyRow,
-            {
-              opacity: contentOpacity,
-              transform: [{ translateX: contentSlideX }],
-            },
-          ]}
-        >
-          {/* Soft Icon Circle */}
-          <View
+      {/* Dimmed background overlay matching Figma design to highlight the guide card */}
+      <View pointerEvents="none" style={styles.dimmedBackdrop} />
+
+      <Animated.View
+        pointerEvents="box-none"
+        style={[
+          styles.container,
+          isDesktop ? styles.containerDesktop : styles.containerMobile,
+          verticalStyle,
+          {
+            transform: [{ scale: cardScale }],
+          },
+        ]}
+      >
+        <View style={styles.card}>
+          {/* Main Content Row */}
+          <Animated.View
             style={[
-              styles.iconCircle,
-              { backgroundColor: currentStep.badgeBg },
+              styles.bodyRow,
+              {
+                opacity: contentOpacity,
+                transform: [{ translateX: contentSlideX }],
+              },
             ]}
           >
-            {currentStep.icon}
-          </View>
-
-          {/* Natural Copy */}
-          <View style={styles.textColumn}>
-            <View style={styles.titleRow}>
-              <Text style={styles.title}>{currentStep.title}</Text>
-              <Pressable
-                onPress={handleSkip}
-                hitSlop={12}
-                style={({ pressed }) => [
-                  styles.closeBtn,
-                  pressed && styles.closeBtnPressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Dismiss guide"
-              >
-                <Feather name="x" size={15} color="#94A3B8" />
-              </Pressable>
+            {/* Soft Icon Circle */}
+            <View
+              style={[
+                styles.iconCircle,
+                { backgroundColor: currentStep.badgeBg },
+              ]}
+            >
+              {currentStep.icon}
             </View>
 
-            <Text style={styles.description}>{currentStep.description}</Text>
-          </View>
-        </Animated.View>
-
-        {/* Clean Minimal Footer */}
-        <View style={styles.footerRow}>
-          {/* Minimal Pill Dots */}
-          <View style={styles.dotsContainer}>
-            {GUIDE_STEPS.map((step, idx) => {
-              const isActive = idx === currentStepIndex;
-              return (
+            {/* Natural Copy */}
+            <View style={styles.textColumn}>
+              <View style={styles.titleRow}>
+                <Text style={styles.title}>{currentStep.title}</Text>
                 <Pressable
-                  key={step.id}
-                  onPress={() => onStepChange(idx)}
+                  onPress={handleSkip}
+                  hitSlop={12}
+                  style={({ pressed }) => [
+                    styles.closeBtn,
+                    pressed && styles.closeBtnPressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss guide"
+                >
+                  <Feather name="x" size={15} color="#94A3B8" />
+                </Pressable>
+              </View>
+
+              <Text style={styles.description}>{currentStep.description}</Text>
+            </View>
+          </Animated.View>
+
+          {/* Clean Minimal Footer */}
+          <View style={styles.footerRow}>
+            {/* Minimal Pill Dots */}
+            <View style={styles.dotsContainer}>
+              {GUIDE_STEPS.map((step, idx) => {
+                const isActive = idx === currentStepIndex;
+                return (
+                  <Pressable
+                    key={step.id}
+                    onPress={() => onStepChange(idx)}
+                    hitSlop={8}
+                    style={[styles.dot, isActive && styles.dotActive]}
+                  />
+                );
+              })}
+            </View>
+
+            <View style={styles.actionsRight}>
+              {!isLast && (
+                <Pressable
+                  onPress={handleSkip}
                   hitSlop={8}
-                  style={[styles.dot, isActive && styles.dotActive]}
-                />
-              );
-            })}
-          </View>
+                  style={({ pressed }) => [
+                    styles.skipButton,
+                    pressed && { opacity: 0.6 },
+                  ]}
+                >
+                  <Text style={styles.skipText}>Skip</Text>
+                </Pressable>
+              )}
 
-          <View style={styles.actionsRight}>
-            {!isLast && (
               <Pressable
-                onPress={handleSkip}
-                hitSlop={8}
+                onPress={handleNext}
                 style={({ pressed }) => [
-                  styles.skipButton,
-                  pressed && { opacity: 0.6 },
+                  styles.nextButton,
+                  pressed && styles.nextButtonPressed,
                 ]}
+                accessibilityRole="button"
+                accessibilityLabel={isLast ? 'Start speaking' : 'Next tip'}
               >
-                <Text style={styles.skipText}>Skip</Text>
+                <Text style={styles.nextButtonText}>
+                  {isLast ? 'Got it' : 'Next'}
+                </Text>
               </Pressable>
-            )}
-
-            <Pressable
-              onPress={handleNext}
-              style={({ pressed }) => [
-                styles.nextButton,
-                pressed && styles.nextButtonPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel={isLast ? 'Start speaking' : 'Next tip'}
-            >
-              <Text style={styles.nextButtonText}>
-                {isLast ? 'Got it' : 'Next'}
-              </Text>
-            </Pressable>
+            </View>
           </View>
         </View>
-      </View>
+      </Animated.View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
+  backdropOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+  },
+  dimmedBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.52)',
+  },
   container: {
     position: 'absolute',
     left: 0,
     right: 0,
     alignItems: 'center',
-    zIndex: 9999,
+    zIndex: 10000,
   },
   containerMobile: {
     paddingHorizontal: 16,
@@ -342,14 +370,14 @@ const styles = StyleSheet.create({
     borderColor: '#E2E8F0',
     ...Platform.select({
       web: {
-        boxShadow: '0 12px 32px -4px rgba(15, 23, 42, 0.12)',
+        boxShadow: '0 16px 36px -4px rgba(15, 23, 42, 0.28)',
       } as any,
       default: {
         shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.12,
-        shadowRadius: 18,
-        elevation: 8,
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+        elevation: 10,
       },
     }),
   },

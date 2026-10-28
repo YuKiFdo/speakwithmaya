@@ -213,51 +213,80 @@ export function AlertHost() {
     };
   }, [toastOpacity, toastTranslateY, useNative]);
 
+  const toastPalette =
+    toast.type === 'error'
+      ? {
+          bg: '#FFF1F2',
+          border: '#FECDD3',
+          iconBg: '#FFE4E6',
+          iconColor: '#DC2626',
+          textColor: '#991B1B',
+          closeColor: '#E11D48',
+          iconName: 'alert-circle' as const,
+        }
+      : toast.type === 'success'
+      ? {
+          bg: '#F0FDF4',
+          border: '#BBF7D0',
+          iconBg: '#DCFCE7',
+          iconColor: '#16A34A',
+          textColor: '#166534',
+          closeColor: '#15803D',
+          iconName: 'checkmark-circle' as const,
+        }
+      : toast.type === 'warning'
+      ? {
+          bg: '#FFF7ED',
+          border: '#FED7AA',
+          iconBg: '#FFEDD5',
+          iconColor: '#EA580C',
+          textColor: '#9A3412',
+          closeColor: '#C2410C',
+          iconName: 'warning' as const,
+        }
+      : {
+          bg: '#EFF6FF',
+          border: '#BFDBFE',
+          iconBg: '#DBEAFE',
+          iconColor: '#2563EB',
+          textColor: '#1E3A8A',
+          closeColor: '#3B82F6',
+          iconName: 'information-circle' as const,
+        };
+
   const toastElement = toast.visible ? (
     <View pointerEvents="box-none" style={styles.toastViewport}>
       <Animated.View
         style={[
           styles.toastBanner,
-          toast.type === 'error' && styles.toastBannerError,
-          toast.type === 'success' && styles.toastBannerSuccess,
-          toast.type === 'warning' && styles.toastBannerWarning,
           {
+            backgroundColor: toastPalette.bg,
+            borderColor: toastPalette.border,
             opacity: toastOpacity,
             transform: [{ translateY: toastTranslateY }],
           },
         ]}
       >
-        <Ionicons
-          name={
-            toast.type === 'error'
-              ? 'alert-circle'
-              : toast.type === 'success'
-              ? 'checkmark-circle'
-              : toast.type === 'warning'
-              ? 'warning'
-              : 'information-circle'
-          }
-          size={20}
-          color={
-            toast.type === 'error'
-              ? '#FCA5A5'
-              : toast.type === 'success'
-              ? '#86EFAC'
-              : toast.type === 'warning'
-              ? '#FDE047'
-              : '#93C5FD'
-          }
-        />
-        <Text style={styles.toastText}>{toast.message}</Text>
+        <View style={[styles.toastIconBadge, { backgroundColor: toastPalette.iconBg }]}>
+          <Ionicons
+            name={toastPalette.iconName}
+            size={18}
+            color={toastPalette.iconColor}
+          />
+        </View>
+        <Text style={[styles.toastText, { color: toastPalette.textColor }]}>
+          {toast.message}
+        </Text>
         <Pressable
           onPress={() => {
             if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
             currentToast = { ...currentToast, visible: false };
             setToast((prev) => ({ ...prev, visible: false }));
           }}
-          hitSlop={8}
+          hitSlop={10}
+          style={styles.toastCloseBtn}
         >
-          <Ionicons name="close" size={16} color="#94A3B8" />
+          <Ionicons name="close" size={16} color={toastPalette.closeColor} />
         </Pressable>
       </Animated.View>
     </View>
@@ -393,52 +422,58 @@ export function AlertHost() {
 const styles = StyleSheet.create({
   toastViewport: {
     position: 'absolute',
-    top: Platform.OS === 'web' ? 20 : 52,
-    left: 16,
-    right: 16,
+    top: Platform.OS === 'web' ? 18 : 50,
+    left: 20,
+    right: 20,
     zIndex: 99999,
     alignItems: 'center',
   },
   toastBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#0F172A',
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    borderRadius: 14,
+    gap: 11,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 18,
     maxWidth: 420,
     width: '100%',
-    borderWidth: 1,
-    borderColor: '#1E293B',
+    borderWidth: 1.5,
+    borderColor: '#BFDBFE',
     ...Platform.select({
       web: {
-        boxShadow: '0 10px 28px rgba(15, 23, 42, 0.22)',
+        boxShadow: '0 8px 24px rgba(37, 99, 235, 0.12), 0 2px 8px rgba(15, 23, 42, 0.05)',
       } as any,
       default: {
-        elevation: 8,
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.22,
-        shadowRadius: 14,
+        elevation: 5,
+        shadowColor: '#1E3A8A',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
       },
     }),
   },
-  toastBannerError: {
-    borderColor: '#7F1D1D',
+  toastIconBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  toastBannerSuccess: {
-    borderColor: '#14532D',
-  },
-  toastBannerWarning: {
-    borderColor: '#713F12',
+  toastCloseBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.75,
   },
   toastText: {
     flex: 1,
-    ...fontStyle('inter', 'medium'),
+    ...fontStyle('outfit', 'semiBold'),
     fontSize: 13.5,
     lineHeight: 19,
-    color: '#F8FAFC',
+    letterSpacing: -0.1,
   },
   backdrop: {
     flex: 1,

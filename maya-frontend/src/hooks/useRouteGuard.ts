@@ -147,7 +147,7 @@ export function useRouteGuard() {
       authService.fetchUserProfile().then((profile) => {
         const latestState = OnboardingStore.getState();
         if (!profile && !latestState.isAuthenticated) {
-          router.replace('/onboarding/phone');
+          router.replace('/onboarding/name');
           return;
         }
         if (profile && isGuestAuthScreen) {
@@ -191,9 +191,9 @@ export function useRouteGuard() {
       segments[0] === 'history';
 
     if (isProtected) {
-      // If not authenticated, require phone verification
+      // If not authenticated, route to /onboarding/name (or /onboarding/phone if name is already set)
       if (!state.isAuthenticated) {
-        router.replace('/onboarding/phone');
+        router.replace(findEarliestAllowedStep(state) as any);
         return;
       }
 
