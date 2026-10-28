@@ -4,6 +4,7 @@ import { OnboardingStore } from '../store/onboarding-store';
 export interface SendOtpResponse {
   success: boolean;
   alreadyRegistered?: boolean;
+  notRegistered?: boolean;
   phoneNumber?: string;
   cooldownSeconds?: number;
   expiresInSeconds?: number;
@@ -101,7 +102,7 @@ class AuthService {
       throw new Error(data.message || 'Failed to send verification code');
     }
 
-    if (data.alreadyRegistered) {
+    if (data.alreadyRegistered || data.notRegistered) {
       return data;
     }
 

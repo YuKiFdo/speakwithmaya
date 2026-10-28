@@ -254,26 +254,34 @@ export class AuthService {
 
     const now = Date.now();
     const isLoginMode = Boolean(dto.isLoginMode);
+    const rawPhone = phone.replace('+', '');
+    const { data: existingProfile } = await this.supabase
+      .from('profiles')
+      .select('id, phone_number')
+      .or(`phone_number.eq.${phone},phone_number.eq.${rawPhone}`)
+      .limit(1)
+      .maybeSingle();
 
     // If user is on the Register page (!isLoginMode), check if this phone number is already registered in profiles
-    if (!isLoginMode) {
-      const rawPhone = phone.replace('+', '');
-      const { data: existingProfile } = await this.supabase
-        .from('profiles')
-        .select('id, phone_number')
-        .or(`phone_number.eq.${phone},phone_number.eq.${rawPhone}`)
-        .limit(1)
-        .maybeSingle();
+    if (!isLoginMode && existingProfile) {
+      this.logger.log(`[sendOtp] Phone ${phone} is already registered in profiles -> prompting client to switch to Login mode.`);
+      return {
+        success: false,
+        alreadyRegistered: true,
+        phoneNumber: phone,
+        message: 'This phone number is already registered. Please log in to continue.',
+      };
+    }
 
-      if (existingProfile) {
-        this.logger.log(`[sendOtp] Phone ${phone} is already registered in profiles -> prompting client to switch to Login mode.`);
-        return {
-          success: false,
-          alreadyRegistered: true,
-          phoneNumber: phone,
-          message: 'This phone number is already registered. Please log in to continue.',
-        };
-      }
+    // If user is in Login mode (isLoginMode), require an existing registered profile before sending an OTP
+    if (isLoginMode && !existingProfile) {
+      this.logger.log(`[sendOtp] Phone ${phone} has no registered profile in Login mode -> rejecting OTP send.`);
+      return {
+        success: false,
+        notRegistered: true,
+        phoneNumber: phone,
+        message: 'No account found with this phone number. Please create an account first.',
+      };
     }
 
     // 1. Check cooldown (60 seconds) strictly against database
@@ -558,7 +566,24 @@ export class AuthService {
       throw new InternalServerErrorException('Failed to update verification status.');
     }
 
-    // 6. Find or Provision User Profile with Starter Plan (10 min / mo) in database
+    // 6. In Login mode, strictly require an existing account and NEVER auto-create a profile
+    if (dto.isLoginMode) {
+      const rawPhone = phone.replace('+', '');
+      const { data: existingLoginProfile } = await this.supabase
+        .from('profiles')
+        .select('id')
+        .or(`phone_number.eq.${phone},phone_number.eq.${rawPhone}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (!existingLoginProfile) {
+        throw new NotFoundException(
+          'No account found with this phone number. Please create an account first.',
+        );
+      }
+    }
+
+    // Find or Provision User Profile with Starter Plan (10 min / mo) in database
     const userProfile = await this.findOrCreateProfileByPhone(phone);
 
     // If Telco carrier billing was verified, save the raw unformatted subscriberId

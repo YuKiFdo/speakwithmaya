@@ -349,6 +349,17 @@ export default function PhoneScreen() {
       OnboardingStore.updateField('phone', formattedPhone);
       setPhone(digits);
 
+      // If in Login mode and phone number does NOT have an existing account, block OTP and alert user
+      if (res.notRegistered) {
+        mayaAlert.toast(
+          res.message ||
+            'No account found with this phone number. Please create an account first.',
+          'error',
+          4500,
+        );
+        return;
+      }
+
       // If phone number is already registered while on the Register screen,
       // show toast notice and switch to Login mode with the phone number pre-filled
       if (res.alreadyRegistered) {
