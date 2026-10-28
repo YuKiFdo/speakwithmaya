@@ -193,9 +193,7 @@ export default function SocialProofScreen() {
       sinhalaStyle: 'balanced',
     });
 
-    // Save preferences and mark onboarding completed as soon as user enters the intro call,
-    // so if they close the app during the call and come back later, their token takes them straight to dashboard.
-    OnboardingStore.setOnboardingCompleted();
+    // Save preferences and sync active step when entering the intro call
     authService.savePreferences({
       displayName: state.name || undefined,
       nativeLanguage: state.nativeLanguage,
@@ -216,7 +214,6 @@ export default function SocialProofScreen() {
     stopMayaSocialProofPromptVoice();
     const state = OnboardingStore.getState();
 
-    OnboardingStore.setOnboardingCompleted();
     authService.savePreferences({
       displayName: state.name || undefined,
       nativeLanguage: state.nativeLanguage,

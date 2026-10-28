@@ -642,12 +642,6 @@ export class AuthService {
     }
 
     const postIntroSteps = [
-      '/onboarding/call',
-      '/onboarding/connecting',
-      '/onboarding/building-plan',
-      '/onboarding/special-offer',
-      '/onboarding/claim-discount',
-      '/onboarding/personalized-plan',
       '/onboarding/complete',
       '/(tabs)/dashboard',
     ];
@@ -1390,12 +1384,6 @@ export class AuthService {
     const nowIso = new Date().toISOString();
 
     const postIntroSteps = [
-      '/onboarding/call',
-      '/onboarding/connecting',
-      '/onboarding/building-plan',
-      '/onboarding/special-offer',
-      '/onboarding/claim-discount',
-      '/onboarding/personalized-plan',
       '/onboarding/complete',
       '/(tabs)/dashboard',
     ];
@@ -1464,17 +1452,11 @@ export class AuthService {
     }
 
     const postIntroSteps = [
-      '/onboarding/call',
-      '/onboarding/connecting',
-      '/onboarding/building-plan',
-      '/onboarding/special-offer',
-      '/onboarding/claim-discount',
-      '/onboarding/personalized-plan',
       '/onboarding/complete',
       '/(tabs)/dashboard',
     ];
 
-    // Auto-heal: If user already reached intro call or completed onboarding, ensure onboarding_completed_at and last_active_step in DB are set to dashboard
+    // Auto-heal: If user completed onboarding, ensure onboarding_completed_at and last_active_step in DB are set to dashboard
     if (
       (data.onboarding_completed_at || (data.last_active_step && postIntroSteps.includes(data.last_active_step))) &&
       (!data.onboarding_completed_at || data.last_active_step !== '/(tabs)/dashboard')

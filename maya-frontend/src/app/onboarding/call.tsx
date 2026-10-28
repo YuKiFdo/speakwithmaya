@@ -240,15 +240,10 @@ export default function CallScreen() {
   // Auto-start Gemini Live call session on component mount with cleanup on unmount
   useEffect(() => {
     // If user closed and reopened the app at /onboarding/call (in-memory CallSessionStore was cleared),
-    // skip the intro call and route directly to the dashboard using their authenticated token.
+    // continue into building-plan -> special-offer -> claim-discount -> personalized-plan.
     if (isOnboardingCallRoute && !storeConfig && onboardingState.isAuthenticated) {
-      OnboardingStore.setOnboardingCompleted();
-      router.replace('/(tabs)/dashboard');
+      router.replace('/onboarding/building-plan' as any);
       return;
-    }
-
-    if (isIntro && onboardingState.isAuthenticated && !onboardingState.isCompleted) {
-      OnboardingStore.setOnboardingCompleted();
     }
 
     liveCall.startCall();

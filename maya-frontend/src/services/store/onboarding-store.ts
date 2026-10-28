@@ -121,12 +121,6 @@ function markHydrated() {
 
 const PRE_AUTH_ROUTES = ['/', '/onboarding/name', '/onboarding/phone', '/onboarding/otp'];
 const POST_INTRO_COMPLETION_ROUTES = [
-  '/onboarding/call',
-  '/onboarding/connecting',
-  '/onboarding/building-plan',
-  '/onboarding/special-offer',
-  '/onboarding/claim-discount',
-  '/onboarding/personalized-plan',
   '/onboarding/complete',
   '/(tabs)/dashboard',
 ];
@@ -157,19 +151,13 @@ function sanitizePersistedState(parsed: any): OnboardingState {
   const reachedPostIntro = Boolean(
     (rawLastRoute && POST_INTRO_COMPLETION_ROUTES.includes(rawLastRoute)) ||
     (parsed?.lastActiveRoute && POST_INTRO_COMPLETION_ROUTES.includes(parsed.lastActiveRoute)) ||
-    (parsed?.user?.lastActiveStep && POST_INTRO_COMPLETION_ROUTES.includes(parsed.user.lastActiveStep)) ||
-    rawLastRoute === '/onboarding/social-proof',
-  );
-
-  // Also heal legacy cached users who already completed all onboarding questions in localStorage
-  const hasAnsweredAllOnboardingQuestions = Boolean(
-    isAuthenticated && parsed?.goal && parsed?.challenge && parsed?.employment,
+    (parsed?.user?.lastActiveStep && POST_INTRO_COMPLETION_ROUTES.includes(parsed.user.lastActiveStep)),
   );
 
   const isCompleted = Boolean(
     parsed?.isCompleted ||
     parsed?.user?.isCompleted ||
-    (isAuthenticated && (reachedPostIntro || hasAnsweredAllOnboardingQuestions)),
+    (isAuthenticated && reachedPostIntro),
   );
 
   let lastActiveRoute: string | null = null;
@@ -374,11 +362,7 @@ export const OnboardingStore = {
       dailyGoalMinutes: user.dailyGoalMinutes || memoryState.dailyGoalMinutes,
       nativeLanguage: (user.nativeLanguage as any) || memoryState.nativeLanguage,
       isCompleted,
-      hasEnteredDashboard: Boolean(
-        memoryState.hasEnteredDashboard ||
-          user.isCompleted ||
-          user.lastActiveStep === '/(tabs)/dashboard',
-      ),
+      hasEnteredDashboard: Boolean(memoryState.hasEnteredDashboard),
       lastActiveRoute: nextLastActiveRoute,
     };
     persistState(updated);
