@@ -176,6 +176,7 @@ export default function AdminUsersScreen() {
     totalUsers: 0,
     activePaidCount: 0,
     starterCount: 0,
+    testAccountsCount: 0,
     totalMinutesConsumed: 0,
     filteredCount: 0,
   });
@@ -592,7 +593,9 @@ export default function AdminUsersScreen() {
                 <View>
                   <Text style={styles.metricLabel}>Paid Active</Text>
                   <Text style={[styles.metricValue, { color: '#16a34a' }]}>{stats.activePaidCount}</Text>
-                  <Text style={styles.metricSub}>{stats.starterCount} Free Starter</Text>
+                  <Text style={styles.metricSub}>
+                    {stats.starterCount} Starter · {stats.testAccountsCount ?? testAccounts.length} Test
+                  </Text>
                 </View>
               </View>
 

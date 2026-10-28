@@ -1872,7 +1872,23 @@ export class AuthService {
       }
 
       const allProfiles = (profiles || []) as UserProfileData[];
-      const extrasMap = await this.getProfileExtrasMap();
+      const [extrasMap, registeredTestAccounts] = await Promise.all([
+        this.getProfileExtrasMap(),
+        this.getTestAccounts().catch(() => [] as TestAccountItem[]),
+      ]);
+
+      const testPhoneDigitsSet = new Set<string>(
+        (registeredTestAccounts || [])
+          .map((t) => (t.phoneNumber || '').replace(/\D/g, ''))
+          .filter(Boolean),
+      );
+
+      const isTestProfile = (p: UserProfileData): boolean => {
+        const digits = (p.phone_number || '').replace(/\D/g, '');
+        if (digits && testPhoneDigitsSet.has(digits)) return true;
+        if ((p.monthly_minutes_allowance || 0) >= 9000 || (p.minutes_balance || 0) >= 9000) return true;
+        return false;
+      };
 
       // 2. Fetch sessions to aggregate per user
       const { data: sessions } = await this.supabase
@@ -2024,10 +2040,19 @@ export class AuthService {
         enrichedUsers = enrichedUsers.filter((u) => u.planStatus.toLowerCase() === query.status!.toLowerCase());
       }
 
-      // Summary Stats for Admin Banner
+      // Summary Stats for Admin Banner (strictly excluding test accounts from Paid Active & Starter counts)
       const totalUsers = allProfiles.length;
-      const activePaidCount = allProfiles.filter((p) => p.plan_tier !== 'starter' && p.plan_status === 'active').length;
-      const starterCount = allProfiles.filter((p) => p.plan_tier === 'starter').length;
+      const testAccountsCount = allProfiles.filter((p) => isTestProfile(p)).length;
+      const realProfiles = allProfiles.filter((p) => !isTestProfile(p));
+
+      const activePaidCount = realProfiles.filter((p) => {
+        const activeSub = subByUser.get(p.id);
+        if (activeSub && activeSub.status === 'ACTIVE') return true;
+        if (p.plan_tier !== 'starter' && p.plan_status === 'active') return true;
+        return false;
+      }).length;
+
+      const starterCount = realProfiles.filter((p) => p.plan_tier === 'starter').length;
       const totalMinutesConsumed = Math.round(
         (sessions || []).reduce((acc: number, s: any) => acc + (s.duration_seconds || 0), 0) / 60
       );
@@ -2037,6 +2062,7 @@ export class AuthService {
           totalUsers,
           activePaidCount,
           starterCount,
+          testAccountsCount,
           totalMinutesConsumed,
           filteredCount: enrichedUsers.length,
         },
