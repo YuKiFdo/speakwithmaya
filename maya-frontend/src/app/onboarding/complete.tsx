@@ -18,6 +18,7 @@ import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getLatestSessionReport, ExtendedSessionReport } from '@/utils/session-report-store';
+import { stopMayaVoiceFallback } from '@/utils/maya-voice-fallback';
 import { playUnderstoodTapSound, playFinishReviewFanfare, playGoodJobSound } from '@/services/sound/sound-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
@@ -330,6 +331,8 @@ export default function SessionCompleteScreen() {
   const buttonAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // Ensure any lingering feedback narration is silenced before playing celebratory sound
+    stopMayaVoiceFallback();
     // Play celebratory good job sound
     playGoodJobSound();
 

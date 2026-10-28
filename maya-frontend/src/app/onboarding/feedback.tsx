@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,7 @@ import {
   Easing,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons, Feather, MaterialIcons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
@@ -216,27 +216,47 @@ export default function SessionFeedbackScreen() {
     'intro' | 'youSaid' | 'betterWay' | 'explanation' | null
   >(null);
   const activeAudioElementRef = useRef<HTMLAudioElement | null>(null);
+  const activeAudioResolveRef = useRef<(() => void) | null>(null);
   const sequenceIdRef = useRef<number>(0);
 
-  // Stop active playback on unmount, slide change, or manual stop
-  const stopActiveAudio = () => {
+  // Stop active playback on unmount, blur, slide change, or manual stop
+  const stopActiveAudio = useCallback(() => {
     sequenceIdRef.current++;
     if (activeAudioElementRef.current) {
       try {
+        activeAudioElementRef.current.onended = null;
+        activeAudioElementRef.current.onerror = null;
         activeAudioElementRef.current.pause();
         activeAudioElementRef.current.currentTime = 0;
+        activeAudioElementRef.current.removeAttribute('src');
+        activeAudioElementRef.current.load();
       } catch {}
       activeAudioElementRef.current = null;
     }
+    if (activeAudioResolveRef.current) {
+      const resolveFn = activeAudioResolveRef.current;
+      activeAudioResolveRef.current = null;
+      try {
+        resolveFn();
+      } catch {}
+    }
     stopMayaVoiceFallback();
     setCurrentSpeakingCard(null);
-  };
+  }, []);
 
   useEffect(() => {
     return () => {
       stopActiveAudio();
     };
-  }, []);
+  }, [stopActiveAudio]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        stopActiveAudio();
+      };
+    }, [stopActiveAudio]),
+  );
 
   // Preload user turn audio elements in the background for instant 0ms playback
   useEffect(() => {
@@ -255,15 +275,26 @@ export default function SessionFeedbackScreen() {
 
   // Helper promise to speak text using Callirrhoe voice with safety timeout
   const speakAsCallirrhoePromise = (text: string, rate: number = 1.0): Promise<void> => {
+    const startSeqId = sequenceIdRef.current;
     return new Promise((resolve) => {
+      if (sequenceIdRef.current !== startSeqId) {
+        resolve();
+        return;
+      }
+
       let resolved = false;
       const safeResolve = () => {
         if (!resolved) {
           resolved = true;
           clearTimeout(timeoutId);
+          if (activeAudioResolveRef.current === safeResolve) {
+            activeAudioResolveRef.current = null;
+          }
           resolve();
         }
       };
+
+      activeAudioResolveRef.current = safeResolve;
 
       const wordCount = (text || '').split(/\s+/).filter(Boolean).length;
       const maxWaitMs = Math.max(6000, wordCount * 800);
@@ -282,15 +313,26 @@ export default function SessionFeedbackScreen() {
 
   // Helper promise to play user's recording or speech progressively with zero download freeze
   const playUserVoiceAudioPromise = (item: FeedbackItem): Promise<void> => {
+    const startSeqId = sequenceIdRef.current;
     return new Promise((resolve) => {
+      if (sequenceIdRef.current !== startSeqId) {
+        resolve();
+        return;
+      }
+
       let resolved = false;
       const safeResolve = () => {
         if (!resolved) {
           resolved = true;
           clearTimeout(timeoutId);
+          if (activeAudioResolveRef.current === safeResolve) {
+            activeAudioResolveRef.current = null;
+          }
           resolve();
         }
       };
+
+      activeAudioResolveRef.current = safeResolve;
 
       const wordCount = (item.youSaid || '').split(/\s+/).filter(Boolean).length;
       const maxWaitMs = Math.max(8000, wordCount * 1000);
@@ -310,22 +352,41 @@ export default function SessionFeedbackScreen() {
           audio.preload = 'auto';
           activeAudioElementRef.current = audio;
 
+          audio.onplay = () => {
+            if (sequenceIdRef.current !== startSeqId) {
+              try {
+                audio.pause();
+              } catch {}
+              safeResolve();
+            }
+          };
+
           audio.onended = () => {
-            activeAudioElementRef.current = null;
+            if (activeAudioElementRef.current === audio) {
+              activeAudioElementRef.current = null;
+            }
             safeResolve();
           };
 
           audio.onerror = (e) => {
-            console.warn('[SessionFeedback] Progressive audio stream error:', e);
-            activeAudioElementRef.current = null;
+            if (sequenceIdRef.current === startSeqId) {
+              console.warn('[SessionFeedback] Progressive audio stream error:', e);
+            }
+            if (activeAudioElementRef.current === audio) {
+              activeAudioElementRef.current = null;
+            }
             safeResolve();
           };
 
           const playPromise = audio.play();
           if (playPromise !== undefined) {
             playPromise.catch((err) => {
-              console.warn('[SessionFeedback] audio.play() rejected:', err);
-              activeAudioElementRef.current = null;
+              if (sequenceIdRef.current === startSeqId) {
+                console.warn('[SessionFeedback] audio.play() rejected:', err);
+              }
+              if (activeAudioElementRef.current === audio) {
+                activeAudioElementRef.current = null;
+              }
               safeResolve();
             });
           }
@@ -480,6 +541,7 @@ export default function SessionFeedbackScreen() {
   // Automated voice narration sequence on card mount
   useEffect(() => {
     stopActiveAudio();
+    if (!currentItem) return;
     // Allow 120ms for screen transition and previous audio session to cleanly release
     const timer = setTimeout(() => {
       startCardAudioSequence(currentItem);
@@ -489,7 +551,7 @@ export default function SessionFeedbackScreen() {
       clearTimeout(timer);
       stopActiveAudio();
     };
-  }, [currentIndex]);
+  }, [currentIndex, currentItem, stopActiveAudio]);
 
   const handleNext = () => {
     stopActiveAudio();
