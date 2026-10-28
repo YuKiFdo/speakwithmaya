@@ -46,6 +46,7 @@ export interface OnboardingState {
   // Navigation resume point
   lastActiveRoute: string | null;
   isCompleted: boolean;
+  hasEnteredDashboard?: boolean;
 
   // Hydration flag - true once encrypted storage has been fully decrypted & loaded
   isHydrated: boolean;
@@ -74,6 +75,7 @@ const defaultState: OnboardingState = {
   isAuthenticated: false,
   lastActiveRoute: null,
   isCompleted: false,
+  hasEnteredDashboard: false,
   isHydrated: false,
   name: '',
   phone: '',
@@ -365,6 +367,11 @@ export const OnboardingStore = {
       dailyGoalMinutes: user.dailyGoalMinutes || memoryState.dailyGoalMinutes,
       nativeLanguage: (user.nativeLanguage as any) || memoryState.nativeLanguage,
       isCompleted,
+      hasEnteredDashboard: Boolean(
+        memoryState.hasEnteredDashboard ||
+          user.isCompleted ||
+          user.lastActiveStep === '/(tabs)/dashboard',
+      ),
       lastActiveRoute: nextLastActiveRoute,
     };
     persistState(updated);
@@ -417,6 +424,27 @@ export const OnboardingStore = {
     const updated: OnboardingState = {
       ...memoryState,
       isCompleted: true,
+      lastActiveRoute: '/(tabs)/dashboard',
+      user: memoryState.user
+        ? {
+            ...memoryState.user,
+            isCompleted: true,
+            lastActiveStep: '/(tabs)/dashboard',
+          }
+        : null,
+    };
+    persistState(updated);
+  },
+
+  /**
+   * Marks that the user has reached the main Dashboard / app tabs.
+   * Once true, all `/onboarding/*` routes are permanently locked for this session.
+   */
+  markDashboardEntered() {
+    const updated: OnboardingState = {
+      ...memoryState,
+      isCompleted: true,
+      hasEnteredDashboard: true,
       lastActiveRoute: '/(tabs)/dashboard',
       user: memoryState.user
         ? {

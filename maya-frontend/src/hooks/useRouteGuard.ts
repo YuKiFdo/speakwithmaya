@@ -20,24 +20,25 @@ const ONBOARDING_STEP_CHAIN: {
   { route: 'onboarding/name',         canAccess: (s) => !s.isAuthenticated },
   { route: 'onboarding/phone',        canAccess: (s) => !s.isAuthenticated },
   { route: 'onboarding/otp',          canAccess: (s) => !s.isAuthenticated && !!s.phone },
-  // Step 4+: Post-auth steps - require authentication
-  { route: 'onboarding/goal',         canAccess: (s) => s.isAuthenticated },
-  { route: 'onboarding/challenge',    canAccess: (s) => s.isAuthenticated && !!s.goal },
-  { route: 'onboarding/level',        canAccess: (s) => s.isAuthenticated && !!s.goal },
-  { route: 'onboarding/language',     canAccess: (s) => s.isAuthenticated && !!s.goal },
-  { route: 'onboarding/employment',   canAccess: (s) => s.isAuthenticated && !!s.goal },
-  { route: 'onboarding/daily-goal',   canAccess: (s) => s.isAuthenticated && !!s.goal },
-  { route: 'onboarding/social-proof', canAccess: (s) => s.isAuthenticated && !!s.goal },
-  { route: 'onboarding/call',         canAccess: (s) => s.isAuthenticated && !!s.goal },
-  { route: 'onboarding/connecting',   canAccess: (s) => s.isAuthenticated && !!s.goal },
-  { route: 'onboarding/analyzing',    canAccess: (s) => s.isAuthenticated },
-  { route: 'onboarding/feedback',     canAccess: (s) => s.isAuthenticated },
-  { route: 'onboarding/session-review', canAccess: (s) => s.isAuthenticated },
-  { route: 'onboarding/building-plan',  canAccess: (s) => s.isAuthenticated },
-  { route: 'onboarding/special-offer',  canAccess: (s) => s.isAuthenticated },
-  { route: 'onboarding/claim-discount', canAccess: (s) => s.isAuthenticated },
-  { route: 'onboarding/personalized-plan', canAccess: (s) => s.isAuthenticated },
-  { route: 'onboarding/complete',     canAccess: (s) => s.isAuthenticated },
+  // Step 4-10: Questionnaire steps - only before onboarding is marked completed / dashboard entered
+  { route: 'onboarding/goal',         canAccess: (s) => s.isAuthenticated && !s.isCompleted && !s.hasEnteredDashboard },
+  { route: 'onboarding/challenge',    canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
+  { route: 'onboarding/level',        canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
+  { route: 'onboarding/language',     canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
+  { route: 'onboarding/employment',   canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
+  { route: 'onboarding/daily-goal',   canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
+  { route: 'onboarding/social-proof', canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
+  // Step 11+: Post-intro onboarding steps - only allowed before user has entered the Dashboard
+  { route: 'onboarding/call',         canAccess: (s) => s.isAuthenticated && !!s.goal && !s.hasEnteredDashboard },
+  { route: 'onboarding/connecting',   canAccess: (s) => s.isAuthenticated && !!s.goal && !s.hasEnteredDashboard },
+  { route: 'onboarding/analyzing',    canAccess: (s) => s.isAuthenticated && !s.hasEnteredDashboard },
+  { route: 'onboarding/feedback',     canAccess: (s) => s.isAuthenticated && !s.hasEnteredDashboard },
+  { route: 'onboarding/session-review', canAccess: (s) => s.isAuthenticated && !s.hasEnteredDashboard },
+  { route: 'onboarding/building-plan',  canAccess: (s) => s.isAuthenticated && !s.hasEnteredDashboard },
+  { route: 'onboarding/special-offer',  canAccess: (s) => s.isAuthenticated && !s.hasEnteredDashboard },
+  { route: 'onboarding/claim-discount', canAccess: (s) => s.isAuthenticated && !s.hasEnteredDashboard },
+  { route: 'onboarding/personalized-plan', canAccess: (s) => s.isAuthenticated && !s.hasEnteredDashboard },
+  { route: 'onboarding/complete',     canAccess: (s) => s.isAuthenticated && !s.hasEnteredDashboard },
 ];
 
 /**
@@ -170,9 +171,15 @@ export function useRouteGuard() {
 
     // 3. Onboarding step prerequisite enforcement
     if (segments[0] === 'onboarding') {
+      // If user is authenticated and has already completed onboarding & entered the dashboard, block all /onboarding/* routes
+      if (state.isAuthenticated && state.hasEnteredDashboard) {
+        router.replace('/(tabs)/dashboard' as any);
+        return;
+      }
+
       const stepDef = ONBOARDING_STEP_CHAIN.find((s) => s.route === routePath);
       if (stepDef && !stepDef.canAccess(state)) {
-        // User is trying to access a step they haven't earned
+        // User is trying to access a step they haven't earned or have already completed
         const redirectTo = findEarliestAllowedStep(state);
         // Prevent redirect loops
         if (redirectTo !== `/${routePath}`) {
@@ -206,6 +213,11 @@ export function useRouteGuard() {
             : '/onboarding/goal';
         router.replace(resumeRoute as any);
         return;
+      }
+
+      // Once an authenticated, completed user enters the main app tabs, lock out all /onboarding/* routes
+      if (state.isCompleted && segments[0] === '(tabs)' && !state.hasEnteredDashboard) {
+        OnboardingStore.markDashboardEntered();
       }
     }
   }, [segments, isHydrated]);

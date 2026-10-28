@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
   },
   brandAccent: {
     fontFamily: Fonts.outfit.extraBold,
-    color: '#0d4efd',
+    color: '#0052FF',
   },
   brandTagline: {
     fontFamily: Fonts.outfit.regular,
