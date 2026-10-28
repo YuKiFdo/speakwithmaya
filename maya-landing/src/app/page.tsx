@@ -1518,10 +1518,10 @@ export default function Home() {
                     </div>
 
                     <ul className="space-y-3.5 mb-8 text-[13px] text-[#475569]">
-                      <li className="flex items-center gap-2.5">
+                      {/* <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
                         <span>600 AI conversation minutes</span>
-                      </li>
+                      </li> */}
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
                         <span>10-minute practice sessions</span>
@@ -1578,10 +1578,10 @@ export default function Home() {
                     </div>
 
                     <ul className="space-y-3.5 mb-8 text-[13px] text-[#475569]">
-                      <li className="flex items-center gap-2.5">
+                      {/* <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
                         <span>900 AI conversation minutes</span>
-                      </li>
+                      </li> */}
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
                         <span>15-minute practice sessions</span>
@@ -1635,10 +1635,10 @@ export default function Home() {
                     </div>
 
                     <ul className="space-y-3.5 mb-8 text-[13px] text-[#475569]">
-                      <li className="flex items-center gap-2.5">
+                      {/* <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
                         <span>1,200 AI conversation minutes</span>
-                      </li>
+                      </li> */}
                       <li className="flex items-center gap-2.5">
                         <CheckCircleIcon />
                         <span>30-minute practice sessions</span>
