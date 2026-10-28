@@ -20,6 +20,7 @@ import {
   playMayaWelcomeVoice,
   stopMayaWelcomeVoice,
   preloadAllOnboardingVoicesInOrder,
+  cancelOnboardingVoicePreload,
 } from '@/services/sound/sound-service';
 import { MayaPrimaryButton } from '@/components/ui';
 import { OnboardingStore } from '@/services/store/onboarding-store';
@@ -109,8 +110,15 @@ export default function WelcomeScreen() {
 
   // Screen entrance choreography + sequential audio preloading
   useEffect(() => {
-    // Sequentially pre-download all onboarding voice clips in order
-    preloadAllOnboardingVoicesInOrder();
+    let active = true;
+    // Only preload onboarding voices if not on admin subdomain and user is not already authenticated
+    OnboardingStore.waitForHydration().then(() => {
+      if (!active) return;
+      const state = OnboardingStore.getState();
+      if (!state.isAuthenticated) {
+        preloadAllOnboardingVoicesInOrder();
+      }
+    });
 
     // 1. Hero Avatar fades in immediately
     Animated.timing(heroFadeAnim, {
@@ -161,6 +169,11 @@ export default function WelcomeScreen() {
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
+
+    return () => {
+      active = false;
+      cancelOnboardingVoicePreload();
+    };
   }, []);
 
   // Soundwave animation when Maya is speaking

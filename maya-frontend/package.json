@@ -55,6 +55,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "build:web": "expo export --platform web && node ./scripts/precompress-dist.js",
     "lint": "expo lint"
   },
   "private": true

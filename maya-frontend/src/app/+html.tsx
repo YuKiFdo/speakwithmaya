@@ -366,6 +366,39 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
                 will-change: transform;
                 animation: mayaProgress 1.35s cubic-bezier(0.4, 0.0, 0.2, 1) infinite;
               }
+              .loader-retry-box {
+                display: none;
+                flex-direction: column;
+                align-items: center;
+                margin-top: 18px;
+                gap: 10px;
+              }
+              .loader-retry-btn {
+                appearance: none;
+                border: none;
+                background-color: #0057FF;
+                color: #FFFFFF;
+                font-family: inherit;
+                font-size: 13px;
+                font-weight: 600;
+                padding: 10px 20px;
+                border-radius: 999px;
+                cursor: pointer;
+                box-shadow: 0 6px 18px rgba(0, 87, 255, 0.24);
+                transition: transform 0.15s ease, background-color 0.15s ease;
+              }
+              .loader-retry-btn:hover {
+                background-color: #0046CC;
+              }
+              .loader-retry-btn:active {
+                transform: scale(0.97);
+              }
+              .loader-retry-sub {
+                font-size: 11.5px;
+                color: #64748B;
+                max-width: 260px;
+                line-height: 1.4;
+              }
               @keyframes mayaCardEnter {
                 0% { opacity: 0; transform: scale(0.96); }
                 100% { opacity: 1; transform: scale(1); }
@@ -451,41 +484,160 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
                   <div className="wave-bar wave-3" />
                   <div className="wave-bar wave-4" />
                 </div>
-                <div className="loading-msg">Loading SpeakwithMaya...</div>
+                <div id="app-loader-status-text" className="loading-msg">
+                  Loading SpeakwithMaya...
+                </div>
               </div>
 
               <div className="progress-track">
                 <div className="progress-bar" />
               </div>
+
+              <div id="app-loader-retry-box" className="loader-retry-box">
+                <div className="loader-retry-sub">
+                  Your connection is taking longer than expected or a new update is available.
+                </div>
+                <button
+                  type="button"
+                  id="app-loader-retry-btn"
+                  className="loader-retry-btn"
+                >
+                  Refresh &amp; Reconnect
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Fail-safe timeout & instant dismissal helper for pre-bundle loader */}
+        {/* Enterprise Boot Watchdog: script-error auto-recovery, cache-busting reload & dismissal */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
                 var isDismissed = false;
+                var RETRY_KEY = '__maya_boot_auto_retry_ts';
+
+                function setStatusText(text) {
+                  var el = document.getElementById('app-loader-status-text');
+                  if (el) el.textContent = text;
+                }
+
+                function showManualRetry(reasonText) {
+                  if (isDismissed) return;
+                  if (reasonText) setStatusText(reasonText);
+                  var box = document.getElementById('app-loader-retry-box');
+                  if (box) box.style.display = 'flex';
+                }
+
+                function hardReloadWithCacheBust() {
+                  try {
+                    if ('serviceWorker' in navigator && navigator.serviceWorker.getRegistrations) {
+                      navigator.serviceWorker.getRegistrations().then(function(regs) {
+                        for (var i = 0; i < regs.length; i++) regs[i].unregister();
+                      });
+                    }
+                    if (window.caches && window.caches.keys) {
+                      window.caches.keys().then(function(keys) {
+                        for (var i = 0; i < keys.length; i++) window.caches.delete(keys[i]);
+                      });
+                    }
+                  } catch (e) {}
+                  var url = new URL(window.location.href);
+                  url.searchParams.set('_v', String(Date.now()));
+                  window.location.replace(url.toString());
+                }
+
+                function attemptAutoRecovery() {
+                  if (isDismissed) return false;
+                  try {
+                    var lastRetry = Number(sessionStorage.getItem(RETRY_KEY) || '0');
+                    var now = Date.now();
+                    // Allow 1 automatic cache-busting reload per 60 seconds
+                    if (!lastRetry || (now - lastRetry) > 60000) {
+                      sessionStorage.setItem(RETRY_KEY, String(now));
+                      setStatusText('Updating SpeakwithMaya...');
+                      hardReloadWithCacheBust();
+                      return true;
+                    }
+                  } catch (e) {}
+                  return false;
+                }
+
+                // Bind manual retry button
+                var retryBtn = document.getElementById('app-loader-retry-btn');
+                if (retryBtn) {
+                  retryBtn.addEventListener('click', function() {
+                    setStatusText('Reconnecting...');
+                    try { sessionStorage.removeItem(RETRY_KEY); } catch (e) {}
+                    hardReloadWithCacheBust();
+                  });
+                }
+
+                // Detect failed <script> bundle loads (e.g. stale HTML after deploy or dropped transfer)
+                window.addEventListener('error', function(event) {
+                  if (isDismissed) return;
+                  var target = event && event.target;
+                  if (target && target.tagName === 'SCRIPT') {
+                    var src = target.src || '';
+                    if (src.indexOf('/_expo/') !== -1 || src.indexOf('entry-') !== -1) {
+                      if (!attemptAutoRecovery()) {
+                        showManualRetry('Connection interrupted');
+                      }
+                    }
+                  }
+                }, true);
+
+                // Handle browser back-forward cache (bfcache) restoring a stale unmounted document
+                window.addEventListener('pageshow', function(event) {
+                  if (event && event.persisted && !isDismissed && !window.__mayaAppMounted) {
+                    window.location.reload();
+                  }
+                });
+
                 function dismissLoader() {
                   if (isDismissed) return;
                   isDismissed = true;
+                  window.__mayaAppMounted = true;
+                  try {
+                    sessionStorage.removeItem(RETRY_KEY);
+                    // Clean up temporary cache-bust query param (_v) without reloading
+                    if (window.location.search.indexOf('_v=') !== -1 && window.history && window.history.replaceState) {
+                      var cleanUrl = new URL(window.location.href);
+                      cleanUrl.searchParams.delete('_v');
+                      window.history.replaceState({}, document.title, cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+                    }
+                  } catch (e) {}
                   var loader = document.getElementById('app-initial-loader');
                   if (loader) {
-                    loader.style.transition = 'opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1)';
+                    loader.style.transition = 'opacity 0.24s cubic-bezier(0.22, 1, 0.36, 1)';
                     loader.style.opacity = '0';
                     loader.style.pointerEvents = 'none';
                     setTimeout(function() {
                       if (loader && loader.parentNode) {
                         loader.parentNode.removeChild(loader);
                       }
-                    }, 300);
+                    }, 260);
                   }
                 }
-                // Safety escape hatch: only in the unlikely event JavaScript crashes, dismiss after 15s
-                var timer = setTimeout(dismissLoader, 15000);
+
+                // Staged progress feedback: never blindly remove loader before React mounts!
+                var slowTimer = setTimeout(function() {
+                  if (!isDismissed) {
+                    setStatusText('Optimizing connection...');
+                  }
+                }, 7000);
+
+                var watchdogTimer = setTimeout(function() {
+                  if (!isDismissed && !window.__mayaAppMounted) {
+                    if (!attemptAutoRecovery()) {
+                      showManualRetry('Connection is taking longer than usual');
+                    }
+                  }
+                }, 16000);
+
                 window.__dismissAppLoader = function() {
-                  clearTimeout(timer);
+                  clearTimeout(slowTimer);
+                  clearTimeout(watchdogTimer);
                   dismissLoader();
                 };
               })();

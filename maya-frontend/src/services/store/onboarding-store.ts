@@ -318,7 +318,14 @@ export const OnboardingStore = {
     }
     return Promise.race([
       hydrationPromise,
-      new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+      new Promise<void>((resolve) =>
+        setTimeout(() => {
+          if (!memoryState.isHydrated) {
+            markHydrated();
+          }
+          resolve();
+        }, 800),
+      ),
     ]);
   },
 

@@ -34,7 +34,9 @@ jobs:
           EXPO_PUBLIC_BACKEND_URL: ${{ vars.EXPO_PUBLIC_BACKEND_URL || 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io' }}
           EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL || 'https://clfjfhdsjwkzgxwoolgp.supabase.co' }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_gQOKzy0Kf5Mw9Uc4wdCdIA_WaLKtaip' }}
-        run: npx expo export --platform web
+        run: |
+          npx expo export --platform web
+          node ./scripts/precompress-dist.js
 
       - name: Package web bundle with server
         working-directory: ./maya-frontend

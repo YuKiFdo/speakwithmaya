@@ -33,7 +33,9 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ vars.PROD_SUPABASE_URL || 'https://sjhvhjxbkpidrjbpiqfw.supabase.co' }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.PROD_SUPABASE_ANON_KEY || 'sb_publishable_usiFVN4cjSUgfKokGGBgyw_FFjWHg5f' }}
           EXPO_PUBLIC_USE_SERVER_LIVE: 'true'
-        run: npx expo export --platform web
+        run: |
+          npx expo export --platform web
+          node ./scripts/precompress-dist.js
 
       - name: Deploy to Ubuntu VM
         env:
@@ -49,8 +51,12 @@ jobs:
           # Ensure app directories exist
           ssh "$VM_USER@$VM_IP" "mkdir -p /home/$VM_USER/apps/maya-frontend/dist /home/$VM_USER/apps/maya-frontend/web-server"
 
-          # Sync exported dist directory, custom SPA server, and PM2 config
-          rsync -avz --delete ./maya-frontend/dist/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/"
+          # Sync exported dist directory while preserving hashed _expo/static & assets from recent deploys
+          # so in-flight tabs never hit 404 on old bundle hashes, then prune bundles older than 7 days.
+          rsync -avz --delete --exclude='_expo/' --exclude='assets/' ./maya-frontend/dist/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/"
+          rsync -avz ./maya-frontend/dist/_expo/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/_expo/"
+          rsync -avz ./maya-frontend/dist/assets/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/assets/"
+          ssh "$VM_USER@$VM_IP" "find /home/$VM_USER/apps/maya-frontend/dist/_expo /home/$VM_USER/apps/maya-frontend/dist/assets -type f -mtime +7 -delete || true"
           rsync -avz --delete ./maya-frontend/web-server/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/web-server/"
           rsync -avz ./maya-frontend/ecosystem.config.cjs "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/"
 

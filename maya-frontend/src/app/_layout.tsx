@@ -10,7 +10,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider, Stack, usePathname } from 'expo
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { useColorScheme, Platform } from 'react-native';
+import { useColorScheme, Platform, View } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
   Outfit_400Regular,
@@ -122,10 +122,13 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    // Settle initial DOM layout quickly on web without artificial lag
+    if (Platform.OS === 'web') {
+      setIsAppReady(true);
+      return;
+    }
     const timer = setTimeout(() => {
       setIsAppReady(true);
-    }, Platform.OS === 'web' ? 60 : 200);
+    }, 200);
     return () => clearTimeout(timer);
   }, []);
 
@@ -153,26 +156,41 @@ export default function RootLayout() {
   const isFontsReady = fontsLoaded || !!fontError || fontTimeout;
   const isAppFullyReady = isFontsReady && isAppReady && isStoreHydrated;
 
-  // Seamless transition: ONLY dismiss the pre-bundle HTML loader once React is completely hydrated and ready to render
+  // Seamless transition: ONLY dismiss the pre-bundle HTML loader once React has committed the active screen
   useEffect(() => {
     if (isAppFullyReady) {
       SplashScreen.hideAsync().catch(() => {});
       if (Platform.OS === 'web' && typeof document !== 'undefined') {
-        if ((window as any).__dismissAppLoader) {
-          (window as any).__dismissAppLoader();
-        } else {
-          const loader = document.getElementById('app-initial-loader');
-          if (loader) {
-            loader.style.opacity = '0';
-            loader.style.pointerEvents = 'none';
-            setTimeout(() => loader.remove(), 260);
+        const dismiss = () => {
+          if ((window as any).__dismissAppLoader) {
+            (window as any).__dismissAppLoader();
+          } else {
+            const loader = document.getElementById('app-initial-loader');
+            if (loader) {
+              loader.style.opacity = '0';
+              loader.style.pointerEvents = 'none';
+              setTimeout(() => loader.remove(), 260);
+            }
           }
+        };
+        if (typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(dismiss);
+          });
+        } else {
+          dismiss();
         }
       }
     }
   }, [isAppFullyReady]);
 
   if (!isAppFullyReady) {
+    // On Web, +html.tsx already renders #app-initial-loader (z-index: 99999) above #root.
+    // Rendering an empty white container here prevents Expo Static SSR from baking a
+    // second, unhydrated loading layout into static HTML files.
+    if (Platform.OS === 'web') {
+      return <View style={{ flex: 1, backgroundColor: '#FFFFFF' }} />;
+    }
     return <DesktopLoadingScreen message="Loading SpeakwithMaya..." />;
   }
 
@@ -198,6 +216,7 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding/challenge" />
         <Stack.Screen name="onboarding/level" />
         <Stack.Screen name="onboarding/language" />
+        <Stack.Screen name="onboarding/employment" />
         <Stack.Screen name="onboarding/daily-goal" />
         <Stack.Screen name="onboarding/social-proof" />
         <Stack.Screen
@@ -211,6 +230,30 @@ export default function RootLayout() {
         <Stack.Screen
           name="onboarding/call"
           options={{ animation: 'fade', animationDuration: 260, gestureEnabled: false }}
+        />
+        <Stack.Screen
+          name="onboarding/analyzing"
+          options={{ animation: 'fade', animationDuration: 240, gestureEnabled: false }}
+        />
+        <Stack.Screen
+          name="onboarding/feedback"
+          options={{ animation: 'slide_from_right', animationDuration: 260 }}
+        />
+        <Stack.Screen
+          name="onboarding/session-review"
+          options={{ animation: 'slide_from_right', animationDuration: 260 }}
+        />
+        <Stack.Screen
+          name="onboarding/special-offer"
+          options={{ animation: 'fade', animationDuration: 240 }}
+        />
+        <Stack.Screen
+          name="onboarding/claim-discount"
+          options={{ animation: 'fade', animationDuration: 240 }}
+        />
+        <Stack.Screen
+          name="onboarding/personalized-plan"
+          options={{ animation: 'fade', animationDuration: 240 }}
         />
         <Stack.Screen
           name="onboarding/complete"
@@ -241,8 +284,20 @@ export default function RootLayout() {
           options={{ animation: 'fade', animationDuration: 180 }}
         />
         <Stack.Screen
+          name="leaderboard"
+          options={{ animation: 'fade', animationDuration: 180 }}
+        />
+        <Stack.Screen
           name="upgrade"
           options={{ animation: 'slide_from_bottom', animationDuration: 280 }}
+        />
+        <Stack.Screen
+          name="admin/index"
+          options={{ animation: 'fade', animationDuration: 180 }}
+        />
+        <Stack.Screen
+          name="admin/login"
+          options={{ animation: 'fade', animationDuration: 200 }}
         />
         <Stack.Screen
           name="admin/usage"
@@ -250,6 +305,22 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="admin/users"
+          options={{ animation: 'fade', animationDuration: 200 }}
+        />
+        <Stack.Screen
+          name="admin/subscriptions"
+          options={{ animation: 'fade', animationDuration: 200 }}
+        />
+        <Stack.Screen
+          name="admin/scenarios"
+          options={{ animation: 'fade', animationDuration: 200 }}
+        />
+        <Stack.Screen
+          name="admin/roadmap"
+          options={{ animation: 'fade', animationDuration: 200 }}
+        />
+        <Stack.Screen
+          name="admin/complaints"
           options={{ animation: 'fade', animationDuration: 200 }}
         />
         <Stack.Screen

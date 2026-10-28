@@ -110,19 +110,14 @@ export function DesktopLoadingScreen({
 
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
-      <View style={styles.card}>
-        {/* Brand Header */}
-        <View style={styles.brandRow}>
-          <Text style={styles.brandTitle}>
-            Speakwith<Text style={styles.brandAccent}>Maya</Text>
-          </Text>
-          <Text style={styles.brandTagline}>
-            Practice · Improve · Be Confident
-          </Text>
-        </View>
+      <View style={styles.bgOrbTop} pointerEvents="none" />
+      <View style={styles.bgOrbBottom} pointerEvents="none" />
 
-        {/* Central Avatar with Breathing Halo */}
+      <View style={styles.card}>
+        {/* Central Avatar with Breathing Halo (Top, matching +html.tsx) */}
         <View style={styles.avatarArea}>
+          <View style={styles.ambientGlow} />
+          <View style={styles.innerRingBorder} />
           <Animated.View
             style={[
               styles.pulseAura,
@@ -141,27 +136,53 @@ export function DesktopLoadingScreen({
             ]}
           >
             <Image
-              source={require('@/assets/images/maya-avatar.png')}
+              source={
+                Platform.OS === 'web'
+                  ? { uri: '/maya-avatar.png' }
+                  : require('@/assets/images/maya-avatar.png')
+              }
               style={styles.avatarImage}
               resizeMode="cover"
             />
+            <View style={styles.onlineBadge} />
           </Animated.View>
         </View>
 
-        {/* Sleek Indeterminate Progress Bar */}
-        <View style={styles.progressBarTrack}>
-          <Animated.View
-            style={[
-              styles.progressBarFill,
-              {
-                transform: [{ translateX: barTranslateX }],
-              },
-            ]}
-          />
+        {/* Brand Header */}
+        <View style={styles.brandRow}>
+          <Text style={styles.brandTitle}>
+            Speakwith<Text style={styles.brandAccent}>Maya</Text>
+          </Text>
+          <View style={styles.taglinePill}>
+            <Text style={styles.brandTagline}>
+              Practice  ·  Improve  ·  Be Confident
+            </Text>
+          </View>
         </View>
 
-        {/* Loading Message */}
-        <Text style={styles.loadingMessage}>{message}</Text>
+        {/* Voice Status Pill + Sleek Indeterminate Progress Bar */}
+        <View style={styles.statusContainer}>
+          <View style={styles.voiceStatusPill}>
+            <View style={styles.waveRow}>
+              <View style={[styles.waveBar, { height: 7 }]} />
+              <View style={[styles.waveBar, { height: 13 }]} />
+              <View style={[styles.waveBar, { height: 9 }]} />
+              <View style={[styles.waveBar, { height: 12 }]} />
+            </View>
+            <Text style={styles.loadingMessage}>{message}</Text>
+          </View>
+
+          <View style={styles.progressBarTrack}>
+            <Animated.View
+              style={[
+                styles.progressBarFill,
+                {
+                  transform: [{ translateX: barTranslateX }],
+                },
+              ]}
+            />
+          </View>
+        </View>
       </View>
     </Animated.View>
   );
@@ -177,6 +198,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
     zIndex: 9999,
     ...(Platform.OS === 'web'
       ? ({
@@ -194,6 +216,24 @@ const styles = StyleSheet.create({
         } as any)
       : {}),
   },
+  bgOrbTop: {
+    position: 'absolute',
+    top: -120,
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    backgroundColor: '#F0F7FF',
+    opacity: 0.7,
+  },
+  bgOrbBottom: {
+    position: 'absolute',
+    bottom: -140,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: '#F8FAFC',
+    opacity: 0.9,
+  },
   card: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -201,59 +241,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 32,
     width: '100%',
-    maxWidth: 400,
+    maxWidth: 380,
+    zIndex: 2,
     ...(Platform.OS === 'web' ? ({ margin: 'auto' } as any) : {}),
   },
-  brandRow: {
-    alignItems: 'center',
-    marginBottom: 28,
-  },
-  brandTitle: {
-    ...fontStyle('outfit', 'extraBold'),
-    fontSize: 24,
-    color: '#0F172A',
-    letterSpacing: -0.6,
-    textAlign: 'center',
-  },
-  brandAccent: {
-    color: '#0057FF',
-  },
-  brandTagline: {
-    ...fontStyle('outfit', 'regular'),
-    fontSize: 12.5,
-    color: '#64748B',
-    marginTop: 4,
-    letterSpacing: 0.2,
-    textAlign: 'center',
-  },
   avatarArea: {
-    width: 130,
-    height: 130,
+    width: 144,
+    height: 144,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    marginBottom: 28,
+    marginBottom: 22,
+  },
+  ambientGlow: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#EFF6FF',
+  },
+  innerRingBorder: {
+    position: 'absolute',
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
   },
   pulseAura: {
     position: 'absolute',
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 98,
+    height: 98,
+    borderRadius: 49,
     backgroundColor: '#0057FF',
   },
   avatarWrapper: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    padding: 3,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    padding: 3.5,
     backgroundColor: '#FFFFFF',
     zIndex: 2,
+    position: 'relative',
     ...(Platform.OS === 'web'
-      ? ({ boxShadow: '0 12px 32px rgba(0, 87, 255, 0.22)' } as any)
+      ? ({ boxShadow: '0 14px 36px rgba(0, 87, 255, 0.20)' } as any)
       : {
           shadowColor: '#0057FF',
           shadowOffset: { width: 0, height: 8 },
-          shadowOpacity: 0.22,
+          shadowOpacity: 0.2,
           shadowRadius: 16,
           elevation: 6,
         }),
@@ -261,16 +296,89 @@ const styles = StyleSheet.create({
   avatarImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 43,
+    borderRadius: 45,
+  },
+  onlineBadge: {
+    position: 'absolute',
+    bottom: 3,
+    right: 3,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#10B981',
+    borderWidth: 2.5,
+    borderColor: '#FFFFFF',
+  },
+  brandRow: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  brandTitle: {
+    ...fontStyle('outfit', 'extraBold'),
+    fontSize: 26,
+    color: '#0F172A',
+    letterSpacing: -0.7,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  brandAccent: {
+    color: '#0057FF',
+  },
+  taglinePill: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingVertical: 5,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+  },
+  brandTagline: {
+    ...fontStyle('outfit', 'medium'),
+    fontSize: 12,
+    color: '#64748B',
+    letterSpacing: 0.3,
+    textAlign: 'center',
+  },
+  statusContainer: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  voiceStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    marginBottom: 12,
+    gap: 8,
+  },
+  waveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 14,
+    gap: 2.5,
+  },
+  waveBar: {
+    width: 2.5,
+    borderRadius: 1.5,
+    backgroundColor: '#0057FF',
+  },
+  loadingMessage: {
+    ...fontStyle('outfit', 'medium'),
+    fontSize: 12.5,
+    color: '#475569',
+    letterSpacing: 0.1,
+    textAlign: 'center',
   },
   progressBarTrack: {
-    width: 180,
-    height: 4,
+    width: 164,
+    height: 3.5,
     borderRadius: 2,
     backgroundColor: '#F1F5F9',
     overflow: 'hidden',
     position: 'relative',
-    marginBottom: 14,
   },
   progressBarFill: {
     position: 'absolute',
@@ -280,12 +388,5 @@ const styles = StyleSheet.create({
     width: 60,
     borderRadius: 2,
     backgroundColor: '#0057FF',
-  },
-  loadingMessage: {
-    ...fontStyle('outfit', 'regular'),
-    fontSize: 13,
-    color: '#64748B',
-    letterSpacing: 0.1,
-    textAlign: 'center',
   },
 });

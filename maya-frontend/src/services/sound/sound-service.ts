@@ -1008,58 +1008,38 @@ export function stopMayaPhonePromptVoice(): void {
  * each upcoming screen's audio is fully loaded into memory before the user arrives.
  */
 let hasInitiatedSequentialPreload = false;
+let preloadTimers: ReturnType<typeof setTimeout>[] = [];
+
+export function cancelOnboardingVoicePreload(): void {
+  if (preloadTimers.length > 0) {
+    preloadTimers.forEach((t) => clearTimeout(t));
+    preloadTimers = [];
+  }
+}
+
 export function preloadAllOnboardingVoicesInOrder(): void {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  if (
+    window.location.hostname.startsWith('admin.') ||
+    window.location.pathname.startsWith('/admin')
+  ) {
+    return;
+  }
   if (hasInitiatedSequentialPreload) return;
   hasInitiatedSequentialPreload = true;
 
+  // Only preload the immediate initial screens here so we never saturate the browser's
+  // 6-connection HTTP pool during initial boot. Subsequent steps preload on their own screens.
   const orderedAssets = [
-    // Screen 1: Welcome Screen
     MAYA_WELCOME_ASSET,
-    // Screen 2: Name Prompt Screen
     MAYA_NAME_PROMPT_ASSET,
-    // Screen 3: Phone Prompt Screen
     MAYA_PHONE_PROMPT_ASSET,
-    // Screen 4: Goal Question Prompt
     MAYA_GOAL_PROMPT_ASSET,
-    // Screen 4: Goal Selection Feedback Voices
-    GOAL_AUDIO_ASSETS['better-job'],
-    GOAL_AUDIO_ASSETS['speak-confidently'],
-    GOAL_AUDIO_ASSETS['work-abroad'],
-    GOAL_AUDIO_ASSETS['travel'],
-    GOAL_AUDIO_ASSETS['exams'],
-    // Screen 5: Challenge Question Prompt
-    MAYA_CHALLENGE_PROMPT_ASSET,
-    // Screen 5: Challenge Selection Feedback Voices
-    CHALLENGE_AUDIO_ASSETS['speaking-confidently'],
-    CHALLENGE_AUDIO_ASSETS['getting-stuck'],
-    CHALLENGE_AUDIO_ASSETS['listening'],
-    CHALLENGE_AUDIO_ASSETS['grammar'],
-    CHALLENGE_AUDIO_ASSETS['vocabulary'],
-    // Screen 6: Level Question Prompt & Selections
-    MAYA_LEVEL_PROMPT_ASSET,
-    LEVEL_AUDIO_ASSETS['beginner'],
-    LEVEL_AUDIO_ASSETS['intermediate'],
-    LEVEL_AUDIO_ASSETS['upper-intermediate'],
-    LEVEL_AUDIO_ASSETS['advanced'],
-    // Screen 7: Employment Question Prompt & Selections
-    MAYA_EMPLOYMENT_PROMPT_ASSET,
-    EMPLOYMENT_AUDIO_ASSETS['full-time'],
-    EMPLOYMENT_AUDIO_ASSETS['part-time'],
-    EMPLOYMENT_AUDIO_ASSETS['student'],
-    EMPLOYMENT_AUDIO_ASSETS['looking-for-job'],
-    EMPLOYMENT_AUDIO_ASSETS['other'],
-    // Screen 8: Daily Goal Question Prompt & Selections
-    MAYA_DAILY_GOAL_PROMPT_ASSET,
-    DAILY_GOAL_AUDIO_ASSETS['5-min'],
-    DAILY_GOAL_AUDIO_ASSETS['10-min'],
-    DAILY_GOAL_AUDIO_ASSETS['15-min'],
-    DAILY_GOAL_AUDIO_ASSETS['30-min'],
   ];
 
-  let delay = 100;
+  let delay = 250;
   orderedAssets.forEach((asset) => {
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       try {
         const uri = getAssetUri(asset);
         if (uri) {
@@ -1069,7 +1049,8 @@ export function preloadAllOnboardingVoicesInOrder(): void {
         console.warn('[sound-service] sequential preload error for asset:', e);
       }
     }, delay);
-    delay += 180; // Smooth sequential stream without freezing browser thread
+    preloadTimers.push(timer);
+    delay += 350;
   });
 }
 
