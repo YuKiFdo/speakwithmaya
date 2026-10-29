@@ -26,6 +26,7 @@ export interface CallSessionConfig {
   goalDescription?: string;
   targetSpeakingShare?: number;
   isIntroCall?: boolean;
+  memory?: string;
   userName?: string;
   goal?: string;
   challenge?: string;
@@ -69,11 +70,11 @@ export const CallSessionStore = {
     ) {
       // Intro calls and roadmap curriculum sessions must NEVER create or update a resume card in dashboard
       ActiveConversationStore.clear();
-    } else if (config.scenarioId || config.scenarioTitle) {
+    } else {
       try {
         ActiveConversationStore.setActive({
           scenarioId: config.scenarioId || 'casual-chat',
-          scenarioTitle: config.scenarioTitle || config.topic || 'Casual Chat',
+          scenarioTitle: config.scenarioTitle || 'Casual Chat',
           topic: config.topic || config.scenarioTitle || 'Casual Chat',
           roadmapLevelId: config.roadmapLevelId,
         });

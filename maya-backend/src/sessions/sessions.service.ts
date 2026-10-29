@@ -1374,6 +1374,15 @@ ${memoryPart}`;
       scenarioGuidance = `This is a general spoken English practice session with ${userName}. Warmly invite them into conversation and ask an open-ended question about their day, studies, or interests.`;
     }
 
+    const hasResumeContext = Boolean(!dto.isReconnect && dto.memory && dto.memory.trim().length > 0);
+    if (hasResumeContext) {
+      const resumeSummary = dto.memory!.trim();
+      if (isSinhala) {
+        return `Hello Maya! This is ${userName}. We are resuming our previous conversation (${resumeSummary}). Please welcome me back warmly by name in friendly everyday Sinhala (strictly Sinhala and English only - no Tamil or other languages), briefly mention what we talked about last time, and ask an engaging follow-up question in English to pick up right where we left off!`;
+      }
+      return `Hello Maya! This is ${userName}. We are resuming our previous conversation (${resumeSummary}). Please welcome me back warmly by name in conversational English aloud, briefly reference our last chat, and ask an engaging follow-up question to continue right where we left off!`;
+    }
+
     // Recurring sessions: model greets the user by name
     if (isSinhala) {
       if (dto.sinhalaStyle === 'deep_guidance') {
@@ -3205,11 +3214,9 @@ ${memoryPart}`;
         const isRoadmapSession = Boolean(
           matchedRoadmapLevelId ||
           sess.level_number ||
-          sessTopic.includes('hospitality') ||
-          sessTopic.includes('conflict') ||
-          sessTopic.includes('hotel') ||
-          sessTopic.includes('mix-up') ||
-          sessTopic.includes('mix up') ||
+          sessTopic.includes('hospitality & conflict') ||
+          sessTopic.includes('room mix-up') ||
+          sessTopic.includes('room mix up') ||
           sessTopic.includes('room mix') ||
           sessTopic.includes('roadmap') ||
           sessTopic.includes('lvl-') ||
@@ -3224,6 +3231,8 @@ ${memoryPart}`;
           end_time: sess.end_time,
           duration_seconds: sess.duration_seconds || 0,
           topic: sess.topic || 'General Practice',
+          scenario_id: sess.scenario_id || null,
+          scenario_title: sess.scenario_title || null,
           overall_score: sess.overall_score ?? 85,
           fluency_score: sess.fluency_score ?? 84,
           grammar_score: sess.grammar_score ?? 82,
@@ -4043,7 +4052,14 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
       .map((t: any, uIdx: number) => ({ ...t, userTurnIdx: uIdx }));
 
     if (userTurns.length === 0) {
-      return { sessionId: dto.sessionId, items: [] };
+      return {
+        sessionId: dto.sessionId,
+        scenarioId: dto.scenarioId || 'casual-chat',
+        scenarioTitle: dto.scenarioTitle || dto.topic || 'Casual Chat',
+        conversationSummary: null,
+        nextFollowupTopic: null,
+        items: [],
+      };
     }
 
     // Filter out any user speech that was prompted or matches active hints
@@ -4215,23 +4231,32 @@ CRITICAL RULES:
             const scenarioId = dto.scenarioId || 'casual-chat';
             const scenarioTitle = dto.scenarioTitle || dto.topic || 'Casual Chat';
 
-            // Persist conversation summary and scenario into database sessions record
+            // Persist conversation summary and scenario into database sessions record before returning
             if (this.supabase && validSessionId) {
               const sessionUpdatePayload: any = {
                 topic: dto.topic || scenarioTitle,
+                scenario_id: scenarioId,
+                scenario_title: scenarioTitle,
               };
               if (conversationSummary) {
                 sessionUpdatePayload.user_feedback = conversationSummary;
               }
-              this.supabase
+              const { error: updateErr } = await this.supabase
                 .from('sessions')
                 .update(sessionUpdatePayload)
-                .eq('id', validSessionId)
-                .then(({ error }: any) => {
-                  if (error) {
-                    this.logger.warn(`Failed to update session summary in DB: ${error.message}`);
-                  }
-                });
+                .eq('id', validSessionId);
+              if (updateErr) {
+                if (updateErr.message?.includes('scenario_id') || updateErr.message?.includes('scenario_title')) {
+                  delete sessionUpdatePayload.scenario_id;
+                  delete sessionUpdatePayload.scenario_title;
+                  await this.supabase
+                    .from('sessions')
+                    .update(sessionUpdatePayload)
+                    .eq('id', validSessionId);
+                } else {
+                  this.logger.warn(`Failed to update session summary in DB: ${updateErr.message}`);
+                }
+              }
             }
 
             const turnTranscriptsMap =
@@ -4427,13 +4452,16 @@ CRITICAL RULES:
     try {
       this.logger.log(`[SessionsService] 📝 Saving session review for ${validSessionId}: rating=${dto.rating}, feedback="${dto.feedback || ''}"`);
 
-      // 1. Update public.sessions table directly (user_rating and user_feedback columns)
+      // 1. Update public.sessions table directly (preserve existing AI summary in user_feedback if user did not enter written review text)
+      const updatePayload: Record<string, any> = {
+        user_rating: dto.rating,
+      };
+      if (dto.feedback && dto.feedback.trim().length > 0) {
+        updatePayload.user_feedback = dto.feedback.trim();
+      }
       const { error: sessionErr } = await this.supabase
         .from('sessions')
-        .update({
-          user_rating: dto.rating,
-          user_feedback: dto.feedback ? dto.feedback.trim() : null,
-        })
+        .update(updatePayload)
         .eq('id', validSessionId);
 
       if (sessionErr) {

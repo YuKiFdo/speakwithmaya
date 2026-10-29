@@ -79,6 +79,8 @@ interface UseLiveCallOptions {
   sinhalaStyle?: 'balanced' | 'deep_guidance';
   aiSuggestions?: boolean;
   scenarioId?: string;
+  scenarioTitle?: string;
+  memory?: string;
   userName?: string;
   isIntroCall?: boolean;
   challenge?: string;
@@ -547,10 +549,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       setPermissionErrorType(null);
 
       // Compute rolling text memory from recent conversation turns to preserve context
-      const rollingMemory = turnsRef.current
+      const turnsMemory = turnsRef.current
         .slice(-8)
         .map((t) => `${t.role === 'user' ? 'Student' : 'Maya'}: ${t.text}`)
         .join('\n');
+      const rollingMemory = [options.memory, turnsMemory].filter(Boolean).join('\n');
 
       let tokenData: any = {};
 

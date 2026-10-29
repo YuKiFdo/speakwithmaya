@@ -181,6 +181,8 @@ export default function CallScreen() {
     sinhalaStyle,
     aiSuggestions: aiSug,
     scenarioId: effectiveScenarioId,
+    scenarioTitle: storeConfig?.scenarioTitle || params.scenarioTitle,
+    memory: storeConfig?.memory,
     userName: effectiveUserName,
     isIntroCall: isIntro,
     challenge: storeConfig?.challenge || params.challenge || onboardingState.challenge,
@@ -840,12 +842,20 @@ export default function CallScreen() {
   useEffect(() => {
     if (liveCall.missionReport) {
       const activeSessionId = liveCall.sessionId || (liveCall.missionReport as any)?.id || '';
+      const resolvedScenarioTitle = storeConfig?.scenarioTitle || params.scenarioTitle || '';
       setLatestSessionReport({
         ...liveCall.missionReport,
         id: activeSessionId,
+        scenarioId: effectiveScenarioId,
+        scenarioTitle: resolvedScenarioTitle,
         callParams: {
           ...params,
           sessionId: activeSessionId,
+          scenarioId: effectiveScenarioId,
+          scenarioTitle: resolvedScenarioTitle,
+          roadmapLevelId: effectiveRoadmapLevelId,
+          levelNumber: effectiveLevelNumber,
+          isIntroCall: isIntro,
         },
         sessionTurns: liveCall.turns,
         activeHints: hintsHistoryRef.current,

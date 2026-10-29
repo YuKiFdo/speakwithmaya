@@ -20,6 +20,8 @@ export interface FeedbackItem {
 export interface ExtendedSessionReport extends MissionReportData {
   id?: string;
   sessionId?: string;
+  scenarioId?: string;
+  scenarioTitle?: string;
   callParams?: Record<string, any>;
   sessionTurns?: Array<{ role: 'user' | 'model'; text: string; turnIndex?: number; audioUrl?: string }>;
   activeHints?: string[];

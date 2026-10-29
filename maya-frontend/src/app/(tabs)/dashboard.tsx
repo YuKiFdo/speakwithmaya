@@ -105,29 +105,32 @@ function resolveScenarioFromTopic(topic?: string, scenarioId?: string): { id: st
   if (isRoadmapOrIntroTopic(topic)) return null;
 
   const lower = topic.toLowerCase().trim();
-  if (lower.includes('interview') || lower.includes('job interview')) {
+  if (lower.includes('interview') || lower.includes('job interview') || lower.includes('hiring') || lower.includes('candidate')) {
     return { id: 'job-interview', title: 'Job Interview' };
   }
-  if (lower.includes('work') || lower.includes('office') || lower.includes('business')) {
+  if (lower.includes('work') || lower.includes('office') || lower.includes('business') || lower.includes('colleague')) {
     return { id: 'workplace', title: 'Workplace' };
   }
-  if (lower.includes('travel english') || lower.includes('travel communication') || lower.includes('flight') || lower.includes('vacation')) {
+  if (lower.includes('travel') || lower.includes('flight') || lower.includes('vacation') || lower.includes('airport')) {
     return { id: 'travel-english', title: 'Travel English' };
   }
-  if (lower.includes('ielts')) {
+  if (lower.includes('ielts') || lower.includes('exam')) {
     return { id: 'ielts-speaking', title: 'IELTS Speaking' };
+  }
+  if (lower.includes('role play') || lower.includes('role-play') || lower.includes('roleplay')) {
+    return { id: 'role-play', title: 'Role Play' };
   }
   if (
     lower === 'casual chat' ||
     lower === 'casual-chat' ||
-    lower.includes('casual chat') ||
-    lower.includes('everyday english') ||
-    lower.includes('chat practice')
+    lower.includes('casual') ||
+    lower.includes('everyday') ||
+    lower.includes('chat') ||
+    lower.includes('general') ||
+    lower.includes('speaking practice') ||
+    lower.includes('english practice')
   ) {
     return { id: 'casual-chat', title: 'Casual Chat' };
-  }
-  if (lower === 'role play' || lower === 'role-play') {
-    return { id: 'role-play', title: 'Role Play' };
   }
   return null;
 }
@@ -208,6 +211,7 @@ export default function DashboardScreen() {
   );
   const [createSessionVisible, setCreateSessionVisible] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<{ id: string; title: string } | null>(null);
+  const [isResumingSession, setIsResumingSession] = useState(false);
 
   const activeConversation = useActiveConversation();
 
@@ -262,22 +266,38 @@ export default function DashboardScreen() {
         if (latest) {
           const scenario = resolveScenarioFromTopic(latest.topic, latest.scenario_id || latest.scenarioId);
           if (scenario && !isRoadmapOrIntroTopic(latest.topic, scenario.title, scenario.id, null, latest.user_feedback)) {
+            const currentStore = ActiveConversationStore.getState();
+            const isSameOrNewerLocal =
+              currentStore &&
+              (currentStore.sessionId === latest.id ||
+                (currentStore.scenarioId === scenario.id && currentStore.summary));
             ActiveConversationStore.setActive({
               sessionId: latest.id,
               scenarioId: scenario.id,
               scenarioTitle: scenario.title,
-              topic: latest.topic || scenario.title,
-              summary: latest.user_feedback || null,
-              lastPracticedAt: latest.start_time || new Date().toISOString(),
-              durationSeconds: latest.duration_seconds,
+              topic: latest.topic || currentStore?.topic || scenario.title,
+              summary: latest.user_feedback || (isSameOrNewerLocal ? currentStore?.summary : undefined),
+              nextFollowup: isSameOrNewerLocal ? currentStore?.nextFollowup : undefined,
+              lastPracticedAt: latest.start_time || currentStore?.lastPracticedAt || new Date().toISOString(),
+              durationSeconds: latest.duration_seconds || currentStore?.durationSeconds,
             });
             return;
           }
         }
-        // If the user only has roadmap milestones, intro calls, or no recent dashboard sessions, keep clean "Start a conversation" hero banner
-        ActiveConversationStore.clear();
-      } else {
-        ActiveConversationStore.clear();
+        // Only clear if local store holds a roadmap/intro session; preserve valid local dashboard chat state
+        const currentStore = ActiveConversationStore.getState();
+        if (
+          currentStore &&
+          isRoadmapOrIntroTopic(
+            currentStore.topic,
+            currentStore.scenarioTitle,
+            currentStore.scenarioId,
+            (currentStore as any).roadmapLevelId,
+            currentStore.summary
+          )
+        ) {
+          ActiveConversationStore.clear();
+        }
       }
     });
     return () => {
@@ -285,11 +305,12 @@ export default function DashboardScreen() {
     };
   }, []);
 
-  const handleOpenCreateSession = (scenario?: { id: string; title: string }) => {
+  const handleOpenCreateSession = (scenario?: { id: string; title: string }, resuming: boolean = false) => {
     if (isSubscriptionLocked) {
       setActivePopup('reactivate-plan');
       return;
     }
+    setIsResumingSession(resuming);
     setSelectedScenario(scenario || null);
     setCreateSessionVisible(true);
   };
@@ -311,13 +332,33 @@ export default function DashboardScreen() {
       return;
     }
 
-    if (config.scenarioId && config.scenarioTitle) {
-      ActiveConversationStore.setActive({
-        scenarioId: config.scenarioId,
-        scenarioTitle: config.scenarioTitle,
-        topic: config.topic || config.scenarioTitle,
-      });
+    const effectiveScenarioId = config.scenarioId || activeConversation?.scenarioId || 'casual-chat';
+    const effectiveScenarioTitle = config.scenarioTitle || activeConversation?.scenarioTitle || 'Casual Chat';
+    const effectiveTopic = config.topic || effectiveScenarioTitle;
+
+    let resumeMemory: string | undefined = undefined;
+    if (isResumingSession && activeConversation) {
+      const parts: string[] = [];
+      if (activeConversation.summary) {
+        parts.push(`Previous ${activeConversation.scenarioTitle} session summary: "${activeConversation.summary}".`);
+      }
+      if (activeConversation.nextFollowup) {
+        parts.push(`Suggested follow-up topic to continue with: "${activeConversation.nextFollowup}".`);
+      } else if (activeConversation.topic) {
+        parts.push(`Previous topic practiced: "${activeConversation.topic}".`);
+      }
+      if (parts.length > 0) {
+        resumeMemory = parts.join(' ');
+      }
     }
+
+    ActiveConversationStore.setActive({
+      scenarioId: effectiveScenarioId,
+      scenarioTitle: effectiveScenarioTitle,
+      topic: effectiveTopic,
+      summary: isResumingSession ? activeConversation?.summary : undefined,
+      nextFollowup: isResumingSession ? activeConversation?.nextFollowup : undefined,
+    });
 
     CallSessionStore.startCall({
       durationSeconds: config.durationSeconds,
@@ -325,9 +366,10 @@ export default function DashboardScreen() {
       languageMode: config.languageMode,
       sinhalaStyle: config.sinhalaStyle || (config.languageMode === 'sinhala' ? 'balanced' : undefined),
       aiSuggestions: config.aiSuggestions,
-      topic: config.topic,
-      scenarioId: config.scenarioId || '',
-      scenarioTitle: config.scenarioTitle || '',
+      topic: effectiveTopic,
+      scenarioId: effectiveScenarioId,
+      scenarioTitle: effectiveScenarioTitle,
+      memory: resumeMemory,
       userName: user?.displayName || store.name || 'Learner',
     });
   };
@@ -345,7 +387,7 @@ export default function DashboardScreen() {
       }
       return;
     }
-    handleOpenCreateSession();
+    handleOpenCreateSession({ id: 'casual-chat', title: 'Casual Chat' }, false);
   };
 
   const handleResumeTalking = () => {
@@ -362,10 +404,13 @@ export default function DashboardScreen() {
       return;
     }
     if (activeConversation) {
-      handleOpenCreateSession({
-        id: activeConversation.scenarioId,
-        title: activeConversation.scenarioTitle,
-      });
+      handleOpenCreateSession(
+        {
+          id: activeConversation.scenarioId || 'casual-chat',
+          title: activeConversation.scenarioTitle || 'Casual Chat',
+        },
+        true
+      );
     } else {
       handleStartTalking();
     }
@@ -954,6 +999,11 @@ export default function DashboardScreen() {
           onStartSession={handleStartSession}
           scenarioId={selectedScenario?.id}
           scenarioTitle={selectedScenario?.title}
+          initialTopic={
+            isResumingSession && activeConversation
+              ? activeConversation.nextFollowup || activeConversation.topic || activeConversation.scenarioTitle
+              : undefined
+          }
           isPro={isPro}
           planTier={stats.planTier}
           onUpgradePrompt={() => {

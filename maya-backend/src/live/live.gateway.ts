@@ -1150,9 +1150,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }));
       }
 
-      // Dispatch opening turn greeting prompt if no prior conversation turns exist (including early reconnects before any turn completed)
-      const hasExistingConversation = Boolean(dto.memory && dto.memory.trim().length > 0);
-      if (!hasExistingConversation && greetingPrompt && !state.hasDispatchedGreeting) {
+      // Dispatch opening turn greeting prompt if no prior in-call turns exist (only skip if this is a mid-call socket reconnect with existing turns)
+      const hasExistingInCallTurns = Boolean(dto.isReconnect && dto.memory && dto.memory.trim().length > 0);
+      if (!hasExistingInCallTurns && greetingPrompt && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         state.isGreetingInProgress = true;
         state.greetingAudioChunksReceived = 0;
@@ -1251,7 +1251,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             }
           }, 8000);
         }, 160);
-      } else if (hasExistingConversation && !state.hasDispatchedGreeting) {
+      } else if (hasExistingInCallTurns && !state.hasDispatchedGreeting) {
         state.hasDispatchedGreeting = true;
         state.isGreetingInProgress = false;
         this.logger.log(`[${state.sessionId}] Reconnected session / existing memory present -> skipping opening greeting prompt`);

@@ -323,36 +323,45 @@ export default function AnalyzingScreen() {
           Boolean((report as any)?.callParams?.levelNumber) ||
           Boolean(params.roadmapLevelId) ||
           Boolean(params.levelNumber) ||
-          Boolean((report as any)?.levelTitle) ||
-          Boolean(params.levelTitle) ||
           Boolean((report as any)?.isScenarioMode) ||
           Boolean((report as any)?.callParams?.isScenarioMode) ||
           isRoadmapOrIntroTopic(
             report?.topic || (report as any)?.levelTitle || (params.levelTitle as string),
-            (report as any)?.scenarioTitle,
-            (report as any)?.scenarioId,
+            (report as any)?.scenarioTitle || (report as any)?.callParams?.scenarioTitle,
+            (report as any)?.scenarioId || (report as any)?.callParams?.scenarioId,
             (report as any)?.roadmapLevelId || (report as any)?.callParams?.roadmapLevelId || (params.roadmapLevelId as string),
             (report as any)?.feedbackEnglish || (report as any)?.passReason
           );
 
         if (res.ok) {
           const data = await res.json();
+          const resolvedScenarioId =
+            data?.scenarioId ||
+            (report as any)?.scenarioId ||
+            (report as any)?.callParams?.scenarioId ||
+            'casual-chat';
+          const resolvedScenarioTitle =
+            data?.scenarioTitle ||
+            (report as any)?.scenarioTitle ||
+            (report as any)?.callParams?.scenarioTitle ||
+            report?.topic ||
+            'Casual Chat';
           const summaryIsRoadmap = isRoadmapOrIntroTopic(
-            data?.scenarioTitle || report?.topic,
-            data?.scenarioTitle,
-            data?.scenarioId,
+            report?.topic || resolvedScenarioTitle,
+            resolvedScenarioTitle,
+            resolvedScenarioId,
             null,
             data?.conversationSummary
           );
 
-          if (!isIntro && !isRoadmap && !summaryIsRoadmap && (data?.conversationSummary || data?.scenarioTitle)) {
+          if (!isIntro && !isRoadmap && !summaryIsRoadmap) {
             ActiveConversationStore.setActive({
               sessionId: activeSessionId,
-              scenarioId: data.scenarioId || (report as any)?.scenarioId || 'casual-chat',
-              scenarioTitle: data.scenarioTitle || (report as any)?.scenarioTitle || report?.topic || 'Casual Chat',
-              topic: report?.topic || data.scenarioTitle || 'Everyday English',
-              summary: data.conversationSummary,
-              nextFollowup: data.nextFollowupTopic,
+              scenarioId: resolvedScenarioId,
+              scenarioTitle: resolvedScenarioTitle,
+              topic: report?.topic || resolvedScenarioTitle || 'Everyday English',
+              summary: data?.conversationSummary || undefined,
+              nextFollowup: data?.nextFollowupTopic || undefined,
               lastPracticedAt: new Date().toISOString(),
               durationSeconds: report?.durationSeconds,
             });

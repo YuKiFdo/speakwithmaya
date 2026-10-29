@@ -33,6 +33,15 @@ function notify() {
   }
 }
 
+const DASHBOARD_SCENARIO_IDS = new Set([
+  'casual-chat',
+  'workplace',
+  'travel-english',
+  'role-play',
+  'job-interview',
+  'ielts-speaking',
+]);
+
 export function isRoadmapOrIntroTopic(
   topic?: string | null,
   scenarioTitle?: string | null,
@@ -44,64 +53,63 @@ export function isRoadmapOrIntroTopic(
   if (
     scenarioId &&
     (scenarioId.startsWith('lvl-') ||
-      scenarioId === 'general-practice' ||
       scenarioId.includes('roadmap') ||
-      scenarioId.includes('mission'))
+      scenarioId.includes('mission') ||
+      scenarioId.includes('intro'))
   ) {
     return true;
   }
 
-  const t = [topic, scenarioTitle, scenarioId, summary]
+  const metaText = [topic, scenarioTitle, scenarioId]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
 
-  if (!t) return false;
+  const fullText = [metaText, summary]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (!fullText) return false;
+
+  // Check topic / scenarioTitle / scenarioId for intro or roadmap markers
+  if (
+    metaText.includes('intro call') ||
+    metaText.includes('introductory') ||
+    metaText === 'intro' ||
+    metaText.includes('onboarding') ||
+    metaText.includes('assessment') ||
+    metaText.includes('placement') ||
+    metaText.includes('free trial') ||
+    metaText.includes('diagnostic') ||
+    metaText.includes('roadmap') ||
+    metaText.includes('milestone') ||
+    metaText.includes('lvl-') ||
+    /\blevel\s*\d+/i.test(metaText) ||
+    metaText.includes('week review')
+  ) {
+    return true;
+  }
+
+  // If this session explicitly belongs to one of the 6 dashboard scenarios, do not false-positive on its summary
+  if (scenarioId && DASHBOARD_SCENARIO_IDS.has(scenarioId) && !metaText.includes('room mix')) {
+    return false;
+  }
 
   return (
-    // Intro & onboarding
-    t.includes('intro') ||
-    t.includes('onboarding') ||
-    t.includes('assessment') ||
-    t.includes('placement') ||
-    t.includes('free trial') ||
-    t.includes('diagnostic') ||
-    // Roadmap metadata
-    t.includes('roadmap') ||
-    t.includes('level') ||
-    t.includes('milestone') ||
-    t.includes('lvl-') ||
-    t.includes('mission') ||
-    t.includes('lesson') ||
-    // Curriculum topics & scenarios (e.g. Level 1: Room Mix-Up at the Hotel)
-    t.includes('hospitality') ||
-    t.includes('conflict') ||
-    t.includes('mix-up') ||
-    t.includes('mix up') ||
-    t.includes('room mix') ||
-    t.includes('hotel') ||
-    t.includes('suite') ||
-    t.includes('ocean-view') ||
-    t.includes('ocean view') ||
-    t.includes('receptionist') ||
-    t.includes('front desk') ||
-    t.includes('hotel guest') ||
-    t.includes('spa credit') ||
-    t.includes('garden room') ||
-    t.includes('garden suite') ||
-    t.includes('reservation') ||
-    // Other known curriculum roleplays
-    t.includes('crying friend') ||
-    t.includes('scholarship') ||
-    t.includes('strict interview') ||
-    t.includes('engineering director') ||
-    t.includes('bank account balance') ||
-    t.includes('customer service') ||
-    // Roleplay markers from scenario engine
-    t.includes('roleplay scenario') ||
-    t.includes('role play scenario') ||
-    t.includes('role play practice') ||
-    t.includes('roleplay practice')
+    // Specific roadmap curriculum scenario signatures (e.g. Level 1: Room Mix-Up at the Hotel)
+    fullText.includes('hospitality & conflict') ||
+    fullText.includes('room mix-up') ||
+    fullText.includes('room mix up') ||
+    fullText.includes('ocean-view suite') ||
+    fullText.includes('ocean view suite') ||
+    fullText.includes('garden room') ||
+    fullText.includes('garden suite') ||
+    fullText.includes('spa credit') ||
+    fullText.includes('crying friend') ||
+    fullText.includes('strict interview') ||
+    fullText.includes('engineering director') ||
+    fullText.includes('bank account balance')
   );
 }
 
