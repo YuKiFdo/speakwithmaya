@@ -6,9 +6,9 @@ from google import genai
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-key = os.getenv('GEMINI_API_KEY')
+key = os.getenv('GEMINI_TTS_API_KEY') or os.getenv('GEMINI_API_KEY')
 if not key:
-    print("Please set GEMINI_API_KEY")
+    print("Please set GEMINI_TTS_API_KEY or GEMINI_API_KEY")
     sys.exit(1)
 client = genai.Client(api_key=key)
 out_dir = r"d:\outsource\Maya Ai\maya-frontend\assets\sounds"

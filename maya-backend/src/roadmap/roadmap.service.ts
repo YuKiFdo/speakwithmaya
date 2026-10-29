@@ -1348,12 +1348,13 @@ Core Conversation Rules:
       }
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = (process.env.GEMINI_TTS_API_KEY || process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) {
-      throw new Error('GEMINI_API_KEY is not configured for TTS generation');
+      throw new Error('GEMINI_TTS_API_KEY (or GEMINI_API_KEY) is not configured for TTS generation');
     }
 
-    this.logger.log(`[TTS Synthesis] Requesting Gemini TTS for voice=${voice}, lang=${language} (text len=${cleanText.length})...`);
+    const keySource = process.env.GEMINI_TTS_API_KEY?.trim() ? 'GEMINI_TTS_API_KEY' : 'GEMINI_API_KEY';
+    this.logger.log(`[TTS Synthesis] Requesting Gemini TTS (${keySource}) for voice=${voice}, lang=${language} (text len=${cleanText.length})...`);
     const ai = new GoogleGenAI({ apiKey });
     const interaction: any = await (ai as any).interactions.create({
       model: 'gemini-3.8-flash-lite-tts',

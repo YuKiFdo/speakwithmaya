@@ -10,13 +10,19 @@ env_file = os.path.join(os.path.dirname(__file__), ".env")
 api_key = None
 if os.path.exists(env_file):
     with open(env_file, "r") as f:
-        for line in f:
-            if line.startswith("GEMINI_API_KEY="):
-                api_key = line.strip().split("=", 1)[1]
+        lines = [line.strip() for line in f]
+        for line in lines:
+            if line.startswith("GEMINI_TTS_API_KEY=") and line.split("=", 1)[1].strip():
+                api_key = line.split("=", 1)[1].strip()
                 break
+        if not api_key:
+            for line in lines:
+                if line.startswith("GEMINI_API_KEY=") and line.split("=", 1)[1].strip():
+                    api_key = line.split("=", 1)[1].strip()
+                    break
 
 if not api_key:
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("GEMINI_TTS_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
 client = genai.Client(api_key=api_key)
 out_dir = r"d:\outsource\Maya Ai\maya-frontend\assets\sounds"
