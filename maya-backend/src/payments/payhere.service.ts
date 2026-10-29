@@ -114,38 +114,6 @@ export class PayHereService {
         );
       }
 
-      // Preserve Telco subscription history in sys_user_profile_extras so Admin Subscriptions retains
-      // the exact days and revenue accrued on Telco before upgrading to a paid Card plan.
-      try {
-        const { data: extrasRow } = await this.supabase
-          .from('roadmap_levels')
-          .select('canonical_content')
-          .eq('id', 'sys_user_profile_extras')
-          .maybeSingle();
-        const extrasMap = extrasRow?.canonical_content ? JSON.parse(extrasRow.canonical_content) : {};
-        const existingExtra = extrasMap[userId] || {};
-        extrasMap[userId] = {
-          ...existingExtra,
-          telcoProvider: provider,
-          telcoSubscriberId: subscriberId || existingExtra.telcoSubscriberId || null,
-          telcoSubscribedAt: existingExtra.telcoSubscribedAt || profile.created_at || nowIso,
-          telcoStatus: 'UPGRADED',
-          telcoEndedAt: existingExtra.telcoEndedAt || nowIso,
-          telcoUpgradedToTier: newPlanTier,
-          telcoEndReason: `Upgraded to ${newPlanTier.toUpperCase()} Card Plan`,
-        };
-        await this.supabase.from('roadmap_levels').upsert({
-          id: 'sys_user_profile_extras',
-          level_number: 9998,
-          title: 'USER_PROFILE_EXTRAS',
-          is_published: false,
-          canonical_content: JSON.stringify(extrasMap),
-          updated_at: nowIso,
-        });
-      } catch (extraErr: any) {
-        this.logger.warn(`[TelcoAutoUnsub] Could not record telco upgrade history: ${extraErr?.message}`);
-      }
-
       // Clear active telco_subscriber_id on profile so mobile billing is detached, while keeping telco_provider
       await this.supabase
         .from('profiles')
@@ -1480,33 +1448,6 @@ export class PayHereService {
         })
         .eq('id', telcoUserId);
 
-      try {
-        const { data: extrasRow } = await this.supabase
-          .from('roadmap_levels')
-          .select('canonical_content')
-          .eq('id', 'sys_user_profile_extras')
-          .maybeSingle();
-        const extrasMap = extrasRow?.canonical_content ? JSON.parse(extrasRow.canonical_content) : {};
-        const existingExtra = extrasMap[telcoUserId] || {};
-        extrasMap[telcoUserId] = {
-          ...existingExtra,
-          telcoProvider: profile.telco_provider || existingExtra.telcoProvider || 'ideamart',
-          telcoSubscriberId: profile.telco_subscriber_id || existingExtra.telcoSubscriberId || null,
-          telcoSubscribedAt: existingExtra.telcoSubscribedAt || profile.created_at || nowIso,
-          telcoStatus: 'CANCELLED',
-          telcoEndedAt: nowIso,
-          telcoEndReason: 'Cancelled by Admin',
-        };
-        await this.supabase.from('roadmap_levels').upsert({
-          id: 'sys_user_profile_extras',
-          level_number: 9998,
-          title: 'USER_PROFILE_EXTRAS',
-          is_published: false,
-          canonical_content: JSON.stringify(extrasMap),
-          updated_at: nowIso,
-        });
-      } catch {}
-
       return { success: true, msg: 'Telco carrier subscription stopped and marked cancelled.' };
     }
 
@@ -2082,7 +2023,6 @@ export class PayHereService {
       { data: profiles },
       { data: telcoVerifs },
       { data: appSettingsRow },
-      { data: extrasRow },
     ] = await Promise.all([
       this.supabase
         .from('subscriptions')
@@ -2113,11 +2053,6 @@ export class PayHereService {
         .select('canonical_content')
         .eq('id', 'sys_app_settings')
         .maybeSingle(),
-      this.supabase
-        .from('roadmap_levels')
-        .select('canonical_content')
-        .eq('id', 'sys_user_profile_extras')
-        .maybeSingle(),
     ]);
 
     if (subErr) {
@@ -2129,13 +2064,6 @@ export class PayHereService {
     if (appSettingsRow?.canonical_content) {
       try {
         appConfig = JSON.parse(appSettingsRow.canonical_content);
-      } catch {}
-    }
-
-    let extrasMap: Record<string, any> = {};
-    if (extrasRow?.canonical_content) {
-      try {
-        extrasMap = JSON.parse(extrasRow.canonical_content);
       } catch {}
     }
 
@@ -2198,13 +2126,10 @@ export class PayHereService {
         continue; // Skip admin test accounts
       }
 
-      const extra = extrasMap[prof.id] || {};
       const verif = digits ? telcoVerifByDigits.get(digits) : undefined;
       const hasExplicitTelco = Boolean(
         prof.telco_subscriber_id ||
           prof.telco_provider ||
-          extra.telcoSubscriberId ||
-          extra.telcoProvider ||
           verif,
       );
       const isImplicitTelcoDailyStarter =
@@ -2219,19 +2144,17 @@ export class PayHereService {
       const prefix = digits.startsWith('94') ? digits.slice(2, 4) : digits.slice(0, 2);
       const detectedProvider: 'ideamart' | 'mspace' =
         prof.telco_provider ||
-        extra.telcoProvider ||
         verif?.provider ||
         (prefix === '70' || prefix === '71' ? 'mspace' : 'ideamart');
 
       const operatorName = this.getTelcoOperatorLabel(prof.phone_number, detectedProvider);
-      const rawSubId = prof.telco_subscriber_id || extra.telcoSubscriberId || verif?.referenceNo || `tel:${digits}`;
+      const rawSubId = prof.telco_subscriber_id || verif?.referenceNo || `tel:${digits}`;
       const maskedSubId =
         rawSubId && rawSubId.length > 10 && !rawSubId.startsWith('tel:')
           ? `${rawSubId.slice(0, 6)}···${rawSubId.slice(-4)}`
           : prof.phone_number || 'Mobile Carrier';
 
       const subscribedAt =
-        extra.telcoSubscribedAt ||
         verif?.verifiedAt ||
         prof.created_at ||
         new Date().toISOString();
@@ -2239,14 +2162,12 @@ export class PayHereService {
       const userCardSub = cardSubByUser.get(prof.id);
       const hasUpgradedToCard =
         Boolean(userCardSub && (userCardSub.status === 'ACTIVE' || userCardSub.status === 'PAST_DUE')) ||
-        (prof.plan_tier && prof.plan_tier !== 'starter') ||
-        extra.telcoStatus === 'UPGRADED';
+        (prof.plan_tier && prof.plan_tier !== 'starter');
 
       const isCancelled =
         !hasUpgradedToCard &&
         (prof.plan_status === 'canceled' ||
-          prof.plan_status === 'expired' ||
-          extra.telcoStatus === 'CANCELLED');
+          prof.plan_status === 'expired');
 
       let status: 'ACTIVE' | 'UPGRADED' | 'CANCELLED' = 'ACTIVE';
       let endedAt: string | null = null;
@@ -2257,19 +2178,16 @@ export class PayHereService {
         status = 'UPGRADED';
         upgradedToTier =
           userCardSub?.plan_tier ||
-          (prof.plan_tier !== 'starter' ? prof.plan_tier : extra.telcoUpgradedToTier || 'pro');
+          (prof.plan_tier !== 'starter' ? prof.plan_tier : 'pro');
         endedAt =
-          extra.telcoEndedAt ||
           userCardSub?.created_at ||
           prof.updated_at ||
           new Date().toISOString();
-        endReason =
-          extra.telcoEndReason ||
-          `Switched to ${String(upgradedToTier).toUpperCase()} Card Plan (Daily Telco Stopped)`;
+        endReason = `Switched to ${String(upgradedToTier).toUpperCase()} Card Plan (Daily Telco Stopped)`;
       } else if (isCancelled) {
         status = 'CANCELLED';
-        endedAt = extra.telcoEndedAt || prof.updated_at || new Date().toISOString();
-        endReason = extra.telcoEndReason || 'Unsubscribed from carrier billing';
+        endedAt = prof.updated_at || new Date().toISOString();
+        endReason = 'Unsubscribed from carrier billing';
       }
 
       const { activeDays, totalRevenueLkr, currentAppliedRateLkr } = this.calculateTelcoRevenue(

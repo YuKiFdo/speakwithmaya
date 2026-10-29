@@ -384,7 +384,7 @@ export class RoadmapService implements OnModuleInit {
       let query = this.supabase
         .from('roadmap_levels')
         .select('*')
-        .neq('id', 'sys_app_settings')
+        .not('id', 'like', 'sys_%')
         .order('level_number', { ascending: true });
 
       if (!adminView) {
@@ -909,7 +909,6 @@ INSTRUCTIONS:
         profilesRes,
         { data: progressRows },
         { data: sessionRows },
-        { data: extrasRow },
       ] = await Promise.all([
         sb.from('profiles').select('*'),
         sb
@@ -918,19 +917,7 @@ INSTRUCTIONS:
         sb
           .from('sessions')
           .select('user_id, duration_seconds, status, roadmap_level_id, created_at'),
-        sb
-          .from('roadmap_levels')
-          .select('canonical_content')
-          .eq('id', 'sys_user_profile_extras')
-          .maybeSingle(),
       ]);
-
-      let extrasMap: Record<string, { email?: string; avatarUrl?: string | null }> = {};
-      if (extrasRow?.canonical_content) {
-        try {
-          extrasMap = JSON.parse(extrasRow.canonical_content) || {};
-        } catch {}
-      }
 
       const allProfiles = Array.isArray(profilesRes.data) ? profilesRes.data : [];
 
@@ -1008,8 +995,7 @@ INSTRUCTIONS:
         const compositeScore = periodXp + minutesConsumed * 10;
         const displayXp = periodXp + minutesConsumed * 10;
         const levelNumber = Math.max(1, Math.floor(Math.max(allTimeXp, periodXp) / 500) + 1);
-        const extra = extrasMap[p.id] || {};
-        const avatarUrl = (p as any).avatar_url || extra.avatarUrl || null;
+        const avatarUrl = (p as any).avatar_url || null;
         const rawName = (p.display_name || '').trim();
         const fallbackPhone = p.phone_number
           ? `Learner ••${String(p.phone_number).slice(-4)}`

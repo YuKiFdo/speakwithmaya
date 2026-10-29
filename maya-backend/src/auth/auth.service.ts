@@ -614,18 +614,6 @@ export class AuthService {
       userProfile.telco_subscriber_id = rawSubscriberId;
       userProfile.telco_status = 'ACTIVE';
       userProfile.plan_status = 'active';
-
-      const extras = await this.getProfileExtrasMap();
-      const existingExtra = extras[userProfile.id] || {};
-      await this.saveProfileExtraForUser(userProfile.id, {
-        telcoProvider: telcoProvider || 'ideamart',
-        telcoSubscriberId: rawSubscriberId,
-        telcoSubscribedAt: existingExtra.telcoSubscribedAt || new Date().toISOString(),
-        telcoStatus: 'ACTIVE',
-        telcoEndedAt: null,
-        telcoUpgradedToTier: null,
-        telcoEndReason: null,
-      });
     }
 
     // 7. Generate bearer access token
@@ -1227,78 +1215,6 @@ export class AuthService {
   }
 
   /**
-   * Persists extra profile fields (email, avatarUrl) in Supabase `roadmap_levels`
-   * (`id = 'sys_user_profile_extras'`) so they are guaranteed to be stored in the DB
-   * even before migration 013 (`email`, `avatar_url` columns on `profiles`) is run.
-   */
-  private async getProfileExtrasMap(): Promise<
-    Record<
-      string,
-      {
-        email?: string;
-        avatarUrl?: string | null;
-        telcoProvider?: 'ideamart' | 'mspace' | null;
-        telcoSubscriberId?: string | null;
-        telcoSubscribedAt?: string | null;
-        telcoStatus?: 'ACTIVE' | 'CANCELLED' | 'UPGRADED' | null;
-        telcoEndedAt?: string | null;
-        telcoUpgradedToTier?: string | null;
-        telcoEndReason?: string | null;
-      }
-    >
-  > {
-    try {
-      const { data } = await this.supabase
-        .from('roadmap_levels')
-        .select('canonical_content')
-        .eq('id', 'sys_user_profile_extras')
-        .maybeSingle();
-      if (data?.canonical_content) {
-        const parsed = JSON.parse(data.canonical_content);
-        if (parsed && typeof parsed === 'object') return parsed;
-      }
-    } catch {}
-    return {};
-  }
-
-  private async saveProfileExtraForUser(
-    userId: string,
-    extra: {
-      email?: string;
-      avatarUrl?: string | null;
-      telcoProvider?: 'ideamart' | 'mspace' | null;
-      telcoSubscriberId?: string | null;
-      telcoSubscribedAt?: string | null;
-      telcoStatus?: 'ACTIVE' | 'CANCELLED' | 'UPGRADED' | null;
-      telcoEndedAt?: string | null;
-      telcoUpgradedToTier?: string | null;
-      telcoEndReason?: string | null;
-    },
-  ): Promise<void> {
-    try {
-      const map = await this.getProfileExtrasMap();
-      const existing = map[userId] || {};
-      const nextEntry: Record<string, any> = { ...existing };
-      for (const [k, v] of Object.entries(extra)) {
-        if (v !== undefined) {
-          nextEntry[k] = v;
-        }
-      }
-      map[userId] = nextEntry;
-      await this.supabase.from('roadmap_levels').upsert({
-        id: 'sys_user_profile_extras',
-        level_number: 9998,
-        title: 'USER_PROFILE_EXTRAS',
-        is_published: false,
-        canonical_content: JSON.stringify(map),
-        updated_at: new Date().toISOString(),
-      });
-    } catch (err: any) {
-      this.logger.warn(`Could not persist profile extra in sys_user_profile_extras: ${err?.message}`);
-    }
-  }
-
-  /**
    * Persists onboarding choices directly into public.profiles in Supabase.
    */
   async savePreferences(userId: string, dto: SavePreferencesDto) {
@@ -1325,14 +1241,6 @@ export class AuthService {
         updates.baseline_grammar_score = dto.baselineScores.grammar || dto.baselineScores.overall;
         updates.baseline_pronunciation_score = dto.baselineScores.pronunciation || dto.baselineScores.overall;
       }
-    }
-
-    // Persist email & avatarUrl in DB extras store and attempt direct column update on profiles
-    if (dto.email !== undefined || dto.avatarUrl !== undefined) {
-      await this.saveProfileExtraForUser(userId, {
-        ...(dto.email !== undefined ? { email: dto.email.trim() } : {}),
-        ...(dto.avatarUrl !== undefined ? { avatarUrl: dto.avatarUrl } : {}),
-      });
     }
 
     const updatesWithCols = {
@@ -1537,20 +1445,6 @@ export class AuthService {
     profile.is_grace_period_active = isGracePeriodActive;
     profile.grace_period_end = gracePeriodEnd;
 
-    // Merge email and avatar_url from DB extras if not already on profile row
-    if (!(profile as any).email || !(profile as any).avatar_url) {
-      const extrasMap = await this.getProfileExtrasMap();
-      const userExtra = extrasMap[userId];
-      if (userExtra) {
-        if (!(profile as any).email && userExtra.email) {
-          (profile as any).email = userExtra.email;
-        }
-        if (!(profile as any).avatar_url && userExtra.avatarUrl) {
-          (profile as any).avatar_url = userExtra.avatarUrl;
-        }
-      }
-    }
-
     return profile;
   }
 
@@ -1583,14 +1477,6 @@ export class AuthService {
       })
       .eq('id', userId);
 
-    await this.saveProfileExtraForUser(userId, {
-      telcoProvider: (profile.telco_provider as any) || this.telcoService.detectProvider(profile.phone_number),
-      telcoSubscriberId: profile.telco_subscriber_id,
-      telcoStatus: 'CANCELLED',
-      telcoEndedAt: nowIso,
-      telcoEndReason: 'Unsubscribed by user',
-    });
-
     return {
       success: true,
       message: 'Your mobile airtime subscription has been cancelled.',
@@ -1617,12 +1503,6 @@ export class AuthService {
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId);
-
-      await this.saveProfileExtraForUser(userId, {
-        telcoStatus: 'ACTIVE',
-        telcoEndedAt: null,
-        telcoEndReason: null,
-      });
 
       return {
         success: true,
@@ -1879,8 +1759,7 @@ export class AuthService {
       }
 
       const allProfiles = (profiles || []) as UserProfileData[];
-      const [extrasMap, registeredTestAccounts, appConfig] = await Promise.all([
-        this.getProfileExtrasMap(),
+      const [registeredTestAccounts, appConfig] = await Promise.all([
         this.getTestAccounts().catch(() => [] as TestAccountItem[]),
         this.getAppConfig(),
       ]);
@@ -2001,9 +1880,8 @@ export class AuthService {
           : (p.baseline_fluency_score || 0);
 
         const lastSession = userSessions[0];
-        const extra = extrasMap[p.id] || {};
-        const email = (p as any).email || extra.email || null;
-        const avatarUrl = (p as any).avatar_url || extra.avatarUrl || null;
+        const email = (p as any).email || null;
+        const avatarUrl = (p as any).avatar_url || null;
         const isTestAccount = isTestProfile(p);
 
         // Determine active subscription state for non-test accounts
@@ -2025,8 +1903,6 @@ export class AuthService {
         const hasExplicitTelco = Boolean(
           p.telco_subscriber_id ||
             p.telco_provider ||
-            extra.telcoSubscriberId ||
-            extra.telcoProvider ||
             verif,
         );
         const isImplicitTelcoDailyStarter =
@@ -2036,20 +1912,17 @@ export class AuthService {
         const isTelcoCancelledOrUpgraded =
           hasActivePayhereSub ||
           p.plan_status === 'canceled' ||
-          p.plan_status === 'expired' ||
-          extra.telcoStatus === 'CANCELLED' ||
-          extra.telcoStatus === 'UPGRADED';
+          p.plan_status === 'expired';
 
         const hasActiveTelcoSub =
           !isTestAccount &&
           Boolean(
             ((hasExplicitTelco || isImplicitTelcoDailyStarter) && !isTelcoCancelledOrUpgraded) ||
-              (p.telco_subscriber_id && extra.telcoStatus !== 'CANCELLED'),
+              (p.telco_subscriber_id && p.plan_status !== 'canceled' && p.plan_status !== 'expired'),
           );
 
         const detectedProvider: 'ideamart' | 'mspace' =
           (p.telco_provider as any) ||
-          extra.telcoProvider ||
           verif?.provider ||
           this.telcoService.detectProvider(p.phone_number);
         const telcoOperatorName =
@@ -2293,13 +2166,11 @@ export class AuthService {
       const totalCostUsd = (ledger || []).reduce((acc: number, l: any) => acc + Number(l.cost_usd || 0), 0);
       const totalPracticeSeconds = (sessions || []).reduce((acc: number, s: any) => acc + (s.duration_seconds || 0), 0);
 
-      const extrasMap = await this.getProfileExtrasMap();
-      const extra = extrasMap[userId] || {};
       const enrichedProfile = {
         ...profile,
-        email: (profile as any).email || extra.email || null,
-        avatar_url: (profile as any).avatar_url || extra.avatarUrl || null,
-        avatarUrl: (profile as any).avatar_url || extra.avatarUrl || null,
+        email: (profile as any).email || null,
+        avatar_url: (profile as any).avatar_url || null,
+        avatarUrl: (profile as any).avatar_url || null,
       };
 
       return {
@@ -2351,64 +2222,6 @@ export class AuthService {
     if (dto.baselineFluencyScore !== undefined) updates.baseline_fluency_score = dto.baselineFluencyScore;
     if (dto.baselineGrammarScore !== undefined) updates.baseline_grammar_score = dto.baselineGrammarScore;
     if (dto.baselinePronunciationScore !== undefined) updates.baseline_pronunciation_score = dto.baselinePronunciationScore;
-
-    if (dto.email !== undefined || dto.avatarUrl !== undefined || dto.planTier !== undefined || dto.planStatus !== undefined) {
-      const extrasMap = await this.getProfileExtrasMap();
-      const existingExtra = extrasMap[userId] || {};
-      const { data: currentProf } = await this.supabase
-        .from('profiles')
-        .select('telco_provider, telco_subscriber_id, plan_tier, plan_status, created_at')
-        .eq('id', userId)
-        .maybeSingle();
-
-      const hadTelco = Boolean(
-        currentProf?.telco_subscriber_id ||
-          currentProf?.telco_provider ||
-          existingExtra.telcoSubscriberId ||
-          existingExtra.telcoProvider,
-      );
-
-      let telcoPatch: Record<string, any> = {};
-      if (hadTelco) {
-        const nowIso = new Date().toISOString();
-        const targetTier = dto.planTier ?? currentProf?.plan_tier ?? 'starter';
-        const targetStatus = dto.planStatus ?? currentProf?.plan_status ?? 'active';
-
-        if (targetTier !== 'starter') {
-          telcoPatch = {
-            telcoProvider: currentProf?.telco_provider || existingExtra.telcoProvider || 'ideamart',
-            telcoSubscriberId: currentProf?.telco_subscriber_id || existingExtra.telcoSubscriberId || null,
-            telcoSubscribedAt: existingExtra.telcoSubscribedAt || currentProf?.created_at || nowIso,
-            telcoStatus: 'UPGRADED',
-            telcoEndedAt: existingExtra.telcoEndedAt || nowIso,
-            telcoUpgradedToTier: targetTier,
-            telcoEndReason: `Changed to ${targetTier.toUpperCase()} Plan`,
-          };
-        } else if (targetStatus === 'canceled' || targetStatus === 'expired') {
-          telcoPatch = {
-            telcoProvider: currentProf?.telco_provider || existingExtra.telcoProvider || 'ideamart',
-            telcoSubscriberId: currentProf?.telco_subscriber_id || existingExtra.telcoSubscriberId || null,
-            telcoSubscribedAt: existingExtra.telcoSubscribedAt || currentProf?.created_at || nowIso,
-            telcoStatus: 'CANCELLED',
-            telcoEndedAt: existingExtra.telcoEndedAt || nowIso,
-            telcoEndReason: 'Cancelled by Admin',
-          };
-        } else if (targetTier === 'starter' && targetStatus === 'active') {
-          telcoPatch = {
-            telcoStatus: 'ACTIVE',
-            telcoEndedAt: null,
-            telcoUpgradedToTier: null,
-            telcoEndReason: null,
-          };
-        }
-      }
-
-      await this.saveProfileExtraForUser(userId, {
-        ...(dto.email !== undefined ? { email: dto.email.trim() } : {}),
-        ...(dto.avatarUrl !== undefined ? { avatarUrl: dto.avatarUrl } : {}),
-        ...telcoPatch,
-      });
-    }
 
     const updatesWithCols = {
       ...updates,
@@ -2806,19 +2619,14 @@ export class AuthService {
     // 2. For real (non-test) accounts, automatically unsubscribe active Telco & PayHere subscriptions
     if (!isTestAccount) {
       try {
-        const extrasMap = await this.getProfileExtrasMap();
-        const extra = extrasMap[userId] || {};
-
         // 2a. Auto-unsubscribe Starter Telco subscription if present
-        const subscriberId = profile.telco_subscriber_id || extra.telcoSubscriberId;
+        const subscriberId = profile.telco_subscriber_id;
         const provider = ((profile.telco_provider as any) ||
-          extra.telcoProvider ||
           this.telcoService.detectProvider(profile.phone_number)) as 'ideamart' | 'mspace';
         const isTelcoAlreadyCancelled =
-          extra.telcoStatus === 'CANCELLED' ||
-          (profile.plan_tier === 'starter' &&
-            (profile.plan_status === 'canceled' || profile.plan_status === 'expired') &&
-            !profile.telco_subscriber_id);
+          profile.plan_tier === 'starter' &&
+          (profile.plan_status === 'canceled' || profile.plan_status === 'expired') &&
+          !profile.telco_subscriber_id;
 
         if (subscriberId && !isTelcoAlreadyCancelled && this.telcoService) {
           try {
@@ -2876,19 +2684,6 @@ export class AuthService {
         ) {
           unsubscribedPayhere = true;
           cancelledPayhereTier = profile.plan_tier;
-        }
-
-        // Clean up user entry from sys_user_profile_extras
-        if (extrasMap[userId]) {
-          delete extrasMap[userId];
-          await this.supabase.from('roadmap_levels').upsert({
-            id: 'sys_user_profile_extras',
-            level_number: 9998,
-            title: 'USER_PROFILE_EXTRAS',
-            is_published: false,
-            canonical_content: JSON.stringify(extrasMap),
-            updated_at: new Date().toISOString(),
-          });
         }
       } catch (subCleanupErr: any) {
         this.logger.warn(
@@ -3012,40 +2807,7 @@ export class AuthService {
   }
 
   /**
-   * Internal helper: Reads stored complaints list from `roadmap_levels` (`id = 'sys_user_complaints'`)
-   */
-  private async getStoredComplaintsList(): Promise<any[]> {
-    try {
-      const { data } = await this.supabase
-        .from('roadmap_levels')
-        .select('canonical_content')
-        .eq('id', 'sys_user_complaints')
-        .maybeSingle();
-      if (data?.canonical_content) {
-        const parsed = JSON.parse(data.canonical_content);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {}
-    return [];
-  }
-
-  private async saveStoredComplaintsList(list: any[]): Promise<void> {
-    try {
-      await this.supabase.from('roadmap_levels').upsert({
-        id: 'sys_user_complaints',
-        level_number: 9997,
-        title: 'USER_COMPLAINTS',
-        is_published: false,
-        canonical_content: JSON.stringify(list),
-        updated_at: new Date().toISOString(),
-      });
-    } catch (err: any) {
-      this.logger.warn(`Could not persist complaints in sys_user_complaints: ${err?.message}`);
-    }
-  }
-
-  /**
-   * Student: Submit a complaint or feedback item
+   * Student: Submit a complaint or feedback item (stored in `public.user_complaints`)
    */
   async submitComplaint(userId: string, dto: SubmitComplaintDto) {
     const cleanMsg = (dto.message || '').trim();
@@ -3053,20 +2815,20 @@ export class AuthService {
       throw new BadRequestException('Complaint message cannot be empty.');
     }
 
-    const [{ data: profile }, extrasMap] = await Promise.all([
-      this.supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
-      this.getProfileExtrasMap(),
-    ]);
+    const { data: profile } = await this.supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
 
-    const extra = extrasMap[userId] || {};
     const nowIso = new Date().toISOString();
     const complaintItem = {
       id: crypto.randomUUID(),
       userId,
       displayName: profile?.display_name || 'Student',
       phoneNumber: profile?.phone_number || '',
-      email: (profile as any)?.email || extra.email || null,
-      avatarUrl: (profile as any)?.avatar_url || extra.avatarUrl || null,
+      email: (profile as any)?.email || null,
+      avatarUrl: (profile as any)?.avatar_url || null,
       planTier: profile?.plan_tier || 'starter',
       message: cleanMsg,
       status: 'open' as 'open' | 'resolved',
@@ -3074,27 +2836,24 @@ export class AuthService {
       updatedAt: nowIso,
     };
 
-    // 1. Save in resilient DB list (`sys_user_complaints`)
-    const list = await this.getStoredComplaintsList();
-    list.unshift(complaintItem);
-    await this.saveStoredComplaintsList(list);
+    const { error } = await this.supabase.from('user_complaints').insert({
+      id: complaintItem.id,
+      user_id: userId,
+      display_name: complaintItem.displayName,
+      phone_number: complaintItem.phoneNumber,
+      email: complaintItem.email,
+      avatar_url: complaintItem.avatarUrl,
+      plan_tier: complaintItem.planTier,
+      message: complaintItem.message,
+      status: complaintItem.status,
+      created_at: nowIso,
+      updated_at: nowIso,
+    });
 
-    // 2. Also insert into `public.user_complaints` if migration 014 is applied
-    try {
-      await this.supabase.from('user_complaints').insert({
-        id: complaintItem.id,
-        user_id: userId,
-        display_name: complaintItem.displayName,
-        phone_number: complaintItem.phoneNumber,
-        email: complaintItem.email,
-        avatar_url: complaintItem.avatarUrl,
-        plan_tier: complaintItem.planTier,
-        message: complaintItem.message,
-        status: complaintItem.status,
-        created_at: nowIso,
-        updated_at: nowIso,
-      });
-    } catch {}
+    if (error) {
+      this.logger.error(`Failed to insert complaint into user_complaints: ${error.message}`);
+      throw new InternalServerErrorException(`Could not save complaint: ${error.message}`);
+    }
 
     return {
       success: true,
@@ -3106,69 +2865,39 @@ export class AuthService {
    * Admin: Retrieve all student complaints enriched with latest user profile data
    */
   async getAdminComplaints() {
-    const [storedList, { data: profiles }, extrasMap] = await Promise.all([
-      this.getStoredComplaintsList(),
-      this.supabase.from('profiles').select('*'),
-      this.getProfileExtrasMap(),
-    ]);
-
-    let tableRows: any[] = [];
-    try {
-      const { data, error } = await this.supabase
+    const [{ data: tableRows, error }, { data: profiles }] = await Promise.all([
+      this.supabase
         .from('user_complaints')
         .select('*')
-        .order('created_at', { ascending: false });
-      if (!error && Array.isArray(data)) {
-        tableRows = data;
-      }
-    } catch {}
+        .order('created_at', { ascending: false }),
+      this.supabase.from('profiles').select('*'),
+    ]);
+
+    if (error) {
+      this.logger.error(`Failed to query user_complaints: ${error.message}`);
+    }
 
     const profileMap = new Map<string, any>();
     for (const p of profiles || []) {
       profileMap.set(p.id, p);
     }
 
-    const byId = new Map<string, any>();
-    for (const item of storedList) {
-      if (item?.id) {
-        byId.set(item.id, item);
-      }
-    }
-    for (const row of tableRows) {
-      if (row?.id && !byId.has(row.id)) {
-        byId.set(row.id, {
+    const complaints = (tableRows || [])
+      .map((row: any) => {
+        const prof = row.user_id ? profileMap.get(row.user_id) : null;
+        return {
           id: row.id,
           userId: row.user_id,
-          displayName: row.display_name,
-          phoneNumber: row.phone_number,
-          email: row.email,
-          avatarUrl: row.avatar_url,
-          planTier: row.plan_tier,
-          message: row.message,
-          status: row.status || 'open',
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        });
-      }
-    }
-
-    const complaints = Array.from(byId.values())
-      .map((c: any) => {
-        const prof = c.userId ? profileMap.get(c.userId) : null;
-        const extra = c.userId ? extrasMap[c.userId] || {} : {};
-        return {
-          id: c.id,
-          userId: c.userId,
-          displayName: prof?.display_name || c.displayName || 'Anonymous Student',
-          phoneNumber: prof?.phone_number || c.phoneNumber || 'No phone',
-          email: prof?.email || extra.email || c.email || null,
-          avatarUrl: prof?.avatar_url || extra.avatarUrl || c.avatarUrl || null,
-          planTier: prof?.plan_tier || c.planTier || 'starter',
+          displayName: prof?.display_name || row.display_name || 'Anonymous Student',
+          phoneNumber: prof?.phone_number || row.phone_number || 'No phone',
+          email: prof?.email || row.email || null,
+          avatarUrl: prof?.avatar_url || row.avatar_url || null,
+          planTier: prof?.plan_tier || row.plan_tier || 'starter',
           level: prof?.level || 'Intermediate',
-          message: c.message,
-          status: (c.status || 'open') as 'open' | 'resolved',
-          createdAt: c.createdAt || new Date().toISOString(),
-          updatedAt: c.updatedAt || c.createdAt || new Date().toISOString(),
+          message: row.message,
+          status: (row.status || 'open') as 'open' | 'resolved',
+          createdAt: row.created_at || new Date().toISOString(),
+          updatedAt: row.updated_at || row.created_at || new Date().toISOString(),
         };
       })
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -3191,18 +2920,10 @@ export class AuthService {
    */
   async updateComplaintStatus(complaintId: string, status: 'open' | 'resolved') {
     const nowIso = new Date().toISOString();
-    const list = await this.getStoredComplaintsList();
-    const updatedList = list.map((c: any) =>
-      c.id === complaintId ? { ...c, status, updatedAt: nowIso } : c,
-    );
-    await this.saveStoredComplaintsList(updatedList);
-
-    try {
-      await this.supabase
-        .from('user_complaints')
-        .update({ status, updated_at: nowIso })
-        .eq('id', complaintId);
-    } catch {}
+    await this.supabase
+      .from('user_complaints')
+      .update({ status, updated_at: nowIso })
+      .eq('id', complaintId);
 
     return { success: true, id: complaintId, status };
   }
@@ -3211,14 +2932,7 @@ export class AuthService {
    * Admin: Delete a complaint
    */
   async deleteComplaint(complaintId: string) {
-    const list = await this.getStoredComplaintsList();
-    const filtered = list.filter((c: any) => c.id !== complaintId);
-    await this.saveStoredComplaintsList(filtered);
-
-    try {
-      await this.supabase.from('user_complaints').delete().eq('id', complaintId);
-    } catch {}
-
+    await this.supabase.from('user_complaints').delete().eq('id', complaintId);
     return { success: true, deletedId: complaintId };
   }
 
@@ -3247,7 +2961,6 @@ export class AuthService {
         { data: profiles },
         { data: progressRows },
         { data: sessionRows },
-        extrasMap,
       ] = await Promise.all([
         this.supabase
           .from('profiles')
@@ -3259,7 +2972,6 @@ export class AuthService {
         this.supabase
           .from('sessions')
           .select('id, user_id, duration_seconds, created_at, status'),
-        this.getProfileExtrasMap(),
       ]);
 
       const allProfiles = Array.isArray(profiles) ? profiles : [];
@@ -3338,8 +3050,7 @@ export class AuthService {
 
         const levelNumber = Math.max(1, Math.floor(dbAllTimeXp / 500) + 1);
 
-        const extra = extrasMap[p.id] || {};
-        const avatarUrl = (p as any).avatar_url || extra.avatarUrl || null;
+        const avatarUrl = (p as any).avatar_url || null;
         const rawName = (p.display_name || '').trim();
         const fallbackPhone = p.phone_number
           ? `Learner ••${String(p.phone_number).slice(-4)}`
