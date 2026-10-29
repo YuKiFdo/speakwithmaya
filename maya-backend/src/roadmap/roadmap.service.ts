@@ -1170,22 +1170,22 @@ Your goal here is simple: ${goalTitle}.
 
 Ready? Let's start the roleplay!
 
-6. "ttsScriptSinhala": Spoken colloquial Sri Lankan Sinhala (කතා කරන සිංහල) warmly spoken by Maya, naturally blended with everyday English roleplay terms (Singlish conversational style, approx 60-90 words).
+6. "ttsScriptSinhala": Spoken colloquial Sri Lankan Sinhala (කතා කරන සිංහල) warmly spoken by Maya, naturally blended with everyday English roleplay terms (Singlish conversational talking style, approx 60-90 words).
 CRITICAL RULES FOR SINHALA:
-- DO NOT explain in English! The narration must be primarily in spoken colloquial Sinhala with English loanwords naturally blended in.
-- DO NOT use formal bookish Sinhala (no "කරනු ලැබේ", "ඔබට", "සඳහාය", "ලදිමි").
-- Use everyday spoken words ("ඔයා", "හිතන්නකෝ", "කලබල නොවී", "calm පිට", "issue එක explain කරලා", "හොඳ solution එකක් negotiate කරන්න", "Ready ද?").
+- NEVER leave full English sentences from the Situation Briefing, Goal Title, or Goal Description in English! You MUST rewrite the scene setup, goal title, and goal explanation in natural spoken Sri Lankan Sinhala mixed with everyday English words (Singlish talking way).
+- DO NOT use formal bookish/written Sinhala (no "කරනු ලැබේ", "ඔබට", "සඳහාය", "ලදිමි", "අවන්හලක", "වේටර්වරයා").
+- Keep everyday English nouns, roles, and action words in English script where natural for Sri Lankan speakers (e.g., "white outfit එකක්", "restaurant එකක", "waiter අතින්", "accidentally", "food spill වෙනවා", "embarrass වෙලා", "calm පිට", "issue එක explain කරලා", "insult කරන්නේ නැතුව", "reasonable solution එකක් negotiate කරගන්න").
 - Include conversational expression tags: <short pause>, <sighs>, <chuckle>.
-Format EXACTLY like this structure:
+- Keep the exact 6-paragraph structure below (do NOT change the opening/role/closing lines):
 හරි... ඔයාගේ ඊළඟ scenario එක: ${dto.title}! <short pause>
 
-මේක පොඩ්ඩක් හිතන්නකෝ... <sighs> [1-2 sentences setting the scene in spoken Sinhala with natural English loanwords based on: ${briefing}]. <short pause>
+මේක පොඩ්ඩක් හිතන්නකෝ... <sighs> [Rewrite "${briefing}" in natural spoken Sinhala-English mix, e.g., ඔයා අලුත්ම white outfit එකක් ඇඳගෙන restaurant එකක ඉන්නකොට, waiter අතින් accidentally ඔයාගේ ඇඳුමට කෑම spill වෙනවා. එයා ගොඩක් embarrass වෙලා ඉන්නේ]. <short pause>
 
 මේ scenario එකේ ඔයා තමයි ${userRole}, <short pause> Maya තමයි ${mayaRole} විදිහට ඉන්නේ.
 
-ඔයාගේ goal එක හරිම simple: [Goal Title in spoken Sinhala].
+ඔයාගේ goal එක හරිම simple: [Rewrite "${goalTitle}" in natural spoken Sinhala-English mix, e.g., කලබල නොවී calm පිට වුණ දේ explain කරන එක].
 
-[1-2 sentences explaining the goal in spoken Sinhala with practical advice, e.g. කලබල නොවී calm පිට issue එක explain කරලා, Maya එක්ක කතා කරලා හොඳ solution එකක් negotiate කරන්න]. <short pause>
+[Rewrite "${goalDesc}" in natural spoken Sinhala-English mix with practical advice, e.g., මේ spill එක නිසා ඔයාට වුණ ප්‍රශ්නේ calm පිට explain කරලා, waiter ට insult කරන්නේ නැතුව restaurant එකෙන් කරන්න පුළුවන් හොඳ solution එකක් ගැන කතා කරලා එකඟතාවයකට එන්න]. <short pause>
 
 Ready ද? <short pause> එහෙනම් අපි roleplay එක පටන් ගමු!
 
@@ -1208,25 +1208,38 @@ Return strictly a JSON object with:
   "ttsScriptSinhala": "string"
 }`;
 
-        const res = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
+        const candidateModels = [
+          'gemini-3.5-flash-lite',
+          'gemini-3.1-flash-lite',
+          'gemini-3-flash-preview',
+          'gemini-3.5-flash',
+        ];
 
-        const text = res.text?.trim() || '';
-        if (text) {
-          const parsed = JSON.parse(text);
-          return {
-            emotion: parsed.emotion || 'neutral',
-            openingMode: parsed.openingMode || 'maya_explains_first',
-            openingLine: parsed.openingLine || '',
-            scenarioPrompt: parsed.scenarioPrompt || '',
-            ttsScriptEnglish: parsed.ttsScriptEnglish || `Welcome to your next scenario: ${dto.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`,
-            ttsScriptSinhala: parsed.ttsScriptSinhala || `හරි... ඔයාගේ ඊළඟ scenario එක: ${dto.title}! <short pause>\n\nමේක පොඩ්ඩක් හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nමේ scenario එකේ ඔයා තමයි ${userRole}, <short pause> Maya තමයි ${mayaRole} විදිහට ඉන්නේ.\n\nඔයාගේ goal එක හරිම simple: ${goalTitle}.\n\n${goalDesc} කලබල නොවී calm පිට issue එක explain කරලා හොඳ solution එකක් negotiate කරන්න. <short pause>\n\nReady ද? <short pause> එහෙනම් අපි roleplay එක පටන් ගමු!`,
-          };
+        for (const modelName of candidateModels) {
+          try {
+            const res = await ai.models.generateContent({
+              model: modelName,
+              contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
+              config: {
+                responseMimeType: 'application/json',
+              },
+            });
+
+            const text = res.text?.trim() || '';
+            if (text) {
+              const parsed = JSON.parse(text);
+              return {
+                emotion: parsed.emotion || 'neutral',
+                openingMode: parsed.openingMode || 'maya_explains_first',
+                openingLine: parsed.openingLine || '',
+                scenarioPrompt: parsed.scenarioPrompt || '',
+                ttsScriptEnglish: parsed.ttsScriptEnglish || `Welcome to your next scenario: ${dto.title}! <short pause>\n\nPicture this... <sighs> ${briefing}\n\nIn this scenario, your role is ${userRole}, <short pause> and Maya will be playing ${mayaRole}.\n\nYour goal here is simple: ${goalTitle}.\n\n${goalDesc} <short pause>\n\nReady? Let's start the roleplay!`,
+                ttsScriptSinhala: parsed.ttsScriptSinhala || `හරි... ඔයාගේ ඊළඟ scenario එක: ${dto.title}! <short pause>\n\nමේක පොඩ්ඩක් හිතන්නකෝ... <sighs> ${briefing}. <short pause>\n\nමේ scenario එකේ ඔයා තමයි ${userRole}, <short pause> Maya තමයි ${mayaRole} විදිහට ඉන්නේ.\n\nඔයාගේ goal එක හරිම simple: ${goalTitle}.\n\n${goalDesc} කලබල නොවී calm පිට issue එක explain කරලා හොඳ solution එකක් negotiate කරන්න. <short pause>\n\nReady ද? <short pause> එහෙනම් අපි roleplay එක පටන් ගමු!`,
+              };
+            }
+          } catch (modelErr: any) {
+            this.logger.warn(`Gemini generateScenarioPrompt failed on ${modelName}: ${modelErr?.message}`);
+          }
         }
       } catch (err: any) {
         this.logger.warn(`Gemini generateScenarioPrompt API error: ${err?.message}`);
