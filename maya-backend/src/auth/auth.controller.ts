@@ -66,7 +66,13 @@ export class AuthController {
   @Get('auth/me')
   @UseGuards(AuthGuard)
   async getMe(@GetUser() user: UserProfileData) {
-    return { success: true, profile: user };
+    return {
+      success: true,
+      profile: {
+        ...user,
+        is_test_account: await this.authService.isTestAccount(user),
+      },
+    };
   }
 
   @Post('auth/logout')
@@ -306,4 +312,3 @@ export class AuthController {
     return this.authService.deleteComplaint(id);
   }
 }
-

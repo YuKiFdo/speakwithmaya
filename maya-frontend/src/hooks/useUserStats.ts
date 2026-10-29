@@ -16,6 +16,7 @@ export interface UserStats {
   isPro: boolean;
   planTier: 'starter' | 'basic' | 'pro' | 'premium';
   planStatus: string;
+  isTestAccount: boolean;
   isPastDue: boolean;
   hasTelcoSubscription: boolean;
   isTelcoUnsubscribed: boolean;
@@ -403,6 +404,7 @@ export function useUserStats(): UserStats {
       isPro,
       planTier,
       planStatus: user?.planStatus || 'active',
+      isTestAccount: user?.isTestAccount === true,
       isPastDue: user?.planStatus === 'past_due',
       hasTelcoSubscription: Boolean(user?.hasTelcoSubscription),
       isTelcoUnsubscribed: user?.telcoStatus === 'UNSUBSCRIBED',

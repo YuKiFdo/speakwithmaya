@@ -1448,6 +1448,23 @@ export class AuthService {
     return profile;
   }
 
+  async isTestAccount(profile: UserProfileData): Promise<boolean> {
+    if (
+      (profile.monthly_minutes_allowance || 0) >= 9000 ||
+      (profile.minutes_balance || 0) >= 9000
+    ) {
+      return true;
+    }
+
+    const phoneDigits = (profile.phone_number || '').replace(/\D/g, '');
+    const { testAccounts } = await this.getAppConfig();
+    return (testAccounts || []).some(
+      (account) =>
+        account.id === profile.id ||
+        Boolean(phoneDigits && (account.phoneNumber || '').replace(/\D/g, '') === phoneDigits),
+    );
+  }
+
   /**
    * Cancels mobile airtime carrier billing subscription (IdeaMart / mSpace)
    */
@@ -3102,4 +3119,3 @@ export class AuthService {
     }
   }
 }
-

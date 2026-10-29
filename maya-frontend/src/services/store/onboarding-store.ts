@@ -19,6 +19,7 @@ export interface UserSessionData {
   challenge?: string | null;
   employmentStatus?: string | null;
   dailyGoalMinutes?: number | null;
+  isTestAccount?: boolean;
   lastActiveStep?: string | null;
   isCompleted?: boolean;
   createdAt?: string;

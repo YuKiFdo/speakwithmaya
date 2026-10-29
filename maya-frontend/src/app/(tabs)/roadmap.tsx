@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -132,7 +132,7 @@ export default function RoadmapScreen() {
   const [isLoadingLevels, setIsLoadingLevels] = useState<boolean>(!cachedRoadmapMilestones);
 
   // Fetch published levels from backend & sync student unlocked status
-  const fetchRoadmapData = async () => {
+  const fetchRoadmapData = useCallback(async () => {
     try {
       const baseUrl = getBackendBaseUrl();
       const [roadmapRes, sessions, progressRes] = await Promise.all([
@@ -208,11 +208,13 @@ export default function RoadmapScreen() {
 
         const isStarter = (stats.planTier || 'starter').toLowerCase() === 'starter';
 
-        if (isStarter && levelNum > 1) {
+        if (isThisLevelCompleted) {
+          status = 'completed';
+        } else if (stats.isTestAccount) {
+          status = 'in-progress';
+        } else if (isStarter && levelNum > 1) {
           // Starter plan users are strictly locked to Level 1 only
           status = 'locked';
-        } else if (isThisLevelCompleted) {
-          status = 'completed';
         } else if (levelNum === 1 || isPrevLevelCompleted) {
           status = 'in-progress';
         } else {
@@ -270,7 +272,7 @@ export default function RoadmapScreen() {
     } finally {
       setIsLoadingLevels(false);
     }
-  };
+  }, [stats.isTestAccount, stats.planTier]);
 
   useEffect(() => {
     // Clean up any old cached storage so Supabase DB is always the sole authority
@@ -279,8 +281,10 @@ export default function RoadmapScreen() {
         window.localStorage.removeItem('maya_cached_completed_levels');
       } catch {}
     }
+    // The roadmap request is asynchronous; state updates happen after the response arrives.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchRoadmapData();
-  }, []);
+  }, [fetchRoadmapData]);
 
 
 

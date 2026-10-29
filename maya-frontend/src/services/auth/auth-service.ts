@@ -108,7 +108,10 @@ class AuthService {
 
     // If test account was authenticated directly without OTP, set the session immediately
     if (data.isTestAccount && data.accessToken && data.user) {
-      OnboardingStore.setAuthSession(data.accessToken, data.user);
+      OnboardingStore.setAuthSession(data.accessToken, {
+        ...data.user,
+        isTestAccount: true,
+      });
       if (data.lastActiveRoute) {
         OnboardingStore.setLastActiveRoute(data.lastActiveRoute);
       }
@@ -286,6 +289,7 @@ class AuthService {
             minutesResetAt: data.profile.minutes_reset_at,
             level: data.profile.level,
             nativeLanguage: data.profile.native_language,
+            isTestAccount: data.profile.is_test_account === true,
             goal: data.profile.goal,
             challenge: data.profile.challenge,
             employmentStatus: data.profile.employment_status,
