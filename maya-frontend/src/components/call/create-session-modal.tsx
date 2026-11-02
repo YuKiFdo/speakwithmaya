@@ -165,7 +165,7 @@ export function CreateSessionModal({
   // Selected State (Defaults match the Figma design)
   const [selectedMinutes, setSelectedMinutes] = useState<SessionDurationMinutes>(starterMinutes);
   const [languageHelp, setLanguageHelp] = useState<LanguageHelpOption>('english_only');
-  const [aiCorrections, setAiCorrections] = useState<AICorrectionOption>('let_me_speak');
+  const [aiCorrections, setAiCorrections] = useState<AICorrectionOption>('keep_on_track');
   const [pickerModal, setPickerModal] = useState<'language' | 'corrections' | null>(null);
 
   // Smooth Entry / Exit Animations
@@ -176,7 +176,7 @@ export function CreateSessionModal({
     if (visible) {
       setSelectedMinutes(starterMinutes);
       setLanguageHelp('english_only');
-      setAiCorrections('let_me_speak');
+      setAiCorrections('keep_on_track');
       setPickerModal(null);
       modalAnim.setValue(0);
       Animated.spring(modalAnim, {

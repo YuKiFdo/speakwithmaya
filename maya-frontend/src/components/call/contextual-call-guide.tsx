@@ -40,9 +40,9 @@ export interface GuideStep {
 export const GUIDE_STEPS: GuideStep[] = [
   {
     id: 'blue-glow',
-    title: 'When Maya is speaking',
+    title: 'Maya කතා කරද්දි',
     description:
-      'A soft blue glow appears around the screen while Maya talks. Just listen naturally.',
+      'Screen එක වටේ soft blue glow එකක් එනවා. Maya කතා කරලා ඉවර වෙනකම් අහගෙන ඉන්න.',
     icon: <Ionicons name="volume-high" size={18} color="#2563EB" />,
     badge: 'Tip 1 of 5',
     badgeColor: '#2563EB',
@@ -52,9 +52,9 @@ export const GUIDE_STEPS: GuideStep[] = [
   },
   {
     id: 'purple-glow',
-    title: 'Your turn to speak',
+    title: 'ඔයා කතා කරන වෙලාව',
     description:
-      'When the bottom wave turns purple, your mic is live. Reply in your own words!',
+      'Bottom wave එක purple පාට වෙද්දි mic එක live. ඔයාගෙම වචන වලින් English වලින් reply කරන්න!',
     icon: <Ionicons name="mic" size={18} color="#7C3AED" />,
     badge: 'Tip 2 of 5',
     badgeColor: '#7C3AED',
@@ -64,9 +64,9 @@ export const GUIDE_STEPS: GuideStep[] = [
   },
   {
     id: 'translation',
-    title: 'Need Sinhala help?',
+    title: 'Sinhala තේරුම බලාගන්න',
     description:
-      'Tap "Show Translation" under Maya’s message anytime to see what she meant in Sinhala.',
+      'Maya කියපු දේ තේරුණේ නැත්නම්, message එක යට තියෙන "Show Translation" tap කරන්න.',
     icon: <MaterialIcons name="translate" size={18} color="#0D9488" />,
     badge: 'Tip 3 of 5',
     badgeColor: '#0D9488',
@@ -76,9 +76,9 @@ export const GUIDE_STEPS: GuideStep[] = [
   },
   {
     id: 'hint',
-    title: 'Not sure what to say?',
+    title: 'කියන්න දෙයක් හිතාගන්න බැරිද?',
     description:
-      'Tap the lightbulb in the bottom-right corner for instant reply ideas you can read aloud.',
+      'Instant reply ideas බලාගන්න පහළ දකුණු පැත්තේ තියෙන lightbulb icon එක tap කරන්න.',
     icon: <Feather name="zap" size={18} color="#D97706" />,
     badge: 'Tip 4 of 5',
     badgeColor: '#D97706',
@@ -88,9 +88,9 @@ export const GUIDE_STEPS: GuideStep[] = [
   },
   {
     id: 'end-call',
-    title: 'Finishing your call',
+    title: 'Call එක finish කිරීම',
     description:
-      'After 1 minute of practice, the red button at the top-right unlocks so you can wrap up anytime.',
+      '1 minute practice කළාට පස්සෙ, උඩ තියෙන red button එක unlock වෙනවා. කැමති වෙලාවක call එක wrap up කරන්න පුළුවන්.',
     icon: <Feather name="phone-off" size={17} color="#E11D48" />,
     badge: 'Tip 5 of 5',
     badgeColor: '#E11D48',
