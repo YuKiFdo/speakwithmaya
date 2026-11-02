@@ -23,6 +23,7 @@ import {
 } from '@/components/icons/nav-icons';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
+import { DesktopTopBar } from '@/components/navigation/desktop-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { CreateSessionModal, CreateSessionConfig } from '@/components/call/create-session-modal';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
@@ -469,6 +470,19 @@ export default function DashboardScreen() {
             onLevelPress={() => setActivePopup('level-up')}
           />
 
+          {/* DESKTOP FIXED TOP BAR (PINNED) */}
+          <DesktopTopBar
+            title={`Hello, ${displayName}! 👋`}
+            subtitle="Ready to practice English today?"
+            levelLabel={stats.levelLabel}
+            xpLabel={stats.xpLabel}
+            progress={stats.progress}
+            isPro={isPro}
+            planTier={stats.planTier}
+            isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
+            onLevelPress={() => setActivePopup('level-up')}
+          />
+
           {/* ==================================================================== */}
           {/* MAIN SCROLLABLE CONTENT */}
           {/* ==================================================================== */}
@@ -483,31 +497,6 @@ export default function DashboardScreen() {
           >
             {/* TOP SECTION: Header + Hero Banner paired together on desktop */}
             <View style={isDesktop ? styles.desktopTopGroup : undefined}>
-              {/* DESKTOP TOP HEADER */}
-              {isDesktop && (
-                <View style={styles.desktopTopHeader}>
-                  <View>
-                    <Text style={styles.greetingTitle}>
-                      Hello, {displayName}! 👋
-                    </Text>
-                    <Text style={styles.greetingSubtitle}>
-                      Ready to practice English today?
-                    </Text>
-                  </View>
-
-                  {/* User Level Badge */}
-                  <UserLevelBadge
-                    levelLabel={stats.levelLabel}
-                    xpLabel={stats.xpLabel}
-                    progress={stats.progress}
-                    isPro={isPro}
-                    planTier={stats.planTier}
-                    isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
-                    onPress={() => setActivePopup('level-up')}
-                  />
-                </View>
-              )}
-
               {/* GREETING ON MOBILE */}
               {!isDesktop && (
                 <View style={styles.mobileGreetingSection}>
@@ -1147,9 +1136,9 @@ const styles = StyleSheet.create({
     paddingBottom: 90, // room for mobile tabs
   },
   mainScrollContentDesktop: {
-    paddingHorizontal: 38,
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingHorizontal: 32,
+    paddingTop: 24,
+    paddingBottom: 24,
     maxWidth: 1600,
     alignSelf: 'center',
     width: '100%',

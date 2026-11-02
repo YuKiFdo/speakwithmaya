@@ -37,6 +37,7 @@ import {
 } from '@/components/icons/roadmap-icons';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
+import { DesktopTopBar } from '@/components/navigation/desktop-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { RoadmapTrackSkeleton } from '@/components/ui/skeleton';
@@ -607,6 +608,19 @@ export default function RoadmapScreen() {
             onLevelPress={() => setActivePopup('level-up')}
           />
 
+          {/* DESKTOP FIXED TOP BAR (PINNED) */}
+          <DesktopTopBar
+            title="Your Learning Roadmap"
+            subtitle="Your journey to fluency starts here!"
+            levelLabel={stats.levelLabel}
+            xpLabel={stats.xpLabel}
+            progress={stats.progress}
+            isPro={isPro}
+            planTier={stats.planTier}
+            isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
+            onLevelPress={() => setActivePopup('level-up')}
+          />
+
           {/* MAIN SCROLLABLE CONTENT */}
           <ScrollView
             style={[styles.mainScroll, isDesktop && styles.mainScrollDesktop]}
@@ -616,30 +630,7 @@ export default function RoadmapScreen() {
             ]}
             showsVerticalScrollIndicator={false}
           >
-            {/* DESKTOP TOP HEADER */}
-            {isDesktop && (
-              <View style={styles.desktopTopHeader}>
-                <View>
-                  <Text style={styles.headingTitle}>Your Learning Roadmap</Text>
-                  <Text style={styles.headingSubtitle}>
-                    Your journey to fluency starts here!
-                  </Text>
-                </View>
-
-                {/* User Level Badge */}
-                <UserLevelBadge
-                  levelLabel={stats.levelLabel}
-                  xpLabel={stats.xpLabel}
-                  progress={stats.progress}
-                  isPro={isPro}
-                  planTier={stats.planTier}
-                  isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
-                  onPress={() => setActivePopup('level-up')}
-                />
-              </View>
-            )}
-
-          {/* MOBILE HEADING */}
+            {/* MOBILE HEADING */}
           {!isDesktop && (
             <View style={styles.mobileHeadingSection}>
               <Text style={styles.headingTitleMobile}>Your Learning Roadmap</Text>
@@ -1869,8 +1860,8 @@ const styles = StyleSheet.create({
     paddingBottom: 90, // room for mobile tabs (matches home/dashboard)
   },
   mainScrollContentDesktop: {
-    paddingHorizontal: 38,
-    paddingTop: 16,
+    paddingHorizontal: 32,
+    paddingTop: 24,
     paddingBottom: 24,
     maxWidth: 1600,
     alignSelf: 'center',

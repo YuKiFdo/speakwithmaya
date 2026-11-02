@@ -17,6 +17,7 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { fontStyle } from '@/theme/fonts';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
+import { DesktopTopBar } from '@/components/navigation/desktop-top-bar';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -316,6 +317,19 @@ export default function LeaderboardScreen() {
             onLevelPress={() => setActivePopup('level-up')}
           />
 
+          {/* DESKTOP FIXED TOP BAR (PINNED) */}
+          <DesktopTopBar
+            title="Leaderboard"
+            subtitle="Practice consistently. Celebrate your progress."
+            levelLabel={stats.levelLabel}
+            xpLabel={stats.xpLabel}
+            progress={stats.progress}
+            isPro={stats.isPro}
+            planTier={stats.planTier}
+            isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
+            onLevelPress={() => setActivePopup('level-up')}
+          />
+
           <ScrollView
             style={styles.mainScroll}
             contentContainerStyle={[
@@ -324,29 +338,8 @@ export default function LeaderboardScreen() {
             ]}
             showsVerticalScrollIndicator={false}
           >
-            {/* DESKTOP TOP HEADER */}
-            {isDesktop ? (
-              <View style={styles.desktopTopHeader}>
-                <View>
-                  <Text style={styles.headingTitle}>Leaderboard</Text>
-                  <Text style={styles.headingSubtitle}>
-                    Practice consistently. Celebrate your progress.
-                  </Text>
-                </View>
-
-                <UserLevelBadge
-                  levelLabel={stats.levelLabel}
-                  xpLabel={stats.xpLabel}
-                  progress={stats.progress}
-                  isPro={stats.isPro}
-                  planTier={stats.planTier}
-                  isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
-                  onPress={() => setActivePopup('level-up')}
-                />
-              </View>
-            ) : (
-              /* MOBILE BACK BUTTON + HEADING */
-              <View style={styles.mobileHeaderRow}>
+            {!isDesktop && (
+                <View style={styles.mobileHeaderRow}>
                 <Pressable
                   onPress={() => {
                     if (router.canGoBack()) {
@@ -1028,10 +1021,10 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   mainScrollContentDesktop: {
-    paddingHorizontal: 38,
-    paddingTop: 28,
+    paddingHorizontal: 32,
+    paddingTop: 24,
     paddingBottom: 40,
-    maxWidth: 1220,
+    maxWidth: 1600,
     alignSelf: 'center',
     width: '100%',
   },

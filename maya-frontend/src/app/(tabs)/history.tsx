@@ -42,6 +42,7 @@ import {
 } from '@/components/icons/history-icons';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
+import { DesktopTopBar } from '@/components/navigation/desktop-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { HistoryDetailSkeleton } from '@/components/ui/skeleton';
@@ -1654,41 +1655,27 @@ export default function HistoryScreen() {
           {/* ============================================================== */}
           {/* TOP BAR */}
           {/* ============================================================== */}
-          {!isDesktop ? (
-            <MobileTopBar
-              pinned
-              onLevelPress={() => setActivePopup('level-up')}
-            />
-          ) : (
-            // Desktop Top Right Level Badge Header
-            <View style={styles.desktopTopHeader}>
-              <View style={{ flex: 1 }} />
-              <UserLevelBadge
-                levelLabel={stats.levelLabel}
-                xpLabel={stats.xpLabel}
-                progress={stats.progress}
-                isPro={isPro}
-                planTier={stats.planTier}
-                isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
-                onPress={() => setActivePopup('level-up')}
-              />
-            </View>
-          )}
-
+          <MobileTopBar
+            pinned
+            onLevelPress={() => setActivePopup('level-up')}
+          />
+          <DesktopTopBar
+            title="History"
+            subtitle="Review your past conversations and continue your journey."
+            levelLabel={stats.levelLabel}
+            xpLabel={stats.xpLabel}
+            progress={stats.progress}
+            isPro={isPro}
+            planTier={stats.planTier}
+            isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
+            onLevelPress={() => setActivePopup('level-up')}
+          />
           {/* ============================================================== */}
           {/* CONTENT AREA: RESPONSIVE MASTER-DETAIL OR MOBILE LIST/DETAIL */}
           {/* ============================================================== */}
           {isDesktop ? (
             // ─── DESKTOP MASTER-DETAIL LAYOUT ─────────────────────────────
             <View style={styles.desktopMasterDetailContainer}>
-              {/* Desktop Header */}
-              <View style={styles.desktopTitleSection}>
-                <Text style={styles.screenMainTitle}>History</Text>
-                <Text style={styles.screenSubtitle}>
-                  Review your past conversations and continue your journey.
-                </Text>
-              </View>
-
               {/* Master Detail Split */}
               <View style={styles.desktopColumnsRow}>
                 {/* ── LEFT COLUMN: SEARCH & SESSION LIST ── */}
@@ -2700,8 +2687,11 @@ const styles = StyleSheet.create({
   desktopMasterDetailContainer: {
     flex: 1,
     minWidth: 0,
-    paddingHorizontal: 28,
+    paddingHorizontal: 32,
     paddingTop: 20,
+    maxWidth: 1600,
+    alignSelf: 'center',
+    width: '100%',
     paddingBottom: 20,
     ...(Platform.OS === 'web' ? { overflow: 'hidden' } : {}),
   },
