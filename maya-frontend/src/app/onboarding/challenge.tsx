@@ -81,11 +81,13 @@ export default function ChallengeScreen() {
     // Preload all challenge voice audio files into memory immediately on entrance
     preloadChallengeVoices();
 
+    const isAudioOff = !areOnboardingAudiosEnabled();
+
     // 1. Header fades & slides in
     Animated.parallel([
       Animated.timing(headerOpacityAnim, {
         toValue: 1,
-        duration: 380,
+        duration: isAudioOff ? 150 : 380,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: Platform.OS !== 'web',
       }),
@@ -99,18 +101,18 @@ export default function ChallengeScreen() {
 
     // 2. Play Maya's gentle question prompt ("What's hardest for you right now? Pick your biggest challenge when speaking English.")
     const promptTimer = setTimeout(() => {
-      if (!areOnboardingAudiosEnabled()) return;
+      if (isAudioOff) return;
       playMayaChallengePromptVoice();
     }, 200);
 
-    // 3. Cascade cards in sequence as Maya introduces the question
+    // 3. Cascade cards in sequence
     CHALLENGE_OPTIONS.forEach((_, idx) => {
-      const delay = 350 + idx * 80;
+      const delay = isAudioOff ? idx * 25 : (350 + idx * 80);
       setTimeout(() => {
         Animated.parallel([
           Animated.timing(cardAnims[idx].opacity, {
             toValue: 1,
-            duration: 380,
+            duration: isAudioOff ? 150 : 380,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: Platform.OS !== 'web',
           }),
@@ -134,8 +136,9 @@ export default function ChallengeScreen() {
   const handleSelectChallenge = (item: ChallengeOption, index: number) => {
     if (isTransitioning) return;
 
-    // Immediately stop question prompt if still playing
+    // Immediately stop question prompt & feedback voices
     stopMayaChallengePromptVoice();
+    stopMayaChallengeFeedbackVoice();
 
     setSelectedChallenge(item.id);
     setIsTransitioning(true);
@@ -144,7 +147,7 @@ export default function ChallengeScreen() {
     Animated.sequence([
       Animated.timing(cardAnims[index].scale, {
         toValue: 0.97,
-        duration: 100,
+        duration: 80,
         useNativeDriver: Platform.OS !== 'web',
       }),
       Animated.spring(cardAnims[index].scale, {
@@ -162,6 +165,7 @@ export default function ChallengeScreen() {
     const navigateNext = () => {
       if (!hasNavigated) {
         hasNavigated = true;
+        stopMayaChallengePromptVoice();
         stopMayaChallengeFeedbackVoice();
         OnboardingStore.updateField('challenge', item.id);
         authService.syncStep('/onboarding/level');
@@ -169,26 +173,8 @@ export default function ChallengeScreen() {
       }
     };
 
-    if (!areOnboardingAudiosEnabled()) {
-      stopMayaChallengePromptVoice();
-      stopMayaChallengeFeedbackVoice();
-      navigateNext();
-      return;
-    }
-
-    // Maya speaks personalized encouraging sentence, waits until finish, then transitions to next screen
-    playMayaChallengeFeedbackVoice(item.id, {
-      onEnd: () => {
-        // Natural breath pause after she finishes speaking her full sentence
-        setTimeout(navigateNext, 300);
-      },
-      onError: () => {
-        setTimeout(navigateNext, 600);
-      },
-    });
-
-    // Extreme fallback: only in case browser audio engine stalls completely without firing events
-    setTimeout(navigateNext, 12000);
+    // Transition quickly without playing feedback voice or waiting
+    setTimeout(navigateNext, 120);
   };
 
   return (

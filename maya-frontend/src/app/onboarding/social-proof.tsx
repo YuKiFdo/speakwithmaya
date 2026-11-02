@@ -64,11 +64,13 @@ export default function SocialProofScreen() {
   const [m3Visible, setM3Visible] = useState(false);
 
   useEffect(() => {
+    const isAudioOff = !areOnboardingAudiosEnabled();
+
     // 1. Header entrance immediately on mount
     Animated.parallel([
       Animated.timing(headerOpacityAnim, {
         toValue: 1,
-        duration: 360,
+        duration: isAudioOff ? 150 : 360,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: Platform.OS !== 'web',
       }),
@@ -80,12 +82,12 @@ export default function SocialProofScreen() {
       }),
     ]).start();
 
-    // 2. Card entrance at ~120ms
+    // 2. Card entrance
     const cardTimer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(cardOpacityAnim, {
           toValue: 1,
-          duration: 360,
+          duration: isAudioOff ? 150 : 360,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -98,15 +100,15 @@ export default function SocialProofScreen() {
       ]).start();
 
       // Start progressive chart drawing as card enters
-      startChartAnimation();
-    }, 120);
+      startChartAnimation(isAudioOff);
+    }, isAudioOff ? 40 : 120);
 
-    // 3. Social Proof Section entrance at ~420ms
+    // 3. Social Proof Section entrance
     const socialTimer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(socialOpacityAnim, {
           toValue: 1,
-          duration: 320,
+          duration: isAudioOff ? 150 : 320,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -117,14 +119,14 @@ export default function SocialProofScreen() {
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
-    }, 420);
+    }, isAudioOff ? 100 : 420);
 
-    // 4. CTA Button & Skip option reveal smoothly at ~620ms
+    // 4. CTA Button & Skip option reveal smoothly
     const buttonTimer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(buttonOpacityAnim, {
           toValue: 1,
-          duration: 340,
+          duration: isAudioOff ? 150 : 340,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -135,12 +137,12 @@ export default function SocialProofScreen() {
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
-    }, 620);
+    }, isAudioOff ? 160 : 620);
 
     // 5. Play Maya's Gemini TTS Voice prompt after ~300ms
     const voiceTimer = setTimeout(() => {
       try {
-        if (areOnboardingAudiosEnabled()) playMayaSocialProofPromptVoice();
+        if (!isAudioOff) playMayaSocialProofPromptVoice();
       } catch {}
     }, 300);
 
@@ -154,7 +156,7 @@ export default function SocialProofScreen() {
   }, []);
 
   // Chart Progressive Draw Animation
-  const startChartAnimation = () => {
+  const startChartAnimation = (isAudioOff?: boolean) => {
     chartRevealAnim.setValue(0);
     const listenerId = chartRevealAnim.addListener(({ value }) => {
       setChartWidth(value);
@@ -165,7 +167,7 @@ export default function SocialProofScreen() {
 
     Animated.timing(chartRevealAnim, {
       toValue: 320,
-      duration: 1400,
+      duration: isAudioOff ? 400 : 1400,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start(() => {

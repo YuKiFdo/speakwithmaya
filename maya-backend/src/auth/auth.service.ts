@@ -123,6 +123,7 @@ const DEFAULT_APP_CONFIG: AppConfigData = {
   mspaceAppHash: '',
   mspaceBaseUrl: 'https://api.mspace.lk',
   telcoUnsubButtonEnabled: true,
+  onboardingAudiosEnabled: false,
   telcoDailyPriceLkr: 12,
   telcoRateHistory: [{ rateLkr: 12, effectiveFrom: '2026-01-01T00:00:00.000Z' }],
   testAccounts: [],
@@ -2436,7 +2437,7 @@ export class AuthService {
       ideamartEnabled: config.ideamartEnabled ?? true,
       mspaceEnabled: config.mspaceEnabled ?? true,
       telcoUnsubButtonEnabled: config.telcoUnsubButtonEnabled ?? true,
-      onboardingAudiosEnabled: config.onboardingAudiosEnabled ?? true,
+      onboardingAudiosEnabled: config.onboardingAudiosEnabled ?? false,
     };
   }
 

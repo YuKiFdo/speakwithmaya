@@ -90,7 +90,7 @@ export default function NameScreen() {
       Animated.parallel([
         Animated.timing(questionOpacityAnim, {
           toValue: 1,
-          duration: isAudioOff ? 200 : 400,
+          duration: isAudioOff ? 150 : 400,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -101,7 +101,7 @@ export default function NameScreen() {
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
-    }, isAudioOff ? 150 : 2000);
+    }, isAudioOff ? 60 : 2000);
 
     // 3. Timing sequence: Input box & Button appear
     const inputTimer = setTimeout(() => {
@@ -109,7 +109,7 @@ export default function NameScreen() {
       Animated.parallel([
         Animated.timing(inputOpacityAnim, {
           toValue: 1,
-          duration: isAudioOff ? 200 : 450,
+          duration: isAudioOff ? 150 : 450,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -121,7 +121,7 @@ export default function NameScreen() {
         }),
         Animated.timing(buttonOpacityAnim, {
           toValue: 1,
-          duration: isAudioOff ? 200 : 450,
+          duration: isAudioOff ? 150 : 450,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -135,7 +135,7 @@ export default function NameScreen() {
         // Fallback focus check
         inputRef.current?.focus();
       });
-    }, 3600);
+    }, isAudioOff ? 120 : 3600);
 
     return () => {
       clearTimeout(voiceTimer);

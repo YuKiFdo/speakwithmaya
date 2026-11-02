@@ -43,7 +43,7 @@ const DEFAULT_CONFIG: AppConfigState = {
   ideamartEnabled: true,
   mspaceEnabled: true,
   telcoUnsubButtonEnabled: true,
-  onboardingAudiosEnabled: true,
+  onboardingAudiosEnabled: false,
 };
 
 export default function AdminSettingsScreen() {
@@ -67,7 +67,7 @@ export default function AdminSettingsScreen() {
   const [ideamartEnabled, setIdeamartEnabled] = useState(true);
   const [mspaceEnabled, setMspaceEnabled] = useState(true);
   const [telcoUnsubButtonEnabled, setTelcoUnsubButtonEnabled] = useState(true);
-  const [onboardingAudiosEnabled, setOnboardingAudiosEnabledState] = useState(true);
+  const [onboardingAudiosEnabled, setOnboardingAudiosEnabledState] = useState(false);
 
   const getEffectiveTelcoPricingNotice = (ideaOn: boolean, mspaceOn: boolean, customVal?: string) => {
     if (customVal !== undefined && customVal !== '') return customVal;
@@ -141,7 +141,7 @@ export default function AdminSettingsScreen() {
         );
 
         setTelcoUnsubButtonEnabled(data.telcoUnsubButtonEnabled ?? true);
-        const isAudioEnabled = data.onboardingAudiosEnabled ?? true;
+        const isAudioEnabled = data.onboardingAudiosEnabled ?? false;
         setOnboardingAudiosEnabledState(isAudioEnabled);
         setOnboardingAudiosEnabled(isAudioEnabled);
       }

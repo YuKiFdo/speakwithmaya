@@ -21,6 +21,7 @@ import {
   stopMayaWelcomeVoice,
   preloadAllOnboardingVoicesInOrder,
   cancelOnboardingVoicePreload,
+  areOnboardingAudiosEnabled,
 } from '@/services/sound/sound-service';
 import { MayaPrimaryButton } from '@/components/ui';
 import { OnboardingStore } from '@/services/store/onboarding-store';
@@ -230,6 +231,7 @@ export default function WelcomeScreen() {
   // Autoplay voice greeting on mount
   useEffect(() => {
     const speechTimer = setTimeout(() => {
+      if (!areOnboardingAudiosEnabled()) return;
       try {
         playMayaWelcomeVoice({
           onStart: () => {

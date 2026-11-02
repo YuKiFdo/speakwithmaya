@@ -79,11 +79,13 @@ export default function DailyGoalScreen() {
     // 0. Preload daily goal voices
     preloadDailyGoalVoices();
 
+    const isAudioOff = !areOnboardingAudiosEnabled();
+
     // 1. Header fades & slides in
     Animated.parallel([
       Animated.timing(headerOpacityAnim, {
         toValue: 1,
-        duration: 380,
+        duration: isAudioOff ? 150 : 380,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: Platform.OS !== 'web',
       }),
@@ -97,18 +99,18 @@ export default function DailyGoalScreen() {
 
     // 2. Play Maya's motivating question prompt ("How much can you practice daily? Even five or ten minutes a day makes a HUGE difference!")
     const promptTimer = setTimeout(() => {
-      if (!areOnboardingAudiosEnabled()) return;
+      if (isAudioOff) return;
       playMayaDailyGoalPromptVoice();
     }, 200);
 
     // 3. Cascade cards in sequence
     PRACTICE_OPTIONS.forEach((_, idx) => {
-      const delay = 350 + idx * 80;
+      const delay = isAudioOff ? idx * 25 : (350 + idx * 80);
       setTimeout(() => {
         Animated.parallel([
           Animated.timing(cardAnims[idx].opacity, {
             toValue: 1,
-            duration: 380,
+            duration: isAudioOff ? 150 : 380,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: Platform.OS !== 'web',
           }),
@@ -132,8 +134,9 @@ export default function DailyGoalScreen() {
   const handleSelectGoal = (item: PracticeOption, index: number) => {
     if (isTransitioning) return;
 
-    // Immediately stop prompt voice
+    // Immediately stop prompt & feedback voices
     stopMayaDailyGoalPromptVoice();
+    stopMayaDailyGoalFeedbackVoice();
 
     setSelectedGoal(item.id);
     setIsTransitioning(true);
@@ -142,7 +145,7 @@ export default function DailyGoalScreen() {
     Animated.sequence([
       Animated.timing(cardAnims[index].scale, {
         toValue: 0.97,
-        duration: 100,
+        duration: 80,
         useNativeDriver: Platform.OS !== 'web',
       }),
       Animated.spring(cardAnims[index].scale, {
@@ -160,6 +163,7 @@ export default function DailyGoalScreen() {
     const navigateNext = () => {
       if (!hasNavigated) {
         hasNavigated = true;
+        stopMayaDailyGoalPromptVoice();
         stopMayaDailyGoalFeedbackVoice();
         const mins = parseInt(item.id.replace('-min', ''), 10) || 10;
         OnboardingStore.updateField('dailyGoalMinutes', mins);
@@ -168,26 +172,8 @@ export default function DailyGoalScreen() {
       }
     };
 
-    if (!areOnboardingAudiosEnabled()) {
-      stopMayaDailyGoalPromptVoice();
-      stopMayaDailyGoalFeedbackVoice();
-      navigateNext();
-      return;
-    }
-
-    // Maya speaks personalized encouraging sentence, waits until finish, then transitions to next screen
-    playMayaDailyGoalFeedbackVoice(item.id, {
-      onEnd: () => {
-        // Natural breath pause after she finishes speaking her full sentence
-        setTimeout(navigateNext, 250);
-      },
-      onError: () => {
-        setTimeout(navigateNext, 500);
-      },
-    });
-
-    // Extreme fallback: only in case browser audio engine stalls completely without firing events
-    setTimeout(navigateNext, 10000);
+    // Transition quickly without playing feedback voice or waiting
+    setTimeout(navigateNext, 120);
   };
 
   return (

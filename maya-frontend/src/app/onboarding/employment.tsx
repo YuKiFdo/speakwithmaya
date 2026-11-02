@@ -95,11 +95,13 @@ export default function EmploymentScreen() {
     // 0. Preload employment voices
     preloadEmploymentVoices();
 
+    const isAudioOff = !areOnboardingAudiosEnabled();
+
     // 1. Header fades & slides in
     Animated.parallel([
       Animated.timing(headerOpacityAnim, {
         toValue: 1,
-        duration: 380,
+        duration: isAudioOff ? 150 : 380,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: Platform.OS !== 'web',
       }),
@@ -113,18 +115,18 @@ export default function EmploymentScreen() {
 
     // 2. Play Maya's friendly question prompt ("What is your current employment status? This helps us personalise your practice sessions!")
     const promptTimer = setTimeout(() => {
-      if (!areOnboardingAudiosEnabled()) return;
+      if (isAudioOff) return;
       playMayaEmploymentPromptVoice();
     }, 200);
 
     // 3. Cascade cards in sequence
     EMPLOYMENT_OPTIONS.forEach((_, idx) => {
-      const delay = 350 + idx * 80;
+      const delay = isAudioOff ? idx * 25 : (350 + idx * 80);
       setTimeout(() => {
         Animated.parallel([
           Animated.timing(cardAnims[idx].opacity, {
             toValue: 1,
-            duration: 380,
+            duration: isAudioOff ? 150 : 380,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: Platform.OS !== 'web',
           }),
@@ -148,8 +150,9 @@ export default function EmploymentScreen() {
   const handleSelectEmployment = (item: EmploymentOption, index: number) => {
     if (isTransitioning) return;
 
-    // Immediately stop prompt voice
+    // Immediately stop prompt & feedback voices
     stopMayaEmploymentPromptVoice();
+    stopMayaEmploymentFeedbackVoice();
 
     setSelectedEmployment(item.id);
     setIsTransitioning(true);
@@ -158,7 +161,7 @@ export default function EmploymentScreen() {
     Animated.sequence([
       Animated.timing(cardAnims[index].scale, {
         toValue: 0.97,
-        duration: 100,
+        duration: 80,
         useNativeDriver: Platform.OS !== 'web',
       }),
       Animated.spring(cardAnims[index].scale, {
@@ -176,6 +179,7 @@ export default function EmploymentScreen() {
     const navigateNext = () => {
       if (!hasNavigated) {
         hasNavigated = true;
+        stopMayaEmploymentPromptVoice();
         stopMayaEmploymentFeedbackVoice();
         OnboardingStore.updateField('employment', item.id);
         authService.syncStep('/onboarding/daily-goal');
@@ -183,26 +187,8 @@ export default function EmploymentScreen() {
       }
     };
 
-    if (!areOnboardingAudiosEnabled()) {
-      stopMayaEmploymentPromptVoice();
-      stopMayaEmploymentFeedbackVoice();
-      navigateNext();
-      return;
-    }
-
-    // Maya speaks personalized encouraging sentence, waits until finish, then transitions to next screen
-    playMayaEmploymentFeedbackVoice(item.id, {
-      onEnd: () => {
-        // Natural breath pause after she finishes speaking her full sentence
-        setTimeout(navigateNext, 250);
-      },
-      onError: () => {
-        setTimeout(navigateNext, 500);
-      },
-    });
-
-    // Extreme fallback: only in case browser audio engine stalls completely without firing events
-    setTimeout(navigateNext, 10000);
+    // Transition quickly without playing feedback voice or waiting
+    setTimeout(navigateNext, 120);
   };
 
   return (

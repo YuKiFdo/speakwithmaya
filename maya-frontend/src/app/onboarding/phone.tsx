@@ -135,10 +135,12 @@ export default function PhoneScreen() {
       return;
     }
 
+    const isAudioOff = !areOnboardingAudiosEnabled();
+
     Animated.parallel([
       Animated.timing(cardOpacityAnim, {
         toValue: 1,
-        duration: 400,
+        duration: isAudioOff ? 150 : 400,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: Platform.OS !== 'web',
       }),
@@ -151,24 +153,26 @@ export default function PhoneScreen() {
     ]).start();
 
     // Voice starts speaking line 1
-    if (!areOnboardingAudiosEnabled()) return;
-    const voiceTimer = setTimeout(() => {
-      try {
-        playMayaPhonePromptVoice({
-          onStart: () => setIsSpeaking(true),
-          onEnd: () => setIsSpeaking(false),
-          onError: () => setIsSpeaking(false),
-        });
-      } catch {}
-    }, 350);
+    let voiceTimer: ReturnType<typeof setTimeout> | null = null;
+    if (!isAudioOff) {
+      voiceTimer = setTimeout(() => {
+        try {
+          playMayaPhonePromptVoice({
+            onStart: () => setIsSpeaking(true),
+            onEnd: () => setIsSpeaking(false),
+            onError: () => setIsSpeaking(false),
+          });
+        } catch {}
+      }, 350);
+    }
 
-    // 2. Timing sequence: Title & Pricing notice appear at ~2100ms
+    // 2. Timing sequence: Title & Pricing notice appear
     const subtitleTimer = setTimeout(() => {
       setShowSubtitle(true);
       Animated.parallel([
         Animated.timing(subtitleOpacityAnim, {
           toValue: 1,
-          duration: 400,
+          duration: isAudioOff ? 150 : 400,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -179,15 +183,15 @@ export default function PhoneScreen() {
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
-    }, 2100);
+    }, isAudioOff ? 60 : 2100);
 
-    // 3. Timing sequence: Input row & Button appear at ~3800ms
+    // 3. Timing sequence: Input row & Button appear
     const inputTimer = setTimeout(() => {
       setShowInput(true);
       Animated.parallel([
         Animated.timing(inputOpacityAnim, {
           toValue: 1,
-          duration: 450,
+          duration: isAudioOff ? 150 : 450,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -199,7 +203,7 @@ export default function PhoneScreen() {
         }),
         Animated.timing(buttonOpacityAnim, {
           toValue: 1,
-          duration: 450,
+          duration: isAudioOff ? 150 : 450,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -213,10 +217,10 @@ export default function PhoneScreen() {
         // Auto-focus on mobile number input once visible
         inputRef.current?.focus();
       });
-    }, 3800);
+    }, isAudioOff ? 120 : 3800);
 
     return () => {
-      clearTimeout(voiceTimer);
+      if (voiceTimer) clearTimeout(voiceTimer);
       clearTimeout(subtitleTimer);
       clearTimeout(inputTimer);
       stopMayaPhonePromptVoice();

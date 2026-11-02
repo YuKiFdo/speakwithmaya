@@ -245,7 +245,32 @@ export async function loadAudioBuffer(uri: string): Promise<AudioBuffer | null> 
  * 2. If not cached, fetches & decodes dynamically into Web Audio.
  * 3. Graceful fallback to HTMLAudioElement if Web Audio fails.
  */
-let onboardingAudiosEnabled = true;
+function resolveBackendBaseUrl(): string {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://127.0.0.1:3000';
+    }
+    if (hostname.endsWith('speakwithmaya.com')) {
+      return 'https://api.speakwithmaya.com';
+    }
+    if (
+      hostname.includes('azurecontainerapps.io') ||
+      hostname.includes('azurewebsites.net') ||
+      hostname.includes('southeastasia')
+    ) {
+      return 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io';
+    }
+    const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+    if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+      return envUrl;
+    }
+    return 'https://api.speakwithmaya.com';
+  }
+  return process.env.EXPO_PUBLIC_BACKEND_URL || 'http://127.0.0.1:3000';
+}
+
+let onboardingAudiosEnabled = false;
 
 if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
   try {
@@ -275,19 +300,8 @@ export function syncAppConfigAudioSettings(): Promise<boolean> {
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
     try {
-      const httpBase = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
-      let targetUrl = `${httpBase.replace(/\/$/, '')}/v1/app-config`;
-      if (typeof window !== 'undefined' && window.location) {
-        const proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
-        if (window.location.hostname.endsWith('speakwithmaya.com')) {
-          targetUrl = 'https://api.speakwithmaya.com/v1/app-config';
-        } else if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-          const host = process.env.EXPO_PUBLIC_BACKEND_URL
-            ? process.env.EXPO_PUBLIC_BACKEND_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')
-            : `${window.location.hostname}:3000`;
-          targetUrl = `${proto}//${host}/v1/app-config`;
-        }
-      }
+      const baseUrl = resolveBackendBaseUrl();
+      const targetUrl = `${baseUrl.replace(/\/$/, '')}/v1/app-config`;
 
       const res = await fetch(targetUrl);
       if (res.ok) {
@@ -1176,6 +1190,7 @@ export function stopMayaDailyGoalPromptVoice(): void {
  * Preload all Maya Level Voice audio assets into memory
  */
 export function preloadLevelVoices(): void {
+  if (!areOnboardingAudiosEnabled()) return;
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {
       const promptUri = getAssetUri(MAYA_LEVEL_PROMPT_ASSET);
@@ -1220,6 +1235,7 @@ export function stopMayaLevelFeedbackVoice(): void {
  * Preload all Maya Employment Voice audio assets into memory
  */
 export function preloadEmploymentVoices(): void {
+  if (!areOnboardingAudiosEnabled()) return;
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {
       const promptUri = getAssetUri(MAYA_EMPLOYMENT_PROMPT_ASSET);
@@ -1264,6 +1280,7 @@ export function stopMayaEmploymentFeedbackVoice(): void {
  * Preload all Maya Daily Goal Voice audio assets into memory
  */
 export function preloadDailyGoalVoices(): void {
+  if (!areOnboardingAudiosEnabled()) return;
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {
       const promptUri = getAssetUri(MAYA_DAILY_GOAL_PROMPT_ASSET);
@@ -1308,6 +1325,7 @@ export function stopMayaDailyGoalFeedbackVoice(): void {
  * Preload all Maya Goal Voice audio assets into memory
  */
 export function preloadGoalVoices(): void {
+  if (!areOnboardingAudiosEnabled()) return;
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {
       const promptUri = getAssetUri(MAYA_GOAL_PROMPT_ASSET);
@@ -1342,6 +1360,7 @@ export function stopMayaGoalPromptVoice(): void {
  * Preload all Maya Challenge Voice audio assets into memory
  */
 export function preloadChallengeVoices(): void {
+  if (!areOnboardingAudiosEnabled()) return;
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {
       const promptUri = getAssetUri(MAYA_CHALLENGE_PROMPT_ASSET);

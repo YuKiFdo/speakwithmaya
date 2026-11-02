@@ -87,11 +87,13 @@ export default function GoalScreen() {
     // Preload all goal voice audio files into memory immediately on entrance
     preloadGoalVoices();
 
+    const isAudioOff = !areOnboardingAudiosEnabled();
+
     // 1. Header fades & slides in
     Animated.parallel([
       Animated.timing(headerOpacityAnim, {
         toValue: 1,
-        duration: 380,
+        duration: isAudioOff ? 150 : 380,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: Platform.OS !== 'web',
       }),
@@ -105,18 +107,18 @@ export default function GoalScreen() {
 
     // 2. Play Maya's cheerful question prompt ("What's your biggest goal? Pick what matters most to you right now!")
     const promptTimer = setTimeout(() => {
-      if (!areOnboardingAudiosEnabled()) return;
+      if (isAudioOff) return;
       playMayaGoalPromptVoice();
     }, 200);
 
-    // 3. Cascade cards in sequence as Maya introduces the question
+    // 3. Cascade cards in sequence
     GOAL_OPTIONS.forEach((_, idx) => {
-      const delay = 350 + idx * 80;
+      const delay = isAudioOff ? idx * 25 : (350 + idx * 80);
       setTimeout(() => {
         Animated.parallel([
           Animated.timing(cardAnims[idx].opacity, {
             toValue: 1,
-            duration: 380,
+            duration: isAudioOff ? 150 : 380,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: Platform.OS !== 'web',
           }),
@@ -140,8 +142,9 @@ export default function GoalScreen() {
   const handleSelectGoal = (goal: GoalOption, index: number) => {
     if (isTransitioning) return;
 
-    // Immediately stop question prompt if still playing
+    // Immediately stop question prompt & feedback voices
     stopMayaGoalPromptVoice();
+    stopMayaGoalFeedbackVoice();
 
     setSelectedGoal(goal.id);
     setIsTransitioning(true);
@@ -150,7 +153,7 @@ export default function GoalScreen() {
     Animated.sequence([
       Animated.timing(cardAnims[index].scale, {
         toValue: 0.97,
-        duration: 100,
+        duration: 80,
         useNativeDriver: Platform.OS !== 'web',
       }),
       Animated.spring(cardAnims[index].scale, {
@@ -168,6 +171,7 @@ export default function GoalScreen() {
     const navigateNext = () => {
       if (!hasNavigated) {
         hasNavigated = true;
+        stopMayaGoalPromptVoice();
         stopMayaGoalFeedbackVoice();
         OnboardingStore.updateField('goal', goal.id);
         authService.syncStep('/onboarding/challenge');
@@ -175,26 +179,8 @@ export default function GoalScreen() {
       }
     };
 
-    if (!areOnboardingAudiosEnabled()) {
-      stopMayaGoalPromptVoice();
-      stopMayaGoalFeedbackVoice();
-      navigateNext();
-      return;
-    }
-
-    // Maya speaks personalized encouraging sentence, waits until finish, then transitions to next screen
-    playMayaGoalFeedbackVoice(goal.id, {
-      onEnd: () => {
-        // Natural breath pause after she finishes speaking her full sentence
-        setTimeout(navigateNext, 300);
-      },
-      onError: () => {
-        setTimeout(navigateNext, 600);
-      },
-    });
-
-    // Extreme fallback: only in case browser audio engine stalls completely without firing events
-    setTimeout(navigateNext, 12000);
+    // Transition quickly without playing feedback voice or waiting
+    setTimeout(navigateNext, 120);
   };
 
   return (
