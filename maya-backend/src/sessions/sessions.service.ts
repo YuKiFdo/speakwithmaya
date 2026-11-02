@@ -788,6 +788,20 @@ export class SessionsService {
     }
   }
 
+  resolveCorrectionMode(dto: CreateSessionTokenDto): 'let_me_speak' | 'keep_on_track' | 'correct_instantly' {
+    if (
+      dto.aiCorrectionMode === 'let_me_speak' ||
+      dto.aiCorrectionMode === 'keep_on_track' ||
+      dto.aiCorrectionMode === 'correct_instantly'
+    ) {
+      return dto.aiCorrectionMode;
+    }
+    if (dto.aiSuggestions === false) {
+      return 'let_me_speak';
+    }
+    return 'keep_on_track';
+  }
+
   private formatLevelLabel(level?: string): string {
     switch (level) {
       case 'beginner': return 'Beginner (knows basic words and phrases, needs warm support and simple sentences)';
@@ -803,6 +817,7 @@ export class SessionsService {
     const challengeDesc = this.formatChallengeLabel(dto.challenge);
     const levelDesc = this.formatLevelLabel(dto.level);
     const dailyMinutes = dto.dailyGoal ? `${dto.dailyGoal.replace('-min', ' minutes')} daily` : '10 minutes daily';
+    const correctionMode = this.resolveCorrectionMode(dto);
 
     if (isSinhala) {
       return `CORE IDENTITY & INTRO CALL MISSION (MAYA AI ENGLISH COACH):
@@ -834,10 +849,22 @@ STAGE 2: NATURAL CONVERSATION & COMFORT CHECK (Turns 2 to 4)
   * If goal is Speaking Confidently: Ask about their favorite hobby, how their day was, or what they did over the weekend.
 - Scaffolding & Support:
   * If the student pauses or struggles to find a word: patiently encourage them: "Take your time! ඔයාට පුළුවන්."
-- Real-Time Corrections & Tool Calling:
-  * When the student makes a noticeable grammar mistake (wrong tense, missing articles, awkward prepositions), call tool 'show_grammar_correction' with studentSaid, moreNatural, short friendly explanation in spoken Sinhala (100% Sinhala script with everyday English loanwords), and highlightWords.
-  * If student phrasing is unnatural, call tool 'show_rephrase_suggestion' to showcase how a native speaker expresses it naturally.
-  * In your spoken delivery: keep it warm, encouraging, and conversational. Acknowledge what they said, gently highlight the natural phrasing (e.g. "We can also say '[moreNatural]'!"), and continue the friendly icebreaker chat without making them feel self-conscious!
+${
+      correctionMode === 'let_me_speak'
+        ? `- Real-Time Corrections & Tool Calling: DISABLED ('Let Me Speak' Mode)
+  * The student selected 'Let Me Speak' mode to focus 100% on fluency, comfort, and speaking without fear.
+  * STRICT RULE: Do NOT interrupt the student or call grammar/rephrase correction tools during this call.
+  * Listen patiently, keep the conversation flowing smoothly, and validate their effort. All grammar and fluency analysis will be delivered in the post-call feedback review.`
+        : correctionMode === 'correct_instantly'
+          ? `- Real-Time Corrections & Tool Calling: ACTIVE ('Correct Me Instantly' Mode)
+  * The student selected 'Correct Me Instantly' mode for real-time coaching.
+  * Whenever the student makes any noticeable grammar mistake (wrong tense, missing articles, awkward prepositions) or unnatural phrasing, immediately call tool 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid, moreNatural, short friendly explanation in spoken Sinhala (100% Sinhala script with everyday English loanwords), and highlightWords.
+  * In your spoken delivery: keep it warm, encouraging, and conversational. Acknowledge what they said, verbally model the natural phrasing (e.g. "We can also say '[moreNatural]'!"), and continue the friendly icebreaker chat.`
+          : `- Real-Time Corrections & Tool Calling: BALANCED ('Keep Me On Track' Mode)
+  * The student selected 'Keep Me On Track' mode for gentle guidance.
+  * Call tool 'show_grammar_correction' ONLY for noticeable, clear grammar mistakes (at most 1-2 times in the entire intro call). Do not interrupt for minor phrasing.
+  * In your spoken delivery: keep it warm, encouraging, and conversational. Acknowledge what they said, gently highlight the natural phrasing (e.g. "We can also say '[moreNatural]'!"), and continue the friendly icebreaker chat without making them feel self-conscious!`
+    }
 
 STAGE 3: ENCOURAGING WRAP-UP & ROADMAP HAND-OFF (Turns 5-6 or when session time is up)
 - After 2 to 3 minutes of speaking or when the student indicates they want to wrap up:
@@ -890,7 +917,22 @@ STAGE 2: NATURAL CONVERSATION & COMFORT CHECK (Turns 2 to 4)
   * If Travel/Abroad: Ask about the country or destination they are excited about.
   * If Confidence/General: Ask about how their day went or their favorite weekend activity.
 - If they pause or hesitate: be patient and encouraging ("Take your time! Tell me a bit more about that.").
-- STRICT RULE: Absolutely DO NOT make any grammar corrections or rephrase suggestions during this introductory call. Tools like 'show_grammar_correction' and 'show_rephrase_suggestion' are COMPLETELY REMOVED and DISABLED for this call. Prioritize confidence, listening, and friendly conversational rapport!
+${
+  correctionMode === 'let_me_speak'
+    ? `- Real-Time Corrections & Tool Calling: DISABLED ('Let Me Speak' Mode)
+  * The student selected 'Let Me Speak' mode to practice fluent speaking without interruptions.
+  * STRICT RULE: Do NOT call grammar or rephrase suggestion tools during this introductory call.
+  * Focus completely on listening attentively and keeping the conversation warm and encouraging. All feedback will be calculated in the post-session feedback report.`
+    : correctionMode === 'correct_instantly'
+      ? `- Real-Time Corrections & Tool Calling: ACTIVE ('Correct Me Instantly' Mode)
+  * The student selected 'Correct Me Instantly' mode for active real-time feedback.
+  * When the student makes any grammar mistake or unnatural phrasing, call tool 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid, moreNatural, short friendly explanation in English, and highlightWords.
+  * In your spoken delivery: immediately model the natural phrasing ("You can say: '[moreNatural]'"), and continue smoothly with your practice question.`
+      : `- Real-Time Corrections & Tool Calling: BALANCED ('Keep Me On Track' Mode)
+  * The student selected 'Keep Me On Track' mode for balanced coaching.
+  * Call tool 'show_grammar_correction' ONLY for noticeable, clear grammar mistakes (at most 1-2 times in the entire intro call). Prioritize flow and confidence.
+  * In your spoken delivery: gently highlight the natural phrasing ("You can say: '[moreNatural]'"), and continue the friendly conversation.`
+}
 
 STAGE 3: ENCOURAGING WRAP-UP & ROADMAP HAND-OFF (Turns 5-6 or when time wraps up)
 - After 2 to 3 minutes or when the student wishes to finish:
@@ -1013,7 +1055,8 @@ ${openingLine ? `- MANDATORY OPENING LINE: Start the conversation immediately by
 
   getSystemPrompt(dto: CreateSessionTokenDto): string {
     const isSinhala = dto.isIntroCall === true || dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
-    const aiSuggestions = dto.aiSuggestions !== false;
+    const correctionMode = this.resolveCorrectionMode(dto);
+    const aiSuggestions = correctionMode !== 'let_me_speak';
     const rawTopic = (dto.topic || '').trim();
     const isGenericTopic =
       !rawTopic ||
@@ -1179,14 +1222,23 @@ STAGE 3: PERFORMANCE VERDICT & LEVEL CONCLUSION
 - Spoken delivery: Explain kindly in natural spoken Sinhala, model the correct English phrase, and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '[natural phrase]'").
 - STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step or advancing the task until ${userName} has repeated the corrected phrase!
 - Only after they repeat correctly: praise them warmly in Sinhala (vary your praise: "සුපිරි!", "හරිම හොඳයි!", "නියමෙටම කිව්වා!"), and prompt the next step.`
-        : (aiSuggestions
-            ? `AI SUGGESTIONS & FEEDBACK TOOLS (ACTIVE):
-- STRICT PACING: Call at most 1 tool every 4-5 turns (maximum 2 times in the entire session). Prioritize student speaking fluency and conversational flow over perfection.
+        : (correctionMode === 'let_me_speak'
+            ? `AI SUGGESTIONS & FEEDBACK TOOLS (DISABLED - 'LET ME SPEAK' MODE):
+- The student selected 'Let Me Speak' mode to focus 100% on fluency and confidence.
+- STRICT RULE: Do NOT interrupt the student or call grammar or rephrase suggestion tools during the live call.
+- Focus completely on active listening, keeping the conversation engaging and fluid.
+- All grammar corrections and speech metrics will be calculated and presented in their post-session feedback report.`
+            : (correctionMode === 'correct_instantly'
+                ? `AI SUGGESTIONS & FEEDBACK TOOLS (ACTIVE - 'CORRECT INSTANTLY' MODE):
+- The student selected 'Correct Me Instantly' mode for high-frequency, real-time coaching.
+- ACTIVE CORRECTIONS: Call tool 'show_grammar_correction' or 'show_rephrase_suggestion' whenever the student makes any grammatical mistake (wrong tense, missing verb, wrong preposition, agreement) or unnatural phrasing.
+- In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in natural Sinhala script), highlightWords.
+- Spoken delivery (after tool response): Verbally model the corrected key phrase (under 6 words, NEVER recite long student sentences!) followed immediately by your question: say "ඔයාට පුළුවන් '[short key phrase]' කියලා කියන්න. [Eng question]?" Keep your total spoken turn strictly under 15 words.`
+                : `AI SUGGESTIONS & FEEDBACK TOOLS (BALANCED - 'KEEP ME ON TRACK' MODE):
+- STRICT PACING: Call at most 1 tool every 3-4 turns (maximum 2-3 times in the entire session). Prioritize student speaking fluency and conversational flow over perfection.
 - CALL ONLY for noticeable grammatical errors (e.g. wrong tense, missing verb 'am/is/are'). NEVER interrupt for minor conversational style or casual phrasing.
-- In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in natural Sinhala), highlightWords.
-- Spoken delivery (after tool response): Verbally model ONLY the short corrected key phrase (strictly under 6 words, NEVER recite long student sentences!) followed immediately by your question: say "ඔයාට පුළුවන් '[short key phrase]' කියලා කියන්න. [Eng question]?" Keep your total spoken turn strictly under 15 words.`
-            : `AI SUGGESTIONS: DISABLED
-- Do NOT call grammar or rephrase suggestion tools. Focus 100% on fluent conversational flow.`);
+- In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in natural Sinhala script), highlightWords.
+- Spoken delivery (after tool response): Verbally model ONLY the short corrected key phrase (strictly under 6 words, NEVER recite long student sentences!) followed immediately by your question: say "ඔයාට පුළුවන් '[short key phrase]' කියලා කියන්න. [Eng question]?" Keep your total spoken turn strictly under 15 words.`));
 
       return `CORE IDENTITY & TONE:
 - Name: Maya (strictly මායා in Sinhala). Warm, enthusiastic, encouraging AI English coach for Sri Lankan students.
@@ -1247,14 +1299,23 @@ ${memoryPart}`;
 - Spoken delivery: Explain kindly, model the correct English phrase, and ask the student to repeat it aloud (say "Try saying that once: '[natural phrase]'").
 - STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step until ${userName} repeats the phrase!
 - Only after they repeat: praise them warmly, and prompt the next step.`
-      : (aiSuggestions
-          ? `AI SUGGESTIONS & FEEDBACK TOOLS (ACTIVE):
-- MANDATORY: When noticing a grammar error or opportunity for more natural phrasing, call the tool ('show_grammar_correction' or 'show_rephrase_suggestion') as a FUNCTION CALL FIRST. Never speak feedback directly without calling the tool first.
+      : (correctionMode === 'let_me_speak'
+          ? `AI SUGGESTIONS & FEEDBACK TOOLS (DISABLED - 'LET ME SPEAK' MODE):
+- The student selected 'Let Me Speak' mode to practice fluent speaking without interruptions.
+- STRICT RULE: Do NOT interrupt the student or call grammar or rephrase suggestion tools during the live call.
+- Keep the conversation engaging, upbeat, and flowing naturally.
+- All grammar feedback and fluency analysis will be delivered in the post-session report.`
+          : (correctionMode === 'correct_instantly'
+              ? `AI SUGGESTIONS & FEEDBACK TOOLS (ACTIVE - 'CORRECT INSTANTLY' MODE):
+- The student selected 'Correct Me Instantly' mode for real-time active feedback.
+- ACTIVE CORRECTIONS: Call 'show_grammar_correction' or 'show_rephrase_suggestion' as a FUNCTION CALL whenever the student makes any grammatical mistake or awkward phrasing.
 - In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in English), highlightWords.
-- Pacing: At most 1 tool every 2-3 turns. Prioritize grammar mistakes over minor rephrasing.
-- Spoken delivery (after tool response): In a SINGLE continuous turn, verbally model the corrected English phrase aloud ("You can say: '...'"), and immediately continue the conversation with your next engaging practice question. Never pause or stop without asking your next question.`
-          : `AI SUGGESTIONS: DISABLED
-- Do NOT call grammar or rephrase suggestion tools. Focus 100% on fluent conversational flow.`);
+- Spoken delivery (after tool response): In a SINGLE continuous turn, verbally model the corrected English phrase aloud ("You can say: '[moreNatural]'"), and immediately continue the conversation with your next engaging practice question.`
+              : `AI SUGGESTIONS & FEEDBACK TOOLS (BALANCED - 'KEEP ME ON TRACK' MODE):
+- MANDATORY: When noticing a noticeable grammar error, call the tool ('show_grammar_correction' or 'show_rephrase_suggestion') as a FUNCTION CALL FIRST. Never speak feedback directly without calling the tool first.
+- In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in English), highlightWords.
+- Pacing: At most 1 tool every 3-4 turns. Prioritize noticeable grammar mistakes over minor rephrasing.
+- Spoken delivery (after tool response): In a SINGLE continuous turn, verbally model the corrected English phrase aloud ("You can say: '[moreNatural]'"), and immediately continue the conversation with your next engaging practice question. Never pause or stop without asking your next question.`));
 
     return `CORE IDENTITY & PERSONA GUARDRAILS:
 - Name: Maya. Warm, enthusiastic, friendly, and encouraging AI English speaking coach.
@@ -1932,8 +1993,12 @@ ${memoryPart}`;
       dto.topic?.toLowerCase().includes('placement') ||
       dto.topic?.toLowerCase().includes('assessment');
     const isSinhala = isIntroCall || dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
+    const correctionMode = this.resolveCorrectionMode(dto);
+    const aiSuggestions = isIntroCall
+      ? (correctionMode !== 'let_me_speak')
+      : (dto.aiSuggestions !== false && correctionMode !== 'let_me_speak');
     const systemPrompt = this.getSystemPrompt(dto);
-    const tools = this.getToolsDeclaration(dto.aiSuggestions !== false, isSinhala, isIntroCall);
+    const tools = this.getToolsDeclaration(aiSuggestions, isSinhala, isIntroCall);
 
     const apiKey = process.env.GEMINI_API_KEY || this.geminiApiKey;
     const maxSeconds = dto.durationSeconds || 600;

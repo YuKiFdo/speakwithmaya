@@ -4,3 +4,4 @@
 
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS ai_correction_mode TEXT DEFAULT 'keep_on_track';
+

@@ -181,6 +181,7 @@ export default function CallScreen() {
     languageMode: langMode,
     sinhalaStyle,
     aiSuggestions: aiSug,
+    aiCorrectionMode: storeConfig?.aiCorrectionMode || onboardingState.aiCorrectionMode || 'keep_on_track',
     scenarioId: effectiveScenarioId,
     scenarioTitle: storeConfig?.scenarioTitle || params.scenarioTitle,
     memory: storeConfig?.memory,

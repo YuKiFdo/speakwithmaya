@@ -78,6 +78,7 @@ interface UseLiveCallOptions {
   languageMode?: 'sinhala' | 'english';
   sinhalaStyle?: 'balanced' | 'deep_guidance';
   aiSuggestions?: boolean;
+  aiCorrectionMode?: 'let_me_speak' | 'keep_on_track' | 'correct_instantly' | string;
   scenarioId?: string;
   scenarioTitle?: string;
   memory?: string;
@@ -634,6 +635,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             languageMode: options.languageMode,
             sinhalaStyle: options.sinhalaStyle || 'balanced',
             aiSuggestions: options.aiSuggestions,
+            aiCorrectionMode: options.aiCorrectionMode,
             scenarioId: options.scenarioId,
             userName: options.userName,
             isIntroCall: options.isIntroCall,
@@ -692,6 +694,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             languageMode: options.languageMode,
             sinhalaStyle: options.sinhalaStyle || 'balanced',
             aiSuggestions: options.aiSuggestions,
+            aiCorrectionMode: options.aiCorrectionMode,
             scenarioId: options.scenarioId,
             userName: options.userName,
             isIntroCall: options.isIntroCall,

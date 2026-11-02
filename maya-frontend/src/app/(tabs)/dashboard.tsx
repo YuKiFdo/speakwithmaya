@@ -367,6 +367,11 @@ export default function DashboardScreen() {
       languageMode: config.languageMode,
       sinhalaStyle: config.sinhalaStyle || (config.languageMode === 'sinhala' ? 'balanced' : undefined),
       aiSuggestions: config.aiSuggestions,
+      aiCorrectionMode: config.aiCorrectionsMode === 'instant'
+        ? 'correct_instantly'
+        : config.aiCorrectionsMode === 'end_review'
+        ? 'let_me_speak'
+        : 'keep_on_track',
       topic: effectiveTopic,
       scenarioId: effectiveScenarioId,
       scenarioTitle: effectiveScenarioTitle,

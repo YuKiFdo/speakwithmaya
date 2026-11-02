@@ -8,6 +8,7 @@ export interface CallSessionConfig {
   languageMode?: 'sinhala' | 'english';
   sinhalaStyle?: 'balanced' | 'deep_guidance';
   aiSuggestions?: boolean;
+  aiCorrectionMode?: 'let_me_speak' | 'keep_on_track' | 'correct_instantly';
   scenarioId?: string;
   scenarioTitle?: string;
   roadmapLevelId?: string;

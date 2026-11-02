@@ -39,6 +39,10 @@ export class CreateSessionTokenDto {
 
   @IsOptional()
   @IsString()
+  aiCorrectionMode?: 'let_me_speak' | 'keep_on_track' | 'correct_instantly' | string;
+
+  @IsOptional()
+  @IsString()
   scenarioId?: string;
 
   @IsOptional()

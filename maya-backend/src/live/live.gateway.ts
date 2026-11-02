@@ -1098,10 +1098,18 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const isSinhala = dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
       const isScenarioRoleplay = Boolean(dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0);
+      const isIntroCall = dto.isIntroCall === true;
+      const correctionMode = this.sessionsService.resolveCorrectionMode(dto);
+      const aiSuggestions = isScenarioRoleplay
+        ? false
+        : isIntroCall
+          ? (correctionMode !== 'let_me_speak')
+          : (dto.aiSuggestions !== false && correctionMode !== 'let_me_speak');
       const systemInstruction = this.sessionsService.getSystemPrompt(dto);
       const toolsDeclaration = this.sessionsService.getToolsDeclaration(
-        isScenarioRoleplay ? false : (dto.aiSuggestions !== false),
+        aiSuggestions,
         isSinhala,
+        isIntroCall,
       );
       const greetingPrompt = this.sessionsService.generateGreetingPrompt(dto);
       const voiceName = this.sessionsService.getVoiceForSession(dto);
