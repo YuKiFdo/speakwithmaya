@@ -19,6 +19,7 @@ export interface UserSessionData {
   challenge?: string | null;
   employmentStatus?: string | null;
   dailyGoalMinutes?: number | null;
+  aiCorrectionMode?: 'let_me_speak' | 'keep_on_track' | 'correct_instantly' | string | null;
   isTestAccount?: boolean;
   lastActiveStep?: string | null;
   isCompleted?: boolean;
@@ -62,6 +63,7 @@ export interface OnboardingState {
   level: string;
   employment: string;
   dailyGoalMinutes: number;
+  aiCorrectionMode: 'let_me_speak' | 'keep_on_track' | 'correct_instantly';
   nativeLanguage: 'sinhala' | 'tamil' | 'english';
   baselineScores: BaselineScores | null;
   discountWon: string | null;
@@ -87,6 +89,7 @@ const defaultState: OnboardingState = {
   level: 'Intermediate',
   employment: '',
   dailyGoalMinutes: 10,
+  aiCorrectionMode: 'keep_on_track',
   nativeLanguage: 'sinhala',
   baselineScores: null,
   discountWon: null,

@@ -121,6 +121,10 @@ export class SavePreferencesDto {
   dailyGoalMinutes?: number;
 
   @IsOptional()
+  @IsString()
+  aiCorrectionMode?: string;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => BaselineScoresDto)
   baselineScores?: BaselineScoresDto;
@@ -179,6 +183,10 @@ export class UpdateStepDto {
   @IsOptional()
   @IsNumber()
   dailyGoalMinutes?: number;
+
+  @IsOptional()
+  @IsString()
+  aiCorrectionMode?: string;
 
   @IsOptional()
   @IsBoolean()

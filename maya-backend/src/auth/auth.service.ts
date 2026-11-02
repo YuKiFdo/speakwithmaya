@@ -45,6 +45,7 @@ export interface UserProfileData {
   native_language: string;
   employment_status: string | null;
   daily_goal_minutes: number;
+  ai_correction_mode?: string | null;
   baseline_fluency_score: number;
   baseline_grammar_score: number;
   baseline_pronunciation_score: number;
@@ -1252,6 +1253,7 @@ export class AuthService {
     if (dto.challenge !== undefined) updates.challenge = dto.challenge;
     if (dto.employmentStatus !== undefined) updates.employment_status = dto.employmentStatus;
     if (dto.dailyGoalMinutes !== undefined) updates.daily_goal_minutes = dto.dailyGoalMinutes;
+    if (dto.aiCorrectionMode !== undefined) updates.ai_correction_mode = dto.aiCorrectionMode;
 
     if (dto.baselineScores) {
       if (dto.baselineScores.overall !== undefined) {
@@ -1344,11 +1346,25 @@ export class AuthService {
     if (typeof dto.dailyGoalMinutes === 'number' && dto.dailyGoalMinutes > 0) {
       updates.daily_goal_minutes = dto.dailyGoalMinutes;
     }
+    if (dto.aiCorrectionMode) {
+      updates.ai_correction_mode = dto.aiCorrectionMode;
+    }
 
-    const { error } = await this.supabase
+    let { error } = await this.supabase
       .from('profiles')
       .update(updates)
       .eq('id', userId);
+
+    if (error && updates.ai_correction_mode !== undefined) {
+      // Graceful fallback in case database column is not migrated yet
+      const fallbackUpdates = { ...updates };
+      delete fallbackUpdates.ai_correction_mode;
+      const retry = await this.supabase
+        .from('profiles')
+        .update(fallbackUpdates)
+        .eq('id', userId);
+      error = retry.error;
+    }
 
     if (error) {
       this.logger.error(`Failed to update last_active_step in database: ${error.message}`);

@@ -167,8 +167,8 @@ export default function DailyGoalScreen() {
         stopMayaDailyGoalFeedbackVoice();
         const mins = parseInt(item.id.replace('-min', ''), 10) || 10;
         OnboardingStore.updateField('dailyGoalMinutes', mins);
-        authService.syncStep('/onboarding/social-proof');
-        router.replace('/onboarding/social-proof');
+        authService.syncStep('/onboarding/correction-mode');
+        router.replace('/onboarding/correction-mode' as any);
       }
     };
 

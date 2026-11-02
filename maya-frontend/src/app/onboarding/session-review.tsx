@@ -57,6 +57,12 @@ export default function SessionReviewScreen() {
   const [feedbackText, setFeedbackText] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
+  React.useEffect(() => {
+    if ((params as any).isIntro === 'true') {
+      router.replace('/onboarding/building-plan' as any);
+    }
+  }, [(params as any).isIntro]);
+
   const handleBack = () => {
     playOtherButtonSound();
     router.back();

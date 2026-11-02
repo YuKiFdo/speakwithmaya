@@ -314,7 +314,8 @@ export default function AnalyzingScreen() {
           (report as any)?.isIntroCall === true ||
           (report as any)?.callParams?.isIntroCall === 'true' ||
           (report as any)?.callParams?.isIntroCall === true ||
-          params.isIntroCall === 'true';
+          params.isIntroCall === 'true' ||
+          params.isIntro === 'true';
 
         const isRoadmap =
           Boolean((report as any)?.roadmapLevelId) ||

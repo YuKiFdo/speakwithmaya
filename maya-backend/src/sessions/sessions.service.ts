@@ -834,7 +834,10 @@ STAGE 2: NATURAL CONVERSATION & COMFORT CHECK (Turns 2 to 4)
   * If goal is Speaking Confidently: Ask about their favorite hobby, how their day was, or what they did over the weekend.
 - Scaffolding & Support:
   * If the student pauses or struggles to find a word: patiently encourage them: "Take your time! ඔයාට පුළුවන්."
-  * STRICT RULE: Absolutely DO NOT make any grammar corrections or rephrase suggestions in this introductory call. Tools like 'show_grammar_correction' and 'show_rephrase_suggestion' are COMPLETELY REMOVED and DISABLED for this call. Do not model corrections or interrupt the student. Focus 100% on friendly conversation, listening, encouragement, and building comfort and rapport!
+- Real-Time Corrections & Tool Calling:
+  * When the student makes a noticeable grammar mistake (wrong tense, missing articles, awkward prepositions), call tool 'show_grammar_correction' with studentSaid, moreNatural, short friendly explanation in spoken Sinhala (100% Sinhala script with everyday English loanwords), and highlightWords.
+  * If student phrasing is unnatural, call tool 'show_rephrase_suggestion' to showcase how a native speaker expresses it naturally.
+  * In your spoken delivery: keep it warm, encouraging, and conversational. Acknowledge what they said, gently highlight the natural phrasing (e.g. "We can also say '[moreNatural]'!"), and continue the friendly icebreaker chat without making them feel self-conscious!
 
 STAGE 3: ENCOURAGING WRAP-UP & ROADMAP HAND-OFF (Turns 5-6 or when session time is up)
 - After 2 to 3 minutes of speaking or when the student indicates they want to wrap up:
@@ -1401,26 +1404,87 @@ ${memoryPart}`;
 
   getToolsDeclaration(aiSuggestions: boolean = true, isSinhala: boolean = false, isIntroCall: boolean = false) {
     if (isIntroCall) {
-      // Intro calls are friendly conversational assessments - strictly NO grammar correction or rephrase tools!
-      return [
+      const introFunctions: any[] = [
         {
-          functionDeclarations: [
-            {
-              name: 'conclude_call',
-              description:
-                'Terminate the session when student wants to wrap up, leaves, or the introductory chat is complete. MANDATORY: Your spoken response MUST be a definitive closing farewell statement. STRICTLY NEVER ask a question because the call terminates immediately.',
-              parameters: {
-                type: 'OBJECT',
-                properties: {
-                  farewellReason: {
-                    type: 'STRING',
-                    description: 'Departure phrase spoken by student, student wrap-up request, or introductory conversation complete',
-                  },
-                },
-                required: ['farewellReason'],
+          name: 'conclude_call',
+          description:
+            'Terminate the session when student wants to wrap up, leaves, or the introductory chat is complete. MANDATORY: Your spoken response MUST be a definitive closing farewell statement. STRICTLY NEVER ask a question because the call terminates immediately.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              farewellReason: {
+                type: 'STRING',
+                description: 'Departure phrase spoken by student, student wrap-up request, or introductory conversation complete',
               },
             },
-          ],
+            required: ['farewellReason'],
+          },
+        },
+      ];
+
+      if (aiSuggestions) {
+        introFunctions.unshift(
+          {
+            name: 'show_grammar_correction',
+            description:
+              'Call whenever the student makes a noticeable grammar or phrasing mistake (wrong tense, missing articles a/an, prepositions, incorrect word order) to display the correction card on their screen.',
+            parameters: {
+              type: 'OBJECT',
+              properties: {
+                studentSaid: {
+                  type: 'STRING',
+                  description: 'The student phrase containing the grammar mistake',
+                },
+                moreNatural: {
+                  type: 'STRING',
+                  description: 'The grammatically corrected phrasing',
+                },
+                explanation: {
+                  type: 'STRING',
+                  description: isSinhala
+                    ? 'A short 1-sentence friendly explanation of the grammar rule in natural spoken Sinhala (සිංහල). MUST use 100% Sinhala script with everyday English loanwords (e.g. "office එකක", "sentence එකක"). STRICTLY FORBIDDEN: NEVER use Hindi/Devanagari script (e.g. absolutely NO कार्यालय).'
+                    : 'A short 1-sentence friendly explanation of the grammar rule or reason for the correction',
+                },
+                highlightWords: {
+                  type: 'ARRAY',
+                  items: { type: 'STRING' },
+                  description: 'Corrected key words',
+                },
+              },
+              required: ['studentSaid', 'moreNatural', 'explanation', 'highlightWords'],
+            },
+          },
+          {
+            name: 'show_rephrase_suggestion',
+            description:
+              'Call when student phrasing is awkward or unnatural to demonstrate how a native speaker would say it naturally.',
+            parameters: {
+              type: 'OBJECT',
+              properties: {
+                studentSaid: {
+                  type: 'STRING',
+                  description: 'The phrase spoken by the student',
+                },
+                suggestedRephrase: {
+                  type: 'STRING',
+                  description: 'More natural native-sounding phrasing',
+                },
+                reason: {
+                  type: 'STRING',
+                  description: isSinhala
+                    ? 'Short encouraging reason in spoken Sinhala (සිංහල) with loanwords. STRICTLY ZERO Hindi/Devanagari script.'
+                    : 'Short encouraging reason why this alternative sounds more natural',
+                },
+              },
+              required: ['studentSaid', 'suggestedRephrase', 'reason'],
+            },
+          },
+        );
+      }
+
+      return [
+        {
+          functionDeclarations: introFunctions,
         },
       ];
     }
@@ -1869,7 +1933,7 @@ ${memoryPart}`;
       dto.topic?.toLowerCase().includes('assessment');
     const isSinhala = isIntroCall || dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
     const systemPrompt = this.getSystemPrompt(dto);
-    const tools = this.getToolsDeclaration(!isIntroCall && dto.aiSuggestions !== false, isSinhala, isIntroCall);
+    const tools = this.getToolsDeclaration(dto.aiSuggestions !== false, isSinhala, isIntroCall);
 
     const apiKey = process.env.GEMINI_API_KEY || this.geminiApiKey;
     const maxSeconds = dto.durationSeconds || 600;

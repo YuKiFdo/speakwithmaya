@@ -92,7 +92,8 @@ export default function CallScreen() {
   const isIntro = storeConfig?.isIntroCall ?? (params.isIntroCall === 'true' || isOnboardingCallRoute);
   const durationSec = storeConfig?.durationSeconds || (params.duration ? parseInt(params.duration, 10) : (isIntro ? 180 : 300));
   const targetDuration = isNaN(durationSec) ? 300 : durationSec;
-  const aiSug = isIntro ? false : (storeConfig?.aiSuggestions ?? (params.aiSuggestions !== 'false'));
+  const userWantsCorrections = onboardingState.aiCorrectionMode !== 'let_me_speak';
+  const aiSug = storeConfig?.aiSuggestions ?? (params.aiSuggestions !== undefined ? params.aiSuggestions !== 'false' : userWantsCorrections);
   const langMode = isIntro ? 'sinhala' : (storeConfig?.languageMode || (params.languageMode === 'english' ? 'english' : 'sinhala'));
   const sinhalaStyle: 'balanced' | 'deep_guidance' = isIntro
     ? 'balanced'
@@ -866,14 +867,9 @@ export default function CallScreen() {
         sessionTurns: liveCall.turns,
         activeHints: hintsHistoryRef.current,
       });
-      if (isIntro) {
-        console.log('[call.tsx] 🏁 Intro call concluded -> routing directly to /onboarding/building-plan');
-        router.replace('/onboarding/building-plan' as any);
-        return;
-      }
-
+      console.log(`[call.tsx] 🏁 Session concluded (isIntro: ${isIntro}) -> routing to analyzing pipeline`);
       router.replace({
-        pathname: '/call/analyzing' as any,
+        pathname: (isIntro ? '/onboarding/analyzing' : '/call/analyzing') as any,
         params: {
           sessionId: activeSessionId,
           roadmapLevelId: liveCall.missionReport.roadmapLevelId || '',
@@ -889,6 +885,7 @@ export default function CallScreen() {
           hintsUsedCount: String(liveCall.missionReport.hintsUsedCount ?? hintsHistoryRef.current.length),
           xpEarned: String(liveCall.missionReport.xpEarned || ''),
           isGeneralChat: String(Boolean(liveCall.missionReport.isGeneralChat)),
+          isIntro: String(isIntro),
         },
       });
     }

@@ -276,6 +276,7 @@ export default function SessionCompleteScreen() {
 
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
 
+  const isIntro = (params as any).isIntro === 'true' || (report?.callParams as any)?.isIntroCall === true;
   const isPassed = report ? report.passed : true;
   const isGeneral = report ? Boolean(report.isGeneralChat) : true;
 
@@ -368,6 +369,13 @@ export default function SessionCompleteScreen() {
   const handlePrimaryPress = () => {
     playUnderstoodTapSound();
     const activeSessionId = params.sessionId || report?.id || (report as any)?.sessionId || '';
+
+    if (isIntro) {
+      authService.syncStep('/onboarding/building-plan');
+      router.replace('/onboarding/building-plan' as any);
+      return;
+    }
+
     if (isGeneral) {
       OnboardingStore.setOnboardingCompleted();
       authService.syncStep('/(tabs)/dashboard');
@@ -403,7 +411,9 @@ export default function SessionCompleteScreen() {
     router.replace('/(tabs)/roadmap');
   };
 
-  const primaryButtonText = isGeneral
+  const primaryButtonText = isIntro
+    ? 'View My Plan'
+    : isGeneral
     ? 'Done'
     : (isPassed ? 'Done' : 'Try Again');
 

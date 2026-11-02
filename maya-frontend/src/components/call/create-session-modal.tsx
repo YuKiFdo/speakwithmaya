@@ -162,10 +162,15 @@ export function CreateSessionModal({
     { minutes: 30, tierLabel: 'Premium', requiredTier: 'premium' },
   ];
 
-  // Selected State (Defaults match the Figma design)
+  const userDefaultCorrection: AICorrectionOption =
+    (store.aiCorrectionMode as AICorrectionOption) ||
+    ((store.user as any)?.ai_correction_mode as AICorrectionOption) ||
+    'keep_on_track';
+
+  // Selected State (Defaults match user preference)
   const [selectedMinutes, setSelectedMinutes] = useState<SessionDurationMinutes>(starterMinutes);
   const [languageHelp, setLanguageHelp] = useState<LanguageHelpOption>('english_only');
-  const [aiCorrections, setAiCorrections] = useState<AICorrectionOption>('keep_on_track');
+  const [aiCorrections, setAiCorrections] = useState<AICorrectionOption>(userDefaultCorrection);
   const [pickerModal, setPickerModal] = useState<'language' | 'corrections' | null>(null);
 
   // Smooth Entry / Exit Animations
@@ -176,7 +181,7 @@ export function CreateSessionModal({
     if (visible) {
       setSelectedMinutes(starterMinutes);
       setLanguageHelp('english_only');
-      setAiCorrections('keep_on_track');
+      setAiCorrections(userDefaultCorrection);
       setPickerModal(null);
       modalAnim.setValue(0);
       Animated.spring(modalAnim, {

@@ -244,6 +244,7 @@ class AuthService {
           challenge: state.challenge || undefined,
           employmentStatus: state.employment || undefined,
           dailyGoalMinutes: state.dailyGoalMinutes || undefined,
+          aiCorrectionMode: state.aiCorrectionMode || undefined,
           markCompleted: state.isCompleted || undefined,
         }),
       });
@@ -295,6 +296,7 @@ class AuthService {
             challenge: data.profile.challenge,
             employmentStatus: data.profile.employment_status,
             dailyGoalMinutes: data.profile.daily_goal_minutes,
+            aiCorrectionMode: data.profile.ai_correction_mode || 'keep_on_track',
             lastActiveStep: data.profile.last_active_step,
             createdAt: data.profile.created_at,
             isCompleted: Boolean(data.profile.onboarding_completed_at),
