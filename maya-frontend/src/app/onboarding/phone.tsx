@@ -23,6 +23,8 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   playMayaPhonePromptVoice,
   stopMayaPhonePromptVoice,
+  areOnboardingAudiosEnabled,
+  setOnboardingAudiosEnabled,
 } from '@/services/sound/sound-service';
 import { MayaPrimaryButton } from '@/components/ui';
 import { mayaAlert } from '@/components/ui/alert-modal';
@@ -62,6 +64,9 @@ export default function PhoneScreen() {
         const mspaceOn = config?.mspaceEnabled ?? true;
 
         setActiveGateway(gateway);
+        if (typeof config?.onboardingAudiosEnabled === 'boolean') {
+          setOnboardingAudiosEnabled(config.onboardingAudiosEnabled);
+        }
         setIdeamartEnabled(ideaOn);
         setMspaceEnabled(mspaceOn);
 
@@ -146,6 +151,7 @@ export default function PhoneScreen() {
     ]).start();
 
     // Voice starts speaking line 1
+    if (!areOnboardingAudiosEnabled()) return;
     const voiceTimer = setTimeout(() => {
       try {
         playMayaPhonePromptVoice({
@@ -361,16 +367,14 @@ export default function PhoneScreen() {
       }
 
       // If phone number is already registered while on the Register screen,
-      // show toast notice and switch to Login mode with the phone number pre-filled
-      if (res.alreadyRegistered) {
-        setForcedLoginMode(true);
+      // SMS has been automatically sent -> show notice and jump straight to OTP verification in Login mode!
+      if (res.alreadyRegistered || res.isExistingUser) {
         mayaAlert.toast(
-          res.message ||
-            'This phone number is already registered. Switched to Login mode — tap Log In to receive your code.',
+          'Welcome back! Account found — sending your login code...',
           'info',
-          4500,
+          4000,
         );
-        router.replace('/onboarding/phone?mode=login' as any);
+        router.replace('/onboarding/otp?mode=login' as any);
         return;
       }
 

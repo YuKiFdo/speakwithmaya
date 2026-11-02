@@ -28,6 +28,7 @@ export interface AppConfigState {
   ideamartEnabled: boolean;
   mspaceEnabled: boolean;
   telcoUnsubButtonEnabled: boolean;
+  onboardingAudiosEnabled?: boolean;
 }
 
 const DEFAULT_CONFIG: AppConfigState = {
@@ -41,6 +42,7 @@ const DEFAULT_CONFIG: AppConfigState = {
   ideamartEnabled: true,
   mspaceEnabled: true,
   telcoUnsubButtonEnabled: true,
+  onboardingAudiosEnabled: true,
 };
 
 export default function AdminSettingsScreen() {
@@ -64,6 +66,7 @@ export default function AdminSettingsScreen() {
   const [ideamartEnabled, setIdeamartEnabled] = useState(true);
   const [mspaceEnabled, setMspaceEnabled] = useState(true);
   const [telcoUnsubButtonEnabled, setTelcoUnsubButtonEnabled] = useState(true);
+  const [onboardingAudiosEnabled, setOnboardingAudiosEnabledState] = useState(true);
 
   const getEffectiveTelcoPricingNotice = (ideaOn: boolean, mspaceOn: boolean, customVal?: string) => {
     if (customVal !== undefined && customVal !== '') return customVal;
@@ -137,6 +140,7 @@ export default function AdminSettingsScreen() {
         );
 
         setTelcoUnsubButtonEnabled(data.telcoUnsubButtonEnabled ?? true);
+        setOnboardingAudiosEnabledState(data.onboardingAudiosEnabled ?? true);
       }
     } catch (err: any) {
       setErrorMsg(`Failed to load app config: ${err?.message}`);
@@ -166,6 +170,7 @@ export default function AdminSettingsScreen() {
         ideamartEnabled,
         mspaceEnabled,
         telcoUnsubButtonEnabled,
+        onboardingAudiosEnabled,
       };
 
       const res = await fetch(`${getBackendBaseUrl()}/v1/admin/app-config`, {
@@ -511,6 +516,44 @@ export default function AdminSettingsScreen() {
                     </View>
                   </View>
                 )}
+
+                {/* Section Divider */}
+                <View style={styles.divider} />
+
+                {/* Onboarding & Voice Experience Controls */}
+                <View style={styles.configFieldsGroup}>
+                  <View style={styles.groupHeaderRow}>
+                    <Feather name="volume-2" size={17} color="#0f766e" />
+                    <Text style={styles.groupHeaderTitle}>Onboarding & Spoken Voice Experience</Text>
+                  </View>
+
+                  <View style={styles.providerBox}>
+                    <View style={styles.providerHeaderRow}>
+                      <View style={{ flex: 1, paddingRight: 12 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <Text style={styles.providerTitle}>Maya Onboarding Voice Guidance</Text>
+                          <View style={[styles.statusPill, onboardingAudiosEnabled ? styles.statusPillOn : styles.statusPillOff]}>
+                            <Text style={[styles.statusPillText, onboardingAudiosEnabled ? styles.statusPillTextOn : styles.statusPillTextOff]}>
+                              {onboardingAudiosEnabled ? 'ENABLED' : 'MUTED / FAST-FORWARD'}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.providerSub}>
+                          {onboardingAudiosEnabled
+                            ? 'Maya speaks personalized audio voice prompts and encouraging feedback during onboarding steps. Users wait for Maya to finish speaking before advancing.'
+                            : 'Muted: Onboarding voice prompts are disabled. When users select an option (Goal, Challenge, Level, etc.), the screen transitions instantly without waiting for audio.'}
+                        </Text>
+                      </View>
+
+                      <Pressable
+                        onPress={() => setOnboardingAudiosEnabledState(!onboardingAudiosEnabled)}
+                        style={[styles.switchTrack, onboardingAudiosEnabled && styles.switchTrackActive]}
+                      >
+                        <View style={[styles.switchThumb, onboardingAudiosEnabled && styles.switchThumbActive]} />
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
 
                 {/* Save Button Row */}
                 <View style={styles.actionsBar}>

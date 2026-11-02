@@ -21,6 +21,7 @@ import {
   stopMayaChallengePromptVoice,
   preloadChallengeVoices,
   playUnderstoodTapSound,
+  areOnboardingAudiosEnabled,
 } from '@/services/sound/sound-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
@@ -166,6 +167,13 @@ export default function ChallengeScreen() {
         router.replace('/onboarding/level');
       }
     };
+
+    if (!areOnboardingAudiosEnabled()) {
+      stopMayaChallengePromptVoice();
+      stopMayaChallengeFeedbackVoice();
+      navigateNext();
+      return;
+    }
 
     // Maya speaks personalized encouraging sentence, waits until finish, then transitions to next screen
     playMayaChallengeFeedbackVoice(item.id, {

@@ -4,6 +4,7 @@ import { OnboardingStore } from '../store/onboarding-store';
 export interface SendOtpResponse {
   success: boolean;
   alreadyRegistered?: boolean;
+  isExistingUser?: boolean;
   notRegistered?: boolean;
   phoneNumber?: string;
   cooldownSeconds?: number;

@@ -22,6 +22,7 @@ import {
   stopMayaEmploymentFeedbackVoice,
   preloadEmploymentVoices,
   playUnderstoodTapSound,
+  areOnboardingAudiosEnabled,
 } from '@/services/sound/sound-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
@@ -180,6 +181,13 @@ export default function EmploymentScreen() {
         router.replace('/onboarding/daily-goal' as any);
       }
     };
+
+    if (!areOnboardingAudiosEnabled()) {
+      stopMayaEmploymentPromptVoice();
+      stopMayaEmploymentFeedbackVoice();
+      navigateNext();
+      return;
+    }
 
     // Maya speaks personalized encouraging sentence, waits until finish, then transitions to next screen
     playMayaEmploymentFeedbackVoice(item.id, {

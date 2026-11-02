@@ -22,6 +22,7 @@ import {
   stopMayaLevelFeedbackVoice,
   preloadLevelVoices,
   playUnderstoodTapSound,
+  areOnboardingAudiosEnabled,
 } from '@/services/sound/sound-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
@@ -168,6 +169,13 @@ export default function LevelScreen() {
         router.replace('/onboarding/employment' as any);
       }
     };
+
+    if (!areOnboardingAudiosEnabled()) {
+      stopMayaLevelPromptVoice();
+      stopMayaLevelFeedbackVoice();
+      navigateNext();
+      return;
+    }
 
     // Maya speaks personalized encouraging sentence, waits until finish, then transitions to next screen
     playMayaLevelFeedbackVoice(item.id, {

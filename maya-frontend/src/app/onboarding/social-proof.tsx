@@ -32,6 +32,7 @@ import {
   playMayaSocialProofPromptVoice,
   stopMayaSocialProofPromptVoice,
   playOtherButtonSound,
+  areOnboardingAudiosEnabled,
 } from '@/services/sound/sound-service';
 import { CallSessionStore } from '@/services/store/call-session-store';
 import { authService } from '@/services/auth/auth-service';
@@ -139,7 +140,7 @@ export default function SocialProofScreen() {
     // 5. Play Maya's Gemini TTS Voice prompt after ~300ms
     const voiceTimer = setTimeout(() => {
       try {
-        playMayaSocialProofPromptVoice();
+        if (areOnboardingAudiosEnabled()) playMayaSocialProofPromptVoice();
       } catch {}
     }, 300);
 

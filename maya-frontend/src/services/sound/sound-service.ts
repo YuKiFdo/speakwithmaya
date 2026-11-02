@@ -245,11 +245,39 @@ export async function loadAudioBuffer(uri: string): Promise<AudioBuffer | null> 
  * 2. If not cached, fetches & decodes dynamically into Web Audio.
  * 3. Graceful fallback to HTMLAudioElement if Web Audio fails.
  */
+let onboardingAudiosEnabled = true;
+
+if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+  try {
+    const val = localStorage.getItem('maya_onboarding_audios_enabled');
+    if (val !== null) {
+      onboardingAudiosEnabled = val === 'true';
+    }
+  } catch {}
+}
+
+export function areOnboardingAudiosEnabled(): boolean {
+  return onboardingAudiosEnabled;
+}
+
+export function setOnboardingAudiosEnabled(enabled: boolean): void {
+  onboardingAudiosEnabled = enabled;
+  if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem('maya_onboarding_audios_enabled', enabled ? 'true' : 'false');
+    } catch {}
+  }
+}
+
 function playUniversalVoiceAsset(
   asset: any,
   callbacks?: VoiceCallbacks,
   onSetHandle?: (handle: VoicePlayerHandle | null) => void,
 ): void {
+  if (!areOnboardingAudiosEnabled()) {
+    callbacks?.onEnd?.();
+    return;
+  }
   unlockAudioSession();
 
   const uri = getAssetUri(asset);
@@ -1018,6 +1046,7 @@ export function cancelOnboardingVoicePreload(): void {
 }
 
 export function preloadAllOnboardingVoicesInOrder(): void {
+  if (!areOnboardingAudiosEnabled()) return;
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
   if (
     window.location.hostname.startsWith('admin.') ||

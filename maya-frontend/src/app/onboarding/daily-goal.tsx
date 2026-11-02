@@ -22,6 +22,7 @@ import {
   stopMayaDailyGoalFeedbackVoice,
   preloadDailyGoalVoices,
   playUnderstoodTapSound,
+  areOnboardingAudiosEnabled,
 } from '@/services/sound/sound-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
@@ -165,6 +166,13 @@ export default function DailyGoalScreen() {
         router.replace('/onboarding/social-proof');
       }
     };
+
+    if (!areOnboardingAudiosEnabled()) {
+      stopMayaDailyGoalPromptVoice();
+      stopMayaDailyGoalFeedbackVoice();
+      navigateNext();
+      return;
+    }
 
     // Maya speaks personalized encouraging sentence, waits until finish, then transitions to next screen
     playMayaDailyGoalFeedbackVoice(item.id, {

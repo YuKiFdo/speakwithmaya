@@ -50,6 +50,8 @@ export interface UserProfileData {
   baseline_pronunciation_score: number;
   last_active_step: string | null;
   onboarding_completed_at: string | null;
+  onboarding_call_status?: string | null;
+  onboarding_call_duration_seconds?: number | null;
   created_at: string;
   updated_at: string;
   telco_provider?: 'ideamart' | 'mspace' | null;
@@ -94,6 +96,7 @@ export interface AppConfigData {
   mspaceAppHash: string;
   mspaceBaseUrl: string;
   telcoUnsubButtonEnabled: boolean;
+  onboardingAudiosEnabled?: boolean;
   telcoDailyPriceLkr?: number;
   telcoRateHistory?: Array<{ rateLkr: number; effectiveFrom: string }>;
   testAccounts?: TestAccountItem[];
@@ -262,15 +265,12 @@ export class AuthService {
       .limit(1)
       .maybeSingle();
 
-    // If user is on the Register page (!isLoginMode), check if this phone number is already registered in profiles
-    if (!isLoginMode && existingProfile) {
-      this.logger.log(`[sendOtp] Phone ${phone} is already registered in profiles -> prompting client to switch to Login mode.`);
-      return {
-        success: false,
-        alreadyRegistered: true,
-        phoneNumber: phone,
-        message: 'This phone number is already registered. Please log in to continue.',
-      };
+    const isAlreadyRegistered = Boolean(existingProfile);
+    const effectiveIsLogin = isLoginMode || isAlreadyRegistered;
+
+    // If user is on the Register page but is already registered, automatically treat as seamless login and dispatch SMS OTP
+    if (!isLoginMode && isAlreadyRegistered) {
+      this.logger.log(`[sendOtp] Phone ${phone} is already registered in profiles -> auto-routing to Login OTP flow with SMS dispatch.`);
     }
 
     // If user is in Login mode (isLoginMode), require an existing registered profile before sending an OTP
@@ -311,9 +311,9 @@ export class AuthService {
     }
 
     // 2. Dispatch via Active Configured SMS Gateway Provider
-    // IMPORTANT: In Login mode (isLoginMode === true), ALWAYS use normal SMS OTP (smsProvider) without Telco!
+    // IMPORTANT: For existing users or in Login mode (effectiveIsLogin === true), ALWAYS use normal SMS OTP (smsProvider) without Telco!
     const gateway = config.smsGateway;
-    const isTelco = !isLoginMode && (gateway === 'ideamart' || gateway === 'mspace');
+    const isTelco = !effectiveIsLogin && (gateway === 'ideamart' || gateway === 'mspace');
     const expiresAt = new Date(now + 5 * 60 * 1000).toISOString(); // 5 minutes
 
     if (isTelco) {
@@ -321,12 +321,25 @@ export class AuthService {
       const pinResult = await this.telcoService.requestPin(phone, config);
 
       if (pinResult?.status === 'ALREADY_REGISTERED') {
-        this.logger.log(`[sendOtp] Telco reported ${phone} is ALREADY_REGISTERED -> prompting client to switch to Login mode.`);
+        this.logger.log(`[sendOtp] Telco reported ${phone} is ALREADY_REGISTERED -> dispatching standard SMS login OTP directly.`);
+        const code = crypto.randomInt(100000, 999999).toString();
+        const otpHash = this.hashOtp(code, phone);
+        await this.supabase.from('phone_verifications').insert({
+          phone_number: phone,
+          otp_hash: otpHash,
+          attempts: 0,
+          max_attempts: 3,
+          is_verified: false,
+          expires_at: expiresAt,
+        });
+        await this.smsProvider.sendOtp(phone, code, config.smsTemplate);
         return {
-          success: false,
+          success: true,
           alreadyRegistered: true,
-          phoneNumber: phone,
-          message: 'This phone number is already registered. Please log in to continue.',
+          isExistingUser: true,
+          cooldownSeconds: 60,
+          expiresInSeconds: 300,
+          message: 'Welcome back! Your login code has been sent via SMS.',
         };
       }
 
@@ -399,9 +412,13 @@ export class AuthService {
 
     return {
       success: true,
+      alreadyRegistered: !isLoginMode && isAlreadyRegistered,
+      isExistingUser: isAlreadyRegistered,
       cooldownSeconds: 60,
       expiresInSeconds: 300,
-      message: 'Verification code sent successfully.',
+      message: (!isLoginMode && isAlreadyRegistered)
+        ? 'Welcome back! We found your account. Your login code has been sent via SMS.'
+        : 'Verification code sent successfully.',
     };
   }
 
@@ -1987,6 +2004,22 @@ export class AuthService {
           },
           lastActiveStep: p.last_active_step,
           onboardingCompletedAt: p.onboarding_completed_at,
+          onboardingCallStatus: (() => {
+            const intro = userSessions.find((s) => (s.topic && s.topic.toLowerCase().includes('intro')));
+            if (intro) {
+              const dur = intro.duration_seconds || 0;
+              return dur >= 60 || intro.status === 'completed' ? 'completed' : 'cut_short';
+            }
+            if (p.onboarding_call_status === 'skipped' || (p.last_active_step && p.last_active_step !== '/onboarding/call' && p.onboarding_completed_at)) {
+              return 'skipped';
+            }
+            if (p.last_active_step === '/onboarding/call') return 'attempted';
+            return 'not_attempted';
+          })(),
+          onboardingCallDuration: (() => {
+            const intro = userSessions.find((s) => (s.topic && s.topic.toLowerCase().includes('intro')));
+            return intro?.duration_seconds || 0;
+          })(),
           createdAt: p.created_at,
           updatedAt: p.updated_at,
           // Aggregated Metrics
@@ -2296,6 +2329,7 @@ export class AuthService {
       ideamartEnabled: config.ideamartEnabled ?? true,
       mspaceEnabled: config.mspaceEnabled ?? true,
       telcoUnsubButtonEnabled: config.telcoUnsubButtonEnabled ?? true,
+      onboardingAudiosEnabled: config.onboardingAudiosEnabled ?? true,
     };
   }
 

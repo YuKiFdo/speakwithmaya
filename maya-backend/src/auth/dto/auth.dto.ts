@@ -368,6 +368,10 @@ export class UpdateAppConfigDto {
   telcoUnsubButtonEnabled?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  onboardingAudiosEnabled?: boolean;
+
+  @IsOptional()
   @IsNumber()
   telcoDailyPriceLkr?: number;
 

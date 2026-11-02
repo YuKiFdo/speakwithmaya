@@ -21,6 +21,7 @@ import {
   stopMayaGoalPromptVoice,
   preloadGoalVoices,
   playUnderstoodTapSound,
+  areOnboardingAudiosEnabled,
 } from '@/services/sound/sound-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
@@ -172,6 +173,13 @@ export default function GoalScreen() {
         router.replace('/onboarding/challenge');
       }
     };
+
+    if (!areOnboardingAudiosEnabled()) {
+      stopMayaGoalPromptVoice();
+      stopMayaGoalFeedbackVoice();
+      navigateNext();
+      return;
+    }
 
     // Maya speaks personalized encouraging sentence, waits until finish, then transitions to next screen
     playMayaGoalFeedbackVoice(goal.id, {

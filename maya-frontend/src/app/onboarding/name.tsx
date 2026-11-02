@@ -21,6 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   playMayaNamePromptVoice,
   stopMayaNamePromptVoice,
+  areOnboardingAudiosEnabled,
 } from '@/services/sound/sound-service';
 import { MayaPrimaryButton } from '@/components/ui';
 import { OnboardingStore } from '@/services/store/onboarding-store';
