@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsBoolean, IsOptional, IsNumber, IsArray, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateSessionTokenDto {
@@ -281,6 +281,26 @@ export class FinishSessionDto {
   @IsOptional()
   @IsString()
   scenarioTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  disconnectReason?: string;
+
+  @IsOptional()
+  @IsString()
+  micPermission?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  micMuted?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hasUserSpoken?: boolean;
+
+  @IsOptional()
+  @IsString()
+  guideStatus?: string;
 }
 
 export class QueryUsageDto {

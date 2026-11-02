@@ -2279,11 +2279,64 @@ export class AuthService {
 
       const introInfo = this.resolveOnboardingCallStatus(profile, sessions || []);
 
+      const introSession = (sessions || []).find((s: any) => {
+        const t = String(s.topic || s.scenario_title || s.scenarioTitle || '').toLowerCase();
+        return t.includes('intro') || t.includes('onboarding');
+      });
+
+      let onboardingCallTracking: any = null;
+      if (introSession && this.supabase) {
+        try {
+          const { data: diagData } = await this.supabase
+            .from('session_diagnostics')
+            .select('events')
+            .eq('session_id', introSession.id)
+            .maybeSingle();
+
+          if (diagData && Array.isArray(diagData.events)) {
+            let disconnectReason: string | null = null;
+            let micPermission: string | null = null;
+            let micMuted: boolean | null = null;
+            let hasUserSpoken: boolean | null = null;
+            let guideStatus: string | null = null;
+
+            for (const ev of diagData.events) {
+              if (ev.event === 'tracking_summary' || ev.event === 'session_meta_update' || ev.event === 'client_finish_payload') {
+                try {
+                  const p = JSON.parse(ev.detail || '{}');
+                  if (p.disconnectReason && !disconnectReason) disconnectReason = p.disconnectReason;
+                  if (p.micPermission) micPermission = p.micPermission;
+                  if (typeof p.micMuted === 'boolean') micMuted = p.micMuted;
+                  if (typeof p.hasUserSpoken === 'boolean') hasUserSpoken = p.hasUserSpoken;
+                  if (p.guideStatus) guideStatus = p.guideStatus;
+                } catch {}
+              } else if (ev.event === 'client_socket_closed' && !disconnectReason) {
+                if (ev.detail && ev.detail.includes('code=1001')) disconnectReason = 'browser_tab_closed';
+                else if (ev.detail && ev.detail.includes('code=1006')) disconnectReason = 'network_dropped';
+                else if (ev.detail && ev.detail.includes('code=1000')) {
+                  const m = ev.detail.match(/reason=(.+)$/);
+                  disconnectReason = (m && m[1] && m[1] !== 'none' && m[1] !== 'User closed session') ? m[1] : 'user_ended_call';
+                }
+              }
+            }
+
+            onboardingCallTracking = {
+              disconnectReason,
+              micPermission,
+              micMuted,
+              hasUserSpoken,
+              guideStatus,
+            };
+          }
+        } catch {}
+      }
+
       return {
         profile: enrichedProfile,
         onboardingCallStatus: introInfo.status,
         onboardingCallStatusLabel: introInfo.label,
         onboardingCallDuration: introInfo.duration,
+        onboardingCallTracking,
         stats: {
           totalSessions: (sessions || []).length,
           totalPracticeMinutes: Math.round(totalPracticeSeconds / 60),

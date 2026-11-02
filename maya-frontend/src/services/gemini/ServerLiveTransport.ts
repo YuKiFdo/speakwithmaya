@@ -302,11 +302,19 @@ export class ServerLiveTransport implements ILiveTransport {
     }
   }
 
-  close(): void {
+  sendSessionMeta(meta: any): void {
+    if (!this.isOpen || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    try {
+      this.ws.send(JSON.stringify({ type: 'session_meta', ...meta }));
+    } catch (e) {}
+  }
+
+  close(reason?: string): void {
     this.isOpen = false;
     if (this.ws) {
       try {
-        this.ws.close(1000, 'User closed session');
+        const closeReason = reason ? String(reason).slice(0, 120) : 'User closed session';
+        this.ws.close(1000, closeReason);
       } catch (e) {
         // ignore
       }

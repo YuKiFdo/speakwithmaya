@@ -120,6 +120,11 @@ export interface SessionDiagnosticsRecord {
   backpressureWarnings: number;
   errorCount: number;
   events: Array<{ ts: number; event: string; detail?: string }>;
+  disconnectReason?: string;
+  micPermission?: string;
+  micMuted?: boolean;
+  hasUserSpoken?: boolean;
+  guideStatus?: string;
   createdAt?: string;
 }
 
@@ -2308,6 +2313,65 @@ ${memoryPart}`;
       }
     }
 
+    // If client provided tracking diagnostic metadata in finishSession, enrich diagnostics record
+    if (dto.disconnectReason || dto.micPermission || dto.guideStatus || dto.micMuted !== undefined || dto.hasUserSpoken !== undefined) {
+      const trackingPayload = {
+        disconnectReason: dto.disconnectReason,
+        micPermission: dto.micPermission,
+        micMuted: dto.micMuted,
+        hasUserSpoken: dto.hasUserSpoken,
+        guideStatus: dto.guideStatus,
+      };
+
+      const existingDiag = this.recentDiagnostics.get(validSessionId) || this.recentDiagnostics.get(sessionId);
+      if (existingDiag) {
+        existingDiag.events = existingDiag.events || [];
+        existingDiag.events.push({
+          ts: Date.now(),
+          event: 'client_finish_payload',
+          detail: JSON.stringify(trackingPayload),
+        });
+        this.enrichRecordWithTracking(existingDiag);
+      }
+
+      if (this.supabase) {
+        const sb = this.supabase;
+        (async () => {
+          try {
+            const { data } = await sb
+              .from('session_diagnostics')
+              .select('id, events')
+              .eq('session_id', validSessionId)
+              .maybeSingle();
+
+            const currentEvents = Array.isArray(data?.events) ? data.events : [];
+            currentEvents.push({
+              ts: Date.now(),
+              event: 'client_finish_payload',
+              detail: JSON.stringify(trackingPayload),
+            });
+            if (data?.id) {
+              await sb.from('session_diagnostics').update({ events: currentEvents }).eq('id', data.id);
+            } else {
+              await sb.from('session_diagnostics').insert({
+                session_id: validSessionId,
+                duration_seconds: durationSeconds,
+                turns_count: (turns || []).length,
+                avg_latency_ms: 0,
+                max_latency_ms: 0,
+                slow_turns_count: 0,
+                backpressure_warnings: 0,
+                error_count: 0,
+                events: currentEvents,
+              });
+            }
+          } catch (diagErr: any) {
+            this.logger.warn(`Failed to update session diagnostics from finish payload: ${diagErr?.message}`);
+          }
+        })();
+      }
+    }
+
     if (dto.languageMode || dto.sinhalaStyle) {
       const existing = this.activeSessions.get(sessionId) || {};
       this.activeSessions.set(sessionId, {
@@ -3263,6 +3327,7 @@ ${memoryPart}`;
       ...record,
       createdAt: record.createdAt || new Date().toISOString(),
     };
+    this.enrichRecordWithTracking(formattedRecord);
 
     // 1. In-memory buffer (capped at 100 recent sessions)
     this.recentDiagnostics.set(record.sessionId, formattedRecord);
@@ -3297,10 +3362,35 @@ ${memoryPart}`;
     }
   }
 
+  private enrichRecordWithTracking(record: SessionDiagnosticsRecord): void {
+    if (!record || !Array.isArray(record.events)) return;
+    for (const ev of record.events) {
+      if (ev.event === 'tracking_summary' || ev.event === 'session_meta_update' || ev.event === 'client_finish_payload') {
+        try {
+          const p = JSON.parse(ev.detail || '{}');
+          if (p.disconnectReason && !record.disconnectReason) record.disconnectReason = p.disconnectReason;
+          if (p.micPermission) record.micPermission = p.micPermission;
+          if (typeof p.micMuted === 'boolean') record.micMuted = p.micMuted;
+          if (typeof p.hasUserSpoken === 'boolean') record.hasUserSpoken = p.hasUserSpoken;
+          if (p.guideStatus) record.guideStatus = p.guideStatus;
+        } catch {}
+      } else if (ev.event === 'client_socket_closed' && !record.disconnectReason) {
+        if (ev.detail && ev.detail.includes('code=1001')) record.disconnectReason = 'browser_tab_closed';
+        else if (ev.detail && ev.detail.includes('code=1006')) record.disconnectReason = 'network_dropped';
+        else if (ev.detail && ev.detail.includes('code=1000')) {
+          const m = ev.detail.match(/reason=(.+)$/);
+          record.disconnectReason = (m && m[1] && m[1] !== 'none' && m[1] !== 'User closed session') ? m[1] : 'user_ended_call';
+        }
+      }
+    }
+  }
+
   async getSessionDiagnostics(sessionId: string): Promise<SessionDiagnosticsRecord | null> {
     // Check in-memory ring-buffer first
     if (this.recentDiagnostics.has(sessionId)) {
-      return this.recentDiagnostics.get(sessionId)!;
+      const rec = this.recentDiagnostics.get(sessionId)!;
+      this.enrichRecordWithTracking(rec);
+      return rec;
     }
 
     // Check Supabase if connected
@@ -3318,7 +3408,7 @@ ${memoryPart}`;
         }
 
         if (data) {
-          return {
+          const rec: SessionDiagnosticsRecord = {
             sessionId: data.session_id,
             durationSeconds: data.duration_seconds,
             turnsCount: data.turns_count,
@@ -3330,6 +3420,8 @@ ${memoryPart}`;
             events: data.events,
             createdAt: data.created_at,
           };
+          this.enrichRecordWithTracking(rec);
+          return rec;
         }
       } catch (err: any) {
         this.logger.warn(`Error querying session diagnostics: ${err?.message}`);

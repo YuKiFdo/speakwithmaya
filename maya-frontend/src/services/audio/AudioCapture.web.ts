@@ -30,6 +30,18 @@ export class WebAudioCapture implements IAudioCapture {
         },
       });
 
+      // Track microphone hardware/browser mute state
+      const audioTrack = this.stream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.onmute = () => {
+          this.callbacks?.onMuteStateChange?.(true);
+        };
+        audioTrack.onunmute = () => {
+          this.callbacks?.onMuteStateChange?.(false);
+        };
+        this.callbacks?.onMuteStateChange?.(audioTrack.muted);
+      }
+
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
       this.audioCtx = new AudioCtxClass();
 
@@ -102,6 +114,7 @@ export class WebAudioCapture implements IAudioCapture {
                 isSpeaking = true;
                 console.log(`[${getLogTimestamp()}] 🎤 [User Speaking] Started (RMS=${candidateMaxRms.toFixed(3)})`);
                 this.callbacks?.onVoiceStart?.();
+                this.callbacks?.onUserSpeechDetected?.();
 
                 while (preRollBuffer.length > 0) {
                   const preChunk = preRollBuffer.shift();

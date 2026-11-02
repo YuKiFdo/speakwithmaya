@@ -89,6 +89,11 @@ export interface SessionDiagnosticsData {
   backpressureWarnings: number;
   errorCount: number;
   events: Array<{ ts: number; event: string; detail?: string }>;
+  disconnectReason?: string;
+  micPermission?: string;
+  micMuted?: boolean;
+  hasUserSpoken?: boolean;
+  guideStatus?: string;
   createdAt?: string;
 }
 
@@ -143,6 +148,85 @@ function formatClientDateTime(isoTimestamp?: string, fallbackDisplayDate?: strin
   if (fallbackDisplayDate) return fallbackDisplayDate;
   if (isoTimestamp) return isoTimestamp.slice(0, 16);
   return '-';
+}
+
+function formatEndReasonLabel(reason?: string): string {
+  if (!reason) return 'Unknown / Normal Close';
+  if (reason === 'user_ended_call') return 'User Clicked End Call';
+  if (reason === 'user_force_ended') return 'User Force Ended (Popup)';
+  if (reason === 'timer_farewell') return 'Full Session Timer Complete';
+  if (reason === 'browser_tab_closed') return 'Browser Tab / App Closed Early';
+  if (reason === 'network_dropped') return 'Network Dropped / Offline';
+  if (reason.startsWith('closed_code_1001')) return 'Browser Tab Closed (1001)';
+  if (reason.startsWith('closed_code_1006')) return 'Abnormal Drop / Lost Connection';
+  return reason.replace(/_/g, ' ');
+}
+
+function getEndReasonColor(reason?: string): string {
+  if (reason === 'user_ended_call') return '#2563eb';
+  if (reason === 'timer_farewell') return '#10b981';
+  if (reason === 'browser_tab_closed') return '#f59e0b';
+  if (reason === 'network_dropped' || reason?.includes('1006')) return '#ef4444';
+  if (reason === 'user_force_ended') return '#ea580c';
+  return '#64748b';
+}
+
+function getEndReasonIcon(reason?: string): string {
+  if (reason === 'user_ended_call') return 'call-outline';
+  if (reason === 'timer_farewell') return 'checkmark-circle-outline';
+  if (reason === 'browser_tab_closed') return 'exit-outline';
+  if (reason === 'network_dropped' || reason?.includes('1006')) return 'cloud-offline-outline';
+  if (reason === 'user_force_ended') return 'close-circle-outline';
+  return 'information-circle-outline';
+}
+
+function formatMicStatusLabel(data?: SessionDiagnosticsData): string {
+  if (!data) return 'Mic Status Unknown';
+  if (data.micPermission === 'denied') return 'Permission Denied by User';
+  if (data.micMuted) return 'Hardware / System Mic Muted';
+  if (data.hasUserSpoken || data.turnsCount > 0) return 'Active & User Spoke';
+  return 'Granted but Kept Silent (0 turns)';
+}
+
+function getMicStatusColor(data?: SessionDiagnosticsData): string {
+  if (!data) return '#64748b';
+  if (data.micPermission === 'denied') return '#ef4444';
+  if (data.micMuted) return '#f59e0b';
+  if (data.hasUserSpoken || data.turnsCount > 0) return '#10b981';
+  return '#64748b';
+}
+
+function getMicStatusIcon(data?: SessionDiagnosticsData): string {
+  if (!data) return 'mic-outline';
+  if (data.micPermission === 'denied') return 'mic-off-outline';
+  if (data.micMuted) return 'volume-mute-outline';
+  if (data.hasUserSpoken || data.turnsCount > 0) return 'mic';
+  return 'volume-low-outline';
+}
+
+function formatGuideStatusLabel(status?: string): string {
+  if (!status) return 'Not recorded';
+  if (status === 'completed') return 'Guide Completed (All 4 Steps)';
+  if (status === 'skipped') return 'Guide Skipped by User';
+  if (status.startsWith('step_')) {
+    const stepNum = Number(status.replace('step_', '')) + 1;
+    return `Stuck on Tip #${stepNum}`;
+  }
+  return status;
+}
+
+function getGuideStatusColor(status?: string): string {
+  if (status === 'completed') return '#10b981';
+  if (status === 'skipped') return '#64748b';
+  if (status?.startsWith('step_')) return '#f59e0b';
+  return '#94a3b8';
+}
+
+function getGuideStatusIcon(status?: string): string {
+  if (status === 'completed') return 'checkmark-done-circle-outline';
+  if (status === 'skipped') return 'play-skip-forward-outline';
+  if (status?.startsWith('step_')) return 'pause-circle-outline';
+  return 'help-circle-outline';
 }
 
 // Sidebar Navigation Structure
@@ -1494,6 +1578,44 @@ export default function AdminUsageScreen() {
                 <AdminTableSkeleton rows={4} />
               ) : logsData ? (
                 <>
+                  {/* End Reason, Mic State & Guide Progress Diagnostic Cards */}
+                  <View style={styles.trackingBadgesRow}>
+                    {/* 1. End Trigger */}
+                    <View style={[styles.trackingCard, { borderLeftColor: getEndReasonColor(logsData.disconnectReason) }]}>
+                      <Text style={styles.trackingCardLabel}>End Trigger / Disconnect</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                        <Ionicons name={getEndReasonIcon(logsData.disconnectReason) as any} size={15} color={getEndReasonColor(logsData.disconnectReason)} />
+                        <Text style={[styles.trackingCardValue, { color: getEndReasonColor(logsData.disconnectReason) }]}>
+                          {formatEndReasonLabel(logsData.disconnectReason)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* 2. Microphone & Audio */}
+                    <View style={[styles.trackingCard, { borderLeftColor: getMicStatusColor(logsData) }]}>
+                      <Text style={styles.trackingCardLabel}>Microphone & Audio</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                        <Ionicons name={getMicStatusIcon(logsData) as any} size={15} color={getMicStatusColor(logsData)} />
+                        <Text style={[styles.trackingCardValue, { color: getMicStatusColor(logsData) }]}>
+                          {formatMicStatusLabel(logsData)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* 3. Guide Progress */}
+                    {(logsData.guideStatus || activeLogsSession?.topic?.toLowerCase().includes('intro')) && (
+                      <View style={[styles.trackingCard, { borderLeftColor: getGuideStatusColor(logsData.guideStatus) }]}>
+                        <Text style={styles.trackingCardLabel}>Intro Guide Progress</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                          <Ionicons name={getGuideStatusIcon(logsData.guideStatus) as any} size={15} color={getGuideStatusColor(logsData.guideStatus)} />
+                          <Text style={[styles.trackingCardValue, { color: getGuideStatusColor(logsData.guideStatus) }]}>
+                            {formatGuideStatusLabel(logsData.guideStatus)}
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+
                   {/* Filter inside logs */}
                   <View style={styles.logsFilterRow}>
                     <Text style={styles.modalSectionTitle}>
@@ -2700,6 +2822,34 @@ const styles = StyleSheet.create({
   },
   modalLogsBodyContent: {
     paddingBottom: 24,
+  },
+  trackingBadgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 16,
+  },
+  trackingCard: {
+    flex: 1,
+    minWidth: 200,
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderLeftWidth: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  trackingCardLabel: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  trackingCardValue: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
   },
   logsBadge: {
     backgroundColor: '#f0fdfa',

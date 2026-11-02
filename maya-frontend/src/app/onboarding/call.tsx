@@ -487,7 +487,8 @@ export default function CallScreen() {
 
       farewellGraceTimerRef.current = setTimeout(() => {
         console.log('[call.tsx] ⏰ Farewell grace period (25s) elapsed -> auto-ending call');
-        liveCall.endCall();
+        liveCall.setDisconnectReason?.('timer_farewell');
+        liveCall.endCall(true, 'timer_farewell');
       }, 25000);
     }
   }, [isTimeUp, liveCall.status]);
@@ -569,6 +570,7 @@ export default function CallScreen() {
       hasShownGuideRef.current = true;
       const timer = setTimeout(() => {
         setGuideStepIndex(0);
+        liveCall.setGuideStatus?.('step_0');
       }, 450);
       return () => clearTimeout(timer);
     }
@@ -807,6 +809,7 @@ export default function CallScreen() {
       }
       if (!isConcludingCall) {
         setIsConcludingCall(true);
+        liveCall.setDisconnectReason?.('user_ended_call');
         liveCall.requestGracefulHangup();
       }
       return;
@@ -817,6 +820,7 @@ export default function CallScreen() {
       return;
     }
     setIsConcludingCall(true);
+    liveCall.setDisconnectReason?.('user_ended_call');
     liveCall.requestGracefulHangup();
   };
 
@@ -826,6 +830,7 @@ export default function CallScreen() {
       return;
     }
     setIsConcludingCall(true);
+    liveCall.setDisconnectReason?.('user_ended_call');
     liveCall.requestGracefulHangup();
   };
 
@@ -835,7 +840,8 @@ export default function CallScreen() {
       clearTimeout(farewellGraceTimerRef.current);
       farewellGraceTimerRef.current = null;
     }
-    liveCall.endCall(true);
+    liveCall.setDisconnectReason?.('user_force_ended');
+    liveCall.endCall(true, 'user_force_ended');
   };
 
   // When session completes, navigate directly to analyzing screen before showing completion scorecard
@@ -1309,9 +1315,13 @@ export default function CallScreen() {
         <ContextualCallGuide
           visible={guideStepIndex !== null}
           currentStepIndex={guideStepIndex ?? 0}
-          onStepChange={(idx) => setGuideStepIndex(idx)}
+          onStepChange={(idx) => {
+            setGuideStepIndex(idx);
+            liveCall.setGuideStatus?.(`step_${idx}`);
+          }}
           onFinish={() => {
             setGuideStepIndex(null);
+            liveCall.setGuideStatus?.('completed');
             setIsTranslationVisible(false);
             setTranslationText('');
             console.log('[call.tsx] 🎙️ Intro tour guide finished: releasing Maya greeting audio');

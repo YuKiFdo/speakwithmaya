@@ -7,6 +7,8 @@ export interface AudioCaptureCallbacks {
   onVolumeChange?: (volume: number) => void;
   onVoiceStart?: () => void;
   onVoiceEnd?: () => void;
+  onMuteStateChange?: (isMuted: boolean) => void;
+  onUserSpeechDetected?: () => void;
   onError?: (error: Error) => void;
   isOutputPlaying?: () => boolean;
 }

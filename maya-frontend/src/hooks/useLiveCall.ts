@@ -211,6 +211,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const resumptionHandleRef = useRef<string | null>(null);
   const hasFinishedRef = useRef<boolean>(false);
   const hasSentMidSessionCueRef = useRef<boolean>(false);
+  const disconnectReasonRef = useRef<string>('browser_tab_closed');
+  const micPermissionRef = useRef<string>('prompt');
+  const isHardwareMutedRef = useRef<boolean>(false);
+  const hasUserSpokenRef = useRef<boolean>(false);
+  const guideStatusRef = useRef<string | null>(null);
 
   const optionsRef = useRef(options);
   useEffect(() => {
@@ -231,6 +236,46 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   useEffect(() => {
     tokensRef.current = tokens;
   }, [tokens]);
+
+  // Track browser/device mic permissions and beforeunload disconnect reason
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && (navigator as any).permissions?.query) {
+      try {
+        (navigator as any).permissions.query({ name: 'microphone' }).then((p: any) => {
+          if (p && p.state) {
+            micPermissionRef.current = p.state;
+            p.onchange = () => {
+              micPermissionRef.current = p.state;
+              if (transportRef.current?.sendSessionMeta) {
+                transportRef.current.sendSessionMeta({ micPermission: p.state });
+              }
+            };
+          }
+        }).catch(() => {});
+      } catch {}
+    }
+
+    if (typeof window === 'undefined') return;
+    const handleBeforeUnload = () => {
+      if (!hasFinishedRef.current && statusRef.current !== 'ended') {
+        disconnectReasonRef.current = 'browser_tab_closed';
+        try {
+          transportRef.current?.sendSessionMeta?.({
+            disconnectReason: 'browser_tab_closed',
+            micPermission: micPermissionRef.current,
+            micMuted: isHardwareMutedRef.current || isMutedRef.current,
+            hasUserSpoken: hasUserSpokenRef.current || userSpeakingSecondsRef.current > 0.5,
+            guideStatus: guideStatusRef.current,
+          });
+          transportRef.current?.close('browser_tab_closed');
+        } catch {}
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
 
   // Register mic suppressor: mutes mic capture & VAD whenever UI sounds (e.g. Hint button chime) play
   useEffect(() => {
@@ -456,6 +501,19 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       // 2. Acquire and start Microphone Capture BEFORE connecting to Gemini Live!
       // This ensures we NEVER connect to Gemini or start consuming tokens until the user has granted microphone permission.
       await captureRef.current.start({
+        onMuteStateChange: (isMuted: boolean) => {
+          isHardwareMutedRef.current = isMuted;
+          console.log(`[useLiveCall] Hardware/browser mic mute state changed: ${isMuted}`);
+          if (transportRef.current?.sendSessionMeta) {
+            transportRef.current.sendSessionMeta({ micMuted: isMuted });
+          }
+        },
+        onUserSpeechDetected: () => {
+          hasUserSpokenRef.current = true;
+          if (transportRef.current?.sendSessionMeta) {
+            transportRef.current.sendSessionMeta({ hasUserSpoken: true });
+          }
+        },
         isOutputPlaying: () => {
           return (
             isMutedRef.current ||
@@ -545,6 +603,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       });
 
       // Microphone initialized successfully -> dismiss permission modal
+      micPermissionRef.current = 'granted';
       setIsPermissionModalVisible(false);
       setPermissionErrorType(null);
 
@@ -1210,6 +1269,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         setPermissionErrorType('insecure');
         setIsPermissionModalVisible(true);
       } else if (isNotAllowed) {
+        micPermissionRef.current = 'denied';
         setPermissionErrorType('denied');
         setIsPermissionModalVisible(true);
       } else if (isUnsupported) {
@@ -1222,12 +1282,15 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     }
   }, [options.topic, options.goal, options.level, isMuted]);
 
-  const endCall = useCallback(async (shouldNavigate: boolean = true) => {
+  const endCall = useCallback(async (shouldNavigate: boolean = true, reason?: string) => {
     if (hasFinishedRef.current) {
       console.log('[useLiveCall] Call already finished or ending in progress, skipping redundant endCall');
       return;
     }
     hasFinishedRef.current = true;
+    if (reason) {
+      disconnectReasonRef.current = reason;
+    }
     setStatus('ended');
     statusRef.current = 'ended';
     setUserVolume(0);
@@ -1288,10 +1351,17 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
     // 1. Immediately teardown audio & transport
     try {
+      transportRef.current.sendSessionMeta?.({
+        disconnectReason: disconnectReasonRef.current,
+        micPermission: micPermissionRef.current,
+        micMuted: isHardwareMutedRef.current || isMutedRef.current,
+        hasUserSpoken: hasUserSpokenRef.current || userSpeakingSecondsRef.current > 0.5,
+        guideStatus: guideStatusRef.current,
+      });
       transportRef.current.sendAudioStreamEnd();
       await captureRef.current.stop();
       await playerRef.current.stop();
-      transportRef.current.close();
+      transportRef.current.close(disconnectReasonRef.current);
     } catch (err) {
       console.warn('[useLiveCall] Error during call teardown:', err);
     }
@@ -1537,6 +1607,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           headers: authHeaders,
           body: JSON.stringify({
             durationSeconds: secs,
+            disconnectReason: disconnectReasonRef.current,
+            micPermission: micPermissionRef.current,
+            micMuted: isHardwareMutedRef.current || isMutedRef.current,
+            hasUserSpoken: hasUserSpokenRef.current || userSpeakingSecondsRef.current > 0.5,
+            guideStatus: guideStatusRef.current,
             tokensUsed: {
               textInTokens: textIn,
               audioInTokens: audioIn,
@@ -1632,6 +1707,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
   const requestGracefulHangup = useCallback(() => {
     console.log('[useLiveCall] 🛑 User initiated call conclusion -> muting mic & dispatching conclude cue to Maya');
+    disconnectReasonRef.current = 'user_ended_call';
+    if (transportRef.current?.sendSessionMeta) {
+      transportRef.current.sendSessionMeta({ disconnectReason: 'user_ended_call' });
+    }
 
     // 1. Immediately mute mic so user speech stops streaming and echo is clamped
     isMutedRef.current = true;
@@ -1756,6 +1835,18 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     startCall,
     endCall,
     requestGracefulHangup,
+    setGuideStatus: (status: string) => {
+      guideStatusRef.current = status;
+      if (transportRef.current?.sendSessionMeta) {
+        transportRef.current.sendSessionMeta({ guideStatus: status });
+      }
+    },
+    setDisconnectReason: (reason: string) => {
+      disconnectReasonRef.current = reason;
+      if (transportRef.current?.sendSessionMeta) {
+        transportRef.current.sendSessionMeta({ disconnectReason: reason });
+      }
+    },
     toggleMute,
     closeFeedbackModal,
     resumeAudio,

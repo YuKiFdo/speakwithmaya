@@ -109,7 +109,8 @@ export interface ILiveTransport {
   sendInterrupted(): void;
   sendTimeWrapupCue(remainingSeconds?: number): void;
   sendCurriculumPacingCue?(nextObjectiveId?: string, nextObjectiveTitle?: string): void;
-  close(): void;
+  sendSessionMeta?(meta: any): void;
+  close(reason?: string): void;
   isConnected(): boolean;
   getResumptionHandle?(): string | null;
 }
@@ -874,7 +875,11 @@ export class LiveTransport implements ILiveTransport {
     return this.resumptionHandle;
   }
 
-  close() {
+  sendSessionMeta(meta: any): void {
+    // no-op for direct LiveTransport
+  }
+
+  close(reason?: string) {
     this.isOpen = false;
     if (this.feedbackNudgeTimer) {
       clearTimeout(this.feedbackNudgeTimer);

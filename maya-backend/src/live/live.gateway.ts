@@ -99,6 +99,11 @@ interface ClientSessionState {
     feedbackEnglish?: string;
   };
   supersededByReconnect?: boolean;
+  disconnectReason?: string;
+  micPermission?: string;
+  micMuted?: boolean;
+  hasUserSpoken?: boolean;
+  guideStatus?: string;
 }
 
 interface PersistentSessionAudioState {
@@ -245,7 +250,36 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     client.on('close', (code, reason) => {
-      this.addSessionLog(state, 'client_socket_closed', `code=${code} reason=${reason?.toString() || ''}`);
+      const reasonStr = reason?.toString() || '';
+      let resolvedReason = state.disconnectReason;
+      if (!resolvedReason) {
+        if (code === 1001) {
+          resolvedReason = 'browser_tab_closed';
+        } else if (code === 1006) {
+          resolvedReason = 'network_dropped';
+        } else if (code === 1000) {
+          if (reasonStr && reasonStr !== 'none' && reasonStr !== 'User closed session') {
+            resolvedReason = reasonStr;
+          } else {
+            resolvedReason = 'user_ended_call';
+          }
+        } else {
+          resolvedReason = `closed_code_${code}`;
+        }
+        state.disconnectReason = resolvedReason;
+      }
+      this.addSessionLog(state, 'client_socket_closed', `code=${code} reason=${reasonStr}`);
+      this.addSessionLog(
+        state,
+        'tracking_summary',
+        JSON.stringify({
+          disconnectReason: state.disconnectReason,
+          micPermission: state.micPermission,
+          micMuted: state.micMuted,
+          hasUserSpoken: state.hasUserSpoken || state.userTurnCount > 0,
+          guideStatus: state.guideStatus,
+        }),
+      );
     });
   }
 
@@ -290,6 +324,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           backpressureWarnings: state.backpressureWarningCount,
           errorCount: errorEvents.length,
           events: state.sessionLog,
+          disconnectReason: state.disconnectReason,
+          micPermission: state.micPermission,
+          micMuted: state.micMuted,
+          hasUserSpoken: state.hasUserSpoken || state.userTurnCount > 0,
+          guideStatus: state.guideStatus,
         })
         .catch((e: any) => {
           this.logger.warn(`[${sid}] Failed to save diagnostics: ${e?.message}`);
@@ -672,6 +711,25 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!state) return;
 
     switch (message.type) {
+      case 'session_meta': {
+        if (message.disconnectReason) state.disconnectReason = message.disconnectReason;
+        if (message.micPermission) state.micPermission = message.micPermission;
+        if (typeof message.micMuted === 'boolean') state.micMuted = message.micMuted;
+        if (typeof message.hasUserSpoken === 'boolean') state.hasUserSpoken = message.hasUserSpoken;
+        if (message.guideStatus) state.guideStatus = message.guideStatus;
+        this.addSessionLog(
+          state,
+          'session_meta_update',
+          JSON.stringify({
+            disconnectReason: state.disconnectReason,
+            micPermission: state.micPermission,
+            micMuted: state.micMuted,
+            hasUserSpoken: state.hasUserSpoken,
+            guideStatus: state.guideStatus,
+          }),
+        );
+        break;
+      }
       case 'start_session': {
         const dto: CreateSessionTokenDto = message.options || {};
         const rawSessionId = message.options?.sessionId || message.sessionId;

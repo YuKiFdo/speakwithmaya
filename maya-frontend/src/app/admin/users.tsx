@@ -103,6 +103,13 @@ export interface UserPersonalizedDetail {
   onboardingCallStatus?: 'completed' | 'cut_short' | 'skipped' | 'attempted' | 'not_attempted';
   onboardingCallDuration?: number;
   onboardingCallStatusLabel?: string;
+  onboardingCallTracking?: {
+    disconnectReason?: string;
+    micPermission?: string;
+    micMuted?: boolean;
+    hasUserSpoken?: boolean;
+    guideStatus?: string;
+  };
   stats: {
     totalSessions: number;
     totalPracticeMinutes: number;
@@ -187,6 +194,61 @@ function formatStepBadge(step?: string): string {
   if (clean.includes('phone') || clean.includes('otp')) return 'Auth';
   if (clean.includes('name')) return 'Name';
   return step.replace('/onboarding/', '');
+}
+
+function formatEndReasonLabel(reason?: string): string {
+  if (!reason) return 'Unknown / Normal Close';
+  if (reason === 'user_ended_call') return 'User Clicked End Call';
+  if (reason === 'user_force_ended') return 'User Force Ended';
+  if (reason === 'timer_farewell') return 'Full Session Timer Complete';
+  if (reason === 'browser_tab_closed') return 'Browser Tab / App Closed Early';
+  if (reason === 'network_dropped') return 'Network Dropped / Offline';
+  if (reason.startsWith('closed_code_1001')) return 'Browser Tab Closed (1001)';
+  if (reason.startsWith('closed_code_1006')) return 'Abnormal Drop / Connection Lost';
+  return reason.replace(/_/g, ' ');
+}
+
+function getEndReasonColor(reason?: string): string {
+  if (reason === 'user_ended_call') return '#2563eb';
+  if (reason === 'timer_farewell') return '#10b981';
+  if (reason === 'browser_tab_closed') return '#f59e0b';
+  if (reason === 'network_dropped' || reason?.includes('1006')) return '#ef4444';
+  if (reason === 'user_force_ended') return '#ea580c';
+  return '#64748b';
+}
+
+function formatMicStatusLabel(tracking?: { micPermission?: string; micMuted?: boolean; hasUserSpoken?: boolean }): string {
+  if (!tracking) return 'Unknown';
+  if (tracking.micPermission === 'denied') return 'Permission Denied by User';
+  if (tracking.micMuted) return 'Hardware / System Mic Muted';
+  if (tracking.hasUserSpoken) return 'Active & User Spoke';
+  return 'Granted but Kept Silent';
+}
+
+function getMicStatusColor(tracking?: { micPermission?: string; micMuted?: boolean; hasUserSpoken?: boolean }): string {
+  if (!tracking) return '#64748b';
+  if (tracking.micPermission === 'denied') return '#ef4444';
+  if (tracking.micMuted) return '#f59e0b';
+  if (tracking.hasUserSpoken) return '#10b981';
+  return '#64748b';
+}
+
+function formatGuideStatusLabel(status?: string): string {
+  if (!status) return 'Not recorded';
+  if (status === 'completed') return 'Guide Completed (All Steps)';
+  if (status === 'skipped') return 'Guide Skipped';
+  if (status.startsWith('step_')) {
+    const stepNum = Number(status.replace('step_', '')) + 1;
+    return `Stuck on Tip #${stepNum}`;
+  }
+  return status;
+}
+
+function getGuideStatusColor(status?: string): string {
+  if (status === 'completed') return '#10b981';
+  if (status === 'skipped') return '#64748b';
+  if (status?.startsWith('step_')) return '#f59e0b';
+  return '#94a3b8';
 }
 
 export default function AdminUsersScreen() {
@@ -1498,6 +1560,45 @@ export default function AdminUsersScreen() {
                               : '0 seconds'}
                           </Text>
                         </View>
+                        {userDetail.onboardingCallTracking && (
+                          <>
+                            <View style={styles.attributeItem}>
+                              <Text style={styles.attrLabel}>Call End Trigger</Text>
+                              <Text
+                                style={[
+                                  styles.attrValue,
+                                  { color: getEndReasonColor(userDetail.onboardingCallTracking.disconnectReason) },
+                                ]}
+                              >
+                                {formatEndReasonLabel(userDetail.onboardingCallTracking.disconnectReason)}
+                              </Text>
+                            </View>
+                            <View style={styles.attributeItem}>
+                              <Text style={styles.attrLabel}>Microphone State</Text>
+                              <Text
+                                style={[
+                                  styles.attrValue,
+                                  { color: getMicStatusColor(userDetail.onboardingCallTracking) },
+                                ]}
+                              >
+                                {formatMicStatusLabel(userDetail.onboardingCallTracking)}
+                              </Text>
+                            </View>
+                            {userDetail.onboardingCallTracking.guideStatus && (
+                              <View style={styles.attributeItem}>
+                                <Text style={styles.attrLabel}>Intro Guide Progress</Text>
+                                <Text
+                                  style={[
+                                    styles.attrValue,
+                                    { color: getGuideStatusColor(userDetail.onboardingCallTracking.guideStatus) },
+                                  ]}
+                                >
+                                  {formatGuideStatusLabel(userDetail.onboardingCallTracking.guideStatus)}
+                                </Text>
+                              </View>
+                            )}
+                          </>
+                        )}
                       </View>
                     </View>
 
