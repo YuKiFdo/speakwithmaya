@@ -81,6 +81,8 @@ export interface UserSummaryItem {
   };
   lastActiveStep?: string;
   onboardingCompletedAt?: string;
+  onboardingCallStatus?: 'completed' | 'cut_short' | 'skipped' | 'attempted' | 'not_attempted';
+  onboardingCallDuration?: number;
   createdAt: string;
   updatedAt: string;
   stats: {
@@ -98,6 +100,9 @@ export interface UserSummaryItem {
 
 export interface UserPersonalizedDetail {
   profile: any;
+  onboardingCallStatus?: 'completed' | 'cut_short' | 'skipped' | 'attempted' | 'not_attempted';
+  onboardingCallDuration?: number;
+  onboardingCallStatusLabel?: string;
   stats: {
     totalSessions: number;
     totalPracticeMinutes: number;
@@ -161,6 +166,27 @@ export interface UserPersonalizedDetail {
     xp_earned: number;
     completed_at: string;
   }>;
+}
+
+
+function formatStepBadge(step?: string): string {
+  if (!step) return 'Started';
+  const clean = step.toLowerCase();
+  if (clean.includes('dashboard') || clean.includes('complete')) return 'Dashboard';
+  if (clean.includes('personalized-plan')) return 'Plan';
+  if (clean.includes('special-offer') || clean.includes('claim-discount')) return 'Offer';
+  if (clean.includes('building-plan')) return 'Building Plan';
+  if (clean.includes('call') || clean.includes('connecting')) return 'Intro Call';
+  if (clean.includes('social-proof')) return 'Social Proof';
+  if (clean.includes('daily-goal')) return 'Daily Goal';
+  if (clean.includes('employment')) return 'Employment';
+  if (clean.includes('language')) return 'Language';
+  if (clean.includes('level')) return 'Level';
+  if (clean.includes('challenge')) return 'Challenge';
+  if (clean.includes('goal')) return 'Goal';
+  if (clean.includes('phone') || clean.includes('otp')) return 'Auth';
+  if (clean.includes('name')) return 'Name';
+  return step.replace('/onboarding/', '');
 }
 
 export default function AdminUsersScreen() {
@@ -827,12 +853,13 @@ export default function AdminUsersScreen() {
                 <View style={styles.table}>
                   {/* Table Header */}
                   <View style={styles.tableHeaderRow}>
-                    <Text style={[styles.tableColHeader, { flex: 2 }]}>STUDENT</Text>
-                    <Text style={[styles.tableColHeader, { flex: 1.2 }]}>LEVEL & GOAL</Text>
-                    <Text style={[styles.tableColHeader, { flex: 1.1 }]}>PLAN & TIER</Text>
-                    <Text style={[styles.tableColHeader, { flex: 1 }]}>PRACTICE BAL.</Text>
-                    <Text style={[styles.tableColHeader, { flex: 1.2 }]}>SESSIONS / MINS</Text>
-                    <Text style={[styles.tableColHeader, { flex: 1.2, textAlign: 'right' }]}>ACTIONS</Text>
+                    <Text style={[styles.tableColHeader, { flex: 1.8 }]}>STUDENT</Text>
+                    <Text style={[styles.tableColHeader, { flex: 1.1 }]}>LEVEL & GOAL</Text>
+                    <Text style={[styles.tableColHeader, { flex: 1.0 }]}>PLAN & TIER</Text>
+                    <Text style={[styles.tableColHeader, { flex: 1.0 }]}>PRACTICE BAL.</Text>
+                    <Text style={[styles.tableColHeader, { flex: 1.4 }]}>ONBOARDING & CALL</Text>
+                    <Text style={[styles.tableColHeader, { flex: 1.1 }]}>SESSIONS / MINS</Text>
+                    <Text style={[styles.tableColHeader, { flex: 1.0, textAlign: 'right' }]}>ACTIONS</Text>
                   </View>
 
                   {/* Table Rows */}
@@ -907,6 +934,60 @@ export default function AdminUsersScreen() {
                           <Text style={styles.balanceMinutes}>{u.minutesBalance} min</Text>
                           <Text style={styles.allowanceSubText}>
                             Alloc: {u.monthlyMinutesAllowance}m | Add-on: {u.addOnMinutesBalance}m
+                          </Text>
+                        </View>
+
+                        {/* Onboarding & Call Status */}
+                        <View style={[styles.tableCol, { flex: 1.4 }]}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                            <View
+                              style={[
+                                styles.statusDot,
+                                {
+                                  backgroundColor: u.onboardingCompletedAt
+                                    ? '#10b981'
+                                    : u.onboardingCallStatus === 'cut_short'
+                                    ? '#f59e0b'
+                                    : u.onboardingCallStatus === 'completed'
+                                    ? '#10b981'
+                                    : u.onboardingCallStatus === 'skipped'
+                                    ? '#64748b'
+                                    : '#3b82f6',
+                                },
+                              ]}
+                            />
+                            <Text
+                              style={[
+                                styles.onboardingStatusBadgeText,
+                                {
+                                  color: u.onboardingCompletedAt
+                                    ? '#0f766e'
+                                    : u.onboardingCallStatus === 'cut_short'
+                                    ? '#b45309'
+                                    : u.onboardingCallStatus === 'completed'
+                                    ? '#0f766e'
+                                    : u.onboardingCallStatus === 'skipped'
+                                    ? '#475569'
+                                    : '#1d4ed8',
+                                },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {u.onboardingCompletedAt
+                                ? 'Completed'
+                                : u.onboardingCallStatus === 'cut_short'
+                                ? `Call Cut (${u.onboardingCallDuration || 0}s)`
+                                : u.onboardingCallStatus === 'completed'
+                                ? `Call Done (${Math.round((u.onboardingCallDuration || 0) / 60)}m)`
+                                : u.onboardingCallStatus === 'skipped'
+                                ? 'Call Skipped'
+                                : u.onboardingCallStatus === 'attempted'
+                                ? 'Call Attempted'
+                                : 'In Progress'}
+                            </Text>
+                          </View>
+                          <Text style={styles.onboardingStepSubText} numberOfLines={1}>
+                            Step: {formatStepBadge(u.lastActiveStep)}
                           </Text>
                         </View>
 
@@ -1338,6 +1419,77 @@ export default function AdminUsersScreen() {
                           <Text style={styles.attrLabel}>Installments Paid</Text>
                           <Text style={styles.attrValue}>
                             {userDetail.subscription?.installments_paid ?? 0} cycles
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Onboarding & First Call Journey Card */}
+                    <View style={styles.sectionCard}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <Text style={styles.sectionTitle}>Onboarding & Initial Call Journey</Text>
+                        <View
+                          style={[
+                            styles.planBadge,
+                            {
+                              backgroundColor: userDetail.profile.onboarding_completed_at ? '#f0fdf4' : '#fffbeb',
+                              borderColor: userDetail.profile.onboarding_completed_at ? '#bbf7d0' : '#fde68a',
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.planBadgeText,
+                              {
+                                color: userDetail.profile.onboarding_completed_at ? '#16a34a' : '#d97706',
+                              },
+                            ]}
+                          >
+                            {userDetail.profile.onboarding_completed_at ? 'ONBOARDING COMPLETED' : 'IN PROGRESS'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.attributesGrid}>
+                        <View style={styles.attributeItem}>
+                          <Text style={styles.attrLabel}>Last Active Screen</Text>
+                          <Text style={styles.attrValue}>
+                            {formatStepBadge(userDetail.profile.last_active_step)} ({userDetail.profile.last_active_step || '/'})
+                          </Text>
+                        </View>
+                        <View style={styles.attributeItem}>
+                          <Text style={styles.attrLabel}>Completion Date</Text>
+                          <Text style={styles.attrValue}>
+                            {userDetail.profile.onboarding_completed_at
+                              ? new Date(userDetail.profile.onboarding_completed_at).toLocaleString()
+                              : 'Not completed yet'}
+                          </Text>
+                        </View>
+                        <View style={styles.attributeItem}>
+                          <Text style={styles.attrLabel}>Intro Call Status</Text>
+                          <Text
+                            style={[
+                              styles.attrValue,
+                              {
+                                color: userDetail.onboardingCallStatus === 'completed'
+                                  ? '#0f766e'
+                                  : userDetail.onboardingCallStatus === 'cut_short'
+                                  ? '#b45309'
+                                  : userDetail.onboardingCallStatus === 'skipped'
+                                  ? '#64748b'
+                                  : '#1d4ed8',
+                              },
+                            ]}
+                          >
+                            {userDetail.onboardingCallStatusLabel || 'Not attempted'}
+                          </Text>
+                        </View>
+                        <View style={styles.attributeItem}>
+                          <Text style={styles.attrLabel}>Intro Call Talk Time</Text>
+                          <Text style={styles.attrValue}>
+                            {userDetail.onboardingCallDuration
+                              ? `${Math.floor(userDetail.onboardingCallDuration / 60)}m ${userDetail.onboardingCallDuration % 60}s (${userDetail.onboardingCallDuration} seconds)`
+                              : '0 seconds'}
                           </Text>
                         </View>
                       </View>
@@ -2139,6 +2291,16 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'regular'),
     fontSize: 10,
     color: '#94a3b8',
+    marginTop: 2,
+  },
+  onboardingStatusBadgeText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 11.5,
+  },
+  onboardingStepSubText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 10.5,
+    color: '#64748b',
     marginTop: 2,
   },
   sessionsCountText: {

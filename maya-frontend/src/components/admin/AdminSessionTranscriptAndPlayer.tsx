@@ -62,6 +62,8 @@ export function AdminSessionTranscriptAndPlayer({
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [totalDuration, setTotalDuration] = useState<number>(durationSeconds || 0);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+  const [trackWidth, setTrackWidth] = useState<number>(0);
 
   const audioRef = useRef<any>(null);
 
@@ -114,30 +116,13 @@ export function AdminSessionTranscriptAndPlayer({
     return `${baseUrl}/v1/sessions/${sessionId}/recording-audio?type=full`;
   };
 
-  const handleTogglePlay = () => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') {
-      Linking.openURL(getFullRecordingUrl()).catch(() => {});
-      return;
-    }
-
-    setAudioError(null);
-
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        audioRef.current.play().catch(() => {
-          setAudioError('Recording audio is not available for this session.');
-          setIsPlaying(false);
-        });
-        setIsPlaying(true);
-      }
-      return;
-    }
+  const initAudioIfNeeded = (): any => {
+    if (audioRef.current) return audioRef.current;
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
 
     const url = getFullRecordingUrl();
     const audio = new window.Audio(url);
+    audio.playbackRate = playbackSpeed;
     audioRef.current = audio;
 
     audio.onloadedmetadata = () => {
@@ -156,16 +141,69 @@ export function AdminSessionTranscriptAndPlayer({
       setIsPlaying(false);
       setAudioError('No audio recording file found for this session.');
     };
+    return audio;
+  };
 
-    audio
-      .play()
-      .then(() => {
-        setIsPlaying(true);
-      })
-      .catch(() => {
-        setIsPlaying(false);
-        setAudioError('No audio recording file found for this session.');
-      });
+  const handleTogglePlay = () => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      Linking.openURL(getFullRecordingUrl()).catch(() => {});
+      return;
+    }
+
+    setAudioError(null);
+
+    const audio = initAudioIfNeeded();
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+    } else {
+      audio
+        .play()
+        .then(() => {
+          setIsPlaying(true);
+        })
+        .catch(() => {
+          setIsPlaying(false);
+          setAudioError('Recording audio is not available for this session.');
+        });
+    }
+  };
+
+  const seekTo = (targetSec: number) => {
+    setAudioError(null);
+    const boundedTime = Math.max(0, Math.min(totalDuration || 9999, targetSec));
+    setCurrentTime(boundedTime);
+
+    const audio = initAudioIfNeeded();
+    if (audio) {
+      try {
+        audio.currentTime = boundedTime;
+      } catch (err) {
+        console.warn('Seek error:', err);
+      }
+    }
+  };
+
+  const seekBy = (deltaSec: number) => {
+    seekTo(currentTime + deltaSec);
+  };
+
+  const handleSeekPress = (e: any) => {
+    if (trackWidth <= 0) return;
+    const clickX = e.nativeEvent.locationX;
+    const ratio = Math.max(0, Math.min(1, clickX / trackWidth));
+    const targetTime = Math.round(ratio * (totalDuration || 60));
+    seekTo(targetTime);
+  };
+
+  const cycleSpeed = () => {
+    const next = playbackSpeed === 1 ? 1.25 : playbackSpeed === 1.25 ? 1.5 : playbackSpeed === 1.5 ? 2 : 1;
+    setPlaybackSpeed(next);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = next;
+    }
   };
 
   const progressPercent =
@@ -205,6 +243,16 @@ export function AdminSessionTranscriptAndPlayer({
 
         {/* Playback Controls Row */}
         <View style={styles.playerControlsBar}>
+          {/* Rewind 10s */}
+          <Pressable
+            onPress={() => seekBy(-10)}
+            style={({ pressed }) => [styles.skipBtn, pressed && { opacity: 0.7 }]}
+            accessibilityLabel="Rewind 10 seconds"
+          >
+            <Ionicons name="play-back" size={16} color="#475569" />
+          </Pressable>
+
+          {/* Main Play / Pause Button */}
           <Pressable
             onPress={handleTogglePlay}
             style={({ pressed }) => [styles.playCircleBtn, pressed && { opacity: 0.85 }]}
@@ -217,10 +265,45 @@ export function AdminSessionTranscriptAndPlayer({
             />
           </Pressable>
 
-          <View style={styles.progressTrackWrap}>
-            <View style={styles.progressTrackBg}>
-              <View style={[styles.progressTrackFill, { width: `${progressPercent}%` }]} />
-            </View>
+          {/* Fast forward 10s */}
+          <Pressable
+            onPress={() => seekBy(10)}
+            style={({ pressed }) => [styles.skipBtn, pressed && { opacity: 0.7 }]}
+            accessibilityLabel="Forward 10 seconds"
+          >
+            <Ionicons name="play-forward" size={16} color="#475569" />
+          </Pressable>
+
+          {/* Speed button */}
+          <Pressable
+            onPress={cycleSpeed}
+            style={({ pressed }) => [styles.speedBadgeBtn, pressed && { opacity: 0.75 }]}
+          >
+            <Text style={styles.speedBadgeText}>{playbackSpeed}x</Text>
+          </Pressable>
+
+          {/* Interactive Scrubber Track & Playhead */}
+          <View
+            style={styles.progressTrackWrap}
+            onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+          >
+            <Pressable
+              onPress={handleSeekPress}
+              style={styles.touchableTrackArea}
+            >
+              <View style={styles.progressTrackBg}>
+                <View style={[styles.progressTrackFill, { width: `${progressPercent}%` }]} />
+              </View>
+
+              {/* Playhead Knob */}
+              <View
+                style={[
+                  styles.playheadKnob,
+                  { left: `${progressPercent}%` },
+                ]}
+              />
+            </Pressable>
+
             <View style={styles.timeLabelsRow}>
               <Text style={styles.timeText}>{formatSec(currentTime)}</Text>
               <Text style={styles.timeText}>{formatSec(totalDuration)}</Text>
@@ -385,13 +468,55 @@ const styles = StyleSheet.create({
   playerControlsBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     backgroundColor: '#ffffff',
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e2e8f0',
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  skipBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speedBadgeBtn: {
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  speedBadgeText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 11,
+    color: '#0d9488',
+  },
+  touchableTrackArea: {
+    height: 22,
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  playheadKnob: {
+    position: 'absolute',
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#0d9488',
+    marginLeft: -7,
+    top: 4,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    shadowColor: '#0d9488',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.35,
+    shadowRadius: 2,
+    elevation: 3,
   },
   playCircleBtn: {
     width: 36,
