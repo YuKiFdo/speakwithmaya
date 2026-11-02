@@ -944,15 +944,18 @@ export default function AdminUsersScreen() {
                               style={[
                                 styles.statusDot,
                                 {
-                                  backgroundColor: u.onboardingCompletedAt
-                                    ? '#10b981'
-                                    : u.onboardingCallStatus === 'cut_short'
-                                    ? '#f59e0b'
-                                    : u.onboardingCallStatus === 'completed'
-                                    ? '#10b981'
-                                    : u.onboardingCallStatus === 'skipped'
-                                    ? '#64748b'
-                                    : '#3b82f6',
+                                  backgroundColor:
+                                    u.onboardingCallStatus === 'completed'
+                                      ? '#10b981'
+                                      : u.onboardingCallStatus === 'cut_short'
+                                      ? '#f59e0b'
+                                      : u.onboardingCallStatus === 'skipped'
+                                      ? '#64748b'
+                                      : u.onboardingCallStatus === 'attempted'
+                                      ? '#3b82f6'
+                                      : u.onboardingCompletedAt
+                                      ? '#10b981'
+                                      : '#94a3b8',
                                 },
                               ]}
                             />
@@ -960,34 +963,37 @@ export default function AdminUsersScreen() {
                               style={[
                                 styles.onboardingStatusBadgeText,
                                 {
-                                  color: u.onboardingCompletedAt
-                                    ? '#0f766e'
-                                    : u.onboardingCallStatus === 'cut_short'
-                                    ? '#b45309'
-                                    : u.onboardingCallStatus === 'completed'
-                                    ? '#0f766e'
-                                    : u.onboardingCallStatus === 'skipped'
-                                    ? '#475569'
-                                    : '#1d4ed8',
+                                  color:
+                                    u.onboardingCallStatus === 'completed'
+                                      ? '#0f766e'
+                                      : u.onboardingCallStatus === 'cut_short'
+                                      ? '#b45309'
+                                      : u.onboardingCallStatus === 'skipped'
+                                      ? '#475569'
+                                      : u.onboardingCallStatus === 'attempted'
+                                      ? '#1d4ed8'
+                                      : u.onboardingCompletedAt
+                                      ? '#0f766e'
+                                      : '#64748b',
                                 },
                               ]}
                               numberOfLines={1}
                             >
-                              {u.onboardingCompletedAt
-                                ? 'Completed'
+                              {u.onboardingCallStatus === 'completed'
+                                ? `Call Done (${Math.round((u.onboardingCallDuration || 0) / 60) || 1}m)`
                                 : u.onboardingCallStatus === 'cut_short'
                                 ? `Call Cut (${u.onboardingCallDuration || 0}s)`
-                                : u.onboardingCallStatus === 'completed'
-                                ? `Call Done (${Math.round((u.onboardingCallDuration || 0) / 60)}m)`
                                 : u.onboardingCallStatus === 'skipped'
                                 ? 'Call Skipped'
                                 : u.onboardingCallStatus === 'attempted'
                                 ? 'Call Attempted'
+                                : u.onboardingCompletedAt
+                                ? 'Completed'
                                 : 'In Progress'}
                             </Text>
                           </View>
                           <Text style={styles.onboardingStepSubText} numberOfLines={1}>
-                            Step: {formatStepBadge(u.lastActiveStep)}
+                            {u.onboardingCompletedAt ? 'Onboarding Done' : `Step: ${formatStepBadge(u.lastActiveStep)}`}
                           </Text>
                         </View>
 

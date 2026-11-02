@@ -1773,6 +1773,64 @@ export class AuthService {
   }
 
   /**
+   * Helper to accurately classify the onboarding call journey for a student.
+   */
+  private resolveOnboardingCallStatus(
+    profile: any,
+    userSessions: any[],
+  ): { status: 'completed' | 'cut_short' | 'skipped' | 'attempted' | 'not_attempted'; duration: number; label: string } {
+    // 1. Look for any session where topic includes 'intro' or 'onboarding'
+    const intro = (userSessions || []).find((s) => {
+      const t = String(s.topic || s.scenario_title || s.scenarioTitle || '').toLowerCase();
+      return t.includes('intro') || t.includes('onboarding');
+    });
+
+    if (intro) {
+      const dur = Number(intro.duration_seconds || 0);
+      const isCompleted = dur >= 45 || intro.status === 'completed';
+      const status = isCompleted ? 'completed' : 'cut_short';
+      const mins = Math.floor(dur / 60);
+      const secs = dur % 60;
+      const durLabel = mins > 0 ? (secs > 0 ? `${mins}m ${secs}s` : `${mins}m`) : `${secs}s`;
+      const label = isCompleted ? `Call Completed (${durLabel})` : `Call Cut Short (${durLabel})`;
+      return { status, duration: dur, label };
+    }
+
+    // 2. Check profile's explicit onboarding_call_status and duration if present
+    if (profile?.onboarding_call_status === 'completed') {
+      const dur = Number(profile?.onboarding_call_duration_seconds || 60);
+      const mins = Math.floor(dur / 60);
+      const secs = dur % 60;
+      const durLabel = mins > 0 ? (secs > 0 ? `${mins}m ${secs}s` : `${mins}m`) : `${secs}s`;
+      return { status: 'completed', duration: dur, label: `Call Completed (${durLabel})` };
+    }
+
+    if (profile?.onboarding_call_status === 'cut_short') {
+      const dur = Number(profile?.onboarding_call_duration_seconds || 0);
+      return { status: 'cut_short', duration: dur, label: `Call Cut Short (${dur}s)` };
+    }
+
+    if (profile?.onboarding_call_status === 'skipped') {
+      return { status: 'skipped', duration: 0, label: 'Call Skipped' };
+    }
+
+    if (
+      profile?.onboarding_call_status === 'attempted' ||
+      profile?.last_active_step === '/onboarding/call' ||
+      profile?.last_active_step === '/onboarding/connecting'
+    ) {
+      return { status: 'attempted', duration: 0, label: 'Call Attempted' };
+    }
+
+    // 3. Fallback: If onboarding was completed and no intro session exists, they skipped the call
+    if (profile?.onboarding_completed_at && profile?.last_active_step !== '/onboarding/call') {
+      return { status: 'skipped', duration: 0, label: 'Call Skipped' };
+    }
+
+    return { status: 'not_attempted', duration: 0, label: 'Not Attempted' };
+  }
+
+  /**
    * Admin: List users with aggregation metrics (sessions count, total tokens, total spend LKR, roadmap progress).
    */
   async getAdminUsers(query?: AdminUsersQueryDto) {
@@ -1814,7 +1872,7 @@ export class AuthService {
       // 2. Fetch sessions to aggregate per user
       const { data: sessions } = await this.supabase
         .from('sessions')
-        .select('id, user_id, duration_seconds, overall_score, fluency_score, grammar_score, pronunciation_score, created_at, status')
+        .select('id, user_id, topic, duration_seconds, overall_score, fluency_score, grammar_score, pronunciation_score, created_at, status')
         .order('created_at', { ascending: false });
 
       // 3. Fetch usage ledger to aggregate spend and tokens per user
@@ -2005,20 +2063,16 @@ export class AuthService {
           lastActiveStep: p.last_active_step,
           onboardingCompletedAt: p.onboarding_completed_at,
           onboardingCallStatus: (() => {
-            const intro = userSessions.find((s) => (s.topic && s.topic.toLowerCase().includes('intro')));
-            if (intro) {
-              const dur = intro.duration_seconds || 0;
-              return dur >= 60 || intro.status === 'completed' ? 'completed' : 'cut_short';
-            }
-            if (p.onboarding_call_status === 'skipped' || (p.last_active_step && p.last_active_step !== '/onboarding/call' && p.onboarding_completed_at)) {
-              return 'skipped';
-            }
-            if (p.last_active_step === '/onboarding/call') return 'attempted';
-            return 'not_attempted';
+            const info = this.resolveOnboardingCallStatus(p, userSessions);
+            return info.status;
+          })(),
+          onboardingCallStatusLabel: (() => {
+            const info = this.resolveOnboardingCallStatus(p, userSessions);
+            return info.label;
           })(),
           onboardingCallDuration: (() => {
-            const intro = userSessions.find((s) => (s.topic && s.topic.toLowerCase().includes('intro')));
-            return intro?.duration_seconds || 0;
+            const info = this.resolveOnboardingCallStatus(p, userSessions);
+            return info.duration;
           })(),
           createdAt: p.created_at,
           updatedAt: p.updated_at,
@@ -2223,8 +2277,13 @@ export class AuthService {
         avatarUrl: (profile as any).avatar_url || null,
       };
 
+      const introInfo = this.resolveOnboardingCallStatus(profile, sessions || []);
+
       return {
         profile: enrichedProfile,
+        onboardingCallStatus: introInfo.status,
+        onboardingCallStatusLabel: introInfo.label,
+        onboardingCallDuration: introInfo.duration,
         stats: {
           totalSessions: (sessions || []).length,
           totalPracticeMinutes: Math.round(totalPracticeSeconds / 60),
