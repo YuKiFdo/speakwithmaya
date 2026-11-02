@@ -99,6 +99,7 @@ export default function ChallengeScreen() {
 
     // 2. Play Maya's gentle question prompt ("What's hardest for you right now? Pick your biggest challenge when speaking English.")
     const promptTimer = setTimeout(() => {
+      if (!areOnboardingAudiosEnabled()) return;
       playMayaChallengePromptVoice();
     }, 200);
 

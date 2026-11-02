@@ -101,6 +101,7 @@ export default function LevelScreen() {
 
     // 2. Play Maya's cheerful question prompt ("What's your current level? Be honest -- I'll meet you right where you are!")
     const promptTimer = setTimeout(() => {
+      if (!areOnboardingAudiosEnabled()) return;
       playMayaLevelPromptVoice();
     }, 200);
 

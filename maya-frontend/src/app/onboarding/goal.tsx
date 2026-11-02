@@ -105,6 +105,7 @@ export default function GoalScreen() {
 
     // 2. Play Maya's cheerful question prompt ("What's your biggest goal? Pick what matters most to you right now!")
     const promptTimer = setTimeout(() => {
+      if (!areOnboardingAudiosEnabled()) return;
       playMayaGoalPromptVoice();
     }, 200);
 

@@ -113,6 +113,7 @@ export default function EmploymentScreen() {
 
     // 2. Play Maya's friendly question prompt ("What is your current employment status? This helps us personalise your practice sessions!")
     const promptTimer = setTimeout(() => {
+      if (!areOnboardingAudiosEnabled()) return;
       playMayaEmploymentPromptVoice();
     }, 200);
 

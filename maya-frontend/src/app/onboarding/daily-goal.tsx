@@ -97,6 +97,7 @@ export default function DailyGoalScreen() {
 
     // 2. Play Maya's motivating question prompt ("How much can you practice daily? Even five or ten minutes a day makes a HUGE difference!")
     const promptTimer = setTimeout(() => {
+      if (!areOnboardingAudiosEnabled()) return;
       playMayaDailyGoalPromptVoice();
     }, 200);
 

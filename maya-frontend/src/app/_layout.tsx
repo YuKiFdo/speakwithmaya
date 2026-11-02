@@ -31,6 +31,7 @@ import { AlertHost } from '@/components/ui/alert-modal';
 import { Ionicons, Feather, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouteGuard } from '@/hooks/useRouteGuard';
 import { OnboardingStore } from '@/services/store/onboarding-store';
+import { syncAppConfigAudioSettings } from '@/services/sound/sound-service';
 if (Platform.OS === 'web' && typeof console !== 'undefined') {
   const originalWarn = console.warn;
   console.warn = (...args: any[]) => {
@@ -134,6 +135,7 @@ export default function RootLayout() {
 
   // Wait for encrypted storage hydration before rendering routes (capped at 800ms safety timeout)
   useEffect(() => {
+    syncAppConfigAudioSettings();
     if (isStoreHydrated) return;
     let mounted = true;
     const safetyTimer = setTimeout(() => {

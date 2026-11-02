@@ -14,6 +14,7 @@ import { Feather, Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
+import { setOnboardingAudiosEnabled } from '@/services/sound/sound-service';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 
@@ -140,7 +141,9 @@ export default function AdminSettingsScreen() {
         );
 
         setTelcoUnsubButtonEnabled(data.telcoUnsubButtonEnabled ?? true);
-        setOnboardingAudiosEnabledState(data.onboardingAudiosEnabled ?? true);
+        const isAudioEnabled = data.onboardingAudiosEnabled ?? true;
+        setOnboardingAudiosEnabledState(isAudioEnabled);
+        setOnboardingAudiosEnabled(isAudioEnabled);
       }
     } catch (err: any) {
       setErrorMsg(`Failed to load app config: ${err?.message}`);
@@ -185,6 +188,8 @@ export default function AdminSettingsScreen() {
         const err = await res.json().catch(() => null);
         throw new Error(err?.message || 'Failed to save configuration');
       }
+
+      setOnboardingAudiosEnabled(onboardingAudiosEnabled);
 
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
@@ -546,7 +551,11 @@ export default function AdminSettingsScreen() {
                       </View>
 
                       <Pressable
-                        onPress={() => setOnboardingAudiosEnabledState(!onboardingAudiosEnabled)}
+                        onPress={() => {
+                          const nextVal = !onboardingAudiosEnabled;
+                          setOnboardingAudiosEnabledState(nextVal);
+                          setOnboardingAudiosEnabled(nextVal);
+                        }}
                         style={[styles.switchTrack, onboardingAudiosEnabled && styles.switchTrackActive]}
                       >
                         <View style={[styles.switchThumb, onboardingAudiosEnabled && styles.switchThumbActive]} />

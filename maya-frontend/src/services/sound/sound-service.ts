@@ -269,6 +269,47 @@ export function setOnboardingAudiosEnabled(enabled: boolean): void {
   }
 }
 
+let syncPromise: Promise<boolean> | null = null;
+
+export function syncAppConfigAudioSettings(): Promise<boolean> {
+  if (syncPromise) return syncPromise;
+  syncPromise = (async () => {
+    try {
+      const httpBase = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+      let targetUrl = `${httpBase.replace(/\/$/, '')}/v1/app-config`;
+      if (typeof window !== 'undefined' && window.location) {
+        const proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
+        if (window.location.hostname.endsWith('speakwithmaya.com')) {
+          targetUrl = 'https://api.speakwithmaya.com/v1/app-config';
+        } else if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+          const host = process.env.EXPO_PUBLIC_BACKEND_URL
+            ? process.env.EXPO_PUBLIC_BACKEND_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')
+            : `${window.location.hostname}:3000`;
+          targetUrl = `${proto}//${host}/v1/app-config`;
+        }
+      }
+
+      const res = await fetch(targetUrl);
+      if (res.ok) {
+        const data = await res.json();
+        if (typeof data.onboardingAudiosEnabled === 'boolean') {
+          setOnboardingAudiosEnabled(data.onboardingAudiosEnabled);
+          return data.onboardingAudiosEnabled;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return onboardingAudiosEnabled;
+  })();
+  return syncPromise;
+}
+
+// Automatically sync on initial module load on web
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  syncAppConfigAudioSettings();
+}
+
 function playUniversalVoiceAsset(
   asset: any,
   callbacks?: VoiceCallbacks,

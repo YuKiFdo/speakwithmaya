@@ -70,8 +70,11 @@ export default function NameScreen() {
       }),
     ]).start();
 
+    const isAudioOff = !areOnboardingAudiosEnabled();
+
     // Voice starts speaking line 1
     const voiceTimer = setTimeout(() => {
+      if (isAudioOff) return;
       try {
         playMayaNamePromptVoice({
           onStart: () => setIsSpeaking(true),
@@ -81,13 +84,13 @@ export default function NameScreen() {
       } catch {}
     }, 350);
 
-    // 2. Timing sequence: "What should I call you?" appears at ~2000ms
+    // 2. Timing sequence: "What should I call you?" appears
     const questionTimer = setTimeout(() => {
       setShowQuestion(true);
       Animated.parallel([
         Animated.timing(questionOpacityAnim, {
           toValue: 1,
-          duration: 400,
+          duration: isAudioOff ? 200 : 400,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -98,15 +101,15 @@ export default function NameScreen() {
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
-    }, 2000);
+    }, isAudioOff ? 150 : 2000);
 
-    // 3. Timing sequence: Input box & Button appear at ~3600ms
+    // 3. Timing sequence: Input box & Button appear
     const inputTimer = setTimeout(() => {
       setShowInput(true);
       Animated.parallel([
         Animated.timing(inputOpacityAnim, {
           toValue: 1,
-          duration: 450,
+          duration: isAudioOff ? 200 : 450,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -118,7 +121,7 @@ export default function NameScreen() {
         }),
         Animated.timing(buttonOpacityAnim, {
           toValue: 1,
-          duration: 450,
+          duration: isAudioOff ? 200 : 450,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
