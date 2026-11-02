@@ -2310,23 +2310,18 @@ export class AuthService {
                   if (typeof p.hasUserSpoken === 'boolean') hasUserSpoken = p.hasUserSpoken;
                   if (p.guideStatus) guideStatus = p.guideStatus;
                 } catch {}
-              } else if (ev.event === 'client_socket_closed' && !disconnectReason) {
-                if (ev.detail && ev.detail.includes('code=1001')) disconnectReason = 'browser_tab_closed';
-                else if (ev.detail && ev.detail.includes('code=1006')) disconnectReason = 'network_dropped';
-                else if (ev.detail && ev.detail.includes('code=1000')) {
-                  const m = ev.detail.match(/reason=(.+)$/);
-                  disconnectReason = (m && m[1] && m[1] !== 'none' && m[1] !== 'User closed session') ? m[1] : 'user_ended_call';
-                }
               }
             }
 
-            onboardingCallTracking = {
-              disconnectReason,
-              micPermission,
-              micMuted,
-              hasUserSpoken,
-              guideStatus,
-            };
+            if (disconnectReason || micPermission || micMuted !== null || hasUserSpoken !== null || guideStatus) {
+              onboardingCallTracking = {
+                disconnectReason,
+                micPermission,
+                micMuted,
+                hasUserSpoken,
+                guideStatus,
+              };
+            }
           }
         } catch {}
       }

@@ -197,7 +197,7 @@ function formatStepBadge(step?: string): string {
 }
 
 function formatEndReasonLabel(reason?: string): string {
-  if (!reason) return 'Unknown / Normal Close';
+  if (!reason) return '';
   if (reason === 'user_ended_call') return 'User Clicked End Call';
   if (reason === 'user_force_ended') return 'User Force Ended';
   if (reason === 'timer_farewell') return 'Full Session Timer Complete';
@@ -1562,29 +1562,35 @@ export default function AdminUsersScreen() {
                         </View>
                         {userDetail.onboardingCallTracking && (
                           <>
-                            <View style={styles.attributeItem}>
-                              <Text style={styles.attrLabel}>Call End Trigger</Text>
-                              <Text
-                                style={[
-                                  styles.attrValue,
-                                  { color: getEndReasonColor(userDetail.onboardingCallTracking.disconnectReason) },
-                                ]}
-                              >
-                                {formatEndReasonLabel(userDetail.onboardingCallTracking.disconnectReason)}
-                              </Text>
-                            </View>
-                            <View style={styles.attributeItem}>
-                              <Text style={styles.attrLabel}>Microphone State</Text>
-                              <Text
-                                style={[
-                                  styles.attrValue,
-                                  { color: getMicStatusColor(userDetail.onboardingCallTracking) },
-                                ]}
-                              >
-                                {formatMicStatusLabel(userDetail.onboardingCallTracking)}
-                              </Text>
-                            </View>
-                            {userDetail.onboardingCallTracking.guideStatus && (
+                            {Boolean(userDetail.onboardingCallTracking.disconnectReason) && (
+                              <View style={styles.attributeItem}>
+                                <Text style={styles.attrLabel}>Call End Trigger</Text>
+                                <Text
+                                  style={[
+                                    styles.attrValue,
+                                    { color: getEndReasonColor(userDetail.onboardingCallTracking.disconnectReason) },
+                                  ]}
+                                >
+                                  {formatEndReasonLabel(userDetail.onboardingCallTracking.disconnectReason)}
+                                </Text>
+                              </View>
+                            )}
+                            {(Boolean(userDetail.onboardingCallTracking.micPermission) ||
+                              typeof userDetail.onboardingCallTracking.micMuted === 'boolean' ||
+                              typeof userDetail.onboardingCallTracking.hasUserSpoken === 'boolean') && (
+                              <View style={styles.attributeItem}>
+                                <Text style={styles.attrLabel}>Microphone State</Text>
+                                <Text
+                                  style={[
+                                    styles.attrValue,
+                                    { color: getMicStatusColor(userDetail.onboardingCallTracking) },
+                                  ]}
+                                >
+                                  {formatMicStatusLabel(userDetail.onboardingCallTracking)}
+                                </Text>
+                              </View>
+                            )}
+                            {Boolean(userDetail.onboardingCallTracking.guideStatus) && (
                               <View style={styles.attributeItem}>
                                 <Text style={styles.attrLabel}>Intro Guide Progress</Text>
                                 <Text

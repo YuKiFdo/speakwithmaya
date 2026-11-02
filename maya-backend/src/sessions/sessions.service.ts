@@ -3374,13 +3374,6 @@ ${memoryPart}`;
           if (typeof p.hasUserSpoken === 'boolean') record.hasUserSpoken = p.hasUserSpoken;
           if (p.guideStatus) record.guideStatus = p.guideStatus;
         } catch {}
-      } else if (ev.event === 'client_socket_closed' && !record.disconnectReason) {
-        if (ev.detail && ev.detail.includes('code=1001')) record.disconnectReason = 'browser_tab_closed';
-        else if (ev.detail && ev.detail.includes('code=1006')) record.disconnectReason = 'network_dropped';
-        else if (ev.detail && ev.detail.includes('code=1000')) {
-          const m = ev.detail.match(/reason=(.+)$/);
-          record.disconnectReason = (m && m[1] && m[1] !== 'none' && m[1] !== 'User closed session') ? m[1] : 'user_ended_call';
-        }
       }
     }
   }

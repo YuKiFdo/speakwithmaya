@@ -151,7 +151,7 @@ function formatClientDateTime(isoTimestamp?: string, fallbackDisplayDate?: strin
 }
 
 function formatEndReasonLabel(reason?: string): string {
-  if (!reason) return 'Unknown / Normal Close';
+  if (!reason) return '';
   if (reason === 'user_ended_call') return 'User Clicked End Call';
   if (reason === 'user_force_ended') return 'User Force Ended (Popup)';
   if (reason === 'timer_farewell') return 'Full Session Timer Complete';
@@ -1578,43 +1578,55 @@ export default function AdminUsageScreen() {
                 <AdminTableSkeleton rows={4} />
               ) : logsData ? (
                 <>
-                  {/* End Reason, Mic State & Guide Progress Diagnostic Cards */}
-                  <View style={styles.trackingBadgesRow}>
-                    {/* 1. End Trigger */}
-                    <View style={[styles.trackingCard, { borderLeftColor: getEndReasonColor(logsData.disconnectReason) }]}>
-                      <Text style={styles.trackingCardLabel}>End Trigger / Disconnect</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                        <Ionicons name={getEndReasonIcon(logsData.disconnectReason) as any} size={15} color={getEndReasonColor(logsData.disconnectReason)} />
-                        <Text style={[styles.trackingCardValue, { color: getEndReasonColor(logsData.disconnectReason) }]}>
-                          {formatEndReasonLabel(logsData.disconnectReason)}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* 2. Microphone & Audio */}
-                    <View style={[styles.trackingCard, { borderLeftColor: getMicStatusColor(logsData) }]}>
-                      <Text style={styles.trackingCardLabel}>Microphone & Audio</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                        <Ionicons name={getMicStatusIcon(logsData) as any} size={15} color={getMicStatusColor(logsData)} />
-                        <Text style={[styles.trackingCardValue, { color: getMicStatusColor(logsData) }]}>
-                          {formatMicStatusLabel(logsData)}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* 3. Guide Progress */}
-                    {(logsData.guideStatus || activeLogsSession?.topic?.toLowerCase().includes('intro')) && (
-                      <View style={[styles.trackingCard, { borderLeftColor: getGuideStatusColor(logsData.guideStatus) }]}>
-                        <Text style={styles.trackingCardLabel}>Intro Guide Progress</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                          <Ionicons name={getGuideStatusIcon(logsData.guideStatus) as any} size={15} color={getGuideStatusColor(logsData.guideStatus)} />
-                          <Text style={[styles.trackingCardValue, { color: getGuideStatusColor(logsData.guideStatus) }]}>
-                            {formatGuideStatusLabel(logsData.guideStatus)}
-                          </Text>
+                  {/* End Reason, Mic State & Guide Progress Diagnostic Cards (only shown if session has tracking records) */}
+                  {(Boolean(logsData.disconnectReason) ||
+                    Boolean(logsData.micPermission) ||
+                    typeof logsData.micMuted === 'boolean' ||
+                    typeof logsData.hasUserSpoken === 'boolean' ||
+                    Boolean(logsData.guideStatus)) && (
+                    <View style={styles.trackingBadgesRow}>
+                      {/* 1. End Trigger */}
+                      {Boolean(logsData.disconnectReason) && (
+                        <View style={[styles.trackingCard, { borderLeftColor: getEndReasonColor(logsData.disconnectReason) }]}>
+                          <Text style={styles.trackingCardLabel}>End Trigger / Disconnect</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                            <Ionicons name={getEndReasonIcon(logsData.disconnectReason) as any} size={15} color={getEndReasonColor(logsData.disconnectReason)} />
+                            <Text style={[styles.trackingCardValue, { color: getEndReasonColor(logsData.disconnectReason) }]}>
+                              {formatEndReasonLabel(logsData.disconnectReason)}
+                            </Text>
+                          </View>
                         </View>
-                      </View>
-                    )}
-                  </View>
+                      )}
+
+                      {/* 2. Microphone & Audio */}
+                      {(Boolean(logsData.micPermission) ||
+                        typeof logsData.micMuted === 'boolean' ||
+                        typeof logsData.hasUserSpoken === 'boolean') && (
+                        <View style={[styles.trackingCard, { borderLeftColor: getMicStatusColor(logsData) }]}>
+                          <Text style={styles.trackingCardLabel}>Microphone & Audio</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                            <Ionicons name={getMicStatusIcon(logsData) as any} size={15} color={getMicStatusColor(logsData)} />
+                            <Text style={[styles.trackingCardValue, { color: getMicStatusColor(logsData) }]}>
+                              {formatMicStatusLabel(logsData)}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+
+                      {/* 3. Guide Progress */}
+                      {Boolean(logsData.guideStatus) && (
+                        <View style={[styles.trackingCard, { borderLeftColor: getGuideStatusColor(logsData.guideStatus) }]}>
+                          <Text style={styles.trackingCardLabel}>Intro Guide Progress</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                            <Ionicons name={getGuideStatusIcon(logsData.guideStatus) as any} size={15} color={getGuideStatusColor(logsData.guideStatus)} />
+                            <Text style={[styles.trackingCardValue, { color: getGuideStatusColor(logsData.guideStatus) }]}>
+                              {formatGuideStatusLabel(logsData.guideStatus)}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  )}
 
                   {/* Filter inside logs */}
                   <View style={styles.logsFilterRow}>
