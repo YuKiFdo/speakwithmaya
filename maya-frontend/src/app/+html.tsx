@@ -20,11 +20,7 @@ export default function RootHtml({ children }: PropsWithChildren) {
         <title>SpeakwithMaya - Your Personal AI English Speaking Coach</title>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-})(window,document,'script','dataLayer','GTM-MVNHWL6X');`,
+            __html: `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s);j.async=true;j.src="https://henpokfr.speakwithmaya.com/65henpokfr.js?"+i;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','3rts=GwJWKCQjSCUkKCM4PFg9TgRbWUFB');`,
           }}
         />
 
@@ -434,7 +430,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
       <body>
         <noscript>
           <iframe
-            src="https://www.googletagmanager.com/ns.html?id=GTM-MVNHWL6X"
+            src="https://henpokfr.speakwithmaya.com/ns.html?id=GTM-MVNHWL6X"
             height="0"
             width="0"
             style={{ display: 'none', visibility: 'hidden' }}

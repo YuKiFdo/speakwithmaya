@@ -3,3 +3,4 @@
 
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS language_mode TEXT DEFAULT 'english_only';
+
