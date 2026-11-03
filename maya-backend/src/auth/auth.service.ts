@@ -1427,7 +1427,8 @@ export class AuthService {
         .eq('id', userId)
         .maybeSingle();
 
-      const existingFlow = Array.isArray(profile?.onboarding_flow) ? profile.onboarding_flow : [];
+      const rawFlow = (profile as any)?.onboarding_flow;
+      const existingFlow = Array.isArray(rawFlow) ? rawFlow : [];
       const updatedFlow = [
         ...existingFlow,
         {
