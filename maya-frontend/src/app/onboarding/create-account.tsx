@@ -41,7 +41,7 @@ export default function CreateAccountScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Dynamic pricing & legal disclaimer from CMS config if available
+  // Dynamic pricing & legal disclaimer from CMS config (reacts to SMS gateway type)
   const [disclaimerText, setDisclaimerText] = useState(
     'By starting the Starter Plan, you agree to our Terms & Conditions. A subscription fee of LKR 12 + applicable taxes per day applies to prepaid users, or LKR 360 + applicable taxes per month for postpaid users. You can cancel anytime.',
   );
@@ -53,11 +53,24 @@ export default function CreateAccountScreen() {
     fetch(`${getBackendBaseUrl()}/v1/app-config`)
       .then((res) => res.json())
       .then((config) => {
-        if (config?.ideamartTermsDisclaimer || config?.termsDisclaimer) {
-          setDisclaimerText(config.ideamartTermsDisclaimer || config.termsDisclaimer);
-        }
-        if (config?.createAccountSubtext) {
-          setSubheadingText(config.createAccountSubtext);
+        const gateway = config?.smsGateway || 'smsapi';
+        const isTelco = gateway === 'ideamart' || gateway === 'mspace' || gateway === 'telco';
+
+        if (isTelco) {
+          const defaultDisclaimer =
+            'By starting the Starter Plan, you agree to our Terms & Conditions. A subscription fee of LKR 12 + applicable taxes per day applies to prepaid users, or LKR 360 + applicable taxes per month for postpaid users. You can cancel anytime.';
+          const defaultSubheading =
+            'Creating your account activates the Starter Plan, billed daily through your mobile carrier. Cancel anytime.';
+
+          setDisclaimerText(config?.ideamartTermsDisclaimer || defaultDisclaimer);
+          setSubheadingText(config?.createAccountSubtext || defaultSubheading);
+        } else {
+          // Normal SMS Gateway (e.g. SMSAPI / non-telco): Zero carrier billing mentions
+          const defaultDisclaimer = 'By creating an account, you agree to our Terms & Conditions.';
+          const defaultSubheading = 'Create your account to start practicing spoken English with Maya.';
+
+          setDisclaimerText(config?.termsDisclaimer || defaultDisclaimer);
+          setSubheadingText(config?.createAccountSubtext || defaultSubheading);
         }
       })
       .catch(() => {});
@@ -344,15 +357,25 @@ export default function CreateAccountScreen() {
                 accessibilityLabel="Continue to account verification"
               />
 
-              {/* Bottom Legal Disclaimer */}
+              {/* Bottom Legal Disclaimer (Dynamic based on gateway) */}
               <View style={styles.legalSection}>
                 <Text style={styles.legalText}>
-                  By starting the Starter Plan, you agree to our{' '}
-                  <Text style={styles.legalLink} onPress={handleOpenTerms}>
-                    Terms & Conditions
-                  </Text>
-                  . A subscription fee of LKR 12 + applicable taxes per day applies to prepaid users,
-                  or LKR 360 + applicable taxes per month for postpaid users. You can cancel anytime.
+                  {disclaimerText.includes('Terms & Conditions') ? (
+                    <>
+                      {disclaimerText.split('Terms & Conditions')[0]}
+                      <Text style={styles.legalLink} onPress={handleOpenTerms}>
+                        Terms & Conditions
+                      </Text>
+                      {disclaimerText.split('Terms & Conditions')[1]}
+                    </>
+                  ) : (
+                    <>
+                      {disclaimerText}{' '}
+                      <Text style={styles.legalLink} onPress={handleOpenTerms}>
+                        Terms & Conditions
+                      </Text>
+                    </>
+                  )}
                 </Text>
               </View>
 
