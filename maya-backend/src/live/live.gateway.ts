@@ -1096,7 +1096,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Ensure roadmap curriculum details are fully loaded
       await this.sessionsService.enrichRoadmapDto(dto);
 
-      const isSinhala = dto.languageMode === 'sinhala' || dto.mode === 'sinhala_tutor';
+      const isSinhala = this.sessionsService.isSinhalaSession(dto);
       const isScenarioRoleplay = Boolean(dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0);
       const isIntroCall = dto.isIntroCall === true;
       const correctionMode = this.sessionsService.resolveCorrectionMode(dto);

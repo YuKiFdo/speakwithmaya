@@ -220,6 +220,7 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding/language" />
         <Stack.Screen name="onboarding/employment" />
         <Stack.Screen name="onboarding/daily-goal" />
+        <Stack.Screen name="onboarding/language-help" />
         <Stack.Screen name="onboarding/social-proof" />
         <Stack.Screen
           name="onboarding/building-plan"

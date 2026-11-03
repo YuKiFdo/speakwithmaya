@@ -167,9 +167,14 @@ export function CreateSessionModal({
     ((store.user as any)?.ai_correction_mode as AICorrectionOption) ||
     'keep_on_track';
 
+  const userDefaultLanguageHelp: LanguageHelpOption =
+    (store.languageMode as LanguageHelpOption) ||
+    ((store.user as any)?.language_mode as LanguageHelpOption) ||
+    'english_only';
+
   // Selected State (Defaults match user preference)
   const [selectedMinutes, setSelectedMinutes] = useState<SessionDurationMinutes>(starterMinutes);
-  const [languageHelp, setLanguageHelp] = useState<LanguageHelpOption>('english_only');
+  const [languageHelp, setLanguageHelp] = useState<LanguageHelpOption>(userDefaultLanguageHelp);
   const [aiCorrections, setAiCorrections] = useState<AICorrectionOption>(userDefaultCorrection);
   const [pickerModal, setPickerModal] = useState<'language' | 'corrections' | null>(null);
 
@@ -180,7 +185,7 @@ export function CreateSessionModal({
   useEffect(() => {
     if (visible) {
       setSelectedMinutes(starterMinutes);
-      setLanguageHelp('english_only');
+      setLanguageHelp(userDefaultLanguageHelp);
       setAiCorrections(userDefaultCorrection);
       setPickerModal(null);
       modalAnim.setValue(0);

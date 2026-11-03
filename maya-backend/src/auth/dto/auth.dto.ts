@@ -125,6 +125,10 @@ export class SavePreferencesDto {
   aiCorrectionMode?: string;
 
   @IsOptional()
+  @IsString()
+  languageMode?: string;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => BaselineScoresDto)
   baselineScores?: BaselineScoresDto;
@@ -187,6 +191,10 @@ export class UpdateStepDto {
   @IsOptional()
   @IsString()
   aiCorrectionMode?: string;
+
+  @IsOptional()
+  @IsString()
+  languageMode?: string;
 
   @IsOptional()
   @IsBoolean()

@@ -27,6 +27,7 @@ const ONBOARDING_STEP_CHAIN: {
   { route: 'onboarding/language',     canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
   { route: 'onboarding/employment',   canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
   { route: 'onboarding/daily-goal',   canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
+  { route: 'onboarding/language-help', canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
   { route: 'onboarding/social-proof', canAccess: (s) => s.isAuthenticated && !!s.goal && !s.isCompleted && !s.hasEnteredDashboard },
   // Step 11+: Post-intro onboarding steps - only allowed before user has entered the Dashboard
   { route: 'onboarding/call',         canAccess: (s) => s.isAuthenticated && !!s.goal && !s.hasEnteredDashboard },

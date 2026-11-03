@@ -20,6 +20,7 @@ export interface UserSessionData {
   employmentStatus?: string | null;
   dailyGoalMinutes?: number | null;
   aiCorrectionMode?: 'let_me_speak' | 'keep_on_track' | 'correct_instantly' | string | null;
+  languageMode?: 'english_only' | 'sinhala_support' | 'deep_guidance' | string | null;
   isTestAccount?: boolean;
   lastActiveStep?: string | null;
   isCompleted?: boolean;
@@ -64,6 +65,7 @@ export interface OnboardingState {
   employment: string;
   dailyGoalMinutes: number;
   aiCorrectionMode: 'let_me_speak' | 'keep_on_track' | 'correct_instantly';
+  languageMode: 'english_only' | 'sinhala_support' | 'deep_guidance';
   nativeLanguage: 'sinhala' | 'tamil' | 'english';
   baselineScores: BaselineScores | null;
   discountWon: string | null;
@@ -90,6 +92,7 @@ const defaultState: OnboardingState = {
   employment: '',
   dailyGoalMinutes: 10,
   aiCorrectionMode: 'keep_on_track',
+  languageMode: 'english_only',
   nativeLanguage: 'sinhala',
   baselineScores: null,
   discountWon: null,
@@ -446,6 +449,23 @@ export const OnboardingStore = {
             ...memoryState.user,
             isCompleted: true,
             lastActiveStep: '/(tabs)/dashboard',
+          }
+        : null,
+    };
+    persistState(updated);
+  },
+
+  /**
+   * Sets the preferred coaching language mode ('english_only' | 'sinhala_support' | 'deep_guidance')
+   */
+  setLanguageMode(mode: 'english_only' | 'sinhala_support' | 'deep_guidance') {
+    const updated: OnboardingState = {
+      ...memoryState,
+      languageMode: mode,
+      user: memoryState.user
+        ? {
+            ...memoryState.user,
+            languageMode: mode,
           }
         : null,
     };

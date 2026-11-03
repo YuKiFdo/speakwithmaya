@@ -94,10 +94,16 @@ export default function CallScreen() {
   const targetDuration = isNaN(durationSec) ? 300 : durationSec;
   const userWantsCorrections = onboardingState.aiCorrectionMode !== 'let_me_speak';
   const aiSug = storeConfig?.aiSuggestions ?? (params.aiSuggestions !== undefined ? params.aiSuggestions !== 'false' : userWantsCorrections);
-  const langMode = isIntro ? 'sinhala' : (storeConfig?.languageMode || (params.languageMode === 'english' ? 'english' : 'sinhala'));
-  const sinhalaStyle: 'balanced' | 'deep_guidance' = isIntro
-    ? 'balanced'
-    : (storeConfig?.sinhalaStyle || (params.sinhalaStyle === 'deep_guidance' ? 'deep_guidance' : 'balanced'));
+  const effectiveLanguageMode =
+    storeConfig?.languageMode ||
+    (params.languageMode ? params.languageMode : (onboardingState.languageMode || (onboardingState.user as any)?.language_mode || 'english_only'));
+
+  const isEnglishOnly = effectiveLanguageMode === 'english' || effectiveLanguageMode === 'english_only';
+  const langMode: 'english' | 'sinhala' = isEnglishOnly ? 'english' : 'sinhala';
+  const sinhalaStyle: 'balanced' | 'deep_guidance' =
+    effectiveLanguageMode === 'deep_guidance'
+      ? 'deep_guidance'
+      : (storeConfig?.sinhalaStyle || (params.sinhalaStyle === 'deep_guidance' ? 'deep_guidance' : 'balanced'));
   const userStats = useUserStats();
   const currentPlanTier = (userStats.planTier || onboardingState.user?.planTier || 'starter').toLowerCase();
   const isStarter = currentPlanTier === 'starter';

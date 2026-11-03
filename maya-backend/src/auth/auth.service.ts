@@ -46,6 +46,7 @@ export interface UserProfileData {
   employment_status: string | null;
   daily_goal_minutes: number;
   ai_correction_mode?: string | null;
+  language_mode?: string | null;
   baseline_fluency_score: number;
   baseline_grammar_score: number;
   baseline_pronunciation_score: number;
@@ -1254,6 +1255,7 @@ export class AuthService {
     if (dto.employmentStatus !== undefined) updates.employment_status = dto.employmentStatus;
     if (dto.dailyGoalMinutes !== undefined) updates.daily_goal_minutes = dto.dailyGoalMinutes;
     if (dto.aiCorrectionMode !== undefined) updates.ai_correction_mode = dto.aiCorrectionMode;
+    if (dto.languageMode !== undefined) updates.language_mode = dto.languageMode;
 
     if (dto.baselineScores) {
       if (dto.baselineScores.overall !== undefined) {
@@ -1349,16 +1351,20 @@ export class AuthService {
     if (dto.aiCorrectionMode) {
       updates.ai_correction_mode = dto.aiCorrectionMode;
     }
+    if (dto.languageMode) {
+      updates.language_mode = dto.languageMode;
+    }
 
     let { error } = await this.supabase
       .from('profiles')
       .update(updates)
       .eq('id', userId);
 
-    if (error && updates.ai_correction_mode !== undefined) {
+    if (error && (updates.ai_correction_mode !== undefined || (updates as any).language_mode !== undefined)) {
       // Graceful fallback in case database column is not migrated yet
       const fallbackUpdates = { ...updates };
       delete fallbackUpdates.ai_correction_mode;
+      delete (fallbackUpdates as any).language_mode;
       const retry = await this.supabase
         .from('profiles')
         .update(fallbackUpdates)
