@@ -210,7 +210,7 @@ export default function RootLayout({
       <head>
         <meta name="facebook-domain-verification" content="4upgmm941w888kmdif1i6kjywtit3o" />
         <Script id="google-tag-manager" strategy="afterInteractive">
-          {`(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s);j.async=true;j.src="https://henpokfr.speakwithmaya.com/65henpokfr.js?"+i;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','3rts=GwJWKCQjSCUkKCM4PFg9TgRbWUFB');`}
+          {`(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s);j.async=true;j.src="https://x7k.speakwithmaya.com/atvdvvtcfy.js?"+i;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','d2yndh=EAJeMyI7STsvKCsjOkA8UA9bUVpHUAAYRBUTERcdEx8NDg4VDxdKFRYL');`}
         </Script>
         <script
           type="application/ld+json"
@@ -220,7 +220,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-white text-[#0F172A] font-sans selection:bg-[#0D4EFD]/15 selection:text-[#0D4EFD]">
         <noscript>
           <iframe
-            src="https://henpokfr.speakwithmaya.com/ns.html?id=GTM-MVNHWL6X"
+            src="https://x7k.speakwithmaya.com/ns.html?id=GTM-MVNHWL6X"
             height="0"
             width="0"
             style={{ display: "none", visibility: "hidden" }}
