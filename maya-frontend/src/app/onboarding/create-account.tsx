@@ -284,6 +284,10 @@ export default function CreateAccountScreen() {
                     onBlur={() => setFocusedField(null)}
                     autoCapitalize="words"
                     autoCorrect={false}
+                    spellCheck={false}
+                    autoComplete="off"
+                    textContentType="none"
+                    importantForAutofill="no"
                     returnKeyType="next"
                   />
                 </View>
@@ -313,6 +317,12 @@ export default function CreateAccountScreen() {
                       onBlur={() => setFocusedField(null)}
                       keyboardType="phone-pad"
                       maxLength={9}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      spellCheck={false}
+                      autoComplete="off"
+                      textContentType="none"
+                      importantForAutofill="no"
                       returnKeyType="next"
                     />
                   </View>
@@ -339,6 +349,10 @@ export default function CreateAccountScreen() {
                     keyboardType="email-address"
                     autoCapitalize="none"
                     autoCorrect={false}
+                    spellCheck={false}
+                    autoComplete="off"
+                    textContentType="none"
+                    importantForAutofill="no"
                     returnKeyType="done"
                     onSubmitEditing={handleContinue}
                   />
