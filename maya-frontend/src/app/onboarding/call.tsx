@@ -1195,14 +1195,14 @@ export default function CallScreen() {
                 previousText={liveCall.previousSubtitles}
                 currentText={
                   isIntro && guideStepIndex !== null && !liveCall.subtitles
-                    ? "Welcome to Maya! Let's practice speaking English together."
+                    ? "Hi! I'm Maya. Let's have a quick conversation in English. Don't worry about making mistakes. I'm here to help you!"
                     : liveCall.subtitles
                 }
                 isSpeaking={guideStepIndex === 0 || liveCall.status === 'speaking'}
                 isWebOrDesktop={isWebOrDesktop}
                 translationText={
                   isIntro && guideStepIndex !== null && !translationText
-                    ? "මායා වෙත සාදරයෙන් පිළිගනිමු! අපි එකට ඉංග්‍රීසි කතා කිරීමට පුරුදු වෙමු."
+                    ? "Hi! මම මායා. අපි English වලින් පොඩි කතාබහක් කරමු. වැරදුණාට කිසිම ප්‍රශ්නයක් නෑ. මම ඔයාට help කරන්න මෙතන ඉන්නවා!"
                     : translationText
                 }
                 isTranslationVisible={isTranslationVisible}
