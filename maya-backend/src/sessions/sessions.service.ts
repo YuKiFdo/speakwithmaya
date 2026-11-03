@@ -789,18 +789,22 @@ export class SessionsService {
   }
 
   isSinhalaSession(dto: CreateSessionTokenDto): boolean {
-    if (dto.isIntroCall === true) {
-      return true; // Intro call is always in friendly Sinhala-English mix for Sri Lankan learners
-    }
-    if (dto.languageMode === 'english' || dto.languageMode === 'english_only') {
+    const mode = (dto.languageMode || '').toLowerCase().trim();
+    if (mode === 'english' || mode === 'english_only') {
       return false;
     }
-    return (
-      dto.languageMode === 'sinhala' ||
-      dto.languageMode === 'sinhala_support' ||
-      dto.languageMode === 'deep_guidance' ||
+    if (
+      mode === 'sinhala' ||
+      mode === 'sinhala_support' ||
+      mode === 'deep_guidance' ||
       dto.mode === 'sinhala_tutor'
-    );
+    ) {
+      return true;
+    }
+    if (dto.isIntroCall === true) {
+      return true; // Default fallback for intro call if no languageMode specified
+    }
+    return false;
   }
 
   resolveCorrectionMode(dto: CreateSessionTokenDto): 'let_me_speak' | 'keep_on_track' | 'correct_instantly' {

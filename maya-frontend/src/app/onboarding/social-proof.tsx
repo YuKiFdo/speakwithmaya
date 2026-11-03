@@ -180,6 +180,10 @@ export default function SocialProofScreen() {
     const state = OnboardingStore.getState();
     const effectiveName = (state.name || state.user?.displayName || '').trim() || 'Learner';
     const effectiveDailyGoal = state.dailyGoalMinutes ? `${state.dailyGoalMinutes}-min` : '10-min';
+    const isEnglishOnly = state.languageMode === 'english_only' || (state.languageMode as string) === 'english';
+    const resolvedLanguageMode: 'english' | 'sinhala' = isEnglishOnly ? 'english' : 'sinhala';
+    const resolvedSinhalaStyle: 'balanced' | 'deep_guidance' =
+      state.languageMode === 'deep_guidance' ? 'deep_guidance' : 'balanced';
 
     CallSessionStore.setConfig({
       topic: 'Introductory Practice',
@@ -192,8 +196,8 @@ export default function SocialProofScreen() {
       dailyGoal: effectiveDailyGoal,
       employment: state.employment,
       phone: state.phone || state.user?.phoneNumber,
-      languageMode: 'sinhala',
-      sinhalaStyle: 'balanced',
+      languageMode: resolvedLanguageMode,
+      sinhalaStyle: resolvedSinhalaStyle,
     });
 
     // Save preferences and sync active step when entering the intro call

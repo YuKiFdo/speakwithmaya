@@ -96,6 +96,7 @@ export default function CallScreen() {
   const userWantsCorrections = onboardingState.aiCorrectionMode !== 'let_me_speak';
   const aiSug = storeConfig?.aiSuggestions ?? (params.aiSuggestions !== undefined ? params.aiSuggestions !== 'false' : userWantsCorrections);
   const effectiveLanguageMode =
+    (isOnboardingCallRoute && onboardingState.languageMode ? onboardingState.languageMode : undefined) ||
     storeConfig?.languageMode ||
     (params.languageMode ? params.languageMode : (onboardingState.languageMode || (onboardingState.user as any)?.language_mode || 'english_only'));
 
@@ -1202,7 +1203,7 @@ export default function CallScreen() {
                 isWebOrDesktop={isWebOrDesktop}
                 translationText={
                   isIntro && guideStepIndex !== null && !translationText
-                    ? "Hi! මම මායා. අපි English වලින් පොඩි කතාබහක් කරමු. වැරදුණාට කිසිම ප්‍රශ්නයක් නෑ. මම ඔයාට help කරන්න මෙතන ඉන්නවා!"
+                    ? (isEnglishOnly ? '' : "Hi! මම මායා. අපි English වලින් පොඩි කතාබහක් කරමු. වැරදුණාට කිසිම ප්‍රශ්නයක් නෑ. මම ඔයාට help කරන්න මෙතන ඉන්නවා!")
                     : translationText
                 }
                 isTranslationVisible={isTranslationVisible}
