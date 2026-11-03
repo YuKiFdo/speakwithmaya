@@ -32,6 +32,8 @@ export interface UserProfileData {
   id: string;
   phone_number: string;
   display_name: string | null;
+  email?: string | null;
+  avatar_url?: string | null;
   level: string;
   goal: string | null;
   challenge: string | null;
@@ -645,6 +647,16 @@ export class AuthService {
       this.supabase
         .from('profiles')
         .update({ display_name: userProfile.display_name, updated_at: new Date().toISOString() })
+        .eq('id', userProfile.id)
+        .then(() => {});
+    }
+
+    // Persist email if provided from registration step
+    if (dto.email && dto.email.trim() && !userProfile.email) {
+      userProfile.email = dto.email.trim().toLowerCase();
+      this.supabase
+        .from('profiles')
+        .update({ email: userProfile.email, updated_at: new Date().toISOString() })
         .eq('id', userProfile.id)
         .then(() => {});
     }

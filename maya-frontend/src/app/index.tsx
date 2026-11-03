@@ -258,7 +258,7 @@ export default function WelcomeScreen() {
   const handleGetStarted = () => {
     stopMayaWelcomeVoice();
     setIsSpeaking(false);
-    router.push('/onboarding/name');
+    router.push('/onboarding/create-account' as any);
   };
 
   return (

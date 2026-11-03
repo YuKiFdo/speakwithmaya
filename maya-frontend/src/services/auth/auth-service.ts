@@ -129,16 +129,19 @@ class AuthService {
   async verifyOtp(
     phoneNumber: string,
     code: string,
-    options?: { isLoginMode?: boolean },
+    options?: { isLoginMode?: boolean; email?: string; displayName?: string },
   ): Promise<VerifyOtpResponse> {
     const currentState = OnboardingStore.getState();
+    const displayName = options?.displayName || currentState.name;
+    const email = options?.email || currentState.email;
     const res = await fetch(`${this.baseUrl}/v1/auth/otp/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         phoneNumber,
         code,
-        displayName: currentState.name ? currentState.name.trim() : undefined,
+        displayName: displayName ? displayName.trim() : undefined,
+        email: email ? email.trim().toLowerCase() : undefined,
         isLoginMode: options?.isLoginMode,
       }),
     });

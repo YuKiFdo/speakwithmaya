@@ -126,7 +126,7 @@ function markHydrated() {
   notify();
 }
 
-const PRE_AUTH_ROUTES = ['/', '/onboarding/name', '/onboarding/phone', '/onboarding/otp'];
+const PRE_AUTH_ROUTES = ['/', '/onboarding/create-account', '/onboarding/name', '/onboarding/phone', '/onboarding/otp'];
 const POST_INTRO_COMPLETION_ROUTES = [
   '/onboarding/complete',
   '/(tabs)/dashboard',
@@ -136,6 +136,7 @@ function isPreAuthRoute(route?: string | null): boolean {
   if (!route) return true;
   if (PRE_AUTH_ROUTES.includes(route)) return true;
   return (
+    route.startsWith('/onboarding/create-account') ||
     route.startsWith('/onboarding/name') ||
     route.startsWith('/onboarding/phone') ||
     route.startsWith('/onboarding/otp')

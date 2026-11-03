@@ -46,6 +46,10 @@ export class VerifyOtpDto {
   displayName?: string;
 
   @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
   @IsBoolean()
   isLoginMode?: boolean;
 }

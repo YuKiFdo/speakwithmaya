@@ -27,7 +27,7 @@ import { trackSignUp } from '@/utils/analytics';
 const OTP_LENGTH = 6;
 
 export default function OtpScreen() {
-  const params = useLocalSearchParams<{ mode?: string }>();
+  const params = useLocalSearchParams<{ mode?: string; phone?: string; name?: string; email?: string }>();
   const isLoginMode = params.mode === 'login';
 
   const storePhone = OnboardingStore.getState().phone;
@@ -205,7 +205,11 @@ export default function OtpScreen() {
     setIsVerifying(true);
 
     try {
-      const res = await authService.verifyOtp(displayPhone, code, { isLoginMode });
+      const res = await authService.verifyOtp(displayPhone, code, {
+        isLoginMode,
+        email: params.email,
+        displayName: params.name,
+      });
 
       if (!isLoginMode && res.isNewUser) {
         trackSignUp({ userId: res.user?.id, method: 'phone_otp' });
@@ -289,7 +293,7 @@ export default function OtpScreen() {
                       onPress={() => {
                         const editUrl = isLoginMode
                           ? '/onboarding/phone?edit=1&mode=login'
-                          : '/onboarding/phone?edit=1';
+                          : '/onboarding/create-account';
                         router.replace(editUrl as any);
                       }}
                       hitSlop={8}

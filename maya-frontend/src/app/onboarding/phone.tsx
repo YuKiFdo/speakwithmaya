@@ -38,6 +38,12 @@ export default function PhoneScreen() {
   const [forcedLoginMode, setForcedLoginMode] = useState(false);
   const isLoginMode = params.mode === 'login' || forcedLoginMode;
 
+  useEffect(() => {
+    if (!isLoginMode && !isEditing) {
+      router.replace('/onboarding/create-account' as any);
+    }
+  }, [isLoginMode, isEditing]);
+
   const [phone, setPhone] = useState(() => {
     const stored = OnboardingStore.getState().phone || '';
     return stored.startsWith('+94') ? stored.slice(3) : stored;
@@ -567,7 +573,7 @@ export default function PhoneScreen() {
                     setIsSpeaking(false);
                     setForcedLoginMode(false);
                     if (isLoginMode) {
-                      router.replace('/onboarding/name');
+                      router.replace('/onboarding/create-account' as any);
                     } else {
                       router.replace('/onboarding/phone?mode=login' as any);
                     }

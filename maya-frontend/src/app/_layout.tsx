@@ -211,6 +211,7 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="index" options={{ title: 'SpeakwithMaya' }} />
+        <Stack.Screen name="onboarding/create-account" />
         <Stack.Screen name="onboarding/name" />
         <Stack.Screen name="onboarding/phone" />
         <Stack.Screen name="onboarding/otp" />

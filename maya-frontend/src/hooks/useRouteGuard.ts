@@ -17,6 +17,7 @@ const ONBOARDING_STEP_CHAIN: {
   canAccess: (s: OnboardingState) => boolean;
 }[] = [
   // Step 1-3: Pre-auth screens - only for unauthenticated visitors
+  { route: 'onboarding/create-account', canAccess: (s) => !s.isAuthenticated },
   { route: 'onboarding/name',         canAccess: (s) => !s.isAuthenticated },
   { route: 'onboarding/phone',        canAccess: (s) => !s.isAuthenticated },
   { route: 'onboarding/otp',          canAccess: (s) => !s.isAuthenticated && !!s.phone },
@@ -63,9 +64,8 @@ function findEarliestAllowedStep(state: OnboardingState): string {
     return '/onboarding/goal';
   }
 
-  // If not authenticated and no name, start from scratch
-  if (!state.name) return '/onboarding/name';
-  return '/onboarding/phone';
+  // If not authenticated, route to create-account
+  return '/onboarding/create-account';
 }
 
 /**
