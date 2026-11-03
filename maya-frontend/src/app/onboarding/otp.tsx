@@ -22,7 +22,7 @@ import { MayaPrimaryButton } from '@/components/ui';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { authService } from '@/services/auth/auth-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
-import { trackSignUp } from '@/utils/analytics';
+import { trackCompleteRegistration, trackSignUp } from '@/utils/analytics';
 
 const OTP_LENGTH = 6;
 
@@ -211,8 +211,13 @@ export default function OtpScreen() {
         displayName: params.name,
       });
 
-      if (!isLoginMode && res.isNewUser) {
-        trackSignUp({ userId: res.user?.id, method: 'phone_otp' });
+      if (!isLoginMode) {
+        trackCompleteRegistration({
+          userId: res.user?.id,
+          firstName: params.name || res.user?.displayName || undefined,
+          email: params.email || (res.user as any)?.email || undefined,
+          phone: displayPhone || res.user?.phoneNumber || undefined,
+        });
       }
 
       // If user had finished onboarding or logged in as existing user:

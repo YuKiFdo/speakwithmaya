@@ -5,6 +5,8 @@ declare global {
 }
 
 export type MayaAnalyticsEventName =
+  | 'complete_registration'
+  | 'initiate_checkout'
   | 'sign_up'
   | 'onboarding_complete'
   | 'view_plan_selection'
@@ -18,6 +20,16 @@ export type MayaAnalyticsEventName =
   | 'session_start'
   | 'session_complete';
 
+/**
+ * Standard Customer Information required for GTM, Stape Server-Side GTM, GA4, Meta Pixel & CAPI.
+ */
+export interface TrackingUserData {
+  user_id: string;
+  first_name: string;
+  email: string;
+  phone: string;
+}
+
 export interface PlanAnalyticsDetails {
   plan_name: string;
   billing_period: string;
@@ -27,32 +39,26 @@ export interface PlanAnalyticsDetails {
 
 export interface PurchaseAnalyticsPayload extends PlanAnalyticsDetails {
   transaction_id: string;
-  event_id: string;
+  event_id?: string;
+  user_data?: TrackingUserData;
 }
 
 export interface PaymentStatusAnalyticsPayload extends Partial<PlanAnalyticsDetails> {
   transaction_id?: string;
+  user_data?: TrackingUserData;
 }
 
 const TRACKED_PURCHASES_STORAGE_KEY = 'maya_tracked_purchases_v1';
 const TRACKED_SIGNUPS_STORAGE_KEY = 'maya_tracked_signups_v1';
 const TRACKED_ONBOARDING_STORAGE_KEY = 'maya_tracked_onboarding_complete_v1';
 const PENDING_CHECKOUT_STORAGE_KEY = 'maya_pending_checkout_context_v1';
+const TRACKING_USER_DATA_KEY = 'maya_tracking_user_data_v1';
 
-// Strict PII blocklist per Section 6 (Data Privacy) & Sri Lanka PDPA
-const FORBIDDEN_PII_KEYS = new Set([
-  'phone',
-  'phone_number',
-  'phonenumber',
-  'name',
-  'first_name',
-  'last_name',
-  'display_name',
-  'displayname',
+// Strict credential blocklist: never allow raw financial/security credentials into dataLayer
+const FORBIDDEN_CREDENTIAL_KEYS = new Set([
   'otp',
   'code',
   'password',
-  'email',
   'card',
   'card_no',
   'card_number',
@@ -70,6 +76,13 @@ const memoryTrackedSignups = new Set<string>();
 const memoryTrackedOnboarding = new Set<string>();
 const memoryTrackedSessionsStarted = new Set<string>();
 const memoryTrackedSessionsCompleted = new Set<string>();
+
+let memoryTrackingUserData: TrackingUserData = {
+  user_id: '',
+  first_name: '',
+  email: '',
+  phone: '',
+};
 
 function isWebBrowser(): boolean {
   return typeof window !== 'undefined' && typeof document !== 'undefined';
@@ -109,8 +122,104 @@ function addToTrackedSet(storageKey: string, memoryFallback: Set<string>, id: st
   }
 }
 
+// ─── User Data Formatting & Persistence (Requirements 1 & 2) ──────────────────
+
 /**
- * Strips any forbidden PII fields and undefined values before pushing to window.dataLayer.
+ * Strips formatting and normalizes phone number with country code (e.g. 94771234567).
+ */
+export function formatTrackingPhone(phone?: string | null): string {
+  if (!phone) return '';
+  const digits = String(phone).replace(/\D/g, '');
+  if (!digits) return '';
+  // Sri Lankan local format starting with 0 (e.g. 0771234567) -> 94771234567
+  if (digits.length === 10 && digits.startsWith('0')) {
+    return `94${digits.slice(1)}`;
+  }
+  // Sri Lankan 9-digit format (e.g. 771234567) -> 94771234567
+  if (digits.length === 9 && digits.startsWith('7')) {
+    return `94${digits}`;
+  }
+  return digits;
+}
+
+/**
+ * Extracts first name from a full or single display name (e.g. 'John Doe' -> 'John').
+ */
+export function extractFirstName(name?: string | null): string {
+  if (!name) return '';
+  const trimmed = String(name).trim();
+  if (!trimmed) return '';
+  return trimmed.split(/\s+/)[0] || '';
+}
+
+/**
+ * Normalizes email address for consistent tracking matching.
+ */
+export function formatTrackingEmail(email?: string | null): string {
+  if (!email) return '';
+  return String(email).trim().toLowerCase();
+}
+
+/**
+ * Persists authenticated user data in localStorage and memory.
+ * Immediately pushes `user_data` to window.dataLayer so GTM, GA4, Meta Pixel & CAPI
+ * can use the customer information across all subsequent steps and checkout.
+ */
+export function saveTrackingUserData(data: Partial<TrackingUserData>): TrackingUserData {
+  const current = getTrackingUserData();
+  const updated: TrackingUserData = {
+    user_id: String(data.user_id !== undefined && data.user_id !== null ? data.user_id : current.user_id || '').trim(),
+    first_name: extractFirstName(data.first_name !== undefined && data.first_name !== null ? data.first_name : current.first_name),
+    email: formatTrackingEmail(data.email !== undefined && data.email !== null ? data.email : current.email),
+    phone: formatTrackingPhone(data.phone !== undefined && data.phone !== null ? data.phone : current.phone),
+  };
+
+  memoryTrackingUserData = updated;
+
+  if (isWebBrowser()) {
+    try {
+      window.localStorage?.setItem(TRACKING_USER_DATA_KEY, JSON.stringify(updated));
+    } catch {}
+
+    // Make customer information immediately available to GTM / Stape dataLayer
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+      user_data: updated,
+    });
+  }
+
+  return updated;
+}
+
+/**
+ * Retrieves the persisted customer data for checkout and purchase tracking.
+ */
+export function getTrackingUserData(fallback?: Partial<TrackingUserData>): TrackingUserData {
+  let stored: Partial<TrackingUserData> = {};
+  if (isWebBrowser()) {
+    try {
+      const raw = window.localStorage?.getItem(TRACKING_USER_DATA_KEY);
+      if (raw) {
+        stored = JSON.parse(raw) || {};
+      }
+    } catch {}
+  }
+
+  const userId = String(fallback?.user_id || stored.user_id || memoryTrackingUserData.user_id || '').trim();
+  const firstName = extractFirstName(fallback?.first_name || stored.first_name || memoryTrackingUserData.first_name);
+  const email = formatTrackingEmail(fallback?.email || stored.email || memoryTrackingUserData.email);
+  const phone = formatTrackingPhone(fallback?.phone || stored.phone || memoryTrackingUserData.phone);
+
+  return {
+    user_id: userId,
+    first_name: firstName,
+    email: email,
+    phone: phone,
+  };
+}
+
+/**
+ * Strips forbidden credentials (OTPs, passwords, raw card numbers) before pushing to dataLayer.
  */
 export function sanitizeDataLayerPayload(
   payload: Record<string, unknown>
@@ -118,14 +227,14 @@ export function sanitizeDataLayerPayload(
   const clean: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(payload)) {
     if (val === undefined || val === null) continue;
-    if (FORBIDDEN_PII_KEYS.has(key.toLowerCase())) continue;
+    if (FORBIDDEN_CREDENTIAL_KEYS.has(key.toLowerCase())) continue;
     clean[key] = val;
   }
   return clean;
 }
 
 /**
- * Safely initializes `window.dataLayer` and pushes a privacy-scrubbed event on Web.
+ * Safely initializes `window.dataLayer` and pushes a sanitized event on Web.
  */
 export function pushDataLayerEvent(
   event: MayaAnalyticsEventName,
@@ -308,20 +417,56 @@ export function markPurchaseTracked(transactionId: string): void {
   addToTrackedSet(TRACKED_PURCHASES_STORAGE_KEY, memoryTrackedPurchases, transactionId);
 }
 
-// ─── Typed Event Emitters (Section 2 & 3 Specification) ──────────────────────
+// ─── Typed Event Emitters (Requirements 1, 3, 4) ─────────────────────────────
 
 /**
- * 1. User successfully completes registration and OTP verification (`sign_up`)
+ * 1. Registration Success
+ * Pushed ONLY after successful registration API response.
+ * Formats: user_id, first_name, email, phone (with country code e.g. 94771234567).
  */
-export function trackSignUp(options?: { userId?: string; method?: string }): void {
-  const dedupKey = options?.userId || 'latest_signup';
-  if (options?.userId) {
+export function trackCompleteRegistration(data?: {
+  userId?: string;
+  firstName?: string;
+  email?: string;
+  phone?: string;
+}): void {
+  const userData = saveTrackingUserData({
+    user_id: data?.userId,
+    first_name: data?.firstName,
+    email: data?.email,
+    phone: data?.phone,
+  });
+
+  const dedupKey = userData.user_id || `signup_${userData.phone || 'anonymous'}`;
+  if (dedupKey) {
     const tracked = readTrackedSet(TRACKED_SIGNUPS_STORAGE_KEY, memoryTrackedSignups);
     if (tracked.has(dedupKey)) return;
     addToTrackedSet(TRACKED_SIGNUPS_STORAGE_KEY, memoryTrackedSignups, dedupKey);
   }
-  pushDataLayerEvent('sign_up', {
-    method: options?.method || 'phone_otp',
+
+  if (!isWebBrowser()) return;
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({
+    event: 'complete_registration',
+    user_data: userData,
+  });
+}
+
+/**
+ * Legacy alias for trackCompleteRegistration.
+ */
+export function trackSignUp(options?: {
+  userId?: string;
+  method?: string;
+  firstName?: string;
+  email?: string;
+  phone?: string;
+}): void {
+  trackCompleteRegistration({
+    userId: options?.userId,
+    firstName: options?.firstName,
+    email: options?.email,
+    phone: options?.phone,
   });
 }
 
@@ -364,18 +509,41 @@ export function trackSelectPlan(plan: PlanAnalyticsDetails): void {
 }
 
 /**
- * 6. User proceeds to PayHere checkout (`begin_checkout`)
+ * 6. Initiate Checkout (Requirement 3)
+ * When a user starts the Premium subscription checkout process.
+ * Pushes event: 'initiate_checkout' with user_data and plan parameters.
+ */
+export function trackInitiateCheckout(
+  plan?: (PlanAnalyticsDetails & { transaction_id?: string }) | null,
+  userDataOverride?: Partial<TrackingUserData>
+): void {
+  if (plan) {
+    savePendingCheckoutContext(plan);
+  }
+
+  const userData = getTrackingUserData(userDataOverride);
+
+  if (!isWebBrowser()) return;
+  window.dataLayer = window.dataLayer || [];
+
+  window.dataLayer.push({
+    event: 'initiate_checkout',
+    ...(plan?.plan_name ? { plan_name: plan.plan_name } : {}),
+    ...(typeof plan?.value === 'number' ? { value: plan.value, currency: 'LKR' } : {}),
+    ...(plan?.billing_period ? { billing_period: plan.billing_period } : {}),
+    ...(plan?.transaction_id ? { transaction_id: plan.transaction_id } : {}),
+    user_data: userData,
+  });
+}
+
+/**
+ * Alias for trackInitiateCheckout (for backward compatibility).
  */
 export function trackBeginCheckout(
-  plan: PlanAnalyticsDetails & { transaction_id?: string }
+  plan: PlanAnalyticsDetails & { transaction_id?: string },
+  userDataOverride?: Partial<TrackingUserData>
 ): void {
-  savePendingCheckoutContext(plan);
-  pushDataLayerEvent('begin_checkout', {
-    plan_name: plan.plan_name,
-    billing_period: plan.billing_period,
-    value: plan.value,
-    currency: 'LKR',
-  });
+  trackInitiateCheckout(plan, userDataOverride);
 }
 
 /**
@@ -386,13 +554,18 @@ export function trackContinueStarter(): void {
 }
 
 /**
- * 8. Payment is successfully verified server-side (`purchase`)
- * Enforces strict deduplication by `transaction_id`.
+ * 8. Successful Purchase (Requirement 4)
+ * Triggered ONLY when payment is successfully confirmed and verified server-side.
+ * Strictly prevents duplicate purchase events using the unique transaction ID.
  */
-export function trackVerifiedPurchase(payload: PurchaseAnalyticsPayload): boolean {
+export function trackVerifiedPurchase(
+  payload: PurchaseAnalyticsPayload,
+  userDataOverride?: Partial<TrackingUserData>
+): boolean {
   const txId = String(payload.transaction_id || '').trim();
   if (!txId) return false;
 
+  // Strict deduplication: never fire duplicate purchase for same transaction_id
   if (hasPurchaseBeenTracked(txId)) {
     return false;
   }
@@ -400,13 +573,20 @@ export function trackVerifiedPurchase(payload: PurchaseAnalyticsPayload): boolea
   markPurchaseTracked(txId);
   clearPendingCheckoutContext();
 
-  pushDataLayerEvent('purchase', {
+  const userData = getTrackingUserData(userDataOverride || payload.user_data);
+
+  if (!isWebBrowser()) return true;
+  window.dataLayer = window.dataLayer || [];
+
+  window.dataLayer.push({
+    event: 'purchase',
     transaction_id: txId,
-    event_id: payload.event_id || `purchase_${txId}`,
-    plan_name: payload.plan_name,
-    billing_period: payload.billing_period,
     value: Number(payload.value),
     currency: 'LKR',
+    plan_name: payload.plan_name,
+    ...(payload.billing_period ? { billing_period: payload.billing_period } : {}),
+    event_id: payload.event_id || `purchase_${txId}`,
+    user_data: userData,
   });
 
   return true;

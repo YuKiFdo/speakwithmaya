@@ -22,6 +22,7 @@ import { mayaAlert } from '@/components/ui/alert-modal';
 import {
   resolvePlanAnalyticsDetails,
   trackSelectPlan,
+  trackInitiateCheckout,
   trackBeginCheckout,
   trackVerifiedPurchase,
   trackPaymentFailed,

@@ -721,6 +721,7 @@ export class AuthService {
         id: userProfile.id,
         phoneNumber: userProfile.phone_number,
         displayName: userProfile.display_name,
+        email: userProfile.email || dto.email || null,
         planTier: userProfile.plan_tier,
         planStatus: userProfile.plan_status,
         monthlyMinutesAllowance: userProfile.monthly_minutes_allowance,

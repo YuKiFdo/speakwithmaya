@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Platform } from 'react-native';
+import { saveTrackingUserData } from '@/utils/analytics';
 
 export interface UserSessionData {
   id: string;
@@ -121,6 +122,14 @@ const hydrationPromise = new Promise<void>((resolve) => {
 
 function markHydrated() {
   memoryState = { ...memoryState, isHydrated: true };
+  if (memoryState.user?.id) {
+    saveTrackingUserData({
+      user_id: memoryState.user.id,
+      first_name: memoryState.user.displayName || memoryState.name,
+      email: memoryState.user.email || memoryState.email,
+      phone: memoryState.user.phoneNumber || memoryState.phone,
+    });
+  }
   hydrationResolve?.();
   hydrationResolve = null;
   notify();

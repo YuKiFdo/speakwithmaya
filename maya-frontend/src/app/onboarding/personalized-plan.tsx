@@ -34,6 +34,7 @@ import {
   trackViewPlanSelection,
   trackViewAllPlans,
   trackSelectPlan,
+  trackInitiateCheckout,
   trackBeginCheckout,
   trackContinueStarter,
   trackVerifiedPurchase,

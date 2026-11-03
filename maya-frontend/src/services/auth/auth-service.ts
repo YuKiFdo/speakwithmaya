@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { OnboardingStore } from '../store/onboarding-store';
+import { saveTrackingUserData } from '@/utils/analytics';
 
 export interface SendOtpResponse {
   success: boolean;
@@ -160,6 +161,14 @@ class AuthService {
       if (data.isCompleted || options?.isLoginMode) {
         OnboardingStore.setOnboardingCompleted();
       }
+
+      // Persist customer information to tracking layer (GTM, Stape, Meta CAPI)
+      saveTrackingUserData({
+        user_id: data.user.id,
+        first_name: data.user.displayName || displayName || undefined,
+        email: data.user.email || email || currentState.email || undefined,
+        phone: data.user.phoneNumber || phoneNumber,
+      });
     }
 
     return data;
@@ -201,6 +210,15 @@ class AuthService {
         };
         window.localStorage.setItem(extraKey, JSON.stringify(merged));
       } catch {}
+    }
+
+    if (payload.displayName || payload.email || payload.phoneNumber || userId) {
+      saveTrackingUserData({
+        user_id: userId,
+        first_name: payload.displayName,
+        email: payload.email,
+        phone: payload.phoneNumber,
+      });
     }
 
     try {
@@ -344,6 +362,14 @@ class AuthService {
             gracePeriodEndDate: data.profile.grace_period_end || null,
           };
           OnboardingStore.setAuthSession(token, user);
+
+          // Update customer data in tracking layer across application
+          saveTrackingUserData({
+            user_id: user.id,
+            first_name: user.displayName || undefined,
+            email: user.email || undefined,
+            phone: user.phoneNumber || undefined,
+          });
 
           // Auto-heal legacy cached users: if local store has preferences/completion that were never synced to DB in older builds, backfill them now
           const latestLocal = OnboardingStore.getState();
