@@ -62,8 +62,8 @@ const LANGUAGE_HELP_OPTIONS: LanguageHelpItem[] = [
 
 export default function LanguageHelpScreen() {
   const { isTablet, isDesktop } = useBreakpoint();
-  const currentSaved = OnboardingStore.getState().languageMode || 'english_only';
-  const [selectedOption, setSelectedOption] = useState<LanguageModeOption>(currentSaved);
+  const currentSaved = (OnboardingStore.getState().languageMode as LanguageModeOption) || null;
+  const [selectedOption, setSelectedOption] = useState<LanguageModeOption | null>(currentSaved);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Staggered Entrance Animations
@@ -152,7 +152,7 @@ export default function LanguageHelpScreen() {
       }
     };
 
-    setTimeout(navigateNext, 120);
+    setTimeout(navigateNext, 450);
   };
 
   const handleBack = () => {

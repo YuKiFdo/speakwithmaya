@@ -65,7 +65,7 @@ export interface OnboardingState {
   employment: string;
   dailyGoalMinutes: number;
   aiCorrectionMode: 'let_me_speak' | 'keep_on_track' | 'correct_instantly';
-  languageMode: 'english_only' | 'sinhala_support' | 'deep_guidance';
+  languageMode: 'english_only' | 'sinhala_support' | 'deep_guidance' | null;
   nativeLanguage: 'sinhala' | 'tamil' | 'english';
   baselineScores: BaselineScores | null;
   discountWon: string | null;
@@ -92,7 +92,7 @@ const defaultState: OnboardingState = {
   employment: '',
   dailyGoalMinutes: 10,
   aiCorrectionMode: 'keep_on_track',
-  languageMode: 'english_only',
+  languageMode: null,
   nativeLanguage: 'sinhala',
   baselineScores: null,
   discountWon: null,

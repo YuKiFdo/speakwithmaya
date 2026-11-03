@@ -179,8 +179,8 @@ export default function GoalScreen() {
       }
     };
 
-    // Transition quickly without playing feedback voice or waiting
-    setTimeout(navigateNext, 120);
+    // Smooth delay so user can see their selection feedback before transitioning
+    setTimeout(navigateNext, 450);
   };
 
   return (
