@@ -172,6 +172,11 @@ export default function RefundPage() {
                       <td className="py-3 px-4">Direct Bank Deposit (SLIPS/CEFT)</td>
                       <td className="py-3 px-4">2 to 5 business days</td>
                     </tr>
+                    <tr>
+                      <td className="py-3 px-4 font-semibold text-[#0F172A]">Mobile Carrier Billing (Dialog / Mobitel / Hutch)</td>
+                      <td className="py-3 px-4">Immediate Telco Cancellation (Daily airtime stops)</td>
+                      <td className="py-3 px-4 text-[#10B981] font-semibold">Immediate on unsubscription</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>

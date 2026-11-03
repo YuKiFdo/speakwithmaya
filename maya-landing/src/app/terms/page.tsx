@@ -29,7 +29,7 @@ export default function TermsPage() {
               These Terms and Conditions constitute a legally binding agreement between you and <strong>IDEACIPHER (PVT) LTD</strong> regarding your access to and use of <strong>SpeakwithMaya</strong>.
             </p>
             <div className="flex flex-wrap items-center gap-4 text-[12.5px] text-[#94A3B8] mt-4 pt-4 border-t border-[#E2E8F0]">
-              <span>Last Updated: October 2026</span>
+              <span>Last Updated: November 2026</span>
               <span>·</span>
               <span>Governing Jurisdiction: Sri Lanka</span>
             </div>
@@ -42,7 +42,7 @@ export default function TermsPage() {
               Key Summary
             </h2>
             <p className="text-[13.5px] text-[#475569] leading-relaxed">
-              SpeakwithMaya is an AI conversational English-speaking coach. By creating an account or subscribing to any paid plan, you agree to these terms, our <Link href="/privacy" className="text-[#0D4EFD] underline font-medium">Privacy Policy</Link>, and our <Link href="/refund" className="text-[#0D4EFD] underline font-medium">Refund Policy</Link>. All payments are securely processed via Central Bank-approved gateway <strong>PayHere</strong>.
+              SpeakwithMaya is an AI conversational English-speaking coach. By creating an account or subscribing to any plan (including our direct mobile carrier <strong>Starter Plan</strong> or paid online tiers), you agree to these terms, our <Link href="/privacy" className="text-[#0D4EFD] underline font-medium">Privacy Policy</Link>, and our <Link href="/refund" className="text-[#0D4EFD] underline font-medium">Refund Policy</Link>. Online card/wallet transactions are securely processed via Central Bank-approved gateway <strong>PayHere</strong>, and mobile carrier airtime subscriptions are processed through authorized Sri Lankan telecommunication operators (Dialog, Mobitel, Hutch).
             </p>
           </div>
 
@@ -89,44 +89,86 @@ export default function TermsPage() {
             </section>
 
             {/* Section 4 */}
-            <section className="space-y-3">
+            <section className="space-y-4">
               <h3 className="text-[18px] font-bold text-[#0F172A] tracking-[-0.01em]">
                 4. Subscriptions, Pricing & Currency
               </h3>
               <p>
-                SpeakwithMaya offers both free trial experiences and tiered paid subscription plans (such as Basic, Pro, and Premium).
+                SpeakwithMaya offers multiple access models: a free trial experience, direct mobile carrier billing (the Starter Plan), and tiered premium subscription plans.
               </p>
+
+              {/* Starter Plan Box */}
+              <div className="p-5 rounded-2xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-1 rounded-md bg-[#EDF3FE] text-[#0D4EFD] text-xs font-bold uppercase tracking-wider">
+                    Starter Plan · Mobile Carrier Billing
+                  </span>
+                </div>
+                <p className="text-[13.5px] text-[#475569] leading-relaxed">
+                  Users registering with a supported Sri Lankan mobile carrier (Dialog, Mobitel, Hutch) can access the platform via the <strong>Starter Plan</strong> through direct airtime billing:
+                </p>
+                <ul className="list-disc pl-5 space-y-1.5 text-[13.5px] text-[#475569]">
+                  <li>
+                    <strong>Prepaid Subscribers:</strong> Billed at <strong>LKR 12 + applicable taxes per day</strong>, deducted automatically from your mobile airtime balance.
+                  </li>
+                  <li>
+                    <strong>Postpaid Subscribers:</strong> Billed at <strong>LKR 360 + applicable taxes per month</strong>, added directly to your monthly mobile carrier invoice.
+                  </li>
+                  <li>
+                    <strong>Activation:</strong> Activated automatically upon entering your mobile number and completing One-Time Password (OTP) verification during account creation.
+                  </li>
+                  <li>
+                    <strong>Daily Access:</strong> Grants daily speaking practice time and AI feedback with Maya. Practice quotas reset daily and do not carry forward.
+                  </li>
+                  <li>
+                    <strong>No Lock-In Contract:</strong> Cancel anytime without penalties or cancellation fees.
+                  </li>
+                </ul>
+              </div>
+
+              {/* General Pricing Terms */}
               <ul className="list-disc pl-6 space-y-1.5 text-[#475569]">
-                <li><strong>Currency:</strong> All subscription prices are stated and billed in Sri Lankan Rupees (LKR) inclusive of applicable taxes, unless explicitly noted otherwise.</li>
-                <li><strong>Practice Quotas:</strong> Each subscription tier includes defined daily or monthly AI conversation minutes as detailed on our Pricing page. Unused minutes expire at the end of each billing cycle and do not carry forward.</li>
-                <li><strong>Price Adjustments:</strong> We reserve the right to revise subscription fees upon giving at least 14 days prior notice via email, SMS, or notification within the app. Existing billing cycles will remain unchanged until their scheduled renewal.</li>
+                <li><strong>Currency:</strong> All subscription prices are stated and billed in Sri Lankan Rupees (LKR) with government taxes (such as VAT / SSCL / telecommunication levies) charged in accordance with Sri Lankan law.</li>
+                <li><strong>Tiered Plans:</strong> Higher-tier plans (Basic, Pro, Premium) with extended monthly quotas are available for purchase via online payment cards and digital wallets.</li>
+                <li><strong>Practice Quotas:</strong> Each subscription tier includes defined daily or monthly AI conversation minutes. Unused minutes expire at the end of each billing cycle and do not carry forward.</li>
+                <li><strong>Price Adjustments:</strong> We reserve the right to revise subscription fees upon giving at least 14 days prior notice via SMS, app notification, or email. Active billing cycles will remain unchanged until their scheduled renewal.</li>
               </ul>
             </section>
 
             {/* Section 5 */}
             <section className="space-y-3">
               <h3 className="text-[18px] font-bold text-[#0F172A] tracking-[-0.01em]">
-                5. Payment Processing via PayHere
+                5. Payment Processing (Mobile Carrier Billing & PayHere)
               </h3>
               <p>
-                All online payments, credit/debit card transactions, and mobile wallet payments are securely processed through <strong>PayHere</strong>, a licensed Payment Service Provider approved by the Central Bank of Sri Lanka (CBSL) adhering to the highest PCI-DSS Level 1 security standards.
+                To provide accessible and seamless billing across Sri Lanka, SpeakwithMaya supports two authorized payment channels:
               </p>
-              <p>
-                <strong>Security Guarantee:</strong> SpeakwithMaya does not collect, handle, or store your raw credit/debit card numbers, CVVs, or financial credentials. All sensitive transaction details are handled directly within the encrypted PayHere payment gateway environment.
-              </p>
+              <ul className="list-disc pl-6 space-y-2 text-[#475569]">
+                <li>
+                  <strong>Direct Carrier Billing (Dialog, Mobitel, Hutch):</strong> For Starter Plan subscriptions, billing transactions are executed directly through telecommunications operator gateways (Ideamart / mSpace). Charges are deducted from prepaid mobile airtime or added to postpaid billing statements. No credit card or banking information is required.
+                </li>
+                <li>
+                  <strong>Online Card & Wallet Payments (PayHere):</strong> For monthly/annual tiered plans and minute add-on purchases, payments are processed securely through <strong>PayHere</strong>, a licensed Payment Service Provider approved by the Central Bank of Sri Lanka (CBSL) operating under PCI-DSS Level 1 compliance. SpeakwithMaya never stores raw credit/debit card numbers or bank credentials.
+                </li>
+              </ul>
             </section>
 
             {/* Section 6 */}
             <section className="space-y-3">
               <h3 className="text-[18px] font-bold text-[#0F172A] tracking-[-0.01em]">
-                6. Recurring Billing & Automatic Renewal
+                6. Recurring Billing, Carrier Airtime Deductions & Auto-Renewal
               </h3>
               <p>
-                When you enroll in a recurring subscription plan, you authorize PayHere to charge the specified subscription fee to your designated payment method at the beginning of each billing interval (monthly or annually) until you cancel.
+                By starting a subscription, you acknowledge and agree to recurring charges:
               </p>
-              <p>
-                If a recurring charge fails due to insufficient funds, card expiration, or other banking reasons, we will attempt to re-notify you. Access to paid features may be suspended if payment cannot be completed after reasonable retry attempts.
-              </p>
+              <ul className="list-disc pl-6 space-y-2 text-[#475569]">
+                <li>
+                  <strong>Starter Plan (Mobile Carrier):</strong> Prepaid accounts are charged LKR 12 + applicable taxes each day on a recurring basis. If your prepaid mobile balance is insufficient at renewal time, access will be temporarily held until balance replenishment triggers the regular daily cycle. Postpaid accounts renew automatically each monthly billing cycle at LKR 360 + applicable taxes.
+                </li>
+                <li>
+                  <strong>Online Recurring Subscriptions (PayHere):</strong> When enrolled in a recurring card subscription, you authorize PayHere to charge the specified subscription fee at the start of each renewal interval (monthly or annually) until cancelled.
+                </li>
+              </ul>
             </section>
 
             {/* Section 7 */}
@@ -137,10 +179,16 @@ export default function TermsPage() {
               <p>
                 You may cancel your subscription at any time without penalty:
               </p>
-              <ul className="list-disc pl-6 space-y-1.5 text-[#475569]">
-                <li><strong>How to Cancel:</strong> Navigate to your Account / Subscription settings within the web app or email our support desk at <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a>.</li>
-                <li><strong>Effect of Cancellation:</strong> Cancellation takes effect at the end of your current paid billing period. You will retain complete access to all paid features until that period concludes. No further recurring charges will be initiated.</li>
-                <li><strong>Refunds:</strong> Refund requests are governed strictly by our <Link href="/refund" className="text-[#0D4EFD] underline font-medium">Refund & Cancellation Policy</Link>.</li>
+              <ul className="list-disc pl-6 space-y-2 text-[#475569]">
+                <li>
+                  <strong>Cancelling Starter Plan (Carrier Billing):</strong> You can cancel carrier billing at any time by tapping the <strong>Unsubscribe</strong> button in your app Profile / Settings, by following operator SMS cancellation instructions, or by emailing <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a> with your registered mobile phone number. Cancellation takes effect immediately, stopping future daily airtime deductions.
+                </li>
+                <li>
+                  <strong>Cancelling Online Card Subscriptions:</strong> Navigate to your Account / Subscription settings within the web app or email <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a>. Cancellation takes effect at the end of your current paid billing period with full feature retention until that date.
+                </li>
+                <li>
+                  <strong>Refunds:</strong> Refund requests are governed strictly by our <Link href="/refund" className="text-[#0D4EFD] underline font-medium">Refund & Cancellation Policy</Link>.
+                </li>
               </ul>
             </section>
 
