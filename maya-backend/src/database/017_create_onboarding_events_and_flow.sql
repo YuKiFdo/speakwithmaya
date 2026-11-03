@@ -19,3 +19,4 @@ CREATE INDEX IF NOT EXISTS idx_onboarding_events_event_name ON public.onboarding
 -- Append-only array of student's journey events directly on the profile
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS onboarding_flow JSONB DEFAULT '[]'::jsonb;
+
