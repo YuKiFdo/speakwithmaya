@@ -163,6 +163,12 @@ export default function LevelScreen() {
     // Play tactile select chime
     playUnderstoodTapSound();
 
+    // Log analytics event
+    authService.logEvent('select_level', '/onboarding/level', {
+      levelId: item.id,
+      levelTitle: item.title,
+    });
+
     let hasNavigated = false;
     const navigateNext = () => {
       if (!hasNavigated) {

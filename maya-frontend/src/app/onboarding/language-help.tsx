@@ -142,6 +142,12 @@ export default function LanguageHelpScreen() {
 
     playUnderstoodTapSound();
 
+    // Log analytics event
+    authService.logEvent('select_language_mode', '/onboarding/language-help', {
+      languageMode: item.id,
+      languageModeTitle: item.title,
+    });
+
     let hasNavigated = false;
     const navigateNext = () => {
       if (!hasNavigated) {

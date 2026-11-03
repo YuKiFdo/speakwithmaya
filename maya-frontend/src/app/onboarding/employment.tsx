@@ -175,6 +175,12 @@ export default function EmploymentScreen() {
     // Play tactile select chime
     playUnderstoodTapSound();
 
+    // Log analytics event
+    authService.logEvent('select_employment', '/onboarding/employment', {
+      employmentId: item.id,
+      employmentTitle: item.title,
+    });
+
     let hasNavigated = false;
     const navigateNext = () => {
       if (!hasNavigated) {

@@ -167,6 +167,12 @@ export default function GoalScreen() {
     // Play tactile select chime
     playUnderstoodTapSound();
 
+    // Log analytics event
+    authService.logEvent('select_goal', '/onboarding/goal', {
+      goalId: goal.id,
+      goalTitle: goal.title,
+    });
+
     let hasNavigated = false;
     const navigateNext = () => {
       if (!hasNavigated) {

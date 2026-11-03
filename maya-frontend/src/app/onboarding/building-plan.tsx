@@ -379,6 +379,7 @@ export default function BuildingPlanScreen() {
 
       // Transition to Special One-Time Offer (Spin Wheel) Screen
       trackOnboardingComplete(OnboardingStore.getState().user?.id);
+      authService.logEvent('building_plan_completed', '/onboarding/building-plan');
       redirectTimeoutRef.current = setTimeout(() => {
         router.replace('/onboarding/special-offer' as any);
       }, 550);

@@ -173,6 +173,22 @@ export interface UserPersonalizedDetail {
     xp_earned: number;
     completed_at: string;
   }>;
+  onboardingEvents?: Array<{
+    id?: string;
+    event_name: string;
+    step: string;
+    action?: string;
+    metadata?: Record<string, any>;
+    created_at?: string;
+    timestamp?: string;
+  }>;
+  onboardingFlow?: Array<{
+    event: string;
+    step: string;
+    action?: string;
+    metadata?: Record<string, any>;
+    timestamp?: string;
+  }>;
 }
 
 
@@ -194,6 +210,85 @@ function formatStepBadge(step?: string): string {
   if (clean.includes('phone') || clean.includes('otp')) return 'Auth';
   if (clean.includes('name')) return 'Name';
   return step.replace('/onboarding/', '');
+}
+
+function getEventIconAndColor(eventName: string): { icon: any; color: string; bg: string } {
+  switch (eventName) {
+    case 'select_goal':
+      return { icon: 'target', color: '#2563eb', bg: '#dbeafe' };
+    case 'select_challenge':
+      return { icon: 'zap', color: '#ea580c', bg: '#ffedd5' };
+    case 'select_level':
+      return { icon: 'bar-chart-2', color: '#059669', bg: '#d1fae5' };
+    case 'select_employment':
+      return { icon: 'briefcase', color: '#7c3aed', bg: '#ede9fe' };
+    case 'select_daily_goal':
+      return { icon: 'clock', color: '#0891b2', bg: '#cffafe' };
+    case 'select_language_mode':
+      return { icon: 'globe', color: '#4f46e5', bg: '#e0e7ff' };
+    case 'intro_call_started':
+    case 'intro_call_ended':
+      return { icon: 'phone-call', color: '#0d9488', bg: '#ccfbf1' };
+    case 'building_plan_completed':
+      return { icon: 'cpu', color: '#6366f1', bg: '#e0e7ff' };
+    case 'spin_wheel_clicked':
+    case 'discount_won':
+      return { icon: 'gift', color: '#d97706', bg: '#fef3c7' };
+    case 'claim_discount_clicked':
+      return { icon: 'tag', color: '#16a34a', bg: '#dcfce7' };
+    case 'view_all_plans_clicked':
+    case 'select_plan_clicked':
+      return { icon: 'layers', color: '#3b82f6', bg: '#eff6ff' };
+    case 'upgrade_plan_clicked':
+      return { icon: 'arrow-up-circle', color: '#2563eb', bg: '#dbeafe' };
+    case 'continue_starter_clicked':
+      return { icon: 'check-circle', color: '#64748b', bg: '#f1f5f9' };
+    case 'arrive_dashboard':
+      return { icon: 'home', color: '#16a34a', bg: '#dcfce7' };
+    default:
+      return { icon: 'activity', color: '#64748b', bg: '#f1f5f9' };
+  }
+}
+
+function formatEventName(eventName: string): string {
+  switch (eventName) {
+    case 'select_goal':
+      return 'Goal Selected';
+    case 'select_challenge':
+      return 'Challenge Selected';
+    case 'select_level':
+      return 'English Level Picked';
+    case 'select_employment':
+      return 'Employment Picked';
+    case 'select_daily_goal':
+      return 'Daily Goal Set';
+    case 'select_language_mode':
+      return 'Language Coaching Mode';
+    case 'intro_call_started':
+      return 'Intro Voice Call Started';
+    case 'intro_call_ended':
+      return 'Intro Voice Call Concluded';
+    case 'building_plan_completed':
+      return 'Personalized Plan Generated';
+    case 'spin_wheel_clicked':
+      return 'Spun Discount Wheel';
+    case 'discount_won':
+      return 'Exclusive Discount Won';
+    case 'claim_discount_clicked':
+      return 'Discount Voucher Claimed';
+    case 'view_all_plans_clicked':
+      return 'Expanded All Available Plans';
+    case 'select_plan_clicked':
+      return 'Plan Option Picked';
+    case 'upgrade_plan_clicked':
+      return 'Clicked Upgrade / Checkout';
+    case 'continue_starter_clicked':
+      return 'Selected Continue with Starter Plan';
+    case 'arrive_dashboard':
+      return 'Arrived on Student Dashboard';
+    default:
+      return eventName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
 }
 
 function formatEndReasonLabel(reason?: string): string {
@@ -281,7 +376,7 @@ export default function AdminUsersScreen() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userDetail, setUserDetail] = useState<UserPersonalizedDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
-  const [detailTab, setDetailTab] = useState<'overview' | 'sessions' | 'corrections' | 'roadmap' | 'orders'>('overview');
+  const [detailTab, setDetailTab] = useState<'overview' | 'onboarding' | 'sessions' | 'corrections' | 'roadmap' | 'orders'>('overview');
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
 
   // Complaints & Feedback
@@ -1349,6 +1444,11 @@ export default function AdminUsersScreen() {
                 <View style={styles.detailTabBar}>
                   {[
                     { id: 'overview', label: 'Overview & Goals', icon: 'user' },
+                    {
+                      id: 'onboarding',
+                      label: `Onboarding (${(userDetail.onboardingEvents?.length || userDetail.onboardingFlow?.length || 0)})`,
+                      icon: 'navigation',
+                    },
                     { id: 'sessions', label: `Sessions (${userDetail.sessions.length})`, icon: 'phone-call' },
                     { id: 'corrections', label: `Corrections (${userDetail.corrections.length})`, icon: 'message-circle' },
                     { id: 'roadmap', label: `Curriculum (${userDetail.roadmapProgress.length})`, icon: 'map' },
@@ -1651,6 +1751,203 @@ export default function AdminUsersScreen() {
                       </View>
                     </View>
 
+                  </ScrollView>
+                )}
+
+                {/* Tab: Onboarding Journey & Funnel Telemetry */}
+                {detailTab === 'onboarding' && (
+                  <ScrollView style={styles.modalTabScroll} contentContainerStyle={{ padding: 20 }}>
+                    {/* Top Funnel KPI Grid */}
+                    <View style={styles.modalKpiGrid}>
+                      <View style={styles.modalKpiCard}>
+                        <Text style={styles.modalKpiLabel}>Funnel Progress</Text>
+                        <Text
+                          style={[
+                            styles.modalKpiValue,
+                            { color: userDetail.profile.onboarding_completed_at ? '#16a34a' : '#d97706' },
+                          ]}
+                        >
+                          {userDetail.profile.onboarding_completed_at ? 'Completed' : 'In Progress'}
+                        </Text>
+                        <Text style={styles.modalKpiSub}>
+                          {userDetail.profile.last_active_step || '/'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.modalKpiCard}>
+                        <Text style={styles.modalKpiLabel}>Intro Call Status</Text>
+                        <Text
+                          style={[
+                            styles.modalKpiValue,
+                            {
+                              color:
+                                userDetail.onboardingCallStatus === 'completed'
+                                  ? '#0f766e'
+                                  : userDetail.onboardingCallStatus === 'cut_short'
+                                  ? '#b45309'
+                                  : '#1d4ed8',
+                            },
+                          ]}
+                        >
+                          {userDetail.onboardingCallStatusLabel || 'Not attempted'}
+                        </Text>
+                        <Text style={styles.modalKpiSub}>
+                          {userDetail.onboardingCallDuration ? `${userDetail.onboardingCallDuration}s total duration` : 'No call duration recorded'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.modalKpiCard}>
+                        <Text style={styles.modalKpiLabel}>Plan Decision</Text>
+                        <Text
+                          style={[
+                            styles.modalKpiValue,
+                            { color: userDetail.profile.plan_tier === 'pro' || userDetail.profile.plan_tier === 'premium' ? '#2563eb' : '#475569' },
+                          ]}
+                        >
+                          {userDetail.profile.plan_tier ? `${userDetail.profile.plan_tier.toUpperCase()} PLAN` : 'STARTER PLAN'}
+                        </Text>
+                        <Text style={styles.modalKpiSub}>
+                          {userDetail.subscription?.plan_tier ? `Subscribed (${userDetail.subscription.plan_tier})` : 'Using Starter Plan'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Step-by-Step Funnel Timeline */}
+                    <View style={[styles.sectionCard, { marginTop: 8 }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                        <Feather name="navigation" size={16} color="#0d9488" />
+                        <Text style={styles.sectionTitle}>Step-by-Step Click & Milestone Log</Text>
+                      </View>
+
+                      {(!userDetail.onboardingEvents || userDetail.onboardingEvents.length === 0) &&
+                       (!userDetail.onboardingFlow || userDetail.onboardingFlow.length === 0) ? (
+                        <View style={styles.timelineContainer}>
+                          {/* Fallback to profile baseline milestones if no events logged yet */}
+                          {[
+                            {
+                              name: 'Select Goal',
+                              step: '/onboarding/goal',
+                              detail: userDetail.profile.goal || 'Not selected',
+                              icon: 'target',
+                              color: '#2563eb',
+                              bg: '#dbeafe',
+                            },
+                            {
+                              name: 'Select Challenge',
+                              step: '/onboarding/challenge',
+                              detail: userDetail.profile.challenge || 'Not selected',
+                              icon: 'zap',
+                              color: '#ea580c',
+                              bg: '#ffedd5',
+                            },
+                            {
+                              name: 'Select Level',
+                              step: '/onboarding/level',
+                              detail: userDetail.profile.level || 'Intermediate',
+                              icon: 'bar-chart-2',
+                              color: '#059669',
+                              bg: '#d1fae5',
+                            },
+                            {
+                              name: 'Intro Voice Call',
+                              step: '/onboarding/call',
+                              detail: userDetail.onboardingCallStatusLabel || 'Not attempted',
+                              icon: 'phone-call',
+                              color: '#0d9488',
+                              bg: '#ccfbf1',
+                            },
+                            {
+                              name: 'Plan Selection',
+                              step: '/onboarding/personalized-plan',
+                              detail: userDetail.profile.plan_tier ? `${userDetail.profile.plan_tier} Plan` : 'Starter Plan',
+                              icon: 'layers',
+                              color: '#3b82f6',
+                              bg: '#eff6ff',
+                            },
+                          ].map((item, idx, arr) => (
+                            <View key={idx} style={styles.timelineItem}>
+                              <View style={styles.timelineIconCol}>
+                                <View style={[styles.timelineIconCircle, { backgroundColor: item.bg }]}>
+                                  <Feather name={item.icon as any} size={15} color={item.color} />
+                                </View>
+                                {idx < arr.length - 1 && <View style={styles.timelineConnector} />}
+                              </View>
+                              <View style={styles.timelineCard}>
+                                <View style={styles.timelineCardHeader}>
+                                  <Text style={styles.timelineCardTitle}>{item.name}</Text>
+                                </View>
+                                <Text style={styles.timelineCardStep}>{item.step}</Text>
+                                <View style={styles.timelineBadgesRow}>
+                                  <View style={styles.timelineBadge}>
+                                    <Text style={styles.timelineBadgeText}>{item.detail}</Text>
+                                  </View>
+                                </View>
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      ) : (
+                        <View style={styles.timelineContainer}>
+                          {(userDetail.onboardingEvents && userDetail.onboardingEvents.length > 0
+                            ? userDetail.onboardingEvents
+                            : (userDetail.onboardingFlow || []).map((f, i) => ({
+                                id: `flow-${i}`,
+                                event_name: f.event,
+                                step: f.step,
+                                action: f.action || 'click',
+                                metadata: f.metadata || {},
+                                created_at: f.timestamp,
+                              }))
+                          ).map((ev: any, idx: number, arr: any[]) => {
+                            const eventKey = ev.event_name || ev.event || 'unknown';
+                            const styleConfig = getEventIconAndColor(eventKey);
+                            const formattedTitle = formatEventName(eventKey);
+                            const timeStr = ev.created_at || ev.timestamp
+                              ? new Date(ev.created_at || ev.timestamp).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit',
+                                })
+                              : '';
+                            const metaObj = ev.metadata || {};
+                            const metaEntries = Object.entries(metaObj);
+
+                            return (
+                              <View key={ev.id || idx} style={styles.timelineItem}>
+                                <View style={styles.timelineIconCol}>
+                                  <View style={[styles.timelineIconCircle, { backgroundColor: styleConfig.bg }]}>
+                                    <Feather name={styleConfig.icon as any} size={15} color={styleConfig.color} />
+                                  </View>
+                                  {idx < arr.length - 1 && <View style={styles.timelineConnector} />}
+                                </View>
+
+                                <View style={styles.timelineCard}>
+                                  <View style={styles.timelineCardHeader}>
+                                    <Text style={styles.timelineCardTitle}>{formattedTitle}</Text>
+                                    {timeStr ? <Text style={styles.timelineCardTime}>{timeStr}</Text> : null}
+                                  </View>
+                                  <Text style={styles.timelineCardStep}>
+                                    {ev.step || '/'} • Action: {ev.action || 'click'}
+                                  </Text>
+
+                                  {metaEntries.length > 0 && (
+                                    <View style={styles.timelineBadgesRow}>
+                                      {metaEntries.map(([k, v]) => (
+                                        <View key={k} style={styles.timelineBadge}>
+                                          <Text style={styles.timelineBadgeText}>
+                                            {k}: {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                                          </Text>
+                                        </View>
+                                      ))}
+                                    </View>
+                                  )}
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+                    </View>
                   </ScrollView>
                 )}
 
@@ -3144,5 +3441,80 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'medium'),
     fontSize: 13,
     color: '#ef4444',
+  },
+  timelineContainer: {
+    gap: 4,
+  },
+  timelineItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  timelineIconCol: {
+    alignItems: 'center',
+    width: 32,
+  },
+  timelineIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timelineConnector: {
+    width: 2,
+    height: 24,
+    backgroundColor: '#e2e8f0',
+    marginVertical: 2,
+  },
+  timelineCard: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    marginBottom: 10,
+  },
+  timelineCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  timelineCardTitle: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#0f172a',
+  },
+  timelineCardTime: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#94a3b8',
+  },
+  timelineCardStep: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#64748b',
+    marginBottom: 6,
+  },
+  timelineBadgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
+  },
+  timelineBadge: {
+    backgroundColor: '#ffffff',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  timelineBadgeText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#475569',
   },
 });

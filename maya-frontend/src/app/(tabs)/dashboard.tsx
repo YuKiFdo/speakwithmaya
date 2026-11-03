@@ -168,6 +168,15 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     authService.fetchUserProfile();
+    authService.logEvent(
+      'arrive_dashboard',
+      '/(tabs)/dashboard',
+      {
+        planTier: OnboardingStore.getState().user?.planTier || (stats.isPro ? 'pro' : 'starter'),
+        isCompleted: OnboardingStore.getState().isCompleted,
+      },
+      'navigation'
+    );
   }, []);
 
   // Dynamically scale card & hero heights so they fill space on taller desktop screens,

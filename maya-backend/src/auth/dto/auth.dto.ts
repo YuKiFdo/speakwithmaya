@@ -205,6 +205,23 @@ export class UpdateStepDto {
   markCompleted?: boolean;
 }
 
+export class LogOnboardingEventDto {
+  @IsString()
+  @IsNotEmpty()
+  event!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  step!: string;
+
+  @IsOptional()
+  @IsString()
+  action?: string;
+
+  @IsOptional()
+  metadata?: Record<string, any>;
+}
+
 export class AdminUsersQueryDto {
   @IsOptional()
   @IsString()

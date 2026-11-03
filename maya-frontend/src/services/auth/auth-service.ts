@@ -256,6 +256,37 @@ class AuthService {
   }
 
   /**
+   * Logs a user click, option choice, or funnel milestone during onboarding.
+   * Persists to server (onboarding_events and profiles.onboarding_flow).
+   */
+  async logEvent(
+    event: string,
+    step: string,
+    metadata?: Record<string, any>,
+    action: string = 'click'
+  ) {
+    const state = OnboardingStore.getState();
+    const token = state.accessToken;
+    if (!token) return;
+
+    try {
+      await fetch(`${this.baseUrl}/v1/users/event`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          event,
+          step,
+          action,
+          metadata: metadata || {},
+        }),
+      });
+    } catch {}
+  }
+
+  /**
    * Refreshes user profile & minutes quota from backend.
    */
   async fetchUserProfile() {

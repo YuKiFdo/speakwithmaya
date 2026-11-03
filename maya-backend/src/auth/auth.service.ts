@@ -18,6 +18,7 @@ import {
   UpgradePlanDto,
   AddOnTopUpDto,
   UpdateStepDto,
+  LogOnboardingEventDto,
   AdminUsersQueryDto,
   AdminUpdateUserDto,
   CreateTestAccountDto,
@@ -1393,6 +1394,66 @@ export class AuthService {
   }
 
   /**
+   * Logs a user click, interaction, or milestone event during onboarding.
+   * Persists to both public.onboarding_events table and profiles.onboarding_flow JSONB.
+   */
+  async logOnboardingEvent(userId: string, dto: LogOnboardingEventDto) {
+    if (!this.supabase) {
+      throw new InternalServerErrorException('Supabase database client not configured.');
+    }
+
+    const nowIso = new Date().toISOString();
+    const eventRecord = {
+      user_id: userId,
+      event_name: dto.event,
+      step: dto.step,
+      action: dto.action || 'click',
+      metadata: dto.metadata || {},
+      created_at: nowIso,
+    };
+
+    // 1. Insert into onboarding_events table (graceful fail-safe if table doesn't exist yet)
+    try {
+      await this.supabase.from('onboarding_events').insert(eventRecord);
+    } catch (err: any) {
+      this.logger.warn(`Could not insert into onboarding_events: ${err?.message}`);
+    }
+
+    // 2. Append to profiles.onboarding_flow JSONB array
+    try {
+      const { data: profile } = await this.supabase
+        .from('profiles')
+        .select('onboarding_flow')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const existingFlow = Array.isArray(profile?.onboarding_flow) ? profile.onboarding_flow : [];
+      const updatedFlow = [
+        ...existingFlow,
+        {
+          event: dto.event,
+          step: dto.step,
+          action: dto.action || 'click',
+          metadata: dto.metadata || {},
+          timestamp: nowIso,
+        },
+      ];
+
+      await this.supabase
+        .from('profiles')
+        .update({
+          onboarding_flow: updatedFlow,
+          updated_at: nowIso,
+        })
+        .eq('id', userId);
+    } catch (err: any) {
+      this.logger.warn(`Could not update profiles.onboarding_flow: ${err?.message}`);
+    }
+
+    return { success: true };
+  }
+
+  /**
    * Retrieves user profile strictly from database with up-to-date quotas.
    */
   async getProfile(userId: string): Promise<UserProfileData> {
@@ -2361,12 +2422,42 @@ export class AuthService {
         } catch {}
       }
 
+      let onboardingEvents: any[] = [];
+      const profileFlow = Array.isArray((profile as any)?.onboarding_flow)
+        ? (profile as any).onboarding_flow
+        : [];
+
+      try {
+        const { data: evData } = await this.supabase
+          .from('onboarding_events')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: true });
+        if (evData && evData.length > 0) {
+          onboardingEvents = evData;
+        } else if (profileFlow.length > 0) {
+          onboardingEvents = profileFlow.map((f: any, idx: number) => ({
+            id: `flow-${idx}`,
+            user_id: userId,
+            event_name: f.event,
+            step: f.step,
+            action: f.action || 'click',
+            metadata: f.metadata || {},
+            created_at: f.timestamp || f.created_at,
+          }));
+        }
+      } catch {
+        onboardingEvents = profileFlow;
+      }
+
       return {
         profile: enrichedProfile,
         onboardingCallStatus: introInfo.status,
         onboardingCallStatusLabel: introInfo.label,
         onboardingCallDuration: introInfo.duration,
         onboardingCallTracking,
+        onboardingEvents,
+        onboardingFlow: profileFlow,
         stats: {
           totalSessions: (sessions || []).length,
           totalPracticeMinutes: Math.round(totalPracticeSeconds / 60),

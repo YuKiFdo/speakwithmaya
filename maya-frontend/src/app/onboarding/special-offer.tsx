@@ -404,6 +404,10 @@ export default function SpecialOfferScreen() {
       playOtherButtonSound();
     } catch {}
 
+    authService.logEvent('spin_wheel_clicked', '/onboarding/special-offer', {
+      attempt: spinAttemptRef.current + 1,
+    });
+
     const isFirstAttempt = spinAttemptRef.current === 0;
     spinAttemptRef.current += 1;
 
@@ -455,6 +459,10 @@ export default function SpecialOfferScreen() {
       } catch {}
 
       // Snappy transition to the congratulations claim discount screen
+      authService.logEvent('discount_won', '/onboarding/special-offer', {
+        discount: '20% OFF',
+        code: '20-off',
+      });
       redirectTimeoutRef.current = setTimeout(() => {
           OnboardingStore.updateField('discountWon', '20-off');
           router.replace('/onboarding/claim-discount' as any);

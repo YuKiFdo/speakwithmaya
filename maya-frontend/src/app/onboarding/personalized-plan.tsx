@@ -502,6 +502,13 @@ export default function PersonalizedPlanScreen() {
       priceText: selectedPlan?.pricePerMonth,
     });
 
+    authService.logEvent('upgrade_plan_clicked', '/onboarding/personalized-plan', {
+      planId: selectedPlanId,
+      planName: selectedPlan?.name,
+      billingPeriod: planAnalytics.billing_period,
+      amount: planAnalytics.value,
+    });
+
     setIsUpgrading(true);
     try {
       // 1. Save onboarding preferences first
@@ -641,6 +648,10 @@ export default function PersonalizedPlanScreen() {
 
     trackOnboardingComplete(OnboardingStore.getState().user?.id);
     trackContinueStarter();
+    authService.logEvent('continue_starter_clicked', '/onboarding/personalized-plan', {
+      isTimerExpired,
+      selectedPlanId,
+    });
 
     const state = OnboardingStore.getState();
     await authService.savePreferences({
@@ -713,6 +724,11 @@ export default function PersonalizedPlanScreen() {
                     key={plan.id}
                     onPress={() => {
                       setSelectedPlanId(plan.id);
+                      authService.logEvent('select_plan_clicked', '/onboarding/personalized-plan', {
+                        planId: plan.id,
+                        planName: plan.name,
+                        price: plan.pricePerMonth,
+                      });
                       trackSelectPlan(
                         resolvePlanAnalyticsDetails({
                           planId: plan.id,
@@ -817,6 +833,7 @@ export default function PersonalizedPlanScreen() {
                   const next = !prev;
                   if (next) {
                     trackViewAllPlans();
+                    authService.logEvent('view_all_plans_clicked', '/onboarding/personalized-plan');
                   }
                   return next;
                 });

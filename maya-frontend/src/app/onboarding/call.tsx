@@ -40,6 +40,7 @@ import {
 } from '@/services/sound/sound-service';
 import { CallSessionStore } from '@/services/store/call-session-store';
 import { OnboardingStore } from '@/services/store/onboarding-store';
+import { authService } from '@/services/auth/auth-service';
 import { useUserStats } from '@/hooks/useUserStats';
 
 export default function CallScreen() {
@@ -703,6 +704,9 @@ export default function CallScreen() {
           ]).start(({ finished }) => {
             if (finished) {
               setConnectingVisible(false);
+              if (isIntro) {
+                authService.logEvent('intro_call_started', '/onboarding/call', { isIntro: true });
+              }
             }
           });
         }, 420); // Quick transition right after showing Connected
@@ -875,6 +879,13 @@ export default function CallScreen() {
         activeHints: hintsHistoryRef.current,
       });
       console.log(`[call.tsx] 🏁 Session concluded (isIntro: ${isIntro}) -> routing to analyzing pipeline`);
+      if (isIntro) {
+        authService.logEvent('intro_call_ended', '/onboarding/call', {
+          isIntro: true,
+          durationSeconds: liveCall.missionReport.durationSeconds || displayedElapsed,
+          overallScore: liveCall.missionReport.overallScore,
+        });
+      }
       router.replace({
         pathname: (isIntro ? '/onboarding/analyzing' : '/call/analyzing') as any,
         params: {

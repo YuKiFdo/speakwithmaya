@@ -24,6 +24,7 @@ import {
   UpgradePlanDto,
   AddOnTopUpDto,
   UpdateStepDto,
+  LogOnboardingEventDto,
   AdminUsersQueryDto,
   AdminUpdateUserDto,
   UpdateAppConfigDto,
@@ -99,6 +100,16 @@ export class AuthController {
     @GetUser('id') userId: string,
   ) {
     return this.authService.updateStep(userId, dto);
+  }
+
+  @Post('users/event')
+  @UseGuards(AuthGuard)
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async logEvent(
+    @Body() dto: LogOnboardingEventDto,
+    @GetUser('id') userId: string,
+  ) {
+    return this.authService.logOnboardingEvent(userId, dto);
   }
 
   @Post('plans/upgrade')

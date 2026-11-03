@@ -185,6 +185,9 @@ export default function ClaimDiscountScreen() {
     try {
       playOtherButtonSound();
     } catch {}
+    authService.logEvent('claim_discount_clicked', '/onboarding/claim-discount', {
+      discount: '20% OFF',
+    });
     OnboardingStore.updateField('discountWon', '20-off');
     router.replace('/onboarding/personalized-plan' as any);
   };

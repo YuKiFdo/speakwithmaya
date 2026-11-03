@@ -159,13 +159,21 @@ export default function DailyGoalScreen() {
     // Play tactile select chime
     playUnderstoodTapSound();
 
+    const mins = parseInt(item.id.replace('-min', ''), 10) || 10;
+
+    // Log analytics event
+    authService.logEvent('select_daily_goal', '/onboarding/daily-goal', {
+      dailyGoalMinutes: mins,
+      goalOptionId: item.id,
+      goalOptionTitle: item.title,
+    });
+
     let hasNavigated = false;
     const navigateNext = () => {
       if (!hasNavigated) {
         hasNavigated = true;
         stopMayaDailyGoalPromptVoice();
         stopMayaDailyGoalFeedbackVoice();
-        const mins = parseInt(item.id.replace('-min', ''), 10) || 10;
         OnboardingStore.updateField('dailyGoalMinutes', mins);
         authService.syncStep('/onboarding/language-help');
         router.replace('/onboarding/language-help' as any);

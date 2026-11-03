@@ -161,6 +161,12 @@ export default function ChallengeScreen() {
     // Play tactile select chime
     playUnderstoodTapSound();
 
+    // Log analytics event
+    authService.logEvent('select_challenge', '/onboarding/challenge', {
+      challengeId: item.id,
+      challengeTitle: item.title,
+    });
+
     let hasNavigated = false;
     const navigateNext = () => {
       if (!hasNavigated) {
