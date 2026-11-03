@@ -174,11 +174,11 @@ export default function DashboardScreen() {
   // while staying compact enough on laptop screens (≤768px height) to prevent any vertical scrolling:
   const desktopHeroMinHeight = isDesktop
     ? Math.min(325, Math.max(160, Math.round(windowHeight * 0.35)))
-    : 170;
+    : 220;
 
   const desktopHeroPaddingV = isDesktop
     ? Math.min(56, Math.max(16, Math.round(windowHeight * 0.055)))
-    : 18;
+    : 20;
 
   const desktopCardMinHeight = isDesktop
     ? Math.min(124, Math.max(86, Math.round(windowHeight * 0.135)))
@@ -1284,10 +1284,11 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     borderColor: '#E0EDFE',
-    padding: 18,
-    overflow: 'visible',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    overflow: 'hidden',
     position: 'relative',
-    minHeight: 170,
+    minHeight: 220,
     justifyContent: 'center',
     marginTop: 16,
   },
@@ -1406,7 +1407,7 @@ const styles = StyleSheet.create({
   },
   heroRight: {
     position: 'absolute',
-    right: -8,
+    right: 0,
     bottom: 0,
     zIndex: 1,
   },
@@ -1415,10 +1416,9 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   mayaWavingImg: {
-    width: 250,
+    width: 245,
     height: 206,
     opacity: 0.15,
-
   },
   mayaWavingImgDesktop: {
     width: 260,
