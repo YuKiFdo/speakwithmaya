@@ -87,7 +87,7 @@ export default function SocialProofScreen() {
       Animated.parallel([
         Animated.timing(cardOpacityAnim, {
           toValue: 1,
-          duration: isAudioOff ? 150 : 360,
+          duration: isAudioOff ? 150 : 420,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -101,14 +101,14 @@ export default function SocialProofScreen() {
 
       // Start progressive chart drawing as card enters
       startChartAnimation(isAudioOff);
-    }, isAudioOff ? 40 : 120);
+    }, isAudioOff ? 40 : 250);
 
-    // 3. Social Proof Section entrance
+    // 3. Social Proof Section entrance (reveals smoothly as chart reaches 2-week confidence milestone)
     const socialTimer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(socialOpacityAnim, {
           toValue: 1,
-          duration: isAudioOff ? 150 : 320,
+          duration: isAudioOff ? 150 : 420,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -119,14 +119,14 @@ export default function SocialProofScreen() {
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
-    }, isAudioOff ? 100 : 420);
+    }, isAudioOff ? 100 : 1300);
 
-    // 4. CTA Button & Skip option reveal smoothly
+    // 4. CTA Button & Skip option reveal smoothly as graph completes
     const buttonTimer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(buttonOpacityAnim, {
           toValue: 1,
-          duration: isAudioOff ? 150 : 340,
+          duration: isAudioOff ? 150 : 420,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -137,14 +137,14 @@ export default function SocialProofScreen() {
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
-    }, isAudioOff ? 160 : 620);
+    }, isAudioOff ? 160 : 2100);
 
-    // 5. Play Maya's Gemini TTS Voice prompt after ~300ms
+    // 5. Play Maya's Gemini TTS Voice prompt smoothly after card settles
     const voiceTimer = setTimeout(() => {
       try {
         if (!isAudioOff) playMayaSocialProofPromptVoice();
       } catch {}
-    }, 300);
+    }, 600);
 
     return () => {
       clearTimeout(cardTimer);
@@ -155,7 +155,7 @@ export default function SocialProofScreen() {
     };
   }, []);
 
-  // Chart Progressive Draw Animation
+  // Chart Progressive Draw Animation (slowed down so learners can follow the 3 milestones)
   const startChartAnimation = (isAudioOff?: boolean) => {
     chartRevealAnim.setValue(0);
     const listenerId = chartRevealAnim.addListener(({ value }) => {
@@ -167,7 +167,7 @@ export default function SocialProofScreen() {
 
     Animated.timing(chartRevealAnim, {
       toValue: 320,
-      duration: isAudioOff ? 400 : 1400,
+      duration: isAudioOff ? 500 : 2500,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start(() => {

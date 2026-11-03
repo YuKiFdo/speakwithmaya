@@ -158,7 +158,8 @@ export default function LanguageHelpScreen() {
       }
     };
 
-    setTimeout(navigateNext, 450);
+    // Smooth delay so user can see their selection feedback before transitioning
+    setTimeout(navigateNext, 700);
   };
 
   const handleBack = () => {
