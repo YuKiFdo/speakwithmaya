@@ -2447,6 +2447,7 @@ ${memoryPart}`;
               .eq('session_id', validSessionId)
               .maybeSingle();
 
+            const diagId = (data as any)?.id;
             const rawEvents = (data as any)?.events;
             const currentEvents = Array.isArray(rawEvents) ? [...rawEvents] : [];
             currentEvents.push({
@@ -2454,8 +2455,8 @@ ${memoryPart}`;
               event: 'client_finish_payload',
               detail: JSON.stringify(trackingPayload),
             });
-            if (data?.id) {
-              await sb.from('session_diagnostics').update({ events: currentEvents }).eq('id', data.id);
+            if (diagId) {
+              await sb.from('session_diagnostics').update({ events: currentEvents }).eq('id', diagId);
             } else {
               await sb.from('session_diagnostics').insert({
                 session_id: validSessionId,
