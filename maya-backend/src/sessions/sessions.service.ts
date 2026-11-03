@@ -2447,7 +2447,8 @@ ${memoryPart}`;
               .eq('session_id', validSessionId)
               .maybeSingle();
 
-            const currentEvents = Array.isArray(data?.events) ? data.events : [];
+            const rawEvents = (data as any)?.events;
+            const currentEvents = Array.isArray(rawEvents) ? [...rawEvents] : [];
             currentEvents.push({
               ts: Date.now(),
               event: 'client_finish_payload',
