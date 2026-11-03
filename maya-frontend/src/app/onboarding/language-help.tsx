@@ -198,9 +198,9 @@ export default function LanguageHelpScreen() {
               },
             ]}
           >
-            <Text style={styles.title}>Language help</Text>
+            <Text style={styles.title}>How would you like to learn?</Text>
             <Text style={styles.subtitle}>
-              Practise with friendly Sinhala coaching whenever you need help.
+              Choose how Maya supports you while you practise speaking English.
             </Text>
           </Animated.View>
 
@@ -258,6 +258,14 @@ export default function LanguageHelpScreen() {
                 </Animated.View>
               );
             })}
+          </View>
+
+          {/* Bottom Disclaimer */}
+          <View style={styles.disclaimerContainer}>
+            <Ionicons name="information-circle-outline" size={17} color="#94A3B8" />
+            <Text style={styles.disclaimerText}>
+              You can change this anytime in Settings.
+            </Text>
           </View>
         </ScrollView>
       </View>
@@ -417,6 +425,20 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
     backgroundColor: '#2B5BFF',
+  },
+  disclaimerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 36,
+    paddingHorizontal: 16,
+  },
+  disclaimerText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#94A3B8',
+    lineHeight: 18,
   },
 });
 
