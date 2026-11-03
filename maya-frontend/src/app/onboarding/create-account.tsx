@@ -12,6 +12,7 @@ import {
   Easing,
   ScrollView,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -24,6 +25,7 @@ import { authService } from '@/services/auth/auth-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { playUnderstoodTapSound } from '@/services/sound/sound-service';
+import { MayaPrimaryButton } from '@/components/ui';
 
 export default function CreateAccountScreen() {
   const { isDesktop, isTablet } = useBreakpoint();
@@ -199,7 +201,13 @@ export default function CreateAccountScreen() {
   };
 
   const handleOpenTerms = () => {
-    router.push('/terms' as any);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.open('https://speakwithmaya.com/terms', '_blank');
+    } else {
+      Linking.openURL('https://speakwithmaya.com/terms').catch(() => {
+        router.push('/terms' as any);
+      });
+    }
   };
 
   return (
@@ -324,24 +332,17 @@ export default function CreateAccountScreen() {
                 </View>
               </View>
 
-              {/* Continue Button */}
-              <Pressable
-                style={({ pressed }) => [
-                  styles.continueButton,
-                  pressed && styles.continueButtonPressed,
-                  isLoading && styles.continueButtonDisabled,
-                ]}
+              {/* Continue Button with MayaPrimaryButton */}
+              <MayaPrimaryButton
+                label="Continue"
                 onPress={handleContinue}
+                loading={isLoading}
                 disabled={isLoading}
-                accessibilityRole="button"
+                showArrow={false}
+                height={56}
+                borderRadius={20}
                 accessibilityLabel="Continue to account verification"
-              >
-                {isLoading ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.continueButtonText}>Continue</Text>
-                )}
-              </Pressable>
+              />
 
               {/* Bottom Legal Disclaimer */}
               <View style={styles.legalSection}>
