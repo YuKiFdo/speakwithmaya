@@ -882,14 +882,14 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (state.geminiSession && state.isConnectedToGemini) {
           try {
             const isIntro = state.dto?.isIntroCall === true;
-            const isSinhala = state.dto?.languageMode === 'sinhala' || state.dto?.mode === 'sinhala_tutor';
+            const isSinhala = this.sessionsService.isSinhalaSession(state.dto || {});
             const studentName = (state.dto?.userName || '').trim() || 'the student';
 
             const wrapupNotice = isIntro
-              ? isSinhala
-                ? `[SYSTEM TIME NOTICE - INTRO CALL WRAP-UP]: The introductory chat time is up. In your very next spoken turn: keep it short (under 20 seconds) and deliver this uplifting wrap-up and premium conversion pitch in spoken Sinhala-English: warmly praise ${studentName} for speaking with you today ("Awesome job today! ඔයා හරිම ලස්සනට කතා කළා."), invite them to buy our Premium plan today to unlock unlimited daily calls, deep grammar coaching, and interview practice ("Maya එක්ක daily practice කරලා English 100% fluent කරගන්න පුළුවන්. Unlimited practice calls, deep grammar coaching, interview practice වගේ තව ගොඩක් දේවල් unlock කරගන්න අපේ Premium plan එක අදම buy කරන්න!"), say goodbye, and call tool conclude_call.`
-                : `[SYSTEM TIME NOTICE - INTRO CALL WRAP-UP]: The introductory chat time is up. In your very next spoken turn: keep it short (under 20 seconds) and deliver this uplifting wrap-up and premium conversion pitch: warmly praise ${studentName} for speaking, invite them to buy our Premium plan today to unlock unlimited daily practice, deep grammar feedback, and interview coaching, say a cheerful goodbye, and call tool conclude_call.`
-              : `[SYSTEM TIME NOTICE: The practice session time has ended. Right now, in your current spoken turn, wrap up naturally: share 1 short encouraging observation about how they did today, thank them warmly, speak your cheerful goodbye aloud, and then call conclude_call. Keep your farewell brief (under 15 seconds of speech).]`;
+              ? `[SYSTEM TIME NOTICE - INTRO CALL WRAP-UP]: The introductory chat time is up. In your very next spoken turn: keep it short (under 20 seconds) and deliver this uplifting wrap-up and premium conversion pitch STRICTLY in spoken Sinhala-English mix (NEVER in 100% English): warmly praise ${studentName} for speaking with you today ("Awesome job today! ඔයා හරිම ලස්සනට කතා කළා."), invite them in Sinhala to buy our Premium plan today to unlock unlimited daily calls, deep grammar coaching, and interview practice ("Maya එක්ක daily practice කරලා English 100% fluent කරගන්න පුළුවන්. Unlimited practice calls, deep grammar coaching, interview practice වගේ තව ගොඩක් දේවල් unlock කරගන්න අපේ Premium plan එක අදම buy කරන්න!"), say goodbye ("See you soon!"), and call tool conclude_call.`
+              : isSinhala
+                ? `[SYSTEM TIME NOTICE: The practice session time has ended. Right now, in your current spoken turn, wrap up naturally: share 1 short encouraging observation about how they did today, thank them warmly, speak your cheerful goodbye aloud, and then call conclude_call. Keep your farewell brief (under 15 seconds of speech).]`
+                : `[SYSTEM TIME NOTICE: The practice session time has ended. Right now, in your current spoken turn, wrap up naturally: share 1 short encouraging observation about how they did today, thank them warmly, speak your cheerful goodbye aloud, and then call conclude_call. Keep your farewell brief (under 15 seconds of speech).]`;
 
             if (state.userSpeechActive) {
               try {
@@ -1700,7 +1700,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // 5. Function Calling / Tools
     if (response.toolCall?.functionCalls) {
       const functionResponses: any[] = [];
-      const isSinhala = state.dto?.languageMode === 'sinhala' || state.dto?.mode === 'sinhala_tutor';
+      const isSinhala = this.sessionsService.isSinhalaSession(state.dto || {});
       const isDeepGuidance = isSinhala && state.dto?.sinhalaStyle === 'deep_guidance';
       const isRoadmap = Boolean(
         state.dto?.roadmapLevelId ||
@@ -1746,9 +1746,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             response: {
               result: 'concluding',
               instruction: isIntro
-                ? (isSinhala
-                    ? 'The introductory call is concluding right now. Speak a warm, short final statement praising their speaking and telling them in Sinhala-English to buy our Premium plan today to unlock unlimited daily practice (e.g. "Awesome job today! අපේ Premium plan එක අදම buy කරලා unlimited practice unlock කරගන්න, see you soon!"). ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK "ප්‍රශ්න තියෙනවද?". Then stop speaking.'
-                    : 'The introductory call is concluding right now. Speak a warm, short final statement praising their speaking and inviting them to buy our Premium plan today to unlock unlimited practice (e.g. "Awesome job today! Make sure to upgrade to our Premium plan today to unlock unlimited practice, see you soon!"). ABSOLUTELY NEVER ASK ANY QUESTION. Then stop speaking.')
+                ? 'The introductory call is concluding right now. In natural spoken Sinhala-English mix, speak a warm, short final statement praising their speaking and telling them in Sinhala to buy our Premium plan today to unlock unlimited daily practice (e.g. "Awesome job today! ඔයා හරිම ලස්සනට කතා කළා. අපේ Premium plan එක අදම buy කරලා unlimited practice unlock කරගන්න, see you soon!"). ABSOLUTELY NEVER SPEAK IN 100% ENGLISH FOR THIS CLOSING STATEMENT. ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK "ප්‍රශ්න තියෙනවද?". Then stop speaking.'
                 : (isSinhala
                     ? 'The call is terminating right now. Speak a warm, 1-sentence definitive final goodbye statement (e.g. wishing them a great day or to keep practicing). ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK "ප්‍රශ්න තියෙනවද?" OR "කරමුද?". Then stop speaking.'
                     : 'The call is terminating right now. Speak a warm, 1-sentence definitive final goodbye statement (e.g. wishing them a great day or to keep practicing). ABSOLUTELY NEVER ASK ANY QUESTION. STRICTLY FORBIDDEN TO USE "?" OR ASK ANY QUESTION. Then stop speaking.'),
