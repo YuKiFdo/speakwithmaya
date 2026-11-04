@@ -1552,18 +1552,23 @@ ${memoryPart}`;
                   type: 'STRING',
                   description: 'The phrase spoken by the student',
                 },
-                suggestedRephrase: {
+                moreNatural: {
                   type: 'STRING',
                   description: 'More natural native-sounding phrasing',
                 },
-                reason: {
+                explanation: {
                   type: 'STRING',
                   description: isSinhala
                     ? 'Short encouraging reason in spoken Sinhala (සිංහල) with loanwords. STRICTLY ZERO Hindi/Devanagari script.'
                     : 'Short encouraging reason why this alternative sounds more natural',
                 },
+                highlightWords: {
+                  type: 'ARRAY',
+                  items: { type: 'STRING' },
+                  description: 'Key words or phrases improved',
+                },
               },
-              required: ['studentSaid', 'suggestedRephrase', 'reason'],
+              required: ['studentSaid', 'moreNatural', 'explanation', 'highlightWords'],
             },
           },
         );

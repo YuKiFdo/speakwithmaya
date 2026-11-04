@@ -1074,22 +1074,38 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             });
             setFeedbackVisible(true);
           },
-          onRephraseSuggestion: (payload: RephraseSuggestionPayload) => {
-            console.log('[useLiveCall] 💬 [UI Feedback Card] Rephrase suggestion displayed:', payload.studentSaid, '->', payload.moreNatural);
-            const sanitizedExplanation = sanitizeModelText(payload.explanation);
+          onRephraseSuggestion: (payload: any) => {
+            const resolvedStudentSaid = String(payload.studentSaid || payload.student_said || '').trim();
+            const resolvedMoreNatural = String(payload.moreNatural || payload.more_natural || payload.suggestedRephrase || payload.suggested_rephrase || '').trim();
+            const rawExplanation = String(payload.explanation || payload.reason || '').trim();
+            const sanitizedExplanation = sanitizeModelText(rawExplanation) || 'Expresses this thought more smoothly and naturally in conversational English.';
+            const highlightList = Array.isArray(payload.highlightWords)
+              ? payload.highlightWords
+              : Array.isArray(payload.highlight_words)
+                ? payload.highlight_words
+                : [];
+
+            if (!resolvedMoreNatural) {
+              console.warn('[useLiveCall] Dropping rephrase suggestion with empty corrected phrase');
+              return;
+            }
+
+            console.log('[useLiveCall] 💬 [UI Feedback Card] Rephrase suggestion displayed:', resolvedStudentSaid, '->', resolvedMoreNatural);
             const correctionItem = {
-              ...payload,
+              studentSaid: resolvedStudentSaid,
+              moreNatural: resolvedMoreNatural,
               explanation: sanitizedExplanation,
+              highlightWords: highlightList,
               timestamp: new Date().toISOString(),
             };
             correctionsRef.current.push(correctionItem);
 
             setFeedbackData({
               type: 'rephrase',
-              originalSentence: payload.studentSaid,
-              correctedSentence: payload.moreNatural,
+              originalSentence: resolvedStudentSaid,
+              correctedSentence: resolvedMoreNatural,
               whyExplanation: sanitizedExplanation,
-              highlightedCorrection: payload.highlightWords?.[0] || '',
+              highlightedCorrection: highlightList[0] || '',
               autoDismissSeconds: 8,
             });
             setFeedbackVisible(true);

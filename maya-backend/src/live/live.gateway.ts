@@ -1831,34 +1831,55 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             },
           });
         } else if (fc.name === 'show_rephrase_suggestion') {
-          const shortKeyPhrase = String(args.moreNatural || args.more_natural || '').split(/[.,;!?]/)[0].trim().replace(/"/g, "'");
-          const rawExplanation = String(args.explanation || '').replace(/"/g, "'");
+          const rawStudentSaid = String(args.studentSaid || args.student_said || '').trim();
+          const rawMoreNatural = String(args.moreNatural || args.more_natural || args.suggestedRephrase || args.suggested_rephrase || '').trim();
+          const rawExplanation = String(args.explanation || args.reason || '').trim().replace(/"/g, "'");
+          const shortKeyPhrase = (rawMoreNatural.split(/[.,;!?]/)[0] || rawMoreNatural).trim().replace(/"/g, "'");
+          const highlightWords = Array.isArray(args.highlightWords)
+            ? args.highlightWords
+            : Array.isArray(args.highlight_words)
+              ? args.highlight_words
+              : (shortKeyPhrase ? [shortKeyPhrase] : []);
+
           let instruction: string;
 
           state.grammarCorrections.push({
-            studentSaid: String(args.studentSaid || args.student_said || ''),
-            moreNatural: String(args.moreNatural || args.more_natural || ''),
-            explanation: String(args.explanation || ''),
-            highlightWords: Array.isArray(args.highlightWords) ? args.highlightWords : [],
+            studentSaid: rawStudentSaid,
+            moreNatural: rawMoreNatural,
+            explanation: rawExplanation,
+            highlightWords,
           });
 
-          // Forward to client so UI displays the animated rephrase feedback drawer / card
+          // Forward to client with normalized fields so UI displays the animated rephrase feedback drawer / card properly
           this.safeSendToClient(state, JSON.stringify({
             type: 'tool_call',
             name: fc.name,
-            args: fc.args,
+            args: {
+              ...fc.args,
+              studentSaid: rawStudentSaid,
+              moreNatural: rawMoreNatural,
+              explanation: rawExplanation,
+              highlightWords,
+            },
           }));
 
+          const spokenPhrase = shortKeyPhrase || rawMoreNatural;
           if (isRoadmap) {
             instruction = isSinhala
-              ? `Rephrase card displayed to student. In friendly spoken Sinhala: explain why this phrasing is more natural, model the natural phrase "${shortKeyPhrase}", and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '${shortKeyPhrase}'"). STRICTLY DO NOT ask your next question yet. DO NOT advance to the next step. Wait for the student to repeat.`
-              : `Rephrase card displayed to student. Verbally model the natural phrase "${shortKeyPhrase}", and explicitly ask the student to repeat it aloud (say "Try saying: '${shortKeyPhrase}'"). DO NOT ask your next question yet. Wait for the student to repeat.`;
+              ? `Rephrase card displayed to student. In friendly spoken Sinhala: explain why this phrasing is more natural, model the natural phrase "${spokenPhrase}", and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '${spokenPhrase}'"). STRICTLY DO NOT ask your next question yet. DO NOT advance to the next step. Wait for the student to repeat.`
+              : `Rephrase card displayed to student. Verbally model the natural phrase "${spokenPhrase}", and explicitly ask the student to repeat it aloud (say "Try saying: '${spokenPhrase}'"). DO NOT ask your next question yet. Wait for the student to repeat.`;
           } else {
             instruction = isSinhala
               ? isDeepGuidance
-                ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${shortKeyPhrase}' කියලා කියන්න පුළුවන්", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
-                : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${shortKeyPhrase}' කියලා කියන්න පුළුවන්"), and immediately ask your next short English question. Total turn strictly under 12 words.`
-              : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`;
+                ? (spokenPhrase
+                    ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${spokenPhrase}' කියලා කියන්න පුළුවන්", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
+                    : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally ask your next short English question. Total turn strictly under 15 words.`)
+                : (spokenPhrase
+                    ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${spokenPhrase}' කියලා කියන්න පුළුවන්"), and immediately ask your next short English question. Total turn strictly under 12 words.`
+                    : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally ask your next short English question. Total turn strictly under 12 words.`)
+              : (spokenPhrase
+                  ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "You can say: '${spokenPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`
+                  : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally ask your next short English question. Total turn strictly under 12 words.`);
           }
 
           functionResponses.push({
