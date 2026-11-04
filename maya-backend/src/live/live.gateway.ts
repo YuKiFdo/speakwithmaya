@@ -1750,7 +1750,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
               id: fc.id,
               response: {
                 result: 'continue_intro_call',
-                instruction: `DO NOT conclude the intro call yet! This introductory session is meant to run for 3 full minutes (180 seconds). Only ${sessionElapsedSec} seconds have elapsed so far. Continue the friendly chat: ask an engaging casual question about their day, hobbies, work, favorite Sri Lankan food, or weekend plans, and continue actively coaching their English!`,
+                instruction: `DO NOT conclude the call and DO NOT mention Premium or goodbye on your own! Only ${sessionElapsedSec} seconds have elapsed. The system will tell you when 3 minutes are up with [SYSTEM TIME NOTICE - INTRO CALL WRAP-UP]. Continue the friendly conversation smoothly: ask an engaging casual question about their day, hobbies, work, favorite Sri Lankan food, or weekend plans!`,
               },
             });
             continue;
