@@ -104,6 +104,7 @@ interface ClientSessionState {
   micMuted?: boolean;
   hasUserSpoken?: boolean;
   guideStatus?: string;
+  isTimeWrapupTriggered?: boolean;
 }
 
 interface PersistentSessionAudioState {
@@ -712,7 +713,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     switch (message.type) {
       case 'session_meta': {
-        if (message.disconnectReason) state.disconnectReason = message.disconnectReason;
+        if (message.disconnectReason) {
+          state.disconnectReason = message.disconnectReason;
+          if (message.disconnectReason === 'user_ended_call' || message.disconnectReason === 'user_force_ended') {
+            state.isTimeWrapupTriggered = true;
+          }
+        }
         if (message.micPermission) state.micPermission = message.micPermission;
         if (typeof message.micMuted === 'boolean') state.micMuted = message.micMuted;
         if (typeof message.hasUserSpoken === 'boolean') state.hasUserSpoken = message.hasUserSpoken;
@@ -879,6 +885,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       case 'time_wrapup_cue': {
         this.logger.log(`[${state.sessionId}] ⏰ Time wrapup cue received from client`);
         this.addSessionLog(state, 'time_wrapup_cue');
+        state.isTimeWrapupTriggered = true;
         if (state.geminiSession && state.isConnectedToGemini) {
           try {
             const isIntro = state.dto?.isIntroCall === true;
@@ -1729,6 +1736,25 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const isIntro = state.dto?.isIntroCall === true;
           const isScenario = Boolean(state.dto?.scenarioPrompt && state.dto?.scenarioPrompt.trim().length > 0);
           const turnsCompleted = state.userTurnCount || 0;
+          const sessionElapsedSec = state.connectedAt ? Math.round((Date.now() - state.connectedAt) / 1000) : 0;
+          const userRequestedEnd = state.disconnectReason === 'user_ended_call' || state.disconnectReason === 'user_force_ended';
+
+          // If this is an intro call and less than 170 seconds have passed and neither time wrapup nor user end was triggered,
+          // BLOCK premature conclusion so the student gets their full 3 minutes of conversation!
+          if (isIntro && sessionElapsedSec < 170 && !state.isTimeWrapupTriggered && !userRequestedEnd) {
+            this.logger.warn(
+              `[${state.sessionId}] ⏳ Blocked premature conclude_call in intro call: only ${sessionElapsedSec}s elapsed (target: 180s). Instructing model to continue conversation.`,
+            );
+            functionResponses.push({
+              name: fc.name,
+              id: fc.id,
+              response: {
+                result: 'continue_intro_call',
+                instruction: `DO NOT conclude the intro call yet! This introductory session is meant to run for 3 full minutes (180 seconds). Only ${sessionElapsedSec} seconds have elapsed so far. Continue the friendly chat: ask an engaging casual question about their day, hobbies, work, favorite Sri Lankan food, or weekend plans, and continue actively coaching their English!`,
+              },
+            });
+            continue;
+          }
 
           // If this is a scenario roleplay session and user has spoken less than 8 turns, block premature conclusion!
           if (isScenario && turnsCompleted < 8 && !isIntro) {
