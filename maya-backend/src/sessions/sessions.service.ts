@@ -838,6 +838,7 @@ export class SessionsService {
     return `MANDATORY VOCAL IDENTITY & STABILITY (CRITICAL):
 - You are Maya. You must ALWAYS speak in a warm, bright, natural, and expressive female voice using the assigned prebuilt voice model (${voiceName}).
 - NEVER alter, shift, or drop your speaking voice, pitch, or timbre mid-session under any circumstances.
+- ZERO MALE VOICE DRIFT: Under NO circumstances should you ever sound like a man, speak in a male voice, or drop into a deep masculine register.
 - NEVER mimic, mirror, or adopt the student's gender, pitch, accent, or speaking cadence (e.g. if the student is male, speaks with a deep voice, or speaks with a heavy regional accent, you MUST NEVER speak in a male or morphed voice).
 - Maintain your consistent, charming female persona across every single turn.
 
@@ -980,44 +981,29 @@ GUARDRAILS:
   }
 
   getVoiceForSession(dto: CreateSessionTokenDto): string {
-    const isSinhala = this.isSinhalaSession(dto);
-
-    // In Scenario Studio mode (when custom scenarioPrompt is present)
-    if (dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0) {
-      const primaryEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : '').toLowerCase();
-      if (
-        primaryEmotion.includes('angry') ||
-        primaryEmotion.includes('strict') ||
-        primaryEmotion.includes('skeptical') ||
-        primaryEmotion.includes('frustrated')
-      ) {
-        return 'Kore'; // Firm, sharp, high-authority female voice
-      }
-      if (
-        primaryEmotion.includes('crying') ||
-        primaryEmotion.includes('sad') ||
-        primaryEmotion.includes('vulnerable') ||
-        primaryEmotion.includes('emotional')
-      ) {
-        return 'Aoede'; // Deep, dramatic, expressive female voice
-      }
-      if (
-        primaryEmotion.includes('cheerful') ||
-        primaryEmotion.includes('upbeat') ||
-        primaryEmotion.includes('playful') ||
-        primaryEmotion.includes('sarcastic')
-      ) {
-        return 'Puck'; // Snappy, lively, fast-paced voice
-      }
-      if (primaryEmotion.includes('professional') || primaryEmotion.includes('formal')) {
-        return 'Aoede';
-      }
-      return 'Kore'; // Default for scenarios
+    // 1. Intro calls and general coaching ALWAYS use female voice Aoede
+    if (dto.isIntroCall || !dto.scenarioPrompt) {
+      return process.env.GEMINI_LIVE_VOICE || 'Aoede';
     }
 
-    // Default for standard coaching / lessons / intro call:
-    // Aoede provides superior multilingual phonemic synthesis for Sinhala + English code-switching
-    return process.env.GEMINI_LIVE_VOICE || 'Aoede';
+    // 2. Scenario Studio: If Maya is roleplaying an explicitly male character
+    const mayaRole = (dto.mayaRole || '').toLowerCase();
+    const isMaleRole = mayaRole.includes('father') || mayaRole.includes('policeman') || mayaRole.includes('king') || mayaRole.includes('mr.');
+    if (isMaleRole) {
+      return 'Fenrir';
+    }
+
+    // 3. Otherwise, Maya's persona is always female (Aoede or Kore) - NEVER male voices like Puck
+    const primaryEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : '').toLowerCase();
+    if (
+      primaryEmotion.includes('angry') ||
+      primaryEmotion.includes('strict') ||
+      primaryEmotion.includes('skeptical') ||
+      primaryEmotion.includes('frustrated')
+    ) {
+      return 'Kore'; // Firm, sharp, high-authority female voice
+    }
+    return 'Aoede'; // Natural, warm, expressive female voice
   }
 
   buildScenarioSystemPrompt(dto: CreateSessionTokenDto, userName: string, isSinhala: boolean): string {

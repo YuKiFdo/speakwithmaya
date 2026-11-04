@@ -45,7 +45,7 @@ describe('SessionsService Voice & Language Mode Configuration', () => {
       const playfulDto = new CreateSessionTokenDto();
       playfulDto.scenarioPrompt = 'You are a playful friend';
       playfulDto.emotionTags = ['playful'];
-      expect(service.getVoiceForSession(playfulDto)).toBe('Puck');
+      expect(service.getVoiceForSession(playfulDto)).toBe('Aoede');
     });
   });
 

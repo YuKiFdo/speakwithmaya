@@ -98,7 +98,7 @@ export default function CallScreen() {
   const effectiveLanguageMode =
     (isOnboardingCallRoute && onboardingState.languageMode ? onboardingState.languageMode : undefined) ||
     storeConfig?.languageMode ||
-    (params.languageMode ? params.languageMode : (onboardingState.languageMode || (onboardingState.user as any)?.language_mode || 'english_only'));
+    (params.languageMode ? params.languageMode : (onboardingState.languageMode || (onboardingState.user as any)?.language_mode || 'sinhala_support'));
 
   const isEnglishOnly = effectiveLanguageMode === 'english' || effectiveLanguageMode === 'english_only';
   const langMode: 'english' | 'sinhala' = isEnglishOnly ? 'english' : 'sinhala';
