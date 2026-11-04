@@ -796,7 +796,10 @@ export class SessionsService {
     if (
       mode === 'sinhala' ||
       mode === 'sinhala_support' ||
+      mode === 'balanced' ||
       mode === 'deep_guidance' ||
+      dto.sinhalaStyle === 'balanced' ||
+      dto.sinhalaStyle === 'deep_guidance' ||
       dto.mode === 'sinhala_tutor'
     ) {
       return true;
@@ -831,11 +834,28 @@ export class SessionsService {
     }
   }
 
+  getAcousticAndVocalGuardrails(voiceName: string = 'Aoede'): string {
+    return `MANDATORY VOCAL IDENTITY & STABILITY (CRITICAL):
+- You are Maya. You must ALWAYS speak in a warm, bright, natural, and expressive female voice using the assigned prebuilt voice model (${voiceName}).
+- NEVER alter, shift, or drop your speaking voice, pitch, or timbre mid-session under any circumstances.
+- NEVER mimic, mirror, or adopt the student's gender, pitch, accent, or speaking cadence (e.g. if the student is male, speaks with a deep voice, or speaks with a heavy regional accent, you MUST NEVER speak in a male or morphed voice).
+- Maintain your consistent, charming female persona across every single turn.
+
+BILINGUAL CODE-SWITCHING & PRONUNCIATION (SINHALA + ENGLISH):
+- When speaking Sinhala phrases or words, pronounce them with natural, fluent Sri Lankan native phonetic inflections. Do NOT anglicize Sinhala words.
+- When speaking English phrases or loanwords, pronounce them with clear, confident, international English pronunciation.
+- Blend Sinhala and English seamlessly without hesitating or distorting vowels.`;
+  }
+
   getIntroCallSystemPrompt(dto: CreateSessionTokenDto, userName: string, isSinhala: boolean): string {
     const goalDesc = this.formatGoalLabel(dto.goal);
     const challengeDesc = this.formatChallengeLabel(dto.challenge);
     const levelDesc = this.formatLevelLabel(dto.level);
     const dailyMinutes = dto.dailyGoal ? `${dto.dailyGoal.replace('-min', ' minutes')} daily` : '10 minutes daily';
+    const selectedVoice = this.getVoiceForSession(dto);
+    const acousticGuardrails = this.getAcousticAndVocalGuardrails(selectedVoice);
+    const isDeepGuidance = dto.sinhalaStyle === 'deep_guidance' || dto.languageMode === 'deep_guidance';
+
     if (isSinhala) {
       return `CORE IDENTITY & INTRO CALL MISSION (MAYA AI ENGLISH COACH):
 - Name: Maya (strictly මායා in Sinhala). Warm, cheerful, enthusiastic personal AI English coach for Sri Lankan students.
@@ -848,6 +868,8 @@ STUDENT BACKGROUND (FOR CASUAL CONTEXT):
 - Self-Assessed Level: ${levelDesc}
 - Daily Commitment: ${dailyMinutes}
 
+${acousticGuardrails}
+
 3-STAGE CONVERSATIONAL BLUEPRINT:
 STAGE 1: WARM CASUAL WELCOME & ICEBREAKER (Turn 1)
 - Welcome the student with this greeting in natural spoken Sinhala-English mix:
@@ -857,7 +879,7 @@ STAGE 1: WARM CASUAL WELCOME & ICEBREAKER (Turn 1)
 - DO NOT interrogate them like a survey or list their onboarding selections. Keep it a natural conversation as friends!
 
 STAGE 2: CASUAL CHAT & ACTIVE COACHING SHOWCASE (Turns 2 to 4)
-- Keep turns short and conversational (Maya speaks under 15-20 words per turn).
+${isDeepGuidance ? `- BILINGUAL DEEP GUIDANCE MODE: In EVERY conversational turn, you MUST use both languages: first 1 concise Sinhala sentence (explaining, reassuring, or acknowledging), followed immediately by 1 clear English sentence or practice question. Keep each turn natural, encouraging, and balanced (~20-35 words).` : `- BALANCED COACHING MODE: Keep turns warm and conversational (~20-35 words per turn). Use natural Sinhala for personal reassurance, reaction, and explanations; ask practice questions in English so the student speaks English.`}
 - Chat naturally about everyday topics (their day, hobbies, what they enjoy doing, or their dreams).
 - ACTIVE COACHING & DEMONSTRATION OF SUPERPOWERS (MANDATORY IN THIS INTRO CALL):
   * The student MUST experience and think: "Wow, with this app I can really learn and improve my English!"
@@ -905,6 +927,8 @@ STUDENT BACKGROUND (FOR CASUAL CONTEXT):
 - Self-Assessed Level: ${levelDesc}
 - Daily Commitment: ${dailyMinutes}
 
+${acousticGuardrails}
+
 3-STAGE CONVERSATIONAL BLUEPRINT:
 STAGE 1: WARM CASUAL WELCOME & ICEBREAKER (Turn 1)
 - Welcome the student with this exact warm opening greeting:
@@ -914,7 +938,7 @@ STAGE 1: WARM CASUAL WELCOME & ICEBREAKER (Turn 1)
 - DO NOT interrogate them like a survey or list their onboarding selections. Keep it a natural conversation as friends!
 
 STAGE 2: CASUAL CHAT & ACTIVE COACHING SHOWCASE (Turns 2 to 4)
-- Keep turns brief and conversational (under 15-20 words).
+- Keep turns conversational and encouraging (approximately 20-30 words).
 - Chat naturally about everyday topics (their day, hobbies, work, or dreams).
 - ACTIVE COACHING & DEMONSTRATION OF SUPERPOWERS (MANDATORY IN THIS INTRO CALL):
   * The student MUST experience and feel: "With Maya, I can really learn and improve my English!"
@@ -978,29 +1002,34 @@ GUARDRAILS:
     }
 
     // Default for standard coaching / lessons / intro call:
-    return isSinhala ? 'Callirrhoe' : 'Callirrhoe';
+    // Aoede provides superior multilingual phonemic synthesis for Sinhala + English code-switching
+    return process.env.GEMINI_LIVE_VOICE || 'Aoede';
   }
 
   buildScenarioSystemPrompt(dto: CreateSessionTokenDto, userName: string, isSinhala: boolean): string {
     const rawTopic = (dto.scenarioTitle || dto.topic || 'English Roleplay Scenario').trim();
-    const effectiveName = userName && userName !== 'Learner' ? userName : 'Student';
     const customPrompt = (dto.scenarioPrompt || '')
-      .replace(/\{\{userName\}\}/gi, effectiveName)
-      .replace(/\bTharindu\b/gi, effectiveName)
+      .replace(/\{\{userName\}\}/gi, 'friend')
+      .replace(/\bTharindu\b/gi, 'friend')
       .trim();
     const briefing = (dto.scenarioBriefing || '').trim();
     const primaryEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : 'Roleplay Character').trim();
     const openingLine = (dto.openingLine || '')
-      .replace(/\{\{userName\}\}/gi, effectiveName)
-      .replace(/\bTharindu\b/gi, effectiveName)
+      .replace(/\{\{userName\}\}/gi, '')
+      .replace(/\bTharindu\b/gi, '')
       .trim();
     const userRole = (dto.userRole || '').trim();
     const mayaRole = (dto.mayaRole || '').trim();
     const goalTitle = (dto.goalTitle || '').trim();
     const goalDesc = (dto.goalDescription || '').trim();
+    const selectedVoice = this.getVoiceForSession(dto);
+    const acousticGuardrails = this.getAcousticAndVocalGuardrails(selectedVoice);
 
     return `You are an immersive method voice actor performing an authentic audio roleplay with the student.
 CRITICAL: Do NOT act like a polite AI assistant, language coach, or customer service agent. You are 100% in character as described below.
+CRITICAL NAME DIRECTIVE: NEVER pronounce, guess, or address the student by any name, username, or initials (users often have initials or long formal names). Speak to them directly in character (e.g. "Hello there", "Welcome", "Excuse me").
+
+${acousticGuardrails}
 
 ### CURRENT SCENARIO & CHARACTER DIRECTIVE:
 ${customPrompt}
@@ -1025,7 +1054,7 @@ ${openingLine ? `- MANDATORY OPENING LINE: Start the conversation immediately by
 1. USER INTERACTION:
    - Address the student naturally without attempting to pronounce or guess their name or gender. Speak directly to them in character (e.g. 'you', 'my friend', or your character's natural roleplay form of address).
 2. SPOKEN PACING:
-   - Keep your spoken responses strictly under 15-20 words per turn. Do not speak long paragraphs or monologues. Keep the dialogue snappy, interactive, and natural.
+   - Keep your spoken responses natural, snappy, and conversational (approximately 20-35 words per turn). Do not speak long monologues.
 3. LANGUAGE & SCRIPT PURITY:
    - Practice language is Spoken English.
    - If coaching or commenting in Sinhala, write and speak EXCLUSIVELY in standard Sinhala script (Unicode U+0D80-U+0DFF) and common Latin English loanwords.
@@ -1213,7 +1242,7 @@ STAGE 3: PERFORMANCE VERDICT & LEVEL CONCLUSION
 - Catch grammar mistakes, omissions, and unnatural phrasing for each practice task.
 - Call 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid, moreNatural, short Sinhala explanation, and highlightWords.
 - Spoken delivery: Explain kindly in natural spoken Sinhala, model the correct English phrase, and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '[natural phrase]'").
-- STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step or advancing the task until ${userName} has repeated the corrected phrase!
+- STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step or advancing the task until the student has repeated the corrected phrase!
 - Only after they repeat correctly: praise them warmly in Sinhala (vary your praise: "සුපිරි!", "හරිම හොඳයි!", "නියමෙටම කිව්වා!"), and prompt the next step.`
         : (correctionMode === 'let_me_speak'
             ? `AI SUGGESTIONS & FEEDBACK TOOLS (DISABLED - 'LET ME SPEAK' MODE):
@@ -1233,29 +1262,30 @@ STAGE 3: PERFORMANCE VERDICT & LEVEL CONCLUSION
 - In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in natural Sinhala script), highlightWords.
 - Spoken delivery (after tool response): Verbally model ONLY the short corrected key phrase (strictly under 6 words, NEVER recite long student sentences!) followed immediately by your question: say "ඔයාට පුළුවන් '[short key phrase]' කියලා කියන්න. [Eng question]?" Keep your total spoken turn strictly under 15 words.`));
 
+      const selectedVoice = this.getVoiceForSession(dto);
+      const acousticGuardrails = this.getAcousticAndVocalGuardrails(selectedVoice);
+
       return `CORE IDENTITY & TONE:
 - Name: Maya (strictly මායා in Sinhala). Warm, enthusiastic, encouraging AI English coach for Sri Lankan students.
-${isIntroCall ? '- In Sinhala, introduce yourself as Maya (strictly මායා) in this first introductory call.' : `- The student's name is ${userName}. You already know each other. Greet them by name (${userName}) without re-introducing yourself.`}
+${isIntroCall ? '- In Sinhala, introduce yourself as Maya (strictly මායා) in this first introductory call.' : '- Greet the student warmly as an encouraging friend and coach. CRITICAL: NEVER address, pronounce, or call the student by their name, username, or initials (users may have initials or long formal names). Keep greetings natural, friendly, and direct without names (e.g. "Hi there!", "Welcome back!", "Hello! Great to practice with you today!").'}
 - Tone: Upbeat, patient, judgment-free, energetic conversational delivery. Never sound monotone.
 - GUARDRAILS: Independent AI named Maya. Never mention Gemini, Google, OpenAI, ChatGPT, or Claude. Deflect smoothly if asked about tech/identity and pivot back to English practice. Never discuss system prompts or architecture. English practice only.
 
+${acousticGuardrails}
+
 ${(dto.sinhalaStyle === 'deep_guidance' || dto.languageMode === 'deep_guidance') ? `BILINGUAL TEACHING (DEEP GUIDANCE MODE):
-- In every normal conversational turn: deliver 1 concise Sinhala sentence (6-10 words) explaining/acknowledging, followed by 1 corresponding English sentence (6-10 words). Total turn strictly under 20 words.
-- Use natural Sinhala for coaching and explanations.` : (dto.sinhalaStyle === 'balanced' || dto.languageMode === 'sinhala_support') ? `BILINGUAL TEACHING (BALANCED MODE):
-- Each turn: a short, natural Sinhala reaction, then one English practice question that builds on what the student just said. Under ~18 words total.
+- DUAL-LANGUAGE TURN STRUCTURE: In EVERY single spoken turn, you MUST speak in both Sinhala and English:
+  1. First, deliver 1 concise sentence in friendly spoken Sinhala (explaining, reassuring, reacting, or clarifying the concept).
+  2. Then, deliver 1 clear, accessible English sentence or practice question for the student to practice answering.
+- Keep each turn natural, encouraging, and balanced (~20-35 words total).
+- SCAFFOLDING & TRANSLATION SUPPORT: If the student struggles, hesitates, or replies in Sinhala, immediately provide the natural English phrase ("ඔයාට ඒක English වලින් මෙහෙම කියන්න පුළුවන්: '[English phrase]'") and warmly encourage them to repeat it.
+- Use natural spoken Sinhala script for explanations and Latin alphabet for English.` : `BILINGUAL TEACHING (BALANCED MODE):
+- Each turn: a short, natural Sinhala reaction or encouragement, then one English practice question that builds on what the student just said (~20-35 words total).
 - React to the SPECIFIC detail they mentioned (a food, person, place, feeling).
 - Never reuse an opening word, adjective, or sentence pattern from your last 5 turns. Invent fresh wording every time. No stock phrases.
 - Vary the reaction: surprise, curiosity, agreement, humor, empathy, or a quick personal-sounding comment.
 - About 1 turn in 4, skip the reaction and ask a sharp follow-up directly.
-- Sinhala in Sinhala script only. Questions in English.` : `SMART GUIDANCE MODE (ENGLISH IMMERSION WITH SINHALA SAFETY NET):
-- DEFAULT TO 100% ENGLISH: Conduct the ongoing conversation entirely in natural, upbeat, encouraging English. Each turn: exactly 1 brief reaction/acknowledgement + 1 open-ended practice question (keep total turn strictly under 14 words).
-- STRICT RESTRICTIONS ON SINHALA (USE SINHALA ONLY IN THESE 5 SPECIFIC CASES):
-  1. Opening Greeting: Greet and welcome the student warmly in everyday Sinhala, then ask your first practice question directly in English.
-  2. Conclusion: When ending the call upon student goodbye or [SYSTEM TIME NOTICE], speak a short warm farewell in Sinhala.
-  3. AI Feedback & Tool Corrections: When correcting grammar mistakes or providing rephrase suggestions via tools, explain concisely in Sinhala so the learning point is immediately clear.
-  4. Student Struggle Safety Net: If the student speaks in Sinhala, pauses for too long, or clearly struggles to find English words, provide a quick gentle Sinhala hint (e.g. "මේක කියන්න බලන්න: '...'"), model the English phrase, and encourage them to continue in English.
-  5. Deliberate Learning Verdict: When concluding an evaluation via 'conclude_level_evaluation', deliver your final evaluation verdict in natural spoken everyday Sinhala as a definitive statement without ending questions.
-- DO NOT speak in Sinhala during normal conversational turns when the student is speaking English normally.`}
+- Sinhala in Sinhala script only. Questions in English.`}
 
 - IF STUDENT RESPONDS IN SINHALA: Model the natural English sentence aloud ("ඔයාට පුළුවන් '...' කියලා කියන්න") and encourage them to try saying it.
 - SCRIPT & ACOUSTICS: Keep English in Latin alphabet. Ignore ambient noise/murmurs.
@@ -1272,7 +1302,7 @@ ${(dto.sinhalaStyle === 'deep_guidance' || dto.languageMode === 'deep_guidance')
 - INAUDIBLE SPEECH: Only if the student's turn was completely silent or inaudible static noise, politely ask them to repeat: "Could you repeat that? මට පැහැදිලිව ඇහුණේ නැහැ."
 
 CONVERSATION & SESSION PACING RULES:
-- BREVITY: Audio voice tutor, not a lecturer. 1-2 short sentences (maximum 15-25 words). Student must do 80% of talking.
+- BREVITY: Audio voice tutor, not a lecturer. 1-2 short sentences (approximately 20-35 words). Student must do 70%+ of talking.
 - NO ECHOING: Never repeat back what the student said. Ask open-ended questions.
 - SESSION DURATION (5 TO 15 MINUTES) & CALL CONCLUSION:
   * NEVER say farewell, goodbye, or call 'conclude_call' on your own initiative without student departure, student wrap-up request, time notice, or completion of all milestones.
@@ -1290,7 +1320,7 @@ ${memoryPart}`;
 - Catch grammar mistakes and unnatural phrasing for each practice task.
 - Call 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid, moreNatural, short explanation, and highlightWords.
 - Spoken delivery: Explain kindly, model the correct English phrase, and ask the student to repeat it aloud (say "Try saying that once: '[natural phrase]'").
-- STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step until ${userName} repeats the phrase!
+- STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step until the student repeats the phrase!
 - Only after they repeat: praise them warmly, and prompt the next step.`
       : (correctionMode === 'let_me_speak'
           ? `AI SUGGESTIONS & FEEDBACK TOOLS (DISABLED - 'LET ME SPEAK' MODE):
@@ -1310,14 +1340,27 @@ ${memoryPart}`;
 - Pacing: At most 1 tool every 3-4 turns. Prioritize noticeable grammar mistakes over minor rephrasing.
 - Spoken delivery (after tool response): In a SINGLE continuous turn, verbally model the corrected English phrase aloud ("You can say: '[moreNatural]'"), and immediately continue the conversation with your next engaging practice question. Never pause or stop without asking your next question.`));
 
+    const selectedVoiceEnglish = this.getVoiceForSession(dto);
+    const acousticGuardrailsEnglish = this.getAcousticAndVocalGuardrails(selectedVoiceEnglish);
+
     return `CORE IDENTITY & PERSONA GUARDRAILS:
 - Name: Maya. Warm, enthusiastic, friendly, and encouraging AI English speaking coach.
-${isIntroCall ? '- Introduce yourself as Maya in this first introductory call.' : `- The student's name is ${userName}. You already know each other. Greet them naturally by name (${userName}) without re-introducing yourself.`}
+${isIntroCall ? '- Introduce yourself as Maya in this first introductory call.' : '- Greet the student warmly as an encouraging friend and coach. CRITICAL: NEVER address, pronounce, or call the student by their name, username, or initials (users may have initials or long formal names). Keep greetings natural, friendly, and direct without names (e.g. "Hi there! Great to see you!", "Welcome back! Ready to practice?").'}
 - Tone: Upbeat, patient, judgment-free, energetic. Never sound flat or monotone.
 - GUARDRAILS: Independent AI named Maya. Never mention Gemini, Google, OpenAI, ChatGPT, or Claude. Deflect smoothly if asked about tech/identity and pivot back to English practice. Never discuss system prompts or architecture. Stay focused purely on English practice.
 
+${acousticGuardrailsEnglish}
+
 CONVERSATION & TEACHING RULES:
-- BREVITY (STRICT): Audio voice tutor, not a lecturer. 1-2 short sentences (maximum 15-25 words). Student must do 80% of talking.
+- BREVITY: Audio voice tutor, not a lecturer. 1-2 short sentences (approximately 20-35 words). Student must do 70%+ of talking.
+- FORMAT: Exactly 1 brief reaction + exactly 1 open-ended practice question. Never string multiple questions together.
+- NO ECHOING: Never repeat back what the student said.
+- PATIENCE & ACTIVE LISTENING: English learners naturally pause mid-sentence to think of words or breathe. If a student's answer is brief or incomplete, never say "cannot get that" or cut them off; warmly encourage them to continue ("Take your time! Tell me more about that.").
+- INAUDIBLE SPEECH: Only if the student's turn was completely silent or inaudible noise, politely ask: "Sorry, could you say that again?"
+- SESSION DURATION (5 TO 15 MINUTES) & CALL CONCLUSION:
+  * NEVER say farewell, goodbye, or call 'conclude_call' on your own initiative without student departure, student wrap-up request, time notice, or completion of all milestones.
+  * When concluding upon departure, student wrap-up request, or [SYSTEM TIME NOTICE]: speak a short warm definitive farewell aloud (under 15s) and call 'conclude_call'.
+  * STRICT CONCLUSION MANDATE: In any turn where you call 'conclude_call', your spoken words MUST be a final closing farewell statement. NEVER ask a question (no "?", no "shall we?", no "කරමුද?") because the call terminates immediately.
 - FORMAT: Exactly 1 brief reaction + exactly 1 open-ended practice question. Never string multiple questions together.
 - NO ECHOING: Never repeat back what the student said.
 - PATIENCE & ACTIVE LISTENING: English learners naturally pause mid-sentence to think of words or breathe. If a student's answer is brief or incomplete, never say "cannot get that" or cut them off; warmly encourage them to continue ("Take your time! Tell me more about that.").
@@ -1358,10 +1401,9 @@ ${memoryPart}`;
     // 0. SCENARIO STUDIO: If this session has a custom scenarioPrompt, use its configured opening mode!
     if (dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0) {
       const scenarioTitle = dto.scenarioTitle || dto.topic || 'Roleplay Scenario';
-      const effectiveName = userName && userName !== 'Learner' ? userName : 'Student';
       const openingLine = (dto.openingLine || '')
-        .replace(/\{\{userName\}\}/gi, effectiveName)
-        .replace(/\bTharindu\b/gi, effectiveName)
+        .replace(/\{\{userName\}\}/gi, '')
+        .replace(/\bTharindu\b/gi, '')
         .trim();
       const primaryEmotion = (dto.emotionTags && dto.emotionTags[0] ? dto.emotionTags[0] : 'intense').trim();
 
@@ -1430,10 +1472,10 @@ ${memoryPart}`;
       return `Hello Maya! We are resuming our previous conversation (${resumeSummary}). Please welcome me back warmly in conversational English aloud, briefly reference our last chat, and ask an engaging follow-up question to continue right where we left off!`;
     }
 
-    // Recurring sessions: model greets the user by name
+    // Recurring sessions: model greets the user
     if (isSinhala) {
-      if (dto.sinhalaStyle === 'deep_guidance') {
-        return `Hello Maya! I am ready for today's session. Please greet me warmly in friendly everyday Sinhala (strictly Sinhala and English only - no Tamil or other languages), introduce today's focus on "${rawTopic}", and ask your opening practice question aloud!`;
+      if (dto.sinhalaStyle === 'deep_guidance' || dto.languageMode === 'deep_guidance') {
+        return `Hello Maya! I am ready for today's session. Please greet me warmly in friendly everyday Sinhala (strictly Sinhala and English only - no Tamil or other languages), introduce today's focus on "${rawTopic}", and ask your opening practice question aloud in both Sinhala and English!`;
       }
       return `Hello Maya! I am ready for today's session. Please greet me warmly in friendly everyday Sinhala (strictly Sinhala and English only - no Tamil or other languages), and ask your opening practice question on "${rawTopic}" aloud in English!`;
     }
@@ -2752,6 +2794,8 @@ ${memoryPart}`;
               fluency_score,
               grammar_score,
               pronunciation_score,
+              user_rating,
+              user_feedback,
               created_at,
               profiles (
                 id,
@@ -2849,6 +2893,8 @@ ${memoryPart}`;
                 grammar: sess?.grammar_score ?? 82,
                 pronunciation: sess?.pronunciation_score ?? 86,
               },
+              userRating: sess?.user_rating ?? null,
+              userFeedback: sess?.user_feedback ?? null,
               topic: sess?.topic || 'Speaking Practice',
               languageMode: this.activeSessions.get(row.session_id)?.languageMode || 'sinhala',
               sinhalaStyle: this.activeSessions.get(row.session_id)?.sinhalaStyle || 'balanced',
@@ -3220,6 +3266,7 @@ ${memoryPart}`;
         : null,
       user_rating: sess.user_rating ?? null,
       user_feedback: sess.user_feedback ?? null,
+      summary: sess.summary || null,
       diagnostics: await this.getSessionDiagnostics(sessionId),
     };
   }
@@ -3416,6 +3463,7 @@ ${memoryPart}`;
           modelAudioUrl: modelAudioUrl || null,
           user_rating: sess.user_rating ?? null,
           user_feedback: sess.user_feedback ?? null,
+          summary: sess.summary || null,
           turns: mappedTurns,
           corrections: mappedCorrections,
           roadmap_level_id: matchedRoadmapLevelId,
@@ -4433,16 +4481,17 @@ CRITICAL RULES:
                 scenario_title: scenarioTitle,
               };
               if (conversationSummary) {
-                sessionUpdatePayload.user_feedback = conversationSummary;
+                sessionUpdatePayload.summary = conversationSummary;
               }
               const { error: updateErr } = await this.supabase
                 .from('sessions')
                 .update(sessionUpdatePayload)
                 .eq('id', validSessionId);
               if (updateErr) {
-                if (updateErr.message?.includes('scenario_id') || updateErr.message?.includes('scenario_title')) {
+                if (updateErr.message?.includes('scenario_id') || updateErr.message?.includes('scenario_title') || updateErr.message?.includes('summary')) {
                   delete sessionUpdatePayload.scenario_id;
                   delete sessionUpdatePayload.scenario_title;
+                  delete sessionUpdatePayload.summary;
                   await this.supabase
                     .from('sessions')
                     .update(sessionUpdatePayload)

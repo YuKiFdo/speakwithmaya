@@ -334,8 +334,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           this.logger.warn(`[${sid}] Failed to save diagnostics: ${e?.message}`);
         });
 
-      // Flush any final verified pending user turn audio (only commits if student speech was transcribed)
-      this.commitPendingUserTurnAudio(state);
+      // Flush any final verified pending user turn audio
+      this.commitPendingUserTurnAudio(state, true);
       state.currentUserTurnAudioChunks = [];
 
       // If model was still speaking when call closed, commit final turn audio
@@ -883,10 +883,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           try {
             const isIntro = state.dto?.isIntroCall === true;
             const isSinhala = this.sessionsService.isSinhalaSession(state.dto || {});
-            const studentName = (state.dto?.userName || '').trim() || 'the student';
-
             const wrapupNotice = isIntro
-              ? `[SYSTEM TIME NOTICE - INTRO CALL WRAP-UP]: The introductory chat time is up. In your very next spoken turn: keep it short (under 20 seconds) and deliver this uplifting wrap-up and premium conversion pitch STRICTLY in spoken Sinhala-English mix (NEVER in 100% English): warmly praise ${studentName} for speaking with you today ("Awesome job today! ඔයා හරිම ලස්සනට කතා කළා."), invite them in Sinhala to buy our Premium plan today to unlock unlimited daily calls, deep grammar coaching, and interview practice ("Maya එක්ක daily practice කරලා English 100% fluent කරගන්න පුළුවන්. Unlimited practice calls, deep grammar coaching, interview practice වගේ තව ගොඩක් දේවල් unlock කරගන්න අපේ Premium plan එක අදම buy කරන්න!"), say goodbye ("See you soon!"), and call tool conclude_call.`
+              ? `[SYSTEM TIME NOTICE - INTRO CALL WRAP-UP]: The introductory chat time is up. In your very next spoken turn: keep it short (under 20 seconds) and deliver this uplifting wrap-up and premium conversion pitch STRICTLY in spoken Sinhala-English mix (NEVER in 100% English): warmly praise the student for speaking with you today ("Awesome job today! ඔයා හරිම ලස්සනට කතා කළා."), invite them in Sinhala to buy our Premium plan today to unlock unlimited daily calls, deep grammar coaching, and interview practice ("Maya එක්ක daily practice කරලා English 100% fluent කරගන්න පුළුවන්. Unlimited practice calls, deep grammar coaching, interview practice වගේ තව ගොඩක් දේවල් unlock කරගන්න අපේ Premium plan එක අදම buy කරන්න!"), say goodbye ("See you soon!"), and call tool conclude_call.`
               : isSinhala
                 ? `[SYSTEM TIME NOTICE: The practice session time has ended. Right now, in your current spoken turn, wrap up naturally: share 1 short encouraging observation about how they did today, thank them warmly, speak your cheerful goodbye aloud, and then call conclude_call. Keep your farewell brief (under 15 seconds of speech).]`
                 : `[SYSTEM TIME NOTICE: The practice session time has ended. Right now, in your current spoken turn, wrap up naturally: share 1 short encouraging observation about how they did today, thank them warmly, speak your cheerful goodbye aloud, and then call conclude_call. Keep your farewell brief (under 15 seconds of speech).]`;
@@ -1027,6 +1025,18 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // This replaces the old approach of sending silence frames + clientContent.turnComplete
       // which only affected text turns and was invisible to Gemini's audio pipeline.
       if (state.userSpeechActive) {
+        // Trailing silence padding: 150ms of 16kHz 16-bit PCM (4800 bytes) ensures the final phonemes
+        // of user speech are not clipped by the activityEnd boundary.
+        const trailingSilence = Buffer.alloc(4800);
+        try {
+          state.geminiSession.sendRealtimeInput({
+            audio: {
+              data: trailingSilence.toString('base64'),
+              mimeType: 'audio/pcm;rate=16000',
+            },
+          });
+        } catch {}
+
         state.geminiSession.sendRealtimeInput({ activityEnd: {} });
         state.userSpeechActive = false;
         this.logger.debug(`[${state.sessionId}] 🛑 activityEnd sent - user speech burst ended`);
@@ -1042,25 +1052,27 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  private commitPendingUserTurnAudio(state: ClientSessionState) {
+  private commitPendingUserTurnAudio(state: ClientSessionState, forceCommit: boolean = false) {
     if (state.currentUserTurnAudioChunks.length === 0) return;
 
     // Check if Gemini actually transcribed student words for this speech segment
     const transcribedText = (state.userTranscriptAccumulator || state.lastStudentTranscript).trim();
+    const totalBytes = state.currentUserTurnAudioChunks.reduce((acc, c) => acc + c.length, 0);
 
     // If NO transcription was recognized (e.g. ambient noise, throat clearing, breathing, thinking hum),
-    // do NOT commit as an isolated user turn. This prevents creating ghost audio turns that misalign
-    // history transcript turns and audio clips!
-    if (!transcribedText) {
-      if (state.hasModelSpokenThisTurn) {
+    // only discard if it's sub-quarter-second (<8KB = <250ms of 16kHz PCM). If user actually spoke
+    // (>8KB), retain chunks until turnComplete or forceCommit so speech audio is never lost!
+    if (!transcribedText && !forceCommit) {
+      if (totalBytes < 8192 && state.hasModelSpokenThisTurn) {
         this.logger.debug(
-          `[${state.sessionId}] 🔇 Discarding untranscribed acoustic noise buffer (${(Buffer.concat(state.currentUserTurnAudioChunks).length / 1024).toFixed(1)} KB) - no student words recognized`
+          `[${state.sessionId}] 🔇 Discarding sub-second acoustic noise buffer (${(totalBytes / 1024).toFixed(1)} KB) - no student words recognized`
         );
         state.currentUserTurnAudioChunks = [];
       }
       return;
     }
 
+    const effectiveText = transcribedText || '(spoken audio)';
     const turnBuffer = Buffer.concat(state.currentUserTurnAudioChunks);
     state.currentUserTurnAudioChunks = [];
 
@@ -1075,14 +1087,14 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         sampleRate: 16000,
       });
       this.logger.log(
-        `[${state.sessionId}] 🎙️ Committed verified user turn ${currentTurnIdx} audio (${(turnBuffer.length / 1024).toFixed(1)} KB) for speech: "${transcribedText.slice(0, 50)}"`
+        `[${state.sessionId}] 🎙️ Committed verified user turn ${currentTurnIdx} audio (${(turnBuffer.length / 1024).toFixed(1)} KB) for speech: "${effectiveText.slice(0, 50)}"`
       );
       state.userTurnCount++;
       this.syncPersistentSessionState(state);
 
       // Progressively upload turn audio in background so it is instantly available in Cloud storage
       this.sessionsService
-        .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, turnBuffer, 'user', transcribedText)
+        .uploadSingleTurnAudio(state.sessionId, currentTurnIdx, turnBuffer, 'user', effectiveText)
         .catch(() => {});
     }
   }
@@ -1146,9 +1158,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           },
           outputAudioTranscription: {},
           contextWindowCompression: {
-            triggerTokens: '25000',
+            triggerTokens: '6000',
             slidingWindow: {
-              targetTokens: '12000',
+              targetTokens: '3000',
             },
           },
         },
@@ -1611,7 +1623,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         // Commit verified user turn audio for this exchange (only if student actually spoke words and not greeting)
         if (!isGreetingTurn) {
-          this.commitPendingUserTurnAudio(state);
+          const hasSignificantAudio = state.currentUserTurnAudioChunks.reduce((a, c) => a + c.length, 0) >= 8192;
+          this.commitPendingUserTurnAudio(state, Boolean(userText) || hasSignificantAudio);
         }
         state.currentUserTurnAudioChunks = [];
 

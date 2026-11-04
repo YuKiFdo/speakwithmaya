@@ -372,20 +372,35 @@ export default function SessionCompleteScreen() {
 
     if (isIntro) {
       authService.syncStep('/onboarding/building-plan');
-      router.replace('/onboarding/building-plan' as any);
+      router.replace({
+        pathname: '/onboarding/session-review' as any,
+        params: {
+          sessionId: activeSessionId,
+          isIntro: 'true',
+          isGeneral: 'true',
+          isPassed: 'true',
+        },
+      });
       return;
     }
 
     if (isGeneral) {
       OnboardingStore.setOnboardingCompleted();
       authService.syncStep('/(tabs)/dashboard');
-      router.replace('/(tabs)/dashboard');
+      router.replace({
+        pathname: '/call/session-review' as any,
+        params: {
+          sessionId: activeSessionId,
+          isGeneral: 'true',
+          isPassed: String(isPassed),
+        },
+      });
       return;
     }
 
     if (isPassed) {
       router.replace({
-        pathname: '/onboarding/session-review' as any,
+        pathname: '/call/session-review' as any,
         params: {
           sessionId: activeSessionId,
           roadmapLevelId: params.roadmapLevelId || '',
@@ -408,7 +423,11 @@ export default function SessionCompleteScreen() {
 
   const handleSecondaryPress = () => {
     playUnderstoodTapSound();
-    router.replace('/(tabs)/roadmap');
+    if (isGeneral) {
+      router.replace('/(tabs)/dashboard');
+    } else {
+      router.replace('/(tabs)/roadmap');
+    }
   };
 
   const primaryButtonText = isIntro

@@ -280,6 +280,10 @@ export default function RootLayout() {
           options={{ animation: 'fade', animationDuration: 260, gestureEnabled: false }}
         />
         <Stack.Screen
+          name="call/session-review"
+          options={{ animation: 'slide_from_right', animationDuration: 260 }}
+        />
+        <Stack.Screen
           name="(tabs)"
           options={{ animation: 'fade', animationDuration: 180 }}
         />

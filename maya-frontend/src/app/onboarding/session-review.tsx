@@ -17,6 +17,7 @@ import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { playOtherButtonSound } from '@/services/sound/sound-service';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
+import { getLatestSessionReport } from '@/utils/session-report-store';
 
 function ReviewStarIcon({
   width = 32,
@@ -47,25 +48,24 @@ export default function SessionReviewScreen() {
     roadmapLevelId?: string;
     isGeneral?: string;
     isPassed?: string;
+    isIntro?: string;
   }>();
 
   const insets = useSafeAreaInsets();
   const { isPhone } = useBreakpoint();
   const isWebOrDesktop = !isPhone;
 
-  const [rating, setRating] = useState<number>(1);
+  const [rating, setRating] = useState<number>(5);
   const [feedbackText, setFeedbackText] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  React.useEffect(() => {
-    if ((params as any).isIntro === 'true') {
-      router.replace('/onboarding/building-plan' as any);
-    }
-  }, [(params as any).isIntro]);
-
   const handleBack = () => {
     playOtherButtonSound();
-    router.back();
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      navigateOut();
+    }
   };
 
   const handleClose = () => {
@@ -74,6 +74,10 @@ export default function SessionReviewScreen() {
   };
 
   const navigateOut = () => {
+    if (params.isIntro === 'true') {
+      router.replace('/onboarding/building-plan' as any);
+      return;
+    }
     const isGeneral = params.isGeneral === 'true' || !params.roadmapLevelId;
     if (isGeneral) {
       router.replace('/(tabs)/dashboard');
@@ -89,13 +93,18 @@ export default function SessionReviewScreen() {
 
     try {
       const backendBaseUrl = getBackendBaseUrl();
-      if (params.sessionId) {
+      const targetSessionId =
+        params.sessionId ||
+        getLatestSessionReport()?.id ||
+        (getLatestSessionReport() as any)?.sessionId;
+
+      if (targetSessionId) {
         // Fire-and-forget review logging to backend
         fetch(`${backendBaseUrl}/v1/sessions/review`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sessionId: params.sessionId,
+            sessionId: targetSessionId,
             rating,
             feedback: feedbackText.trim(),
             roadmapLevelId: params.roadmapLevelId,

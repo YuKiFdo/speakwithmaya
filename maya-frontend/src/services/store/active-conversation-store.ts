@@ -42,6 +42,40 @@ const DASHBOARD_SCENARIO_IDS = new Set([
   'ielts-speaking',
 ]);
 
+const RATING_WORDS = new Set([
+  'good',
+  'great',
+  'awesome',
+  'nice',
+  'bad',
+  'poor',
+  'okay',
+  'ok',
+  'fine',
+  'terrible',
+  'excellent',
+  'well',
+  'average',
+  'super',
+]);
+
+/**
+ * Validates whether a string is a genuine AI conversation summary rather than
+ * a student's rating review / single-word sentiment comment (e.g. "Good", "Bad", "Okay").
+ */
+export function isValidConversationSummary(summary?: string | null): boolean {
+  if (!summary || typeof summary !== 'string') return false;
+  const trimmed = summary.trim();
+  if (trimmed.length < 8) return false;
+  const lower = trimmed.toLowerCase();
+  if (RATING_WORDS.has(lower)) return false;
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length < 3 && (RATING_WORDS.has(words[0]?.toLowerCase() || '') || trimmed.length < 15)) {
+    return false;
+  }
+  return true;
+}
+
 export function isRoadmapOrIntroTopic(
   topic?: string | null,
   scenarioTitle?: string | null,
@@ -137,6 +171,9 @@ function loadInitialState(): ActiveConversationState | null {
           window.localStorage.removeItem(STORAGE_KEY);
           return null;
         }
+        if (parsed.summary && !isValidConversationSummary(parsed.summary)) {
+          parsed.summary = undefined;
+        }
         return parsed;
       }
     } catch {}
@@ -183,6 +220,9 @@ export const ActiveConversationStore = {
       persistState(null);
       return null;
     }
+    if (memoryState?.summary && !isValidConversationSummary(memoryState.summary)) {
+      memoryState.summary = undefined;
+    }
     return memoryState;
   },
 
@@ -194,13 +234,16 @@ export const ActiveConversationStore = {
     }
 
     const currentUserId = conv.userId || getCurrentUserId();
+    const rawSummary = conv.summary !== undefined ? conv.summary : memoryState?.summary;
+    const sanitizedSummary = isValidConversationSummary(rawSummary) ? rawSummary : undefined;
+
     const updated: ActiveConversationState = {
       userId: currentUserId,
       sessionId: conv.sessionId || memoryState?.sessionId,
       scenarioId: conv.scenarioId,
       scenarioTitle: conv.scenarioTitle,
       topic: conv.topic || memoryState?.topic || conv.scenarioTitle,
-      summary: conv.summary !== undefined ? conv.summary : memoryState?.summary,
+      summary: sanitizedSummary,
       nextFollowup: conv.nextFollowup !== undefined ? conv.nextFollowup : memoryState?.nextFollowup,
       lastPracticedAt: conv.lastPracticedAt || new Date().toISOString(),
       durationSeconds: conv.durationSeconds || memoryState?.durationSeconds,
@@ -210,9 +253,10 @@ export const ActiveConversationStore = {
 
   setSummary(summary: string, nextFollowup?: string, sessionId?: string) {
     if (!memoryState) return;
+    const sanitizedSummary = isValidConversationSummary(summary) ? summary : undefined;
     const updated: ActiveConversationState = {
       ...memoryState,
-      summary,
+      summary: sanitizedSummary,
       nextFollowup: nextFollowup || memoryState.nextFollowup,
       sessionId: sessionId || memoryState.sessionId,
       lastPracticedAt: new Date().toISOString(),

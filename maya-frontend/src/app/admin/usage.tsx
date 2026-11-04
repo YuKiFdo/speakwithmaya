@@ -76,6 +76,10 @@ interface SessionRecord {
   topic?: string;
   languageMode?: string;
   sinhalaStyle?: string;
+  userRating?: number | null;
+  userFeedback?: string | null;
+  user_rating?: number | null;
+  user_feedback?: string | null;
   diagnostics?: SessionDiagnosticsData;
 }
 
@@ -1392,6 +1396,61 @@ export default function AdminUsageScreen() {
                 </View>
               </View>
 
+              {/* Student Rating & Feedback Comments Section */}
+              <View style={styles.modalReviewSection}>
+                <View style={styles.modalReviewHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="star" size={15} color="#f59e0b" />
+                    <Text style={styles.modalReviewSectionTitle}>Student Rating & Comments</Text>
+                  </View>
+
+                  {typeof (activeSession?.userRating ?? activeSession?.user_rating) === 'number' &&
+                  (activeSession?.userRating ?? activeSession?.user_rating)! > 0 ? (
+                    <View style={styles.modalRatingBadge}>
+                      <View style={{ flexDirection: 'row', gap: 2 }}>
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Ionicons
+                            key={star}
+                            name={
+                              star <= (activeSession?.userRating ?? activeSession?.user_rating)!
+                                ? 'star'
+                                : 'star-outline'
+                            }
+                            size={13}
+                            color={
+                              star <= (activeSession?.userRating ?? activeSession?.user_rating)!
+                                ? '#f59e0b'
+                                : '#cbd5e1'
+                            }
+                          />
+                        ))}
+                      </View>
+                      <Text style={styles.modalRatingScoreText}>
+                        {(activeSession?.userRating ?? activeSession?.user_rating)}.0
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.modalNoRatingBadge}>
+                      <Text style={styles.modalNoRatingBadgeText}>No Rating Submitted</Text>
+                    </View>
+                  )}
+                </View>
+
+                {(activeSession?.userFeedback ?? activeSession?.user_feedback) &&
+                (activeSession?.userFeedback ?? activeSession?.user_feedback)!.trim().length > 0 ? (
+                  <View style={styles.modalFeedbackCommentBox}>
+                    <Feather name="message-square" size={13} color="#0d9488" style={{ marginTop: 2 }} />
+                    <Text style={styles.modalFeedbackCommentText}>
+                      "{(activeSession?.userFeedback ?? activeSession?.user_feedback)!.trim()}"
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.modalNoCommentText}>
+                    No written comment left by student for this session.
+                  </Text>
+                )}
+              </View>
+
               {/* Audio Recording Player, Coaching Corrections & Full Conversation Transcript */}
               {activeSession?.id && (
                 <View style={{ marginBottom: 16 }}>
@@ -2599,6 +2658,76 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
     padding: 12,
     borderRadius: 8,
+  },
+  modalReviewSection: {
+    marginBottom: 20,
+    backgroundColor: '#ffffff',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  modalReviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  modalReviewSectionTitle: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#0f172a',
+  },
+  modalRatingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#fffbeb',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#fef3c7',
+  },
+  modalRatingScoreText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 12.5,
+    color: '#b45309',
+  },
+  modalNoRatingBadge: {
+    backgroundColor: '#f1f5f9',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  modalNoRatingBadgeText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#94a3b8',
+  },
+  modalFeedbackCommentBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#f8fafc',
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+  },
+  modalFeedbackCommentText: {
+    flex: 1,
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#334155',
+    lineHeight: 19,
+    fontStyle: 'italic',
+  },
+  modalNoCommentText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11.5,
+    color: '#94a3b8',
+    fontStyle: 'italic',
   },
   correctionCard: {
     backgroundColor: '#fef2f2',

@@ -33,7 +33,7 @@ import { CallSessionStore } from '@/services/store/call-session-store';
 import { authService } from '@/services/auth/auth-service';
 import { useUserStats } from '@/hooks/useUserStats';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
-import { useActiveConversation, ActiveConversationStore, isRoadmapOrIntroTopic } from '@/services/store/active-conversation-store';
+import { useActiveConversation, ActiveConversationStore, isRoadmapOrIntroTopic, isValidConversationSummary } from '@/services/store/active-conversation-store';
 import { fetchAllPracticeSessions } from '@/services/supabase';
 import { paymentApi } from '@/services/payment/payment-api';
 import { mayaAlert } from '@/components/ui/alert-modal';
@@ -262,7 +262,7 @@ export default function DashboardScreen() {
             s.scenario_title || s.scenarioTitle,
             s.scenario_id || s.scenarioId,
             s.roadmap_level_id || s.roadmapLevelId,
-            s.user_feedback || s.summary
+            s.summary
           );
         };
 
@@ -275,7 +275,7 @@ export default function DashboardScreen() {
 
         if (latest) {
           const scenario = resolveScenarioFromTopic(latest.topic, latest.scenario_id || latest.scenarioId);
-          if (scenario && !isRoadmapOrIntroTopic(latest.topic, scenario.title, scenario.id, null, latest.user_feedback)) {
+          if (scenario && !isRoadmapOrIntroTopic(latest.topic, scenario.title, scenario.id, null, latest.summary)) {
             const currentStore = ActiveConversationStore.getState();
             const isSameOrNewerLocal =
               currentStore &&
@@ -286,7 +286,7 @@ export default function DashboardScreen() {
               scenarioId: scenario.id,
               scenarioTitle: scenario.title,
               topic: latest.topic || currentStore?.topic || scenario.title,
-              summary: latest.user_feedback || (isSameOrNewerLocal ? currentStore?.summary : undefined),
+              summary: latest.summary || (isSameOrNewerLocal ? currentStore?.summary : undefined),
               nextFollowup: isSameOrNewerLocal ? currentStore?.nextFollowup : undefined,
               lastPracticedAt: latest.start_time || currentStore?.lastPracticedAt || new Date().toISOString(),
               durationSeconds: latest.duration_seconds || currentStore?.durationSeconds,
@@ -560,7 +560,7 @@ export default function DashboardScreen() {
                         ]}
                         numberOfLines={isDesktop ? 4 : 3}
                       >
-                        {activeConversation.summary
+                        {isValidConversationSummary(activeConversation.summary)
                           ? `"${activeConversation.summary}"`
                           : activeConversation.topic
                             ? `Topic: ${activeConversation.topic}`

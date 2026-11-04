@@ -31,6 +31,7 @@ export interface SessionHistoryRecord {
   modelAudioUrl?: string | null;
   user_rating?: number | null;
   user_feedback?: string | null;
+  summary?: string | null;
   turns?: Array<{
     role: 'user' | 'model';
     text: string;
@@ -209,6 +210,7 @@ export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]
           modelAudioUrl: s.model_audio_url || s.modelAudioUrl || (s.id ? `${backendUrl}/v1/sessions/${s.id}/recording-audio?type=model` : null),
           user_rating: s.user_rating ?? null,
           user_feedback: s.user_feedback ?? null,
+          summary: s.summary ?? null,
           turns: (s.session_turns || [])
             .sort((a: any, b: any) => (a.turn_order || 0) - (b.turn_order || 0))
             .map((t: any) => ({

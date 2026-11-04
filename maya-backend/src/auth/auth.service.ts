@@ -2231,6 +2231,57 @@ export class AuthService {
         (sessions || []).reduce((acc: number, s: any) => acc + (s.duration_seconds || 0), 0) / 60
       );
 
+      // Calculate Today & 7-Day Trend Metrics (Sri Lanka Timezone)
+      const slDateStr = (dateInput?: string | Date | null): string => {
+        if (!dateInput) return '';
+        try {
+          const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+          return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' });
+        } catch {
+          return '';
+        }
+      };
+
+      const todaySlKey = slDateStr(new Date());
+
+      const todayRegisteredCount = allProfiles.filter(
+        (p) => slDateStr(p.created_at) === todaySlKey,
+      ).length;
+
+      const todaySessionsCount = (sessions || []).filter(
+        (s: any) => slDateStr(s.created_at) === todaySlKey,
+      ).length;
+
+      // Generate 7-day trend series for visual charts
+      const past7Days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (6 - i));
+        const dateKey = slDateStr(d);
+        const dayLabel = d.toLocaleDateString('en-US', {
+          weekday: 'short',
+          timeZone: 'Asia/Colombo',
+        });
+        return { dateKey, dayLabel, isToday: i === 6 };
+      });
+
+      const registrationTrend = past7Days.map(({ dateKey, dayLabel, isToday }) => {
+        const count = allProfiles.filter((p) => slDateStr(p.created_at) === dateKey).length;
+        return {
+          date: dateKey,
+          label: isToday ? 'Today' : dayLabel,
+          count,
+        };
+      });
+
+      const sessionTrend = past7Days.map(({ dateKey, dayLabel, isToday }) => {
+        const count = (sessions || []).filter((s: any) => slDateStr(s.created_at) === dateKey).length;
+        return {
+          date: dateKey,
+          label: isToday ? 'Today' : dayLabel,
+          count,
+        };
+      });
+
       return {
         stats: {
           totalUsers,
@@ -2238,6 +2289,10 @@ export class AuthService {
           starterCount,
           testAccountsCount,
           totalMinutesConsumed,
+          todayRegisteredCount,
+          todaySessionsCount,
+          registrationTrend,
+          sessionTrend,
           filteredCount: enrichedUsers.length,
         },
         users: enrichedUsers,

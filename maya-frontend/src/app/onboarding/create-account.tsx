@@ -515,8 +515,6 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         outlineStyle: 'none',
-        outlineWidth: 0,
-        outline: 'none',
       } as any,
     }),
   },

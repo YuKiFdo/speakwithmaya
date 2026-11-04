@@ -369,6 +369,10 @@ export default function AdminUsersScreen() {
     starterCount: 0,
     testAccountsCount: 0,
     totalMinutesConsumed: 0,
+    todayRegisteredCount: 0,
+    todaySessionsCount: 0,
+    registrationTrend: [] as Array<{ date: string; label: string; count: number }>,
+    sessionTrend: [] as Array<{ date: string; label: string; count: number }>,
     filteredCount: 0,
   });
 
@@ -833,14 +837,27 @@ export default function AdminUsersScreen() {
 
               <View style={styles.metricCard}>
                 <View style={[styles.metricIconWrap, { backgroundColor: '#f0fdf4' }]}>
-                  <Feather name="check-circle" size={18} color="#16a34a" />
+                  <Feather name="user-plus" size={18} color="#16a34a" />
                 </View>
                 <View>
-                  <Text style={styles.metricLabel}>Paid Active</Text>
-                  <Text style={[styles.metricValue, { color: '#16a34a' }]}>{stats.activePaidCount}</Text>
-                  <Text style={styles.metricSub}>
-                    {stats.starterCount} Starter · {stats.testAccountsCount ?? testAccounts.length} Test
+                  <Text style={styles.metricLabel}>Registered Today</Text>
+                  <Text style={[styles.metricValue, { color: '#16a34a' }]}>
+                    +{stats.todayRegisteredCount ?? 0}
                   </Text>
+                  <Text style={styles.metricSub}>New Student Signups</Text>
+                </View>
+              </View>
+
+              <View style={styles.metricCard}>
+                <View style={[styles.metricIconWrap, { backgroundColor: '#faf5ff' }]}>
+                  <Feather name="activity" size={18} color="#9333ea" />
+                </View>
+                <View>
+                  <Text style={styles.metricLabel}>Today's Sessions</Text>
+                  <Text style={[styles.metricValue, { color: '#9333ea' }]}>
+                    {stats.todaySessionsCount ?? 0}
+                  </Text>
+                  <Text style={styles.metricSub}>Live Practice Calls Today</Text>
                 </View>
               </View>
 
@@ -851,18 +868,129 @@ export default function AdminUsersScreen() {
                 <View>
                   <Text style={styles.metricLabel}>Total Practiced</Text>
                   <Text style={[styles.metricValue, { color: '#2563eb' }]}>{stats.totalMinutesConsumed}m</Text>
-                  <Text style={styles.metricSub}>Live Voice Coach Minutes</Text>
+                  <Text style={styles.metricSub}>
+                    {stats.activePaidCount} Paid · {stats.starterCount} Starter
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Visual Activity & Growth Trends Chart Card */}
+            <View style={styles.trendChartsCard}>
+              <View style={[styles.trendHeaderRow, isPhone && styles.trendHeaderRowPhone]}>
+                <View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Feather name="trending-up" size={18} color="#0d9488" />
+                    <Text style={styles.trendCardTitle}>Daily Registrations & Practice Sessions</Text>
+                  </View>
+                  <Text style={styles.trendCardSub}>
+                    7-day comparative activity and student engagement breakdown
+                  </Text>
+                </View>
+
+                <View style={styles.trendSummaryPills}>
+                  <View style={styles.trendPillGreen}>
+                    <View style={styles.trendPillDotGreen} />
+                    <Text style={styles.trendPillTextGreen}>
+                      +{stats.todayRegisteredCount ?? 0} Registered Today
+                    </Text>
+                  </View>
+                  <View style={styles.trendPillPurple}>
+                    <View style={styles.trendPillDotPurple} />
+                    <Text style={styles.trendPillTextPurple}>
+                      {stats.todaySessionsCount ?? 0} Sessions Today
+                    </Text>
+                  </View>
                 </View>
               </View>
 
-              <View style={styles.metricCard}>
-                <View style={[styles.metricIconWrap, { backgroundColor: '#faf5ff' }]}>
-                  <Feather name="target" size={18} color="#9333ea" />
+              <View style={[styles.trendChartsColumns, isPhone && styles.trendChartsColumnsPhone]}>
+                {/* 1. Registrations Bar Chart */}
+                <View style={styles.trendSubChart}>
+                  <View style={styles.trendSubChartHeader}>
+                    <Feather name="user-plus" size={14} color="#16a34a" />
+                    <Text style={styles.trendSubChartTitle}>New Student Signups (7 Days)</Text>
+                  </View>
+                  <View style={styles.barChartContainer}>
+                    {(stats.registrationTrend?.length ? stats.registrationTrend : [
+                      { label: '6d ago', count: 0 },
+                      { label: '5d ago', count: 0 },
+                      { label: '4d ago', count: 0 },
+                      { label: '3d ago', count: 0 },
+                      { label: '2d ago', count: 0 },
+                      { label: 'Yesterday', count: 0 },
+                      { label: 'Today', count: stats.todayRegisteredCount ?? 0 },
+                    ]).map((item, idx) => {
+                      const trendCounts = (stats.registrationTrend?.map((t) => t.count) || [item.count]);
+                      const maxVal = Math.max(1, ...trendCounts);
+                      const barHeight = Math.max(8, Math.round((item.count / maxVal) * 75));
+                      const isToday = idx === (stats.registrationTrend?.length ? stats.registrationTrend.length - 1 : 6);
+
+                      return (
+                        <View key={idx} style={styles.barCol}>
+                          <Text style={[styles.barValText, isToday && styles.barValTextHighlightGreen]}>
+                            {item.count}
+                          </Text>
+                          <View style={styles.barTrack}>
+                            <View
+                              style={[
+                                styles.barFillGreen,
+                                { height: barHeight },
+                                isToday && styles.barFillTodayGreen,
+                              ]}
+                            />
+                          </View>
+                          <Text style={[styles.barLabelText, isToday && styles.barLabelTextToday]}>
+                            {item.label}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
                 </View>
-                <View>
-                  <Text style={styles.metricLabel}>Active Filtered</Text>
-                  <Text style={[styles.metricValue, { color: '#9333ea' }]}>{users.length}</Text>
-                  <Text style={styles.metricSub}>Matching Criteria</Text>
+
+                {/* 2. Practice Sessions Bar Chart */}
+                <View style={styles.trendSubChart}>
+                  <View style={styles.trendSubChartHeader}>
+                    <Feather name="phone-call" size={14} color="#9333ea" />
+                    <Text style={styles.trendSubChartTitle}>Completed Practice Sessions (7 Days)</Text>
+                  </View>
+                  <View style={styles.barChartContainer}>
+                    {(stats.sessionTrend?.length ? stats.sessionTrend : [
+                      { label: '6d ago', count: 0 },
+                      { label: '5d ago', count: 0 },
+                      { label: '4d ago', count: 0 },
+                      { label: '3d ago', count: 0 },
+                      { label: '2d ago', count: 0 },
+                      { label: 'Yesterday', count: 0 },
+                      { label: 'Today', count: stats.todaySessionsCount ?? 0 },
+                    ]).map((item, idx) => {
+                      const trendCounts = (stats.sessionTrend?.map((t) => t.count) || [item.count]);
+                      const maxVal = Math.max(1, ...trendCounts);
+                      const barHeight = Math.max(8, Math.round((item.count / maxVal) * 75));
+                      const isToday = idx === (stats.sessionTrend?.length ? stats.sessionTrend.length - 1 : 6);
+
+                      return (
+                        <View key={idx} style={styles.barCol}>
+                          <Text style={[styles.barValText, isToday && styles.barValTextHighlightPurple]}>
+                            {item.count}
+                          </Text>
+                          <View style={styles.barTrack}>
+                            <View
+                              style={[
+                                styles.barFillPurple,
+                                { height: barHeight },
+                                isToday && styles.barFillTodayPurple,
+                              ]}
+                            />
+                          </View>
+                          <Text style={[styles.barLabelText, isToday && styles.barLabelTextToday]}>
+                            {item.label}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
                 </View>
               </View>
             </View>
@@ -2006,12 +2134,46 @@ export default function AdminUsersScreen() {
                               </View>
                             </View>
 
-                            {sess.user_feedback && (
-                              <View style={styles.feedbackBox}>
-                                <Text style={styles.feedbackLabel}>Student Feedback:</Text>
-                                <Text style={styles.feedbackText}>{sess.user_feedback}</Text>
+                            {/* Dedicated Student Rating & Comments Section */}
+                            <View style={styles.reviewSectionCard}>
+                              <View style={styles.reviewHeaderRow}>
+                                <View style={styles.reviewTitleGroup}>
+                                  <Ionicons name="star" size={14} color="#f59e0b" />
+                                  <Text style={styles.reviewSectionHeading}>Student Rating & Comments</Text>
+                                </View>
+
+                                {typeof sess.user_rating === 'number' && sess.user_rating > 0 ? (
+                                  <View style={styles.ratingBadge}>
+                                    <View style={styles.starsRow}>
+                                      {[1, 2, 3, 4, 5].map((star) => (
+                                        <Ionicons
+                                          key={star}
+                                          name={star <= sess.user_rating! ? 'star' : 'star-outline'}
+                                          size={12}
+                                          color={star <= sess.user_rating! ? '#f59e0b' : '#cbd5e1'}
+                                        />
+                                      ))}
+                                    </View>
+                                    <Text style={styles.ratingBadgeScoreText}>{sess.user_rating}.0</Text>
+                                  </View>
+                                ) : (
+                                  <View style={styles.noRatingBadge}>
+                                    <Text style={styles.noRatingBadgeText}>No Rating Submitted</Text>
+                                  </View>
+                                )}
                               </View>
-                            )}
+
+                              {sess.user_feedback && sess.user_feedback.trim().length > 0 ? (
+                                <View style={styles.reviewCommentBox}>
+                                  <Feather name="message-square" size={13} color="#0d9488" style={{ marginTop: 2 }} />
+                                  <Text style={styles.reviewCommentText}>
+                                    "{sess.user_feedback.trim()}"
+                                  </Text>
+                                </View>
+                              ) : (
+                                <Text style={styles.noCommentText}>No written comment left by student</Text>
+                              )}
+                            </View>
 
                             {/* Toggle Transcript & Audio Recording Button */}
                             <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -3123,6 +3285,262 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#334155',
     marginTop: 2,
+  },
+  // Dedicated Student Rating & Comments in Session List
+  reviewSectionCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  reviewHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  reviewTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  reviewSectionHeading: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#0f172a',
+  },
+  ratingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#fffbeb',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#fef3c7',
+  },
+  starsRow: {
+    flexDirection: 'row',
+    gap: 2,
+    alignItems: 'center',
+  },
+  ratingBadgeScoreText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 12,
+    color: '#b45309',
+  },
+  noRatingBadge: {
+    backgroundColor: '#f1f5f9',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  noRatingBadgeText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 10.5,
+    color: '#94a3b8',
+  },
+  reviewCommentBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#f8fafc',
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+  },
+  reviewCommentText: {
+    flex: 1,
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12.5,
+    color: '#334155',
+    lineHeight: 18,
+    fontStyle: 'italic',
+  },
+  noCommentText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#94a3b8',
+    fontStyle: 'italic',
+  },
+  // Visual Growth & Activity Trends Card
+  trendChartsCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    marginBottom: 20,
+    ...Platform.select({
+      web: { boxShadow: '0 1px 3px rgba(0,0,0,0.04)' } as any,
+      default: { elevation: 1 },
+    }),
+  },
+  trendHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  trendHeaderRowPhone: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+  },
+  trendCardTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 16,
+    color: '#0f172a',
+  },
+  trendCardSub: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12.5,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  trendSummaryPills: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  trendPillGreen: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#f0fdf4',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#dcfce7',
+  },
+  trendPillDotGreen: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#16a34a',
+  },
+  trendPillTextGreen: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#166534',
+  },
+  trendPillPurple: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#faf5ff',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#f3e8ff',
+  },
+  trendPillDotPurple: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#9333ea',
+  },
+  trendPillTextPurple: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#7e22ce',
+  },
+  trendChartsColumns: {
+    flexDirection: 'row',
+    gap: 20,
+  },
+  trendChartsColumnsPhone: {
+    flexDirection: 'column',
+  },
+  trendSubChart: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+  },
+  trendSubChartHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 14,
+  },
+  trendSubChartTitle: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#334155',
+  },
+  barChartContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    height: 120,
+    paddingTop: 10,
+  },
+  barCol: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    height: '100%',
+  },
+  barValText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 10.5,
+    color: '#64748b',
+    marginBottom: 4,
+  },
+  barValTextHighlightGreen: {
+    ...fontStyle('outfit', 'bold'),
+    color: '#16a34a',
+    fontSize: 11.5,
+  },
+  barValTextHighlightPurple: {
+    ...fontStyle('outfit', 'bold'),
+    color: '#9333ea',
+    fontSize: 11.5,
+  },
+  barTrack: {
+    width: 18,
+    height: 80,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 6,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  barFillGreen: {
+    width: '100%',
+    backgroundColor: '#4ade80',
+    borderRadius: 6,
+  },
+  barFillTodayGreen: {
+    backgroundColor: '#16a34a',
+  },
+  barFillPurple: {
+    width: '100%',
+    backgroundColor: '#c084fc',
+    borderRadius: 6,
+  },
+  barFillTodayPurple: {
+    backgroundColor: '#9333ea',
+  },
+  barLabelText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 10.5,
+    color: '#64748b',
+    marginTop: 6,
+  },
+  barLabelTextToday: {
+    ...fontStyle('inter', 'semiBold'),
+    color: '#0f172a',
   },
   // Corrections in Modal
   correctionCard: {
