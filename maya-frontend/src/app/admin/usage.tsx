@@ -303,8 +303,6 @@ export default function AdminUsageScreen() {
   const [analysisDetail, setAnalysisDetail] = useState<any>(null);
   const [analysisLoading, setAnalysisLoading] = useState<boolean>(false);
   const [correctionFilter, setCorrectionFilter] = useState<'all' | 'on_call' | 'post_analysis'>('all');
-  const [analyzingAi, setAnalyzingAi] = useState<boolean>(false);
-  const [analyzingError, setAnalyzingError] = useState<string | null>(null);
 
   const handleOpenAnalysis = async (session: SessionRecord | null) => {
     if (!session) return;
@@ -312,7 +310,6 @@ export default function AdminUsageScreen() {
     setAnalysisDetail(session);
     setAnalysisLoading(true);
     setCorrectionFilter('all');
-    setAnalyzingError(null);
     try {
       const baseUrl = getBackendBaseUrl();
       const res = await fetch(`${baseUrl}/v1/admin/usage/sessions/${session.id}`);
@@ -324,44 +321,6 @@ export default function AdminUsageScreen() {
       // Graceful fallback to existing session record
     } finally {
       setAnalysisLoading(false);
-    }
-  };
-
-  const handleTriggerAiAnalysis = async () => {
-    if (!activeAnalysisSession) return;
-    const sessionId = activeAnalysisSession.id;
-    setAnalyzingAi(true);
-    setAnalyzingError(null);
-    try {
-      const baseUrl = getBackendBaseUrl();
-      const turns = (analysisDetail?.turns || []).map((t: any) => ({
-        role: t.role,
-        text: t.text || t.text_transcript,
-      }));
-      const res = await fetch(`${baseUrl}/v1/sessions/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          turns: turns.length > 0 ? turns : undefined,
-          topic: activeAnalysisSession.topic,
-        }),
-      });
-      if (res.ok) {
-        // Re-fetch session detail to get freshly saved post_analysis corrections
-        const detailRes = await fetch(`${baseUrl}/v1/admin/usage/sessions/${sessionId}`);
-        if (detailRes.ok) {
-          const updated = await detailRes.json();
-          setAnalysisDetail(updated);
-        }
-        setCorrectionFilter('post_analysis');
-      } else {
-        setAnalyzingError('AI Analysis request could not be processed.');
-      }
-    } catch (err: any) {
-      setAnalyzingError(err?.message || 'Error running AI analysis');
-    } finally {
-      setAnalyzingAi(false);
     }
   };
 
@@ -1976,42 +1935,15 @@ export default function AdminUsageScreen() {
 
                     return (
                       <View style={styles.analysisCorrectionsCard}>
-                        {/* Section Header with Counts and Action */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-                          <View>
-                            <Text style={styles.analysisSectionHeading}>
-                              Corrections & Natural Phrasing ({allList.length})
-                            </Text>
-                            <Text style={{ ...fontStyle('inter', 'regular'), fontSize: 12, color: '#64748b', marginTop: 2 }}>
-                              {onCallList.length} Live On-Call • {postAnalysisList.length} Post-Session Analysis
-                            </Text>
-                          </View>
-
-                          {/* Quick Trigger Button for AI Post Analysis */}
-                          {postAnalysisList.length === 0 && (
-                            <Pressable
-                              onPress={handleTriggerAiAnalysis}
-                              disabled={analyzingAi}
-                              style={styles.runAnalysisHeaderBtn}
-                            >
-                              {analyzingAi ? (
-                                <ActivityIndicator size="small" color="#9333ea" style={{ marginRight: 6 }} />
-                              ) : (
-                                <Ionicons name="sparkles" size={13} color="#9333ea" style={{ marginRight: 6 }} />
-                              )}
-                              <Text style={styles.runAnalysisHeaderBtnText}>
-                                {analyzingAi ? 'Running AI Post-Analysis...' : 'Generate AI Post-Analysis'}
-                              </Text>
-                            </Pressable>
-                          )}
+                        {/* Section Header with Counts */}
+                        <View>
+                          <Text style={styles.analysisSectionHeading}>
+                            Corrections & Natural Phrasing ({allList.length})
+                          </Text>
+                          <Text style={{ ...fontStyle('inter', 'regular'), fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                            {onCallList.length} Live On-Call • {postAnalysisList.length} Post-Session Analysis
+                          </Text>
                         </View>
-
-                        {analyzingError && (
-                          <View style={styles.analysisErrorBox}>
-                            <Feather name="alert-circle" size={14} color="#dc2626" />
-                            <Text style={styles.analysisErrorText}>{analyzingError}</Text>
-                          </View>
-                        )}
 
                         {/* Filter Tabs */}
                         <View style={styles.corrFilterTabsRow}>
@@ -2070,43 +2002,25 @@ export default function AdminUsageScreen() {
                         {/* List of Corrections */}
                         {filteredList.length === 0 ? (
                           <View style={styles.noCorrectionsBox}>
-                            {correctionFilter === 'post_analysis' ? (
-                              <>
-                                <Feather name="cpu" size={24} color="#9333ea" />
-                                <Text style={styles.noCorrectionsTitle}>No Post-Session Analysis Yet</Text>
-                                <Text style={styles.noCorrectionsSub}>
-                                  Deep transcript analysis scans the dialogue turns after the session for pronunciation clarity, grammar rules, and native phrasing.
-                                </Text>
-                                <Pressable
-                                  onPress={handleTriggerAiAnalysis}
-                                  disabled={analyzingAi}
-                                  style={styles.runAnalysisActionBtn}
-                                >
-                                  {analyzingAi ? (
-                                    <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
-                                  ) : (
-                                    <Ionicons name="sparkles" size={14} color="#ffffff" style={{ marginRight: 6 }} />
-                                  )}
-                                  <Text style={styles.runAnalysisActionBtnText}>
-                                    {analyzingAi ? 'Running Post-Session AI Analysis...' : 'Generate AI Post-Analysis Now'}
-                                  </Text>
-                                </Pressable>
-                              </>
-                            ) : (
-                              <>
-                                <Feather name="check-circle" size={24} color="#16a34a" />
-                                <Text style={styles.noCorrectionsTitle}>
-                                  {correctionFilter === 'on_call'
-                                    ? 'No Live On-Call Corrections Flagged'
-                                    : 'Clean Speech Performance!'}
-                                </Text>
-                                <Text style={styles.noCorrectionsSub}>
-                                  {correctionFilter === 'on_call'
-                                    ? 'No live correction prompts were triggered while speaking during this conversation.'
-                                    : 'No grammar mistakes or phrasing issues were flagged for this conversation.'}
-                                </Text>
-                              </>
-                            )}
+                            <Feather
+                              name={correctionFilter === 'post_analysis' ? 'award' : 'check-circle'}
+                              size={24}
+                              color={correctionFilter === 'post_analysis' ? '#94a3b8' : '#16a34a'}
+                            />
+                            <Text style={styles.noCorrectionsTitle}>
+                              {correctionFilter === 'post_analysis'
+                                ? 'No Post-Session Analysis Corrections'
+                                : correctionFilter === 'on_call'
+                                ? 'No Live On-Call Corrections'
+                                : 'No Corrections Found'}
+                            </Text>
+                            <Text style={styles.noCorrectionsSub}>
+                              {correctionFilter === 'post_analysis'
+                                ? 'No post-session analysis or natural rephrasings were recorded for this session.'
+                                : correctionFilter === 'on_call'
+                                ? 'No live correction prompts were triggered while speaking during this conversation.'
+                                : 'No grammar mistakes or phrasing issues were flagged for this conversation.'}
+                            </Text>
                           </View>
                         ) : (
                           <View style={{ gap: 12 }}>
@@ -3710,51 +3624,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0',
     gap: 12,
-  },
-  runAnalysisHeaderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#faf5ff',
-    borderWidth: 1,
-    borderColor: '#d8b4fe',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  runAnalysisHeaderBtnText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 11.5,
-    color: '#9333ea',
-  },
-  runAnalysisActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#9333ea',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-  runAnalysisActionBtnText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 13,
-    color: '#ffffff',
-  },
-  analysisErrorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#fef2f2',
-    borderWidth: 1,
-    borderColor: '#fecaca',
-    padding: 10,
-    borderRadius: 8,
-  },
-  analysisErrorText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 12,
-    color: '#b91c1c',
-    flex: 1,
   },
   corrFilterTabsRow: {
     flexDirection: 'row',
