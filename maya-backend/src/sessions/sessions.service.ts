@@ -2364,7 +2364,7 @@ ${memoryPart}`;
           await this.saveSessionTurns(validSessionId, turnsToUse, dto.topic);
         }
 
-        // 3. Insert grammar corrections
+        // 3. Insert grammar corrections (live on-call real-time coach alerts)
         if (grammarCorrections && grammarCorrections.length > 0) {
           const correctionsToInsert = grammarCorrections.map((c) => ({
             session_id: validSessionId,
@@ -2372,8 +2372,21 @@ ${memoryPart}`;
             more_natural: c.moreNatural,
             explanation: c.explanation,
             highlight_words: c.highlightWords || [],
+            source: 'on_call',
+            type: 'grammar',
           }));
-          await this.supabase.from('grammar_corrections').insert(correctionsToInsert);
+          const { error: insErr } = await this.supabase.from('grammar_corrections').insert(correctionsToInsert);
+          if (insErr) {
+            this.logger.warn(`[SessionsService] DB inserting on_call corrections with source/type: ${insErr.message}. Fallback to explanation prefix.`);
+            const fallbackRows = correctionsToInsert.map((r) => ({
+              session_id: r.session_id,
+              student_said: r.student_said,
+              more_natural: r.more_natural,
+              explanation: `[Live On-Call] ${r.explanation}`,
+              highlight_words: r.highlight_words,
+            }));
+            await this.supabase.from('grammar_corrections').insert(fallbackRows);
+          }
         }
 
         // 4. Append to usage ledger in Supabase
@@ -3242,12 +3255,20 @@ ${memoryPart}`;
       };
     });
 
-    const mappedCorrections = (corrections || []).map((c: any) => ({
-      studentSaid: c.student_said,
-      moreNatural: c.more_natural,
-      explanation: c.explanation,
-      highlightWords: c.highlight_words || [],
-    }));
+    const mappedCorrections = (corrections || []).map((c: any) => {
+      const isPost = c.source === 'post_analysis' || (c.explanation && c.explanation.includes('[Post-Analysis]'));
+      const cleanExp = (c.explanation || '').replace(/^\[(Live On-Call|Post-Analysis)\]\s*/i, '');
+      return {
+        id: c.id,
+        studentSaid: c.student_said,
+        moreNatural: c.more_natural,
+        explanation: cleanExp || c.explanation,
+        highlightWords: c.highlight_words || [],
+        source: isPost ? 'post_analysis' : 'on_call',
+        type: c.type || (isPost ? 'post_analysis' : 'grammar'),
+        timestamp: c.created_at,
+      };
+    });
 
     return {
       id: sess.id,
@@ -3434,14 +3455,20 @@ ${memoryPart}`;
             };
           });
 
-        const mappedCorrections = (sess.grammar_corrections || []).map((c: any) => ({
-          id: c.id,
-          studentSaid: c.student_said,
-          moreNatural: c.more_natural,
-          explanation: c.explanation,
-          highlightWords: c.highlight_words || [],
-          timestamp: c.created_at,
-        }));
+        const mappedCorrections = (sess.grammar_corrections || []).map((c: any) => {
+          const isPost = c.source === 'post_analysis' || (c.explanation && c.explanation.includes('[Post-Analysis]'));
+          const cleanExp = (c.explanation || '').replace(/^\[(Live On-Call|Post-Analysis)\]\s*/i, '');
+          return {
+            id: c.id,
+            studentSaid: c.student_said,
+            moreNatural: c.more_natural,
+            explanation: cleanExp || c.explanation,
+            highlightWords: c.highlight_words || [],
+            source: isPost ? 'post_analysis' : 'on_call',
+            type: c.type || (isPost ? 'post_analysis' : 'grammar'),
+            timestamp: c.created_at,
+          };
+        });
 
         let userAudioUrl = hasUserAudio
           ? (rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
@@ -4576,6 +4603,166 @@ CRITICAL RULES:
               return overlap >= 0.5 ? overlap * 0.9 : 0;
             };
 
+            const finalItems = rawItems.slice(0, 5).map((it: any) => {
+              const rawTurnIdx = typeof it.userTurnIndex === 'number' ? it.userTurnIndex : 0;
+              let isolatedTurnAudio: string | undefined;
+
+              // 1. Check if the LLM-provided index (as 0-based userTurnIdx or dialogue turnIndex) matches the spoken text
+              let bestUserTurnPos = -1;
+              let bestScore = 0;
+
+              const directCandidate = userTurns[rawTurnIdx];
+              if (directCandidate) {
+                const s = scoreTurnMatch(directCandidate.text, it);
+                if (s >= 0.5) {
+                  bestUserTurnPos = rawTurnIdx;
+                  bestScore = s;
+                }
+              }
+
+              if (bestScore < 0.9) {
+                const byDialogueIdxPos = userTurns.findIndex((ut) => ut.turnIndex === rawTurnIdx);
+                if (byDialogueIdxPos >= 0) {
+                  const s = scoreTurnMatch(userTurns[byDialogueIdxPos].text, it);
+                  if (s > bestScore && s >= 0.5) {
+                    bestUserTurnPos = byDialogueIdxPos;
+                    bestScore = s;
+                  }
+                }
+              }
+
+              // 2. Always scan all userTurns by text similarity if the index did not produce a strong text match
+              if (bestScore < 0.9 && it.youSaid) {
+                userTurns.forEach((ut, idx) => {
+                  const s = scoreTurnMatch(ut.text, it);
+                  if (s > bestScore) {
+                    bestScore = s;
+                    bestUserTurnPos = idx;
+                  }
+                });
+              }
+
+              let effectiveUserTurnIdx = bestUserTurnPos >= 0 ? bestUserTurnPos : rawTurnIdx;
+
+              // 3. If server recorded per-turn audio transcripts, verify that the audio clip at effectiveUserTurnIdx matches the text
+              if (turnTranscriptsMap && turnTranscriptsMap.size > 0 && it.youSaid) {
+                const recordedTextAtIdx = turnTranscriptsMap.get(effectiveUserTurnIdx);
+                const currentClipScore = recordedTextAtIdx ? scoreTurnMatch(recordedTextAtIdx, it) : 0;
+                if (currentClipScore < 0.5) {
+                  let bestClipIdx = -1;
+                  let bestClipScore = 0;
+                  for (const [clipIdx, clipText] of turnTranscriptsMap.entries()) {
+                    const s = scoreTurnMatch(clipText, it);
+                    if (s > bestClipScore) {
+                      bestClipScore = s;
+                      bestClipIdx = clipIdx;
+                    }
+                  }
+                  if (bestClipIdx >= 0 && bestClipScore >= 0.5) {
+                    effectiveUserTurnIdx = bestClipIdx;
+                  }
+                }
+              }
+
+              if (turnUrlsMap) {
+                isolatedTurnAudio = turnUrlsMap.get(effectiveUserTurnIdx);
+              }
+
+              // If not found in-memory, construct the isolated turn URL directly from storage
+              if (!isolatedTurnAudio && this.supabase && effectiveUserTurnIdx >= 0) {
+                isolatedTurnAudio = this.supabase.storage
+                  .from('session-recordings')
+                  .getPublicUrl(`${validSessionId}/turns/user_turn_${effectiveUserTurnIdx}.wav`).data.publicUrl;
+              }
+
+              const sentenceAudioUrl = isolatedTurnAudio
+                ? isolatedTurnAudio.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp')
+                : null;
+
+              let youSaidHighlight = it.youSaidHighlight?.trim();
+              let betterWayHighlight = it.betterWayHighlight?.trim();
+
+              if ((it.type === 'grammar' || it.type === 'more_natural') && (!youSaidHighlight || !betterWayHighlight)) {
+                const fallback = this.findHighlightDiff(it.youSaid, it.betterWay);
+                if (!youSaidHighlight && fallback.originalHighlight) {
+                  youSaidHighlight = fallback.originalHighlight;
+                }
+                if (!betterWayHighlight && fallback.updatedHighlight) {
+                  betterWayHighlight = fallback.updatedHighlight;
+                }
+              }
+
+              return {
+                ...it,
+                userTurnIndex: effectiveUserTurnIdx,
+                youSaidHighlight,
+                betterWayHighlight,
+                userAudioUrl: sentenceAudioUrl,
+                source: 'post_analysis',
+              };
+            });
+
+            // 1. Update session summary if provided
+            if (conversationSummary && this.supabase) {
+              try {
+                await this.supabase
+                  .from('sessions')
+                  .update({ summary: conversationSummary })
+                  .eq('id', validSessionId);
+              } catch (e: any) {
+                this.logger.warn(`Could not update summary on session ${validSessionId}: ${e?.message}`);
+              }
+            }
+
+            // 2. Persist post-session analysis corrections into public.grammar_corrections
+            if (this.supabase && finalItems.length > 0) {
+              try {
+                const { data: existingPost } = await this.supabase
+                  .from('grammar_corrections')
+                  .select('id, student_said, more_natural')
+                  .eq('session_id', validSessionId);
+
+                const existingKeys = new Set(
+                  (existingPost || []).map((e: any) => `${(e.student_said || '').trim().toLowerCase()}|${(e.more_natural || '').trim().toLowerCase()}`)
+                );
+
+                const toInsert = finalItems
+                  .filter((it: any) => it.youSaid && it.betterWay)
+                  .filter((it: any) => !existingKeys.has(`${(it.youSaid || '').trim().toLowerCase()}|${(it.betterWay || '').trim().toLowerCase()}`))
+                  .map((it: any) => ({
+                    session_id: validSessionId,
+                    student_said: (it.youSaid || '').trim(),
+                    more_natural: (it.betterWay || '').trim(),
+                    explanation: (it.whyExplanation || it.subtitle || 'Post-session pronunciation and phrasing analysis').trim(),
+                    highlight_words: [it.youSaidHighlight, it.betterWayHighlight].filter(Boolean),
+                    source: 'post_analysis',
+                    type: it.type || 'grammar',
+                  }));
+
+                if (toInsert.length > 0) {
+                  const { error: insErr } = await this.supabase
+                    .from('grammar_corrections')
+                    .insert(toInsert);
+
+                  if (insErr) {
+                    this.logger.warn(`[SessionsService] Error inserting post_analysis corrections with source/type: ${insErr.message}. Fallback to explanation tag.`);
+                    const fallbackRows = toInsert.map((r: any) => ({
+                      session_id: r.session_id,
+                      student_said: r.student_said,
+                      more_natural: r.more_natural,
+                      explanation: `[Post-Analysis] ${r.explanation}`,
+                      highlight_words: r.highlight_words,
+                    }));
+                    await this.supabase.from('grammar_corrections').insert(fallbackRows);
+                  } else {
+                    this.logger.log(`[SessionsService] ✅ Successfully persisted ${toInsert.length} post-analysis corrections for session ${validSessionId}`);
+                  }
+                }
+              } catch (persistErr: any) {
+                this.logger.warn(`[SessionsService] Could not persist post-analysis corrections: ${persistErr?.message}`);
+              }
+            }
+
             return {
               sessionId: dto.sessionId,
               scenarioId,
@@ -4584,103 +4771,7 @@ CRITICAL RULES:
               nextFollowupTopic,
               userAudioUrl: userAudioUrl || null,
               modelAudioUrl: modelAudioUrl || null,
-              items: rawItems.slice(0, 5).map((it: any) => {
-                const rawTurnIdx = typeof it.userTurnIndex === 'number' ? it.userTurnIndex : 0;
-                let isolatedTurnAudio: string | undefined;
-
-                // 1. Check if the LLM-provided index (as 0-based userTurnIdx or dialogue turnIndex) matches the spoken text
-                let bestUserTurnPos = -1;
-                let bestScore = 0;
-
-                const directCandidate = userTurns[rawTurnIdx];
-                if (directCandidate) {
-                  const s = scoreTurnMatch(directCandidate.text, it);
-                  if (s >= 0.5) {
-                    bestUserTurnPos = rawTurnIdx;
-                    bestScore = s;
-                  }
-                }
-
-                if (bestScore < 0.9) {
-                  const byDialogueIdxPos = userTurns.findIndex((ut) => ut.turnIndex === rawTurnIdx);
-                  if (byDialogueIdxPos >= 0) {
-                    const s = scoreTurnMatch(userTurns[byDialogueIdxPos].text, it);
-                    if (s > bestScore && s >= 0.5) {
-                      bestUserTurnPos = byDialogueIdxPos;
-                      bestScore = s;
-                    }
-                  }
-                }
-
-                // 2. Always scan all userTurns by text similarity if the index did not produce a strong text match
-                if (bestScore < 0.9 && it.youSaid) {
-                  userTurns.forEach((ut, idx) => {
-                    const s = scoreTurnMatch(ut.text, it);
-                    if (s > bestScore) {
-                      bestScore = s;
-                      bestUserTurnPos = idx;
-                    }
-                  });
-                }
-
-                let effectiveUserTurnIdx = bestUserTurnPos >= 0 ? bestUserTurnPos : rawTurnIdx;
-
-                // 3. If server recorded per-turn audio transcripts, verify that the audio clip at effectiveUserTurnIdx matches the text
-                if (turnTranscriptsMap && turnTranscriptsMap.size > 0 && it.youSaid) {
-                  const recordedTextAtIdx = turnTranscriptsMap.get(effectiveUserTurnIdx);
-                  const currentClipScore = recordedTextAtIdx ? scoreTurnMatch(recordedTextAtIdx, it) : 0;
-                  if (currentClipScore < 0.5) {
-                    let bestClipIdx = -1;
-                    let bestClipScore = 0;
-                    for (const [clipIdx, clipText] of turnTranscriptsMap.entries()) {
-                      const s = scoreTurnMatch(clipText, it);
-                      if (s > bestClipScore) {
-                        bestClipScore = s;
-                        bestClipIdx = clipIdx;
-                      }
-                    }
-                    if (bestClipIdx >= 0 && bestClipScore >= 0.5) {
-                      effectiveUserTurnIdx = bestClipIdx;
-                    }
-                  }
-                }
-
-                if (turnUrlsMap) {
-                  isolatedTurnAudio = turnUrlsMap.get(effectiveUserTurnIdx);
-                }
-
-                // If not found in-memory, construct the isolated turn URL directly from storage
-                if (!isolatedTurnAudio && this.supabase && effectiveUserTurnIdx >= 0) {
-                  isolatedTurnAudio = this.supabase.storage
-                    .from('session-recordings')
-                    .getPublicUrl(`${validSessionId}/turns/user_turn_${effectiveUserTurnIdx}.wav`).data.publicUrl;
-                }
-
-                const sentenceAudioUrl = isolatedTurnAudio
-                  ? isolatedTurnAudio.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp')
-                  : null;
-
-                let youSaidHighlight = it.youSaidHighlight?.trim();
-                let betterWayHighlight = it.betterWayHighlight?.trim();
-
-                if ((it.type === 'grammar' || it.type === 'more_natural') && (!youSaidHighlight || !betterWayHighlight)) {
-                  const fallback = this.findHighlightDiff(it.youSaid, it.betterWay);
-                  if (!youSaidHighlight && fallback.originalHighlight) {
-                    youSaidHighlight = fallback.originalHighlight;
-                  }
-                  if (!betterWayHighlight && fallback.updatedHighlight) {
-                    betterWayHighlight = fallback.updatedHighlight;
-                  }
-                }
-
-                return {
-                  ...it,
-                  userTurnIndex: effectiveUserTurnIdx,
-                  youSaidHighlight,
-                  betterWayHighlight,
-                  userAudioUrl: sentenceAudioUrl,
-                };
-              }),
+              items: finalItems,
             };
         }
       } catch (err: any) {
