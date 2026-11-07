@@ -322,4 +322,22 @@ export class AuthController {
   async deleteComplaint(@Param('id') id: string) {
     return this.authService.deleteComplaint(id);
   }
+
+  /**
+   * Admin: List all student session reviews with star breakdown and separate comments
+   */
+  @Get('admin/session-reviews')
+  @UseGuards(AdminGuard)
+  async getAdminSessionReviews() {
+    return this.authService.getAdminSessionReviews();
+  }
+
+  /**
+   * Admin: Delete or clear a session review
+   */
+  @Delete('admin/session-reviews/:id')
+  @UseGuards(AdminGuard)
+  async deleteSessionReview(@Param('id') id: string) {
+    return this.authService.deleteSessionReview(id);
+  }
 }

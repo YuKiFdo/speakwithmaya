@@ -3278,6 +3278,107 @@ export class AuthService {
   }
 
   /**
+   * Admin: Retrieve all student session reviews enriched with user profiles,
+   * calculating star counts and separating written comments.
+   */
+  async getAdminSessionReviews() {
+    if (!this.supabase) {
+      return {
+        stats: {
+          totalReviews: 0,
+          avgRating: 0,
+          commentsCount: 0,
+          withoutCommentsCount: 0,
+          starCounts: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
+        },
+        reviews: [],
+      };
+    }
+
+    const [{ data: sessions, error }, { data: profiles }] = await Promise.all([
+      this.supabase
+        .from('sessions')
+        .select('id, user_id, topic, status, duration_seconds, overall_score, user_rating, user_feedback, summary, created_at, start_time, roadmap_level_id')
+        .not('user_rating', 'is', null)
+        .order('created_at', { ascending: false }),
+      this.supabase.from('profiles').select('*'),
+    ]);
+
+    if (error) {
+      this.logger.error(`Failed to query session reviews: ${error.message}`);
+    }
+
+    const profileMap = new Map<string, any>();
+    for (const p of profiles || []) {
+      profileMap.set(p.id, p);
+    }
+
+    const reviews = (sessions || [])
+      .map((row: any) => {
+        const prof = row.user_id ? profileMap.get(row.user_id) : null;
+        const feedback = row.user_feedback ? String(row.user_feedback).trim() : null;
+        return {
+          id: row.id,
+          sessionId: row.id,
+          userId: row.user_id,
+          displayName: prof?.display_name || 'Anonymous Student',
+          phoneNumber: prof?.phone_number || 'No phone',
+          email: prof?.email || null,
+          avatarUrl: prof?.avatar_url || null,
+          planTier: prof?.plan_tier || 'starter',
+          level: prof?.level || 'Intermediate',
+          topic: row.topic || 'Speaking Practice',
+          durationSeconds: row.duration_seconds || 0,
+          overallScore: row.overall_score || 0,
+          rating: Number(row.user_rating) || 5,
+          feedback: feedback && feedback.length > 0 ? feedback : null,
+          createdAt: row.created_at || row.start_time || new Date().toISOString(),
+        };
+      })
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    const starCounts: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    let totalScore = 0;
+    let commentsCount = 0;
+
+    for (const r of reviews) {
+      const star = Math.min(5, Math.max(1, Math.round(r.rating)));
+      starCounts[star] = (starCounts[star] || 0) + 1;
+      totalScore += r.rating;
+      if (r.feedback) {
+        commentsCount += 1;
+      }
+    }
+
+    const totalReviews = reviews.length;
+    const avgRating = totalReviews > 0 ? Number((totalScore / totalReviews).toFixed(1)) : 0;
+
+    return {
+      stats: {
+        totalReviews,
+        avgRating,
+        commentsCount,
+        withoutCommentsCount: totalReviews - commentsCount,
+        starCounts,
+      },
+      reviews,
+    };
+  }
+
+  /**
+   * Admin: Delete or clear a session review
+   */
+  async deleteSessionReview(sessionId: string) {
+    if (this.supabase) {
+      await this.supabase
+        .from('sessions')
+        .update({ user_rating: null, user_feedback: null })
+        .eq('id', sessionId);
+    }
+    return { success: true, deletedId: sessionId };
+  }
+
+  /**
    * Public / Student Leaderboard: Computes rankings across all real users in `public.profiles`
    * based on XP earned and practice minutes consumed. Users with 0 XP and 0 minutes get rank = null (N/A).
    */
