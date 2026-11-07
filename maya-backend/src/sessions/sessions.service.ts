@@ -891,11 +891,11 @@ ${isDeepGuidance ? `- BILINGUAL DEEP GUIDANCE MODE: In EVERY conversational turn
   * The student MUST experience and think: "Wow, with this app I can really learn and improve my English!"
   * Whenever the student speaks:
     1. If they make ANY grammar mistake (wrong tense, missing 'a/an/the', prepositions, singular/plural, "I am agree", etc.):
-       - Immediately call tool 'show_grammar_correction' with studentSaid, moreNatural, short friendly explanation in spoken Sinhala (100% Sinhala script with everyday English loanwords like "sentence එකක"), and highlightWords.
-       - In your spoken response: gently acknowledge what they meant, warmly model the correct sentence (e.g. "We can say '[moreNatural]'!"), and smoothly continue the casual chat.
+       - Immediately call tool 'show_grammar_correction' with studentSaid (the exact mistaken phrase or clause), moreNatural (the natural replacement), short friendly explanation in spoken Sinhala (100% Sinhala script with everyday English loanwords like "sentence එකක"), and highlightWords.
+       - In your spoken response: CRITICAL: Always anchor the correction so the student knows which words were wrong! Say: "'[studentSaid]' කියනවට වඩා, ඔයාට පුළුවන් '[moreNatural]' කියලා කියන්න." (If the student spoke a long sentence with multiple clauses, cite ONLY their specific mistaken phrase in '[studentSaid]'). Then smoothly continue the casual chat.
     2. If their grammar is okay but simple or awkward:
        - Call tool 'show_rephrase_suggestion' with studentSaid, moreNatural, short explanation in spoken Sinhala, and highlightWords to show how a native speaker would say it more naturally and fluently.
-       - In your spoken response: say encouragingly: "To sound even more natural, you can also say '[moreNatural]'!", and ask your next friendly follow-up.
+       - In your spoken response: say: "'[studentSaid]' කියන එක natural විදියට කියන්න පුළුවන්: '[moreNatural]'." Then ask your next friendly follow-up.
   * MANDATORY: You MUST trigger tool 'show_grammar_correction' or 'show_rephrase_suggestion' at least once or twice during turns 2-4 so the interactive feedback card visibly appears on their screen and they see you coaching them live!
   * Scaffolding: If they struggle or hesitate, encourage them warmly: "Take your time! You're doing great."
 
@@ -957,11 +957,11 @@ STAGE 2: CASUAL CHAT & ACTIVE COACHING SHOWCASE (CONTINUOUS 3-MINUTE CONVERSATIO
   * The student MUST experience and feel: "With Maya, I can really learn and improve my English!"
   * Whenever the student speaks:
     1. If they make ANY grammar mistake (wrong tense, missing articles a/an, prepositions, incorrect word order):
-       - Immediately call tool 'show_grammar_correction' with studentSaid, moreNatural, short friendly explanation in English, and highlightWords.
-       - In your spoken response: gently acknowledge what they meant, model the natural phrasing ("You can say: '[moreNatural]'!"), and smoothly continue the conversation.
+       - Immediately call tool 'show_grammar_correction' with studentSaid (the exact mistaken phrase or clause), moreNatural (the natural replacement), short friendly explanation in English, and highlightWords.
+       - In your spoken response: CRITICAL: Always anchor the correction so the student knows which words were wrong! Say: "Instead of '[studentSaid]', you can say: '[moreNatural]'!" (or "Rather than '[studentSaid]', we say: '[moreNatural]'!"). If the student spoke a long sentence with multiple clauses, cite ONLY their specific mistaken phrase in '[studentSaid]'. Then smoothly continue the conversation.
     2. If their grammar is okay but simple or awkward:
        - Call tool 'show_rephrase_suggestion' with studentSaid, moreNatural, short friendly explanation in English, and highlightWords to show how a native speaker would say it more naturally.
-       - In your spoken response: say encouragingly: "To sound even more natural, you can also say '[moreNatural]'!", and ask your next friendly follow-up.
+       - In your spoken response: say encouragingly: "To make '[studentSaid]' sound even more natural, you can say: '[moreNatural]'!", and ask your next friendly follow-up.
   * MANDATORY: You MUST trigger tool 'show_grammar_correction' or 'show_rephrase_suggestion' at least once or twice during turns 2-4 so the interactive feedback card visibly appears on their screen and they see you coaching them live!
   * If they pause or hesitate: be patient and encouraging ("Take your time! You're doing great.").
 
@@ -1145,8 +1145,8 @@ STAGE 1: GUIDED PRACTICE & ACTIVE TEACHING (COACH MODE)
        * In the EXACT SAME TURN, smoothly transition and ask the prompt for the NEXT task in English.
      - IF THE STUDENT MAKES ANY MISTAKE, GRAMMAR ERROR, OR UNNATURAL/AWKWARD PHRASING:
        * This is a deliberate learning roadmap lesson: DO NOT ignore mistakes!
-       * a. Call tool 'show_grammar_correction' (or 'show_rephrase_suggestion') with studentSaid, moreNatural, short explanation in Sinhala, and highlightWords.
-       * b. In your spoken turn: Explain the mistake kindly in conversational Sinhala, clearly model the correct English phrase, and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '[natural phrase]'").
+       * a. Call tool 'show_grammar_correction' (or 'show_rephrase_suggestion') with studentSaid (the exact mistaken phrase/clause), moreNatural, short explanation in Sinhala, and highlightWords.
+       * b. In your spoken turn: Explain the mistake kindly in conversational Sinhala, clearly model the correct English phrase with the contrast anchor, and explicitly ask the student to repeat it aloud (say "'[studentSaid]' කියනවට වඩා, මේක කියලා බලන්න: '[moreNatural]'").
        * c. STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step until ${userName} has repeated the corrected phrase!
        * d. Once they repeat correctly, praise them warmly ("Good job!", "සුපිරි!"), and only THEN move to the next task and ask the next prompt.
 - HARD STAGE BOUNDARY: You must practice ALL listed tasks in Stage 1 before moving to Stage 2. Do not skip any.
@@ -1240,8 +1240,8 @@ STAGE 3: PERFORMANCE VERDICT & LEVEL CONCLUSION
       const sinhalaToolsInstruction = isRoadmapSession
         ? `DELIBERATE ROADMAP ERROR CORRECTION PROTOCOL:
 - Catch grammar mistakes, omissions, and unnatural phrasing for each practice task.
-- Call 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid, moreNatural, short Sinhala explanation, and highlightWords.
-- Spoken delivery: Explain kindly in natural spoken Sinhala, model the correct English phrase, and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '[natural phrase]'").
+- Call 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid (the exact mistaken phrase or clause), moreNatural, short Sinhala explanation, and highlightWords.
+- Spoken delivery: Explain kindly in natural spoken Sinhala, model the correct English phrase with the contrast anchor, and explicitly ask the student to repeat it aloud (say "'[studentSaid]' කියනවට වඩා, මේක කියලා බලන්න: '[moreNatural]'").
 - STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step or advancing the task until the student has repeated the corrected phrase!
 - Only after they repeat correctly: praise them warmly in Sinhala (vary your praise: "සුපිරි!", "හරිම හොඳයි!", "නියමෙටම කිව්වා!"), and prompt the next step.`
         : (correctionMode === 'let_me_speak'
@@ -1254,13 +1254,13 @@ STAGE 3: PERFORMANCE VERDICT & LEVEL CONCLUSION
                 ? `AI SUGGESTIONS & FEEDBACK TOOLS (ACTIVE - 'CORRECT INSTANTLY' MODE):
 - The student selected 'Correct Me Instantly' mode for high-frequency, real-time coaching.
 - ACTIVE CORRECTIONS: Call tool 'show_grammar_correction' or 'show_rephrase_suggestion' whenever the student makes any grammatical mistake (wrong tense, missing verb, wrong preposition, agreement) or unnatural phrasing.
-- In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in natural Sinhala script), highlightWords.
-- Spoken delivery (after tool response): Verbally model the corrected key phrase (under 6 words, NEVER recite long student sentences!) followed immediately by your question: say "ඔයාට පුළුවන් '[short key phrase]' කියලා කියන්න. [Eng question]?" Keep your total spoken turn strictly under 15 words.`
+- In tool call supply: studentSaid (the specific mistaken clause, not an ambiguous word), moreNatural, explanation (1 short friendly sentence in natural Sinhala script), highlightWords.
+- Spoken delivery (after tool response): Verbally anchor the correction clearly so the student knows what was wrong! Say: "'[studentSaid]' කියනවට වඩා, ඔයාට පුළුවන් '[moreNatural]' කියලා කියන්න. [Eng follow-up question]?" If the student spoke a long sentence with multiple clauses, isolate their specific mistaken phrase in '[studentSaid]'. Keep your spoken turn focused and concise (~15-22 words).`
                 : `AI SUGGESTIONS & FEEDBACK TOOLS (BALANCED - 'KEEP ME ON TRACK' MODE):
 - STRICT PACING: Call at most 1 tool every 3-4 turns (maximum 2-3 times in the entire session). Prioritize student speaking fluency and conversational flow over perfection.
 - CALL ONLY for noticeable grammatical errors (e.g. wrong tense, missing verb 'am/is/are'). NEVER interrupt for minor conversational style or casual phrasing.
-- In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in natural Sinhala script), highlightWords.
-- Spoken delivery (after tool response): Verbally model ONLY the short corrected key phrase (strictly under 6 words, NEVER recite long student sentences!) followed immediately by your question: say "ඔයාට පුළුවන් '[short key phrase]' කියලා කියන්න. [Eng question]?" Keep your total spoken turn strictly under 15 words.`));
+- In tool call supply: studentSaid (the specific mistaken clause, not an ambiguous word), moreNatural, explanation (1 short friendly sentence in natural Sinhala script), highlightWords.
+- Spoken delivery (after tool response): Verbally anchor the correction clearly so the student knows what was wrong! Say: "'[studentSaid]' කියනවට වඩා, ඔයාට පුළුවන් '[moreNatural]' කියලා කියන්න. [Eng follow-up question]?" If the student spoke a long sentence with multiple clauses, isolate their specific mistaken phrase in '[studentSaid]'. Keep your spoken turn focused and concise (~15-22 words).`));
 
       const selectedVoice = this.getVoiceForSession(dto);
       const acousticGuardrails = this.getAcousticAndVocalGuardrails(selectedVoice);
@@ -1318,8 +1318,8 @@ ${memoryPart}`;
     const englishToolsInstruction = isRoadmapSession
       ? `DELIBERATE ROADMAP ERROR CORRECTION PROTOCOL:
 - Catch grammar mistakes and unnatural phrasing for each practice task.
-- Call 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid, moreNatural, short explanation, and highlightWords.
-- Spoken delivery: Explain kindly, model the correct English phrase, and ask the student to repeat it aloud (say "Try saying that once: '[natural phrase]'").
+- Call 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid (the exact mistaken phrase or clause), moreNatural, short explanation, and highlightWords.
+- Spoken delivery: Explain kindly, model the correct English phrase with the contrast anchor, and ask the student to repeat it aloud (say "Instead of '[studentSaid]', try saying: '[moreNatural]'").
 - STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step until the student repeats the phrase!
 - Only after they repeat: praise them warmly, and prompt the next step.`
       : (correctionMode === 'let_me_speak'
@@ -1332,13 +1332,13 @@ ${memoryPart}`;
               ? `AI SUGGESTIONS & FEEDBACK TOOLS (ACTIVE - 'CORRECT INSTANTLY' MODE):
 - The student selected 'Correct Me Instantly' mode for real-time active feedback.
 - ACTIVE CORRECTIONS: Call 'show_grammar_correction' or 'show_rephrase_suggestion' as a FUNCTION CALL whenever the student makes any grammatical mistake or awkward phrasing.
-- In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in English), highlightWords.
-- Spoken delivery (after tool response): In a SINGLE continuous turn, verbally model the corrected English phrase aloud ("You can say: '[moreNatural]'"), and immediately continue the conversation with your next engaging practice question.`
+- In tool call supply: studentSaid (the specific mistaken clause, not an ambiguous word), moreNatural, explanation (1 short friendly sentence in English), highlightWords.
+- Spoken delivery (after tool response): In a SINGLE continuous turn, verbally anchor the correction so the student knows what was wrong: say "Instead of '[studentSaid]', you can say: '[moreNatural]'!" (or "Rather than '[studentSaid]', we say: '[moreNatural]'!"), and immediately continue the conversation with your next engaging practice question. If the student spoke a compound or run-on sentence with multiple clauses, cite ONLY their specific mistaken phrase in '[studentSaid]'.`
               : `AI SUGGESTIONS & FEEDBACK TOOLS (BALANCED - 'KEEP ME ON TRACK' MODE):
 - MANDATORY: When noticing a noticeable grammar error, call the tool ('show_grammar_correction' or 'show_rephrase_suggestion') as a FUNCTION CALL FIRST. Never speak feedback directly without calling the tool first.
-- In tool call supply: studentSaid, moreNatural, explanation (1 short friendly sentence in English), highlightWords.
+- In tool call supply: studentSaid (the specific mistaken clause, not an ambiguous word), moreNatural, explanation (1 short friendly sentence in English), highlightWords.
 - Pacing: At most 1 tool every 3-4 turns. Prioritize noticeable grammar mistakes over minor rephrasing.
-- Spoken delivery (after tool response): In a SINGLE continuous turn, verbally model the corrected English phrase aloud ("You can say: '[moreNatural]'"), and immediately continue the conversation with your next engaging practice question. Never pause or stop without asking your next question.`));
+- Spoken delivery (after tool response): In a SINGLE continuous turn, verbally anchor the correction so the student knows what was wrong: say "Instead of '[studentSaid]', you can say: '[moreNatural]'!" (or "Rather than '[studentSaid]', we say: '[moreNatural]'!"), and immediately continue the conversation with your next engaging practice question. If the student spoke a compound or run-on sentence with multiple clauses, cite ONLY their specific mistaken phrase in '[studentSaid]'.`));
 
     const selectedVoiceEnglish = this.getVoiceForSession(dto);
     const acousticGuardrailsEnglish = this.getAcousticAndVocalGuardrails(selectedVoiceEnglish);
@@ -1514,11 +1514,11 @@ ${memoryPart}`;
               properties: {
                 studentSaid: {
                   type: 'STRING',
-                  description: 'The student phrase containing the grammar mistake',
+                  description: 'The specific student phrase or clause containing the mistake (e.g. "done my works good" ). If the student spoke a long sentence with multiple clauses, isolate the specific clause being corrected so the student knows exactly what is being fixed.',
                 },
                 moreNatural: {
                   type: 'STRING',
-                  description: 'The grammatically corrected phrasing',
+                  description: 'The grammatically corrected phrasing that directly replaces studentSaid (e.g. "I completed my work well" ).',
                 },
                 explanation: {
                   type: 'STRING',
@@ -1544,11 +1544,11 @@ ${memoryPart}`;
               properties: {
                 studentSaid: {
                   type: 'STRING',
-                  description: 'The phrase spoken by the student',
+                  description: 'The specific student phrase or clause that could sound more natural. If the student spoke a long sentence with multiple clauses, isolate the specific clause being improved.',
                 },
                 moreNatural: {
                   type: 'STRING',
-                  description: 'More natural native-sounding phrasing',
+                  description: 'The natural native-sounding phrasing that directly replaces studentSaid.',
                 },
                 explanation: {
                   type: 'STRING',
@@ -1651,11 +1651,11 @@ ${memoryPart}`;
             properties: {
               studentSaid: {
                 type: 'STRING',
-                description: 'The student phrase containing the grammar mistake',
+                description: 'The specific student phrase or clause containing the mistake (e.g. "done my works good"). If the student spoke a long sentence with multiple clauses, isolate the specific clause being corrected so the student knows exactly what is being fixed.',
               },
               moreNatural: {
                 type: 'STRING',
-                description: 'The grammatically corrected phrasing',
+                description: 'The grammatically corrected phrasing that directly replaces studentSaid (e.g. "I completed my work well" ).',
               },
               explanation: {
                 type: 'STRING',
@@ -1681,11 +1681,11 @@ ${memoryPart}`;
             properties: {
               studentSaid: {
                 type: 'STRING',
-                description: 'The student phrase that could sound more natural',
+                description: 'The specific student phrase or clause that could sound more natural. If the student spoke a long sentence with multiple clauses, isolate the specific clause being improved.',
               },
               moreNatural: {
                 type: 'STRING',
-                description: 'The more natural phrasing',
+                description: 'The natural native-sounding phrasing that directly replaces studentSaid.',
               },
               explanation: {
                 type: 'STRING',
