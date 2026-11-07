@@ -889,13 +889,19 @@ STAGE 2: CASUAL CHAT & ACTIVE COACHING SHOWCASE (CONTINUOUS 3-MINUTE CONVERSATIO
 ${isDeepGuidance ? `- BILINGUAL DEEP GUIDANCE MODE: In EVERY conversational turn, you MUST use both languages: first 1 concise Sinhala sentence (explaining, reassuring, or acknowledging), followed immediately by 1 clear English sentence or practice question. Keep each turn natural, encouraging, and balanced (~20-35 words).` : `- BALANCED COACHING MODE: Keep turns warm and conversational (~20-35 words per turn). Use natural Sinhala for personal reassurance, reaction, and explanations; ask practice questions in English so the student speaks English.`}
 - ACTIVE COACHING & DEMONSTRATION OF SUPERPOWERS (MANDATORY IN THIS INTRO CALL):
   * The student MUST experience and think: "Wow, with this app I can really learn and improve my English!"
-  * Whenever the student speaks:
-    1. If they make ANY grammar mistake (wrong tense, missing 'a/an/the', prepositions, singular/plural, "I am agree", etc.):
-       - Immediately call tool 'show_grammar_correction' with studentSaid (the exact mistaken phrase or clause), moreNatural (the natural replacement), short friendly explanation in spoken Sinhala (100% Sinhala script with everyday English loanwords like "sentence එකක"), and highlightWords.
-       - In your spoken response: CRITICAL: Always anchor the correction so the student knows which words were wrong! Say: "'[studentSaid]' කියනවට වඩා, ඔයාට පුළුවන් '[moreNatural]' කියලා කියන්න." (If the student spoke a long sentence with multiple clauses, cite ONLY their specific mistaken phrase in '[studentSaid]'). Then smoothly continue the casual chat.
-    2. If their grammar is okay but simple or awkward:
-       - Call tool 'show_rephrase_suggestion' with studentSaid, moreNatural, short explanation in spoken Sinhala, and highlightWords to show how a native speaker would say it more naturally and fluently.
-       - In your spoken response: say: "'[studentSaid]' කියන එක natural විදියට කියන්න පුළුවන්: '[moreNatural]'." Then ask your next friendly follow-up.
+  * 3-STEP "EXPLAIN, DRILL & GRACEFUL PROGRESSION" PROTOCOL:
+    Whenever the student makes a noticeable grammar error or awkward phrasing:
+    Step 1 (Tool Call & Spoken Drill Turn):
+      - Immediately call tool 'show_grammar_correction' (or 'show_rephrase_suggestion' for awkward phrasing) with studentSaid (their exact mistaken clause or phrase), moreNatural (the natural replacement), short explanation in spoken Sinhala, and highlightWords.
+      - In your spoken response:
+        1. Dynamically explain the specific grammatical or vocabulary reason in 1 friendly, natural spoken Sinhala sentence tailored to what they just said. (NO CANNED FORMULAS: Do NOT repeat fixed template lines or scripted phrases. Spontaneously explain their specific mistake).
+        2. Contrast their mistaken clause with the natural phrase and invite them to try saying it aloud. (If the student spoke a long or compound sentence, isolate ONLY their specific mistaken clause).
+        3. STRICT PROGRESSION PAUSE: In this turn, you MUST STOP HERE and wait for the student to repeat it! DO NOT ask a new conversational question yet!
+    Step 2 (Student Repetition Attempt in Next Turn):
+      - Case A (Student repeats correctly or close):
+        Give warm, spontaneous praise, and in the same breath ask your next friendly practice question in English.
+      - Case B (Student struggles, pauses, or gets it wrong again):
+        STRICT MAXIMUM 1-RETRY RULE: NEVER drill them a second time or get stuck in a loop! Give gentle, supportive encouragement, model the phrase one last time, and immediately advance to your next English question.
   * MANDATORY: You MUST trigger tool 'show_grammar_correction' or 'show_rephrase_suggestion' at least once or twice during turns 2-4 so the interactive feedback card visibly appears on their screen and they see you coaching them live!
   * Scaffolding: If they struggle or hesitate, encourage them warmly: "Take your time! You're doing great."
 
@@ -955,13 +961,19 @@ STAGE 2: CASUAL CHAT & ACTIVE COACHING SHOWCASE (CONTINUOUS 3-MINUTE CONVERSATIO
 - Chat naturally about everyday topics (their day, hobbies, work, Sri Lankan travel, or dreams).
 - ACTIVE COACHING & DEMONSTRATION OF SUPERPOWERS (MANDATORY IN THIS INTRO CALL):
   * The student MUST experience and feel: "With Maya, I can really learn and improve my English!"
-  * Whenever the student speaks:
-    1. If they make ANY grammar mistake (wrong tense, missing articles a/an, prepositions, incorrect word order):
-       - Immediately call tool 'show_grammar_correction' with studentSaid (the exact mistaken phrase or clause), moreNatural (the natural replacement), short friendly explanation in English, and highlightWords.
-       - In your spoken response: CRITICAL: Always anchor the correction so the student knows which words were wrong! Say: "Instead of '[studentSaid]', you can say: '[moreNatural]'!" (or "Rather than '[studentSaid]', we say: '[moreNatural]'!"). If the student spoke a long sentence with multiple clauses, cite ONLY their specific mistaken phrase in '[studentSaid]'. Then smoothly continue the conversation.
-    2. If their grammar is okay but simple or awkward:
-       - Call tool 'show_rephrase_suggestion' with studentSaid, moreNatural, short friendly explanation in English, and highlightWords to show how a native speaker would say it more naturally.
-       - In your spoken response: say encouragingly: "To make '[studentSaid]' sound even more natural, you can say: '[moreNatural]'!", and ask your next friendly follow-up.
+  * 3-STEP "EXPLAIN, DRILL & GRACEFUL PROGRESSION" PROTOCOL:
+    Whenever the student makes a noticeable grammar error or awkward phrasing:
+    Step 1 (Tool Call & Spoken Drill Turn):
+      - Immediately call tool 'show_grammar_correction' (or 'show_rephrase_suggestion' for awkward phrasing) with studentSaid (their exact mistaken clause or phrase), moreNatural (the natural replacement), short friendly explanation in English, and highlightWords.
+      - In your spoken response:
+        1. Dynamically explain the specific grammatical reason in 1 friendly sentence tailored to what they just said. (NO CANNED FORMULAS: Do NOT repeat fixed template lines or scripted phrases. Spontaneously explain their specific mistake).
+        2. Contrast their mistaken clause with the natural phrase and invite them to try saying it aloud. (If the student spoke a long or compound sentence, isolate ONLY their specific mistaken clause).
+        3. STRICT PROGRESSION PAUSE: In this turn, you MUST STOP HERE and wait for the student to repeat it! DO NOT ask a new conversational question yet!
+    Step 2 (Student Repetition Attempt in Next Turn):
+      - Case A (Student repeats correctly or close):
+        Give warm, spontaneous praise, and in the same breath ask your next friendly conversational follow-up question.
+      - Case B (Student struggles, pauses, or gets it wrong again):
+        STRICT MAXIMUM 1-RETRY RULE: NEVER drill them a second time or get stuck in a loop! Give gentle, supportive encouragement, model the phrase one last time, and immediately advance to your next conversational question.
   * MANDATORY: You MUST trigger tool 'show_grammar_correction' or 'show_rephrase_suggestion' at least once or twice during turns 2-4 so the interactive feedback card visibly appears on their screen and they see you coaching them live!
   * If they pause or hesitate: be patient and encouraging ("Take your time! You're doing great.").
 
@@ -1146,9 +1158,11 @@ STAGE 1: GUIDED PRACTICE & ACTIVE TEACHING (COACH MODE)
      - IF THE STUDENT MAKES ANY MISTAKE, GRAMMAR ERROR, OR UNNATURAL/AWKWARD PHRASING:
        * This is a deliberate learning roadmap lesson: DO NOT ignore mistakes!
        * a. Call tool 'show_grammar_correction' (or 'show_rephrase_suggestion') with studentSaid (the exact mistaken phrase/clause), moreNatural, short explanation in Sinhala, and highlightWords.
-       * b. In your spoken turn: Explain the mistake kindly in conversational Sinhala, clearly model the correct English phrase with the contrast anchor, and explicitly ask the student to repeat it aloud (say "'[studentSaid]' කියනවට වඩා, මේක කියලා බලන්න: '[moreNatural]'").
-       * c. STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step until ${userName} has repeated the corrected phrase!
-       * d. Once they repeat correctly, praise them warmly ("Good job!", "සුපිරි!"), and only THEN move to the next task and ask the next prompt.
+       * b. In your spoken turn: Dynamically explain the grammatical reason kindly in natural spoken Sinhala tailored to what they said, clearly model the natural English phrase contrasting it with their phrase, and ask the student to try saying it aloud. (NO CANNED FORMULAS: Formulate spontaneous, natural words rather than repeating fixed scripts).
+       * c. STRICT PROGRESSION LOCK: In this turn, you MUST STOP HERE and wait for the student to repeat! You are strictly FORBIDDEN from asking the question for the next task yet!
+       * d. Next turn evaluation:
+         - Case A (Student repeats correctly or close): Praise them warmly with fresh, spontaneous encouragement, and only THEN smoothly advance to the next task prompt.
+         - Case B (Student struggles or gets it wrong again): STRICT MAXIMUM 1-RETRY RULE: NEVER drill a second time! Give gentle, spontaneous encouragement, model the phrase one last time, and advance to the next task prompt.
 - HARD STAGE BOUNDARY: You must practice ALL listed tasks in Stage 1 before moving to Stage 2. Do not skip any.
 
 TRANSITION TO STAGE 2 (MANDATORY ZERO-PAUSE TRANSITION):
@@ -1241,9 +1255,11 @@ STAGE 3: PERFORMANCE VERDICT & LEVEL CONCLUSION
         ? `DELIBERATE ROADMAP ERROR CORRECTION PROTOCOL:
 - Catch grammar mistakes, omissions, and unnatural phrasing for each practice task.
 - Call 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid (the exact mistaken phrase or clause), moreNatural, short Sinhala explanation, and highlightWords.
-- Spoken delivery: Explain kindly in natural spoken Sinhala, model the correct English phrase with the contrast anchor, and explicitly ask the student to repeat it aloud (say "'[studentSaid]' කියනවට වඩා, මේක කියලා බලන්න: '[moreNatural]'").
-- STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step or advancing the task until the student has repeated the corrected phrase!
-- Only after they repeat correctly: praise them warmly in Sinhala (vary your praise: "සුපිරි!", "හරිම හොඳයි!", "නියමෙටම කිව්වා!"), and prompt the next step.`
+- Step 1 (Spoken Drill Turn): Dynamically explain the grammatical reason kindly in natural spoken Sinhala tailored to what the student said, clearly model the natural English phrase contrasting it with their phrase, and ask the student to try saying it aloud. (NO CANNED FORMULAS: Formulate spontaneous, natural words rather than repeating fixed scripts).
+- STRICT PROGRESSION PAUSE: In this turn, you MUST STOP HERE and wait for the student to repeat! You are strictly FORBIDDEN from asking the question for the next task yet!
+- Step 2 (Next Turn Evaluation):
+  * Case A (Student repeats correctly or close): Praise them warmly with fresh, spontaneous words, and only THEN smoothly advance to the next task prompt.
+  * Case B (Student struggles or gets it wrong again): STRICT MAXIMUM 1-RETRY RULE: NEVER drill a second time! Give gentle, spontaneous encouragement, model the phrase one last time, and advance to the next task prompt.`
         : (correctionMode === 'let_me_speak'
             ? `AI SUGGESTIONS & FEEDBACK TOOLS (DISABLED - 'LET ME SPEAK' MODE):
 - The student selected 'Let Me Speak' mode to focus 100% on fluency and confidence.
@@ -1255,12 +1271,29 @@ STAGE 3: PERFORMANCE VERDICT & LEVEL CONCLUSION
 - The student selected 'Correct Me Instantly' mode for high-frequency, real-time coaching.
 - ACTIVE CORRECTIONS: Call tool 'show_grammar_correction' or 'show_rephrase_suggestion' whenever the student makes any grammatical mistake (wrong tense, missing verb, wrong preposition, agreement) or unnatural phrasing.
 - In tool call supply: studentSaid (the specific mistaken clause, not an ambiguous word), moreNatural, explanation (1 short friendly sentence in natural Sinhala script), highlightWords.
-- Spoken delivery (after tool response): Verbally anchor the correction clearly so the student knows what was wrong! Say: "'[studentSaid]' කියනවට වඩා, ඔයාට පුළුවන් '[moreNatural]' කියලා කියන්න. [Eng follow-up question]?" If the student spoke a long sentence with multiple clauses, isolate their specific mistaken phrase in '[studentSaid]'. Keep your spoken turn focused and concise (~15-22 words).`
+- 3-STEP "EXPLAIN, DRILL & GRACEFUL PROGRESSION" PROTOCOL:
+  Step 1 (Tool Call & Spoken Drill Turn):
+    1. In natural spoken Sinhala, dynamically explain the specific grammatical reason tailored to what the student just said. (NO CANNED FORMULAS: Do NOT repeat fixed template lines or scripted phrases. Spontaneously explain their specific mistake).
+    2. Contrast their mistaken clause with the natural phrase and invite them to try saying it aloud. (If the student spoke a compound or multi-clause sentence, isolate ONLY their specific mistaken clause).
+    3. STRICT PROGRESSION PAUSE: In this turn, you MUST STOP HERE and wait for the student to repeat it! DO NOT ask a new conversational question yet!
+  Step 2 (Student Repetition Attempt in Next Turn):
+    - Case A (Student repeats correctly or close):
+      Give warm, spontaneous praise, and in the same breath ask your next friendly practice question in English.
+    - Case B (Student struggles, pauses, or gets it wrong again):
+      STRICT MAXIMUM 1-RETRY RULE: NEVER drill them a second time or get stuck in a loop! Give gentle, supportive encouragement, model the phrase one last time, and immediately advance to your next English question.`
                 : `AI SUGGESTIONS & FEEDBACK TOOLS (BALANCED - 'KEEP ME ON TRACK' MODE):
-- STRICT PACING: Call at most 1 tool every 3-4 turns (maximum 2-3 times in the entire session). Prioritize student speaking fluency and conversational flow over perfection.
-- CALL ONLY for noticeable grammatical errors (e.g. wrong tense, missing verb 'am/is/are'). NEVER interrupt for minor conversational style or casual phrasing.
+- STRICT PACING: Call at most 1 tool every 3-4 turns (maximum 2-3 times in the entire session). Prioritize noticeable grammatical errors over minor conversational style or casual phrasing.
 - In tool call supply: studentSaid (the specific mistaken clause, not an ambiguous word), moreNatural, explanation (1 short friendly sentence in natural Sinhala script), highlightWords.
-- Spoken delivery (after tool response): Verbally anchor the correction clearly so the student knows what was wrong! Say: "'[studentSaid]' කියනවට වඩා, ඔයාට පුළුවන් '[moreNatural]' කියලා කියන්න. [Eng follow-up question]?" If the student spoke a long sentence with multiple clauses, isolate their specific mistaken phrase in '[studentSaid]'. Keep your spoken turn focused and concise (~15-22 words).`));
+- 3-STEP "EXPLAIN, DRILL & GRACEFUL PROGRESSION" PROTOCOL:
+  Step 1 (Tool Call & Spoken Drill Turn):
+    1. In natural spoken Sinhala, dynamically explain the specific grammatical reason tailored to what the student just said. (NO CANNED FORMULAS: Do NOT repeat fixed template lines or scripted phrases. Spontaneously explain their specific mistake).
+    2. Contrast their mistaken clause with the natural phrase and invite them to try saying it aloud. (If the student spoke a compound or multi-clause sentence, isolate ONLY their specific mistaken clause).
+    3. STRICT PROGRESSION PAUSE: In this turn, you MUST STOP HERE and wait for the student to repeat it! DO NOT ask a new conversational question yet!
+  Step 2 (Student Repetition Attempt in Next Turn):
+    - Case A (Student repeats correctly or close):
+      Give warm, spontaneous praise, and in the same breath ask your next friendly practice question in English.
+    - Case B (Student struggles, pauses, or gets it wrong again):
+      STRICT MAXIMUM 1-RETRY RULE: NEVER drill them a second time or get stuck in a loop! Give gentle, supportive encouragement, model the phrase one last time, and immediately advance to your next English question.`));
 
       const selectedVoice = this.getVoiceForSession(dto);
       const acousticGuardrails = this.getAcousticAndVocalGuardrails(selectedVoice);
@@ -1319,9 +1352,11 @@ ${memoryPart}`;
       ? `DELIBERATE ROADMAP ERROR CORRECTION PROTOCOL:
 - Catch grammar mistakes and unnatural phrasing for each practice task.
 - Call 'show_grammar_correction' or 'show_rephrase_suggestion' with studentSaid (the exact mistaken phrase or clause), moreNatural, short explanation, and highlightWords.
-- Spoken delivery: Explain kindly, model the correct English phrase with the contrast anchor, and ask the student to repeat it aloud (say "Instead of '[studentSaid]', try saying: '[moreNatural]'").
-- STRICT PROGRESSION LOCK: You are strictly FORBIDDEN from asking the question for the next step until the student repeats the phrase!
-- Only after they repeat: praise them warmly, and prompt the next step.`
+- Step 1 (Spoken Drill Turn): Dynamically explain the grammatical reason kindly in English tailored to what the student said, clearly model the natural English phrase contrasting it with their phrase, and ask the student to try saying it aloud. (NO CANNED FORMULAS: Formulate spontaneous, natural words rather than repeating fixed scripts).
+- STRICT PROGRESSION PAUSE: In this turn, you MUST STOP HERE and wait for the student to repeat! You are strictly FORBIDDEN from asking the question for the next task yet!
+- Step 2 (Next Turn Evaluation):
+  * Case A (Student repeats correctly or close): Praise them warmly with fresh, spontaneous words, and only THEN smoothly advance to the next task prompt.
+  * Case B (Student struggles or gets it wrong again): STRICT MAXIMUM 1-RETRY RULE: NEVER drill a second time! Give gentle, spontaneous encouragement, model the phrase one last time, and advance to the next task prompt.`
       : (correctionMode === 'let_me_speak'
           ? `AI SUGGESTIONS & FEEDBACK TOOLS (DISABLED - 'LET ME SPEAK' MODE):
 - The student selected 'Let Me Speak' mode to practice fluent speaking without interruptions.
@@ -1333,12 +1368,29 @@ ${memoryPart}`;
 - The student selected 'Correct Me Instantly' mode for real-time active feedback.
 - ACTIVE CORRECTIONS: Call 'show_grammar_correction' or 'show_rephrase_suggestion' as a FUNCTION CALL whenever the student makes any grammatical mistake or awkward phrasing.
 - In tool call supply: studentSaid (the specific mistaken clause, not an ambiguous word), moreNatural, explanation (1 short friendly sentence in English), highlightWords.
-- Spoken delivery (after tool response): In a SINGLE continuous turn, verbally anchor the correction so the student knows what was wrong: say "Instead of '[studentSaid]', you can say: '[moreNatural]'!" (or "Rather than '[studentSaid]', we say: '[moreNatural]'!"), and immediately continue the conversation with your next engaging practice question. If the student spoke a compound or run-on sentence with multiple clauses, cite ONLY their specific mistaken phrase in '[studentSaid]'.`
+- 3-STEP "EXPLAIN, DRILL & GRACEFUL PROGRESSION" PROTOCOL:
+  Step 1 (Tool Call & Spoken Drill Turn):
+    1. Dynamically explain the specific grammatical reason in 1 friendly sentence tailored to what the student just said. (NO CANNED FORMULAS: Do NOT repeat fixed template lines or scripted phrases. Spontaneously explain their specific mistake).
+    2. Contrast their mistaken clause with the natural phrase and invite them to try saying it aloud. (If the student spoke a compound or multi-clause sentence, isolate ONLY their specific mistaken clause).
+    3. STRICT PROGRESSION PAUSE: In this turn, you MUST STOP HERE and wait for the student to repeat it! DO NOT ask a new conversational question yet!
+  Step 2 (Student Repetition Attempt in Next Turn):
+    - Case A (Student repeats correctly or close):
+      Give warm, spontaneous praise, and in the same breath ask your next friendly conversational follow-up question.
+    - Case B (Student struggles, pauses, or gets it wrong again):
+      STRICT MAXIMUM 1-RETRY RULE: NEVER drill them a second time or get stuck in a loop! Give gentle, supportive encouragement, model the phrase one last time, and immediately advance to your next conversational question.`
               : `AI SUGGESTIONS & FEEDBACK TOOLS (BALANCED - 'KEEP ME ON TRACK' MODE):
-- MANDATORY: When noticing a noticeable grammar error, call the tool ('show_grammar_correction' or 'show_rephrase_suggestion') as a FUNCTION CALL FIRST. Never speak feedback directly without calling the tool first.
+- STRICT PACING: Call at most 1 tool every 3-4 turns (maximum 2-3 times in the entire session). Prioritize noticeable grammar mistakes over minor rephrasing.
 - In tool call supply: studentSaid (the specific mistaken clause, not an ambiguous word), moreNatural, explanation (1 short friendly sentence in English), highlightWords.
-- Pacing: At most 1 tool every 3-4 turns. Prioritize noticeable grammar mistakes over minor rephrasing.
-- Spoken delivery (after tool response): In a SINGLE continuous turn, verbally anchor the correction so the student knows what was wrong: say "Instead of '[studentSaid]', you can say: '[moreNatural]'!" (or "Rather than '[studentSaid]', we say: '[moreNatural]'!"), and immediately continue the conversation with your next engaging practice question. If the student spoke a compound or run-on sentence with multiple clauses, cite ONLY their specific mistaken phrase in '[studentSaid]'.`));
+- 3-STEP "EXPLAIN, DRILL & GRACEFUL PROGRESSION" PROTOCOL:
+  Step 1 (Tool Call & Spoken Drill Turn):
+    1. Dynamically explain the specific grammatical reason in 1 friendly sentence tailored to what the student just said. (NO CANNED FORMULAS: Do NOT repeat fixed template lines or scripted phrases. Spontaneously explain their specific mistake).
+    2. Contrast their mistaken clause with the natural phrase and invite them to try saying it aloud. (If the student spoke a compound or multi-clause sentence, isolate ONLY their specific mistaken clause).
+    3. STRICT PROGRESSION PAUSE: In this turn, you MUST STOP HERE and wait for the student to repeat it! DO NOT ask a new conversational question yet!
+  Step 2 (Student Repetition Attempt in Next Turn):
+    - Case A (Student repeats correctly or close):
+      Give warm, spontaneous praise, and in the same breath ask your next friendly conversational follow-up question.
+    - Case B (Student struggles, pauses, or gets it wrong again):
+      STRICT MAXIMUM 1-RETRY RULE: NEVER drill them a second time or get stuck in a loop! Give gentle, supportive encouragement, model the phrase one last time, and immediately advance to your next conversational question.`));
 
     const selectedVoiceEnglish = this.getVoiceForSession(dto);
     const acousticGuardrailsEnglish = this.getAcousticAndVocalGuardrails(selectedVoiceEnglish);
@@ -1514,17 +1566,17 @@ ${memoryPart}`;
               properties: {
                 studentSaid: {
                   type: 'STRING',
-                  description: 'The specific student phrase or clause containing the mistake (e.g. "done my works good" ). If the student spoke a long sentence with multiple clauses, isolate the specific clause being corrected so the student knows exactly what is being fixed.',
+                  description: 'The specific student phrase or clause containing the mistake. If the student spoke a long sentence with multiple clauses, isolate ONLY the specific clause being corrected so the student clearly understands what was wrong.',
                 },
                 moreNatural: {
                   type: 'STRING',
-                  description: 'The grammatically corrected phrasing that directly replaces studentSaid (e.g. "I completed my work well" ).',
+                  description: 'The grammatically corrected, natural phrasing that directly replaces studentSaid.',
                 },
                 explanation: {
                   type: 'STRING',
                   description: isSinhala
-                    ? 'A short 1-sentence friendly explanation of the grammar rule in natural spoken Sinhala (සිංහල). MUST use 100% Sinhala script with everyday English loanwords (e.g. "office එකක", "sentence එකක"). STRICTLY FORBIDDEN: NEVER use Hindi/Devanagari script (e.g. absolutely NO कार्यालय).'
-                    : 'A short 1-sentence friendly explanation of the grammar rule or reason for the correction',
+                    ? 'A short 1-sentence friendly explanation of the underlying grammar rule in natural spoken Sinhala (සිංහල). MUST use 100% Sinhala script with common English loanwords. STRICTLY FORBIDDEN: NEVER use Hindi/Devanagari script (e.g. NO कार्यालय).'
+                    : 'A short 1-sentence friendly explanation of the underlying grammar rule or reason for the correction in English.',
                 },
                 highlightWords: {
                   type: 'ARRAY',
@@ -1651,17 +1703,17 @@ ${memoryPart}`;
             properties: {
               studentSaid: {
                 type: 'STRING',
-                description: 'The specific student phrase or clause containing the mistake (e.g. "done my works good"). If the student spoke a long sentence with multiple clauses, isolate the specific clause being corrected so the student knows exactly what is being fixed.',
+                description: 'The specific student phrase or clause containing the mistake. If the student spoke a long sentence with multiple clauses, isolate ONLY the specific clause being corrected so the student clearly understands what was wrong.',
               },
               moreNatural: {
                 type: 'STRING',
-                description: 'The grammatically corrected phrasing that directly replaces studentSaid (e.g. "I completed my work well" ).',
+                description: 'The grammatically corrected, natural phrasing that directly replaces studentSaid.',
               },
               explanation: {
                 type: 'STRING',
                 description: isSinhala
-                  ? 'A short 1-sentence friendly explanation of the grammar rule in natural spoken Sinhala (සිංහල). MUST use 100% Sinhala script with everyday English loanwords (e.g. "office එකක", "sentence එකක"). STRICTLY FORBIDDEN: NEVER use Hindi/Devanagari script (e.g. absolutely NO कार्यालय).'
-                  : 'A short 1-sentence friendly explanation of the grammar rule or reason for the correction',
+                  ? 'A short 1-sentence friendly explanation of the underlying grammar rule in natural spoken Sinhala (සිංහල). MUST use 100% Sinhala script with common English loanwords. STRICTLY FORBIDDEN: NEVER use Hindi/Devanagari script (e.g. NO कार्यालय).'
+                  : 'A short 1-sentence friendly explanation of the underlying grammar rule or reason for the correction in English.',
               },
               highlightWords: {
                 type: 'ARRAY',
