@@ -669,9 +669,9 @@ export class LiveTransport implements ILiveTransport {
                 result: 'displayed_to_student',
                 instruction: isSinhala
                   ? isDeepGuidance
-                    ? `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "ඔයාට පුළුවන් '${shortKeyPhrase}' කියලා කියන්න", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
-                    : `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "ඔයාට පුළුවන් '${shortKeyPhrase}' කියලා කියන්න"), and immediately ask your next short English question. Total turn strictly under 12 words.`
-                  : `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`,
+                    ? `Correction card displayed to student. Follow the 3-step protocol: First briefly explain why in spoken Sinhala (${rawExplanation}), model the natural English phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`
+                    : `Correction card displayed to student. Follow the 3-step protocol: First briefly explain why in spoken Sinhala (${rawExplanation}), model the natural English phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`
+                  : `Correction card displayed to student. Follow the 3-step protocol: First briefly explain why (${rawExplanation}), model the natural English phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`,
               },
             });
             console.log(`[${getLogTimestamp()}] 📤 [Tool Response Queued]: Queued response for show_grammar_correction`);
@@ -698,9 +698,15 @@ export class LiveTransport implements ILiveTransport {
                 result: 'displayed_to_student',
                 instruction: isSinhala
                   ? isDeepGuidance
-                    ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${shortKeyPhrase}' කියලා කියන්න පුළුවන්", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
-                    : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${shortKeyPhrase}' කියලා කියන්න පුළුවන්"), and immediately ask your next short English question. Total turn strictly under 12 words.`
-                  : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`,
+                    ? (shortKeyPhrase
+                        ? `Rephrase card displayed to student. Follow the 3-step protocol: First briefly explain why in spoken Sinhala (${rawExplanation}), model the natural English phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`
+                        : `Rephrase card displayed to student. Briefly explain why in spoken Sinhala (${rawExplanation}) and ask your next question.`)
+                    : (shortKeyPhrase
+                        ? `Rephrase card displayed to student. Follow the 3-step protocol: First briefly explain why in spoken Sinhala (${rawExplanation}), model the natural English phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`
+                        : `Rephrase card displayed to student. Briefly explain why in spoken Sinhala (${rawExplanation}) and ask your next question.`)
+                  : (shortKeyPhrase
+                      ? `Rephrase card displayed to student. Follow the 3-step protocol: First briefly explain why (${rawExplanation}), model the natural English phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`
+                      : `Rephrase card displayed to student. Briefly explain why (${rawExplanation}) and ask your next question.`),
               },
             });
             console.log(`[${getLogTimestamp()}] 📤 [Tool Response Queued]: Queued response for show_rephrase_suggestion`);

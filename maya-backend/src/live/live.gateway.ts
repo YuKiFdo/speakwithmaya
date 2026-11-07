@@ -1812,14 +1812,14 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
           if (isRoadmap) {
             instruction = isSinhala
-              ? `Correction card displayed to student. In friendly spoken Sinhala: explain why it was wrong, model the correct English phrase "${shortKeyPhrase}", and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '${shortKeyPhrase}'"). STRICTLY DO NOT ask your next question yet. DO NOT advance to the next step. Wait for the student to repeat.`
-              : `Correction card displayed to student. Verbally explain the correction, model the correct phrase "${shortKeyPhrase}", and explicitly ask the student to repeat it aloud (say "Try saying: '${shortKeyPhrase}'"). DO NOT ask your next question yet. Wait for the student to repeat.`;
+              ? `Correction card displayed to student. In natural spoken Sinhala: explain why it was wrong, model the natural English phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. STRICTLY DO NOT ask your next question yet. DO NOT advance to the next step. Wait for the student to repeat.`
+              : `Correction card displayed to student. Explain why it was wrong, model the natural phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. STRICTLY DO NOT ask your next question yet. Wait for the student to repeat.`;
           } else {
             instruction = isSinhala
               ? isDeepGuidance
-                ? `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "ඔයාට පුළුවන් '${shortKeyPhrase}' කියලා කියන්න", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
-                : `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "ඔයාට පුළුවන් '${shortKeyPhrase}' කියලා කියන්න"), and immediately ask your next short English question. Total turn strictly under 12 words.`
-              : `Correction card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short corrected key phrase (say "You can say: '${shortKeyPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`;
+                ? `Correction card displayed to student. Follow the 3-step protocol: First briefly explain why in spoken Sinhala (${rawExplanation}), model the natural English phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`
+                : `Correction card displayed to student. Follow the 3-step protocol: First briefly explain why in spoken Sinhala (${rawExplanation}), model the natural English phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`
+              : `Correction card displayed to student. Follow the 3-step protocol: First briefly explain why (${rawExplanation}), model the natural English phrase "${shortKeyPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`;
           }
 
           functionResponses.push({
@@ -1866,20 +1866,20 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const spokenPhrase = shortKeyPhrase || rawMoreNatural;
           if (isRoadmap) {
             instruction = isSinhala
-              ? `Rephrase card displayed to student. In friendly spoken Sinhala: explain why this phrasing is more natural, model the natural phrase "${spokenPhrase}", and explicitly ask the student to repeat it aloud (say "මේක කියලා බලන්න: '${spokenPhrase}'"). STRICTLY DO NOT ask your next question yet. DO NOT advance to the next step. Wait for the student to repeat.`
-              : `Rephrase card displayed to student. Verbally model the natural phrase "${spokenPhrase}", and explicitly ask the student to repeat it aloud (say "Try saying: '${spokenPhrase}'"). DO NOT ask your next question yet. Wait for the student to repeat.`;
+              ? `Rephrase card displayed to student. In natural spoken Sinhala: explain why this phrasing is more natural, model the natural phrase "${spokenPhrase}", and invite the student to try saying it aloud. STRICTLY DO NOT ask your next question yet. DO NOT advance to the next step. Wait for the student to repeat.`
+              : `Rephrase card displayed to student. Explain why this is more natural, model the natural phrase "${spokenPhrase}", and invite the student to try saying it aloud. STRICTLY DO NOT ask your next question yet. Wait for the student to repeat.`;
           } else {
             instruction = isSinhala
               ? isDeepGuidance
                 ? (spokenPhrase
-                    ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${spokenPhrase}' කියලා කියන්න පුළුවන්", then "${rawExplanation}"), and immediately ask your next short English question. Total turn strictly under 15 words.`
-                    : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally ask your next short English question. Total turn strictly under 15 words.`)
+                    ? `Rephrase card displayed to student. Follow the 3-step protocol: First briefly explain why in spoken Sinhala (${rawExplanation}), model the natural English phrase "${spokenPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`
+                    : `Rephrase card displayed to student. Briefly explain why in spoken Sinhala (${rawExplanation}) and ask your next question.`)
                 : (spokenPhrase
-                    ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "මේක වඩාත් ස්වාභාවිකව '${spokenPhrase}' කියලා කියන්න පුළුවන්"), and immediately ask your next short English question. Total turn strictly under 12 words.`
-                    : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally ask your next short English question. Total turn strictly under 12 words.`)
+                    ? `Rephrase card displayed to student. Follow the 3-step protocol: First briefly explain why in spoken Sinhala (${rawExplanation}), model the natural English phrase "${spokenPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`
+                    : `Rephrase card displayed to student. Briefly explain why in spoken Sinhala (${rawExplanation}) and ask your next question.`)
               : (spokenPhrase
-                  ? `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally model ONLY the short natural key phrase (say "You can say: '${spokenPhrase}'"), and immediately ask your next short English question. Total turn strictly under 12 words.`
-                  : `Rephrase card displayed to student. In a SINGLE fluid spoken response: verbally ask your next short English question. Total turn strictly under 12 words.`);
+                  ? `Rephrase card displayed to student. Follow the 3-step protocol: First briefly explain why (${rawExplanation}), model the natural English phrase "${spokenPhrase}", and invite the student to try saying it aloud. Stop and wait for the student to repeat. Do NOT ask your next question yet.`
+                  : `Rephrase card displayed to student. Briefly explain why (${rawExplanation}) and ask your next question.`);
           }
 
           functionResponses.push({
