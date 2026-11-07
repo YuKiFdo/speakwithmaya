@@ -5,8 +5,8 @@ declare global {
 }
 
 export type MayaAnalyticsEventName =
-  | 'complete_registration'
-  | 'initiate_checkout'
+  // | 'complete_registration'
+  // | 'initiate_checkout'
   | 'sign_up'
   | 'onboarding_complete'
   | 'view_plan_selection'
@@ -122,11 +122,7 @@ function addToTrackedSet(storageKey: string, memoryFallback: Set<string>, id: st
   }
 }
 
-// ─── User Data Formatting & Persistence (Requirements 1 & 2) ──────────────────
 
-/**
- * Strips formatting and normalizes phone number with country code (e.g. 94771234567).
- */
 export function formatTrackingPhone(phone?: string | null): string {
   if (!phone) return '';
   const digits = String(phone).replace(/\D/g, '');
@@ -142,9 +138,7 @@ export function formatTrackingPhone(phone?: string | null): string {
   return digits;
 }
 
-/**
- * Extracts first name from a full or single display name (e.g. 'John Doe' -> 'John').
- */
+
 export function extractFirstName(name?: string | null): string {
   if (!name) return '';
   const trimmed = String(name).trim();
@@ -152,19 +146,12 @@ export function extractFirstName(name?: string | null): string {
   return trimmed.split(/\s+/)[0] || '';
 }
 
-/**
- * Normalizes email address for consistent tracking matching.
- */
 export function formatTrackingEmail(email?: string | null): string {
   if (!email) return '';
   return String(email).trim().toLowerCase();
 }
 
-/**
- * Persists authenticated user data in localStorage and memory.
- * Immediately pushes `user_data` to window.dataLayer so GTM, GA4, Meta Pixel & CAPI
- * can use the customer information across all subsequent steps and checkout.
- */
+
 export function saveTrackingUserData(data: Partial<TrackingUserData>): TrackingUserData {
   const current = getTrackingUserData();
   const updated: TrackingUserData = {
@@ -181,7 +168,6 @@ export function saveTrackingUserData(data: Partial<TrackingUserData>): TrackingU
       window.localStorage?.setItem(TRACKING_USER_DATA_KEY, JSON.stringify(updated));
     } catch {}
 
-    // Make customer information immediately available to GTM / Stape dataLayer
     window.dataLayer = window.dataLayer || [];
     window.dataLayer.push({
       user_data: updated,
@@ -191,9 +177,7 @@ export function saveTrackingUserData(data: Partial<TrackingUserData>): TrackingU
   return updated;
 }
 
-/**
- * Retrieves the persisted customer data for checkout and purchase tracking.
- */
+
 export function getTrackingUserData(fallback?: Partial<TrackingUserData>): TrackingUserData {
   let stored: Partial<TrackingUserData> = {};
   if (isWebBrowser()) {
@@ -218,9 +202,7 @@ export function getTrackingUserData(fallback?: Partial<TrackingUserData>): Track
   };
 }
 
-/**
- * Strips forbidden credentials (OTPs, passwords, raw card numbers) before pushing to dataLayer.
- */
+
 export function sanitizeDataLayerPayload(
   payload: Record<string, unknown>
 ): Record<string, unknown> {
@@ -233,9 +215,7 @@ export function sanitizeDataLayerPayload(
   return clean;
 }
 
-/**
- * Safely initializes `window.dataLayer` and pushes a sanitized event on Web.
- */
+
 export function pushDataLayerEvent(
   event: MayaAnalyticsEventName,
   params: Record<string, unknown> = {}
@@ -251,9 +231,7 @@ export function pushDataLayerEvent(
   window.dataLayer.push(sanitized);
 }
 
-/**
- * Parses a price string like "LKR 8,640" or "Billed as LKR 8,640 for 3 months" or numeric value into a number.
- */
+
 export function parseLkrAmount(raw: string | number | undefined | null): number {
   if (typeof raw === 'number' && Number.isFinite(raw)) {
     return raw;
@@ -261,7 +239,6 @@ export function parseLkrAmount(raw: string | number | undefined | null): number 
   if (typeof raw !== 'string' || !raw.trim()) {
     return 0;
   }
-  // Extract LKR amount (prefer "Billed as LKR X,XXX" if present, otherwise first number)
   const billedMatch = raw.match(/Billed\s+as\s+LKR\s*([\d,]+(?:\.\d+)?)/i);
   const target = billedMatch ? billedMatch[1] : raw;
   const numMatch = target.match(/([\d,]+(?:\.\d+)?)/);
@@ -270,10 +247,7 @@ export function parseLkrAmount(raw: string | number | undefined | null): number 
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/**
- * Resolves actual `plan_name`, `billing_period`, `value`, and `currency` dynamically
- * from plan definitions, checkout parameters, or server-verified order metadata.
- */
+
 export function resolvePlanAnalyticsDetails(input: {
   planId?: string | null;
   planName?: string | null;
@@ -355,10 +329,7 @@ export function resolvePlanAnalyticsDetails(input: {
   };
 }
 
-/**
- * Persists pending checkout context in sessionStorage before PayHere redirect
- * so `payment_cancelled` and `payment_failed` have accurate plan & order context upon return.
- */
+
 export function savePendingCheckoutContext(
   context: PlanAnalyticsDetails & { transaction_id?: string }
 ): void {
@@ -417,13 +388,7 @@ export function markPurchaseTracked(transactionId: string): void {
   addToTrackedSet(TRACKED_PURCHASES_STORAGE_KEY, memoryTrackedPurchases, transactionId);
 }
 
-// ─── Typed Event Emitters (Requirements 1, 3, 4) ─────────────────────────────
 
-/**
- * 1. Registration Success
- * Pushed ONLY after successful registration API response.
- * Formats: user_id, first_name, email, phone (with country code e.g. 94771234567).
- */
 export function trackCompleteRegistration(data?: {
   userId?: string;
   firstName?: string;
@@ -447,14 +412,12 @@ export function trackCompleteRegistration(data?: {
   if (!isWebBrowser()) return;
   window.dataLayer = window.dataLayer || [];
   window.dataLayer.push({
-    event: 'complete_registration',
+    event: 'sign_up',
     user_data: userData,
   });
 }
 
-/**
- * Legacy alias for trackCompleteRegistration.
- */
+
 export function trackSignUp(options?: {
   userId?: string;
   method?: string;
@@ -470,9 +433,7 @@ export function trackSignUp(options?: {
   });
 }
 
-/**
- * 2. User completes onboarding (`onboarding_complete`)
- */
+
 export function trackOnboardingComplete(userId?: string): void {
   const dedupKey = userId || 'current_user';
   const tracked = readTrackedSet(TRACKED_ONBOARDING_STORAGE_KEY, memoryTrackedOnboarding);
@@ -482,23 +443,17 @@ export function trackOnboardingComplete(userId?: string): void {
   pushDataLayerEvent('onboarding_complete');
 }
 
-/**
- * 3. User views the plan selection screen (`view_plan_selection`)
- */
+
 export function trackViewPlanSelection(): void {
   pushDataLayerEvent('view_plan_selection');
 }
 
-/**
- * 4. User expands and views all available plans (`view_all_plans`)
- */
+
 export function trackViewAllPlans(): void {
   pushDataLayerEvent('view_all_plans');
 }
 
-/**
- * 5. User selects a subscription plan (`select_plan`)
- */
+
 export function trackSelectPlan(plan: PlanAnalyticsDetails): void {
   pushDataLayerEvent('select_plan', {
     plan_name: plan.plan_name,
@@ -508,11 +463,7 @@ export function trackSelectPlan(plan: PlanAnalyticsDetails): void {
   });
 }
 
-/**
- * 6. Initiate Checkout (Requirement 3)
- * When a user starts the Premium subscription checkout process.
- * Pushes event: 'initiate_checkout' with user_data and plan parameters.
- */
+
 export function trackInitiateCheckout(
   plan?: (PlanAnalyticsDetails & { transaction_id?: string }) | null,
   userDataOverride?: Partial<TrackingUserData>
@@ -527,7 +478,7 @@ export function trackInitiateCheckout(
   window.dataLayer = window.dataLayer || [];
 
   window.dataLayer.push({
-    event: 'initiate_checkout',
+    event: 'begin_checkout',
     ...(plan?.plan_name ? { plan_name: plan.plan_name } : {}),
     ...(typeof plan?.value === 'number' ? { value: plan.value, currency: 'LKR' } : {}),
     ...(plan?.billing_period ? { billing_period: plan.billing_period } : {}),
@@ -536,9 +487,7 @@ export function trackInitiateCheckout(
   });
 }
 
-/**
- * Alias for trackInitiateCheckout (for backward compatibility).
- */
+
 export function trackBeginCheckout(
   plan: PlanAnalyticsDetails & { transaction_id?: string },
   userDataOverride?: Partial<TrackingUserData>
