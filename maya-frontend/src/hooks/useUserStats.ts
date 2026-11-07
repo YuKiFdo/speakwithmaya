@@ -283,6 +283,7 @@ export function useUserStats(): UserStats {
 
         const completedIds = new Set<string>();
         let totalXpAccumulated = 0;
+        let hasPracticeProgressFromDb = false;
         let serverRank: number | null = null;
         let serverMinutesConsumed: number = 0;
 
@@ -298,7 +299,11 @@ export function useUserStats(): UserStats {
             if (Array.isArray(data.progress)) {
               data.progress.forEach((p: any) => {
                 if (p.status === 'completed' || p.isPassed) {
-                  completedIds.add(p.roadmapLevelId || String(p.levelNumber));
+                  const lvlId = String(p.roadmapLevelId || p.levelNumber || '');
+                  if (lvlId.startsWith('practice-')) {
+                    hasPracticeProgressFromDb = true;
+                  }
+                  completedIds.add(lvlId);
                   totalXpAccumulated += typeof p.xpEarned === 'number' ? p.xpEarned : Number(p.xpEarned) || 0;
                 }
               });
@@ -307,10 +312,22 @@ export function useUserStats(): UserStats {
         }
 
         let totalSessionSeconds = 0;
+        let normalSessionXp = 0;
         if (Array.isArray(sessions)) {
           sessions.forEach((s: any) => {
-            totalSessionSeconds += Number(s.duration_seconds || 0);
+            const dur = Number(s.duration_seconds || 0);
+            totalSessionSeconds += dur;
+            // Award 5 XP per 1 minute practiced for normal/general sessions
+            const isRoadmap = Boolean(s.roadmap_level_id || s.roadmapLevelId);
+            if (!isRoadmap && dur >= 30) {
+              const mins = Math.max(1, Math.floor(dur / 60));
+              normalSessionXp += mins * 5;
+            }
           });
+        }
+
+        if (!hasPracticeProgressFromDb && normalSessionXp > 0) {
+          totalXpAccumulated += normalSessionXp;
         }
 
         const practicedMinutes = Math.max(

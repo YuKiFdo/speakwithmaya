@@ -172,6 +172,14 @@ export function useRouteGuard() {
 
     // 3. Onboarding step prerequisite enforcement
     if (segments[0] === 'onboarding') {
+      const isTestAccount = Boolean(
+        state.user?.isTestAccount || (state as any).isTestAccount
+      );
+      if (isTestAccount) {
+        // Test / Demo accounts have unrestricted access to all onboarding screens at any time
+        return;
+      }
+
       // If user is authenticated and has already completed onboarding & entered the dashboard, block all /onboarding/* routes
       if (state.isAuthenticated && state.hasEnteredDashboard) {
         router.replace('/(tabs)/dashboard' as any);

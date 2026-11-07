@@ -3413,7 +3413,7 @@ export class AuthService {
           .select('*'),
         this.supabase
           .from('sessions')
-          .select('id, user_id, duration_seconds, created_at, status'),
+          .select('id, user_id, duration_seconds, created_at, status, roadmap_level_id'),
       ]);
 
       const allProfiles = Array.isArray(profiles) ? profiles : [];
@@ -3476,6 +3476,15 @@ export class AuthService {
               s.user_id,
               (sessionSecondsByUser.get(s.user_id) || 0) + dur,
             );
+          }
+          if (!s.roadmap_level_id && dur >= 30) {
+            // Normal practice sessions (General chat, Workplace): 5 XP per 1 minute practiced
+            const normalMins = Math.max(1, Math.floor(dur / 60));
+            const normalXp = normalMins * 5;
+            allTimeXpByUser.set(s.user_id, (allTimeXpByUser.get(s.user_id) || 0) + normalXp);
+            if (cutoffMs === 0 || ts >= cutoffMs) {
+              xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + normalXp);
+            }
           }
         }
       }

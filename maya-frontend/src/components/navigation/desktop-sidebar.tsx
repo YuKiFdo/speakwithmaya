@@ -193,9 +193,9 @@ export function DesktopSidebar({
             onPress={() => onSelectTab('home')}
           />
 
-          {/* Roadmap */}
+          {/* Roleplays */}
           <SidebarNavItem
-            label="Roadmap"
+            label="Roleplays"
             icon={(active) => <RoadmapNavIcon active={active} size={isCompact ? 18 : 20} />}
             isActive={activeTab === 'roadmap'}
             isCompact={isCompact}

@@ -195,7 +195,7 @@ export function MobileTopBar({
           levelNumber={resolvedLevelNumber}
           title="Your Level Progress"
           subtitle={`You are currently on ${resolvedLevelLabel} with ${resolvedXpLabel}.\nKeep completing speaking lessons to reach Level ${resolvedLevelNumber + 1}!`}
-          primaryButtonText="View Learning Roadmap"
+          primaryButtonText="Practice Roleplays"
           primaryButtonIcon="arrow"
           showPrimaryArrow
           onClose={() => setInternalPopupOpen(false)}

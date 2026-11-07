@@ -27,9 +27,9 @@ const TAB_CONFIG: Record<
     iconInactive: 'home-outline',
   },
   roadmap: {
-    label: 'Roadmap',
-    iconActive: 'map',
-    iconInactive: 'map-outline',
+    label: 'Roleplays',
+    iconActive: 'chatbubbles',
+    iconInactive: 'chatbubbles-outline',
   },
   history: {
     label: 'History',

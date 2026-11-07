@@ -31,7 +31,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="roadmap"
-        options={{ title: 'Roadmap · SpeakwithMaya' }}
+        options={{ title: 'Roleplays · SpeakwithMaya' }}
       />
       <Tabs.Screen
         name="history"

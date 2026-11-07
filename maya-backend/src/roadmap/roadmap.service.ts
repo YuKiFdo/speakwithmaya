@@ -839,6 +839,11 @@ INSTRUCTIONS:
               set.add(s.roadmap_level_id);
               xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + 100);
             }
+          } else if (s.status === 'completed' && !s.roadmap_level_id && (Number(s.duration_seconds) || 0) >= 30) {
+            // Normal practice sessions: 5 XP per 1 minute practiced
+            const normalMins = Math.max(1, Math.floor(Number(s.duration_seconds) / 60));
+            const normalXp = normalMins * 5;
+            xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + normalXp);
           }
         }
       }

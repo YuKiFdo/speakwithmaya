@@ -2189,6 +2189,7 @@ ${memoryPart}`;
       resolvedUserId = (await this.getActiveProfileId()) || undefined;
     }
     let remainingMinutes: number = 10;
+    let awardedXp: number = 0;
 
     const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
     const userAudioUrl = rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined);
@@ -2392,6 +2393,8 @@ ${memoryPart}`;
         // 5. If this session was for a roadmap level, record progress in user_roadmap_progress
         const activeInfo = this.activeSessions.get(sessionId);
         const roadmapLevelId = activeInfo?.roadmapLevelId || (dto as any).roadmapLevelId;
+        awardedXp = 0;
+        awardedXp = 0;
         if (roadmapLevelId && this.roadmapService) {
           try {
             const overallScore = resolvedScores.overall ?? 75;
@@ -2412,6 +2415,7 @@ ${memoryPart}`;
             const userTurnsCount = turnsToUse ? turnsToUse.filter((t: any) => t.role === 'user').length : 0;
             const meetsTurnRequirement = userTurnsCount >= 3 || durationSeconds >= 45;
             const isPassed = overallScore >= passingScorePercent && meetsTurnRequirement;
+            awardedXp = isPassed ? 100 : 25;
 
             if (resolvedUserId) {
               await this.roadmapService.recordUserProgress(resolvedUserId, {
@@ -2421,12 +2425,33 @@ ${memoryPart}`;
                 scorePercent: overallScore,
                 isPassed,
                 status: isPassed ? 'completed' : 'in_progress',
-                xpEarned: isPassed ? 100 : 25,
+                xpEarned: awardedXp,
               });
               this.logger.log(`[Roadmap Progress] Recorded completion for user ${resolvedUserId}, level ${roadmapLevelId}, session ${sessionId}, passed: ${isPassed} (score: ${overallScore}%, target: ${passingScorePercent}%, userTurns: ${userTurnsCount})`);
             }
           } catch (progressErr: any) {
             this.logger.warn(`Failed to auto-record roadmap progress: ${progressErr?.message}`);
+          }
+        } else if (resolvedUserId && durationSeconds >= 30) {
+          // Award XP for normal practice sessions (e.g. general chat, workplace, casual conversation): 5 XP per 1 minute practiced
+          try {
+            const practiceMinutes = Math.max(1, Math.floor(durationSeconds / 60));
+            awardedXp = Math.max(5, practiceMinutes * 5);
+            const practiceKey = `practice-${validSessionId.replace(/-/g, '').slice(0, 12)}`;
+            if (this.roadmapService) {
+              await this.roadmapService.recordUserProgress(resolvedUserId, {
+                roadmapLevelId: practiceKey,
+                levelNumber: 0,
+                sessionId: validSessionId,
+                scorePercent: resolvedScores.overall ?? 80,
+                isPassed: true,
+                status: 'completed',
+                xpEarned: awardedXp,
+              });
+              this.logger.log(`[Practice XP] Awarded ${awardedXp} XP (${practiceMinutes} min practiced @ 5 XP/min) for user ${resolvedUserId}, session ${validSessionId}`);
+            }
+          } catch (xpErr: any) {
+            this.logger.warn(`Failed to record practice session XP: ${xpErr?.message}`);
           }
         }
 
@@ -2588,6 +2613,7 @@ ${memoryPart}`;
       },
       correctionsRecorded: grammarCorrections?.length || 0,
       scores: scores || { overall: 85, fluency: 84, grammar: 82, pronunciation: 86 },
+      xpEarned: awardedXp,
     };
   }
 

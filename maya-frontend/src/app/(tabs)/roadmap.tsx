@@ -610,8 +610,8 @@ export default function RoadmapScreen() {
 
           {/* DESKTOP FIXED TOP BAR (PINNED) */}
           <DesktopTopBar
-            title="Your Learning Roadmap"
-            subtitle="Your journey to fluency starts here!"
+            title="Interactive Roleplays"
+            subtitle="Master real-world English through interactive speaking roleplays!"
             levelLabel={stats.levelLabel}
             xpLabel={stats.xpLabel}
             progress={stats.progress}
@@ -633,15 +633,15 @@ export default function RoadmapScreen() {
             {/* MOBILE HEADING */}
           {!isDesktop && (
             <View style={styles.mobileHeadingSection}>
-              <Text style={styles.headingTitleMobile}>Your Learning Roadmap</Text>
+              <Text style={styles.headingTitleMobile}>Interactive Roleplays</Text>
               <Text style={styles.headingSubtitleMobile}>
-                Your journey to fluency starts here!
+                Master real-world English through interactive speaking roleplays!
               </Text>
             </View>
           )}
 
           {/* ==================================================================== */}
-          {/* ROADMAP TRACK & MILESTONES */}
+          {/* ROLEPLAY TRACK & SCENARIOS */}
           {/* ==================================================================== */}
           {isLoadingLevels ? (
             <RoadmapTrackSkeleton
@@ -652,11 +652,11 @@ export default function RoadmapScreen() {
           ) : milestones.length === 0 ? (
             <View style={styles.roadmapStatusCard}>
               <View style={styles.roadmapEmptyIconWrapper}>
-                <Feather name="map" size={36} color="#0057FF" />
+                <Feather name="message-square" size={36} color="#0057FF" />
               </View>
-              <Text style={styles.roadmapEmptyTitle}>No Roadmap Levels Yet</Text>
+              <Text style={styles.roadmapEmptyTitle}>No Roleplay Scenarios Yet</Text>
               <Text style={styles.roadmapEmptyText}>
-                No published levels available at the moment. Levels will appear here once created.
+                No published roleplays available at the moment. Scenarios will appear here once created.
               </Text>
             </View>
           ) : isDesktop ? (
@@ -1064,7 +1064,7 @@ export default function RoadmapScreen() {
             isLevelLocked && effectiveLockedLevel
               ? `Complete Level ${Math.max(1, (effectiveLockedLevel.levelNumber ?? 2) - 1)} first to unlock this session and keep moving forward on your journey.`
               : activePopup === 'level-up'
-              ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep completing lessons on your roadmap to reach Level ${stats.currentLevelNumber + 1}!`
+              ? `You are currently on ${stats.levelLabel} with ${stats.xpLabel}.\nKeep completing roleplay lessons to reach Level ${stats.currentLevelNumber + 1}!`
               : undefined
           }
           primaryButtonText={

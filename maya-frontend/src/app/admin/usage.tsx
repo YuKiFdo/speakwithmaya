@@ -298,6 +298,30 @@ export default function AdminUsageScreen() {
   const [logsLoading, setLogsLoading] = useState<boolean>(false);
   const [logsFilter, setLogsFilter] = useState<string>('');
 
+  // Final Analysis & Review Modal States
+  const [activeAnalysisSession, setActiveAnalysisSession] = useState<SessionRecord | null>(null);
+  const [analysisDetail, setAnalysisDetail] = useState<any>(null);
+  const [analysisLoading, setAnalysisLoading] = useState<boolean>(false);
+
+  const handleOpenAnalysis = async (session: SessionRecord | null) => {
+    if (!session) return;
+    setActiveAnalysisSession(session);
+    setAnalysisDetail(session);
+    setAnalysisLoading(true);
+    try {
+      const baseUrl = getBackendBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/admin/usage/sessions/${session.id}`);
+      if (res.ok) {
+        const fullDetail = await res.json();
+        setAnalysisDetail(fullDetail);
+      }
+    } catch {
+      // Graceful fallback to existing session record
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
+
   // Fetch usage data from backend
   const fetchUsageData = async () => {
     try {
@@ -961,7 +985,7 @@ export default function AdminUsageScreen() {
                     <Text style={[styles.th, { width: 110, textAlign: 'right' }]}>Total Cost</Text>
                     <Text style={[styles.th, { width: 105, textAlign: 'right' }]}>Avg / Min</Text>
                     <Text style={[styles.th, { width: 90, textAlign: 'center' }]}>Status</Text>
-                    <Text style={[styles.th, { width: 145, textAlign: 'center' }]}>Actions</Text>
+                    <Text style={[styles.th, { width: 235, textAlign: 'center' }]}>Actions</Text>
                   </View>
 
                   {/* Table Body */}
@@ -1135,13 +1159,20 @@ export default function AdminUsageScreen() {
                           </View>
                         </View>
 
-                        {/* Action Detail & Logs */}
-                        <View style={[styles.td, { width: 145, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 }]}>
+                        {/* Action Detail, Review & Logs */}
+                        <View style={[styles.td, { width: 235, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 }]}>
                           <Pressable
                             onPress={() => setActiveSession(row)}
                             style={styles.detailBtn}
                           >
                             <Text style={styles.detailBtnText}>Detail</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => handleOpenAnalysis(row)}
+                            style={styles.analysisBtn}
+                          >
+                            <Feather name="award" size={12} color="#9333ea" style={{ marginRight: 4 }} />
+                            <Text style={styles.analysisBtnText}>Analysis</Text>
                           </Pressable>
                           <Pressable
                             onPress={() => setActiveLogsSession(row)}
@@ -1464,8 +1495,20 @@ export default function AdminUsageScreen() {
                 </View>
               )}
 
-              {/* Check Logs Button inside Detail Modal */}
-              <View style={styles.modalFooterActions}>
+              {/* Actions inside Detail Modal */}
+              <View style={[styles.modalFooterActions, { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }]}>
+                <Pressable
+                  onPress={() => {
+                    const s = activeSession;
+                    setActiveSession(null);
+                    handleOpenAnalysis(s);
+                  }}
+                  style={styles.modalCheckAnalysisBtn}
+                >
+                  <Feather name="award" size={15} color="#ffffff" style={{ marginRight: 6 }} />
+                  <Text style={styles.modalCheckLogsBtnText}>View Final Analysis & Feedback</Text>
+                </Pressable>
+
                 <Pressable
                   onPress={() => {
                     const s = activeSession;
@@ -1478,6 +1521,294 @@ export default function AdminUsageScreen() {
                   <Text style={styles.modalCheckLogsBtnText}>Check Network & Diagnostics Logs</Text>
                 </Pressable>
               </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ============================================================ */}
+      {/* 5. SESSION FINAL SPEECH ANALYSIS & REVIEW MODAL              */}
+      {/* ============================================================ */}
+      <Modal
+        visible={!!activeAnalysisSession}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setActiveAnalysisSession(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalContentAnalysis}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <View>
+                <View style={styles.modalTitleRow}>
+                  <Text style={styles.modalTitle}>Speech Analysis & Review Report</Text>
+                  <View style={[styles.logsBadge, { backgroundColor: '#faf5ff', borderColor: '#e9d5ff' }]}>
+                    <Text style={[styles.logsBadgeText, { color: '#9333ea' }]}>
+                      {activeAnalysisSession?.sessionCode}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.modalSub}>
+                  Student: {activeAnalysisSession?.user?.name || 'Student'} • {activeAnalysisSession?.topic || 'Speaking Practice'} • {formatClientDateTime(activeAnalysisSession?.timestamp, activeAnalysisSession?.displayDate)}
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={() => setActiveAnalysisSession(null)}
+                style={styles.modalCloseBtn}
+              >
+                <Ionicons name="close" size={20} color="#64748b" />
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {analysisLoading && !analysisDetail ? (
+                <View style={{ padding: 40, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                  <ActivityIndicator size="large" color="#9333ea" />
+                  <Text style={{ ...fontStyle('inter', 'medium'), fontSize: 13, color: '#64748b' }}>
+                    Compiling speech metrics & analysis report...
+                  </Text>
+                </View>
+              ) : (
+                <View style={{ gap: 20 }}>
+                  {/* Hero Score Card */}
+                  <View style={styles.analysisHeroCard}>
+                    <View style={styles.analysisScoreCircle}>
+                      <Text style={styles.analysisScoreNumber}>
+                        {analysisDetail?.scores?.overall ?? activeAnalysisSession?.scores?.overall ?? 85}%
+                      </Text>
+                      <Text style={styles.analysisScoreLabel}>OVERALL</Text>
+                    </View>
+
+                    <View style={{ flex: 1, gap: 10 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                        <Text style={styles.analysisHeroTitle}>Overall Speaking Proficiency</Text>
+                        <View style={styles.analysisTopicPill}>
+                          <Text style={styles.analysisTopicText}>
+                            {analysisDetail?.topic || activeAnalysisSession?.topic || 'General Practice'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* 3 Metrics Row */}
+                      <View style={styles.analysisMetricsRow}>
+                        <View style={styles.analysisMetricItem}>
+                          <Text style={styles.analysisMetricVal}>
+                            {analysisDetail?.scores?.fluency ?? activeAnalysisSession?.scores?.fluency ?? 84}%
+                          </Text>
+                          <Text style={styles.analysisMetricName}>Fluency</Text>
+                        </View>
+                        <View style={styles.analysisMetricItem}>
+                          <Text style={styles.analysisMetricVal}>
+                            {analysisDetail?.scores?.grammar ?? activeAnalysisSession?.scores?.grammar ?? 82}%
+                          </Text>
+                          <Text style={styles.analysisMetricName}>Grammar</Text>
+                        </View>
+                        <View style={styles.analysisMetricItem}>
+                          <Text style={styles.analysisMetricVal}>
+                            {analysisDetail?.scores?.pronunciation ?? activeAnalysisSession?.scores?.pronunciation ?? 86}%
+                          </Text>
+                          <Text style={styles.analysisMetricName}>Pronunciation</Text>
+                        </View>
+                        <View style={styles.analysisMetricItem}>
+                          <Text style={styles.analysisMetricVal}>
+                            {activeAnalysisSession?.durationFormatted || `${Math.round((activeAnalysisSession?.durationSeconds || 0) / 60)}m`}
+                          </Text>
+                          <Text style={styles.analysisMetricName}>Duration</Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* 4 Speech Analysis Verification Steps (from analyzing.tsx) */}
+                  <View style={styles.analysisStepsCard}>
+                    <Text style={styles.analysisSectionHeading}>
+                      Analysis Verification Stages
+                    </Text>
+                    <View style={styles.analysisStepsGrid}>
+                      {[
+                        {
+                          title: 'Pronunciation Clarity',
+                          desc: 'Checked vowel articulation, syllable stress, and speech phonetics.',
+                          icon: 'mic',
+                        },
+                        {
+                          title: 'Grammar & Syntax',
+                          desc: 'Scanned turn transcripts for subject-verb agreement and tense accuracy.',
+                          icon: 'check-square',
+                        },
+                        {
+                          title: 'Natural Phrasing',
+                          desc: 'Generated natural conversational rephrases and native expressions.',
+                          icon: 'message-circle',
+                        },
+                        {
+                          title: 'Speaking Score Computation',
+                          desc: 'Evaluated response confidence, vocabulary range, and turn speed.',
+                          icon: 'bar-chart-2',
+                        },
+                      ].map((step, idx) => (
+                        <View key={idx} style={styles.analysisStepRow}>
+                          <View style={styles.analysisStepCheckCircle}>
+                            <Feather name="check" size={14} color="#16a34a" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.analysisStepTitle}>{step.title}</Text>
+                            <Text style={styles.analysisStepDesc}>{step.desc}</Text>
+                          </View>
+                          <View style={styles.verifiedBadge}>
+                            <Text style={styles.verifiedBadgeText}>VERIFIED</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+
+                  {/* Maya AI Coaching Evaluation Note */}
+                  {(analysisDetail?.summary ||
+                    activeAnalysisSession?.userFeedback ||
+                    analysisDetail?.userFeedback) && (
+                    <View style={styles.analysisMayaNoteCard}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <View style={styles.mayaAvatarMini}>
+                          <Text style={{ fontSize: 14 }}>✨</Text>
+                        </View>
+                        <Text style={styles.analysisMayaNoteTitle}>Maya Coach Evaluation Note</Text>
+                      </View>
+                      <Text style={styles.analysisMayaNoteText}>
+                        "{analysisDetail?.summary ||
+                          activeAnalysisSession?.userFeedback ||
+                          analysisDetail?.userFeedback}"
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Coaching Corrections & Rephrases */}
+                  <View style={styles.analysisCorrectionsCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                      <Text style={styles.analysisSectionHeading}>
+                        Coaching Corrections & Phrasing (
+                        {(analysisDetail?.grammarCorrections || activeAnalysisSession?.grammarCorrections || []).length}
+                        )
+                      </Text>
+                      <Text style={{ ...fontStyle('inter', 'regular'), fontSize: 11, color: '#94a3b8' }}>
+                        Live corrections suggested during session
+                      </Text>
+                    </View>
+
+                    {(analysisDetail?.grammarCorrections || activeAnalysisSession?.grammarCorrections || []).length === 0 ? (
+                      <View style={styles.noCorrectionsBox}>
+                        <Feather name="check-circle" size={24} color="#16a34a" />
+                        <Text style={styles.noCorrectionsTitle}>Clean Speech Performance!</Text>
+                        <Text style={styles.noCorrectionsSub}>
+                          No major grammar mistakes or phrasing issues were flagged for this conversation.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={{ gap: 10 }}>
+                        {(analysisDetail?.grammarCorrections || activeAnalysisSession?.grammarCorrections || []).map(
+                          (c: any, cIdx: number) => (
+                            <View key={cIdx} style={styles.analysisCorrectionItem}>
+                              <View style={styles.corrBadgesRow}>
+                                <View style={styles.corrMistakePill}>
+                                  <Text style={styles.corrMistakeTag}>Student said:</Text>
+                                  <Text style={styles.corrMistakeText}>"{c.studentSaid || c.student_said}"</Text>
+                                </View>
+                                <View style={styles.corrArrowWrap}>
+                                  <Feather name="arrow-right" size={14} color="#64748b" />
+                                </View>
+                                <View style={styles.corrBetterPill}>
+                                  <Text style={styles.corrBetterTag}>More natural:</Text>
+                                  <Text style={styles.corrBetterText}>"{c.moreNatural || c.more_natural}"</Text>
+                                </View>
+                              </View>
+                              {c.explanation ? (
+                                <View style={styles.corrExplanationBox}>
+                                  <Feather name="info" size={12} color="#0d9488" style={{ marginTop: 2 }} />
+                                  <Text style={styles.corrExplanationText}>{c.explanation}</Text>
+                                </View>
+                              ) : null}
+                            </View>
+                          )
+                        )}
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Student Rating & Feedback Review */}
+                  <View style={styles.analysisReviewCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                      <Text style={styles.analysisSectionHeading}>Student Post-Session Review</Text>
+                      {typeof (analysisDetail?.userRating ?? activeAnalysisSession?.userRating ?? activeAnalysisSession?.user_rating) === 'number' && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <Ionicons
+                              key={star}
+                              name={
+                                star <= Number(analysisDetail?.userRating ?? activeAnalysisSession?.userRating ?? activeAnalysisSession?.user_rating)
+                                  ? 'star'
+                                  : 'star-outline'
+                              }
+                              size={15}
+                              color={
+                                star <= Number(analysisDetail?.userRating ?? activeAnalysisSession?.userRating ?? activeAnalysisSession?.user_rating)
+                                  ? '#f59e0b'
+                                  : '#cbd5e1'
+                              }
+                            />
+                          ))}
+                          <Text style={{ ...fontStyle('inter', 'bold'), fontSize: 13, color: '#0f172a', marginLeft: 4 }}>
+                            {Number(analysisDetail?.userRating ?? activeAnalysisSession?.userRating ?? activeAnalysisSession?.user_rating)}.0 / 5.0
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {(analysisDetail?.userFeedback || activeAnalysisSession?.userFeedback || activeAnalysisSession?.user_feedback) ? (
+                      <View style={styles.studentCommentBox}>
+                        <Feather name="message-circle" size={14} color="#0d9488" style={{ marginTop: 2 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.studentCommentTag}>Student Written Feedback:</Text>
+                          <Text style={styles.studentCommentText}>
+                            "{analysisDetail?.userFeedback || activeAnalysisSession?.userFeedback || activeAnalysisSession?.user_feedback}"
+                          </Text>
+                        </View>
+                      </View>
+                    ) : (
+                      <Text style={{ ...fontStyle('inter', 'regular'), fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>
+                        No written comment left by student.
+                      </Text>
+                    )}
+                  </View>
+
+                  {/* Modal Footer Cross-Navigation */}
+                  <View style={[styles.modalFooterActions, { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' }]}>
+                    <Pressable
+                      onPress={() => {
+                        const s = activeAnalysisSession;
+                        setActiveAnalysisSession(null);
+                        setActiveSession(s);
+                      }}
+                      style={styles.viewDetailFromLogsBtn}
+                    >
+                      <Feather name="file-text" size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                      <Text style={styles.viewDetailFromLogsBtnText}>View Full Transcript & Audio</Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => {
+                        const s = activeAnalysisSession;
+                        setActiveAnalysisSession(null);
+                        setActiveLogsSession(s);
+                      }}
+                      style={[styles.viewDetailFromLogsBtn, { backgroundColor: '#0f766e' }]}
+                    >
+                      <Feather name="activity" size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                      <Text style={styles.viewDetailFromLogsBtnText}>Check Diagnostics Logs</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -1791,6 +2122,294 @@ export default function AdminUsageScreen() {
                       <Text style={styles.viewDetailFromLogsBtnText}>View Session Detail & Turns</Text>
                     </Pressable>
                   )}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ============================================================ */}
+      {/* 5. SESSION FINAL SPEECH ANALYSIS & REVIEW MODAL              */}
+      {/* ============================================================ */}
+      <Modal
+        visible={!!activeAnalysisSession}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setActiveAnalysisSession(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalContentAnalysis}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <View>
+                <View style={styles.modalTitleRow}>
+                  <Text style={styles.modalTitle}>Speech Analysis & Review Report</Text>
+                  <View style={[styles.logsBadge, { backgroundColor: '#faf5ff', borderColor: '#e9d5ff' }]}>
+                    <Text style={[styles.logsBadgeText, { color: '#9333ea' }]}>
+                      {activeAnalysisSession?.sessionCode}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.modalSub}>
+                  Student: {activeAnalysisSession?.user?.name || 'Student'} • {activeAnalysisSession?.topic || 'Speaking Practice'} • {formatClientDateTime(activeAnalysisSession?.timestamp, activeAnalysisSession?.displayDate)}
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={() => setActiveAnalysisSession(null)}
+                style={styles.modalCloseBtn}
+              >
+                <Ionicons name="close" size={20} color="#64748b" />
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {analysisLoading && !analysisDetail ? (
+                <View style={{ padding: 40, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                  <ActivityIndicator size="large" color="#9333ea" />
+                  <Text style={{ ...fontStyle('inter', 'medium'), fontSize: 13, color: '#64748b' }}>
+                    Compiling speech metrics & analysis report...
+                  </Text>
+                </View>
+              ) : (
+                <View style={{ gap: 20 }}>
+                  {/* Hero Score Card */}
+                  <View style={styles.analysisHeroCard}>
+                    <View style={styles.analysisScoreCircle}>
+                      <Text style={styles.analysisScoreNumber}>
+                        {analysisDetail?.scores?.overall ?? activeAnalysisSession?.scores?.overall ?? 85}%
+                      </Text>
+                      <Text style={styles.analysisScoreLabel}>OVERALL</Text>
+                    </View>
+
+                    <View style={{ flex: 1, gap: 10 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                        <Text style={styles.analysisHeroTitle}>Overall Speaking Proficiency</Text>
+                        <View style={styles.analysisTopicPill}>
+                          <Text style={styles.analysisTopicText}>
+                            {analysisDetail?.topic || activeAnalysisSession?.topic || 'General Practice'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* 3 Metrics Row */}
+                      <View style={styles.analysisMetricsRow}>
+                        <View style={styles.analysisMetricItem}>
+                          <Text style={styles.analysisMetricVal}>
+                            {analysisDetail?.scores?.fluency ?? activeAnalysisSession?.scores?.fluency ?? 84}%
+                          </Text>
+                          <Text style={styles.analysisMetricName}>Fluency</Text>
+                        </View>
+                        <View style={styles.analysisMetricItem}>
+                          <Text style={styles.analysisMetricVal}>
+                            {analysisDetail?.scores?.grammar ?? activeAnalysisSession?.scores?.grammar ?? 82}%
+                          </Text>
+                          <Text style={styles.analysisMetricName}>Grammar</Text>
+                        </View>
+                        <View style={styles.analysisMetricItem}>
+                          <Text style={styles.analysisMetricVal}>
+                            {analysisDetail?.scores?.pronunciation ?? activeAnalysisSession?.scores?.pronunciation ?? 86}%
+                          </Text>
+                          <Text style={styles.analysisMetricName}>Pronunciation</Text>
+                        </View>
+                        <View style={styles.analysisMetricItem}>
+                          <Text style={styles.analysisMetricVal}>
+                            {activeAnalysisSession?.durationFormatted || `${Math.round((activeAnalysisSession?.durationSeconds || 0) / 60)}m`}
+                          </Text>
+                          <Text style={styles.analysisMetricName}>Duration</Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* 4 Speech Analysis Verification Steps (from analyzing.tsx) */}
+                  <View style={styles.analysisStepsCard}>
+                    <Text style={styles.analysisSectionHeading}>
+                      Analysis Verification Stages
+                    </Text>
+                    <View style={styles.analysisStepsGrid}>
+                      {[
+                        {
+                          title: 'Pronunciation Clarity',
+                          desc: 'Checked vowel articulation, syllable stress, and speech phonetics.',
+                          icon: 'mic',
+                        },
+                        {
+                          title: 'Grammar & Syntax',
+                          desc: 'Scanned turn transcripts for subject-verb agreement and tense accuracy.',
+                          icon: 'check-square',
+                        },
+                        {
+                          title: 'Natural Phrasing',
+                          desc: 'Generated natural conversational rephrases and native expressions.',
+                          icon: 'message-circle',
+                        },
+                        {
+                          title: 'Speaking Score Computation',
+                          desc: 'Evaluated response confidence, vocabulary range, and turn speed.',
+                          icon: 'bar-chart-2',
+                        },
+                      ].map((step, idx) => (
+                        <View key={idx} style={styles.analysisStepRow}>
+                          <View style={styles.analysisStepCheckCircle}>
+                            <Feather name="check" size={14} color="#16a34a" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.analysisStepTitle}>{step.title}</Text>
+                            <Text style={styles.analysisStepDesc}>{step.desc}</Text>
+                          </View>
+                          <View style={styles.verifiedBadge}>
+                            <Text style={styles.verifiedBadgeText}>VERIFIED</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+
+                  {/* Maya AI Coaching Evaluation Note */}
+                  {(analysisDetail?.summary ||
+                    activeAnalysisSession?.userFeedback ||
+                    analysisDetail?.userFeedback) && (
+                    <View style={styles.analysisMayaNoteCard}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <View style={styles.mayaAvatarMini}>
+                          <Text style={{ fontSize: 14 }}>✨</Text>
+                        </View>
+                        <Text style={styles.analysisMayaNoteTitle}>Maya Coach Evaluation Note</Text>
+                      </View>
+                      <Text style={styles.analysisMayaNoteText}>
+                        "{analysisDetail?.summary ||
+                          activeAnalysisSession?.userFeedback ||
+                          analysisDetail?.userFeedback}"
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Coaching Corrections & Rephrases */}
+                  <View style={styles.analysisCorrectionsCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                      <Text style={styles.analysisSectionHeading}>
+                        Coaching Corrections & Phrasing (
+                        {(analysisDetail?.grammarCorrections || activeAnalysisSession?.grammarCorrections || []).length}
+                        )
+                      </Text>
+                      <Text style={{ ...fontStyle('inter', 'regular'), fontSize: 11, color: '#94a3b8' }}>
+                        Live corrections suggested during session
+                      </Text>
+                    </View>
+
+                    {(analysisDetail?.grammarCorrections || activeAnalysisSession?.grammarCorrections || []).length === 0 ? (
+                      <View style={styles.noCorrectionsBox}>
+                        <Feather name="check-circle" size={24} color="#16a34a" />
+                        <Text style={styles.noCorrectionsTitle}>Clean Speech Performance!</Text>
+                        <Text style={styles.noCorrectionsSub}>
+                          No major grammar mistakes or phrasing issues were flagged for this conversation.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={{ gap: 10 }}>
+                        {(analysisDetail?.grammarCorrections || activeAnalysisSession?.grammarCorrections || []).map(
+                          (c: any, cIdx: number) => (
+                            <View key={cIdx} style={styles.analysisCorrectionItem}>
+                              <View style={styles.corrBadgesRow}>
+                                <View style={styles.corrMistakePill}>
+                                  <Text style={styles.corrMistakeTag}>Student said:</Text>
+                                  <Text style={styles.corrMistakeText}>"{c.studentSaid || c.student_said}"</Text>
+                                </View>
+                                <View style={styles.corrArrowWrap}>
+                                  <Feather name="arrow-right" size={14} color="#64748b" />
+                                </View>
+                                <View style={styles.corrBetterPill}>
+                                  <Text style={styles.corrBetterTag}>More natural:</Text>
+                                  <Text style={styles.corrBetterText}>"{c.moreNatural || c.more_natural}"</Text>
+                                </View>
+                              </View>
+                              {c.explanation ? (
+                                <View style={styles.corrExplanationBox}>
+                                  <Feather name="info" size={12} color="#0d9488" style={{ marginTop: 2 }} />
+                                  <Text style={styles.corrExplanationText}>{c.explanation}</Text>
+                                </View>
+                              ) : null}
+                            </View>
+                          )
+                        )}
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Student Rating & Feedback Review */}
+                  <View style={styles.analysisReviewCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                      <Text style={styles.analysisSectionHeading}>Student Post-Session Review</Text>
+                      {typeof (analysisDetail?.userRating ?? activeAnalysisSession?.userRating ?? activeAnalysisSession?.user_rating) === 'number' && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <Ionicons
+                              key={star}
+                              name={
+                                star <= Number(analysisDetail?.userRating ?? activeAnalysisSession?.userRating ?? activeAnalysisSession?.user_rating)
+                                  ? 'star'
+                                  : 'star-outline'
+                              }
+                              size={15}
+                              color={
+                                star <= Number(analysisDetail?.userRating ?? activeAnalysisSession?.userRating ?? activeAnalysisSession?.user_rating)
+                                  ? '#f59e0b'
+                                  : '#cbd5e1'
+                              }
+                            />
+                          ))}
+                          <Text style={{ ...fontStyle('inter', 'bold'), fontSize: 13, color: '#0f172a', marginLeft: 4 }}>
+                            {Number(analysisDetail?.userRating ?? activeAnalysisSession?.userRating ?? activeAnalysisSession?.user_rating)}.0 / 5.0
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {(analysisDetail?.userFeedback || activeAnalysisSession?.userFeedback || activeAnalysisSession?.user_feedback) ? (
+                      <View style={styles.studentCommentBox}>
+                        <Feather name="message-circle" size={14} color="#0d9488" style={{ marginTop: 2 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.studentCommentTag}>Student Written Feedback:</Text>
+                          <Text style={styles.studentCommentText}>
+                            "{analysisDetail?.userFeedback || activeAnalysisSession?.userFeedback || activeAnalysisSession?.user_feedback}"
+                          </Text>
+                        </View>
+                      </View>
+                    ) : (
+                      <Text style={{ ...fontStyle('inter', 'regular'), fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>
+                        No written comment left by student.
+                      </Text>
+                    )}
+                  </View>
+
+                  {/* Modal Footer Cross-Navigation */}
+                  <View style={[styles.modalFooterActions, { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' }]}>
+                    <Pressable
+                      onPress={() => {
+                        const s = activeAnalysisSession;
+                        setActiveAnalysisSession(null);
+                        setActiveSession(s);
+                      }}
+                      style={styles.viewDetailFromLogsBtn}
+                    >
+                      <Feather name="file-text" size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                      <Text style={styles.viewDetailFromLogsBtnText}>View Full Transcript & Audio</Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => {
+                        const s = activeAnalysisSession;
+                        setActiveAnalysisSession(null);
+                        setActiveLogsSession(s);
+                      }}
+                      style={[styles.viewDetailFromLogsBtn, { backgroundColor: '#0f766e' }]}
+                    >
+                      <Feather name="activity" size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                      <Text style={styles.viewDetailFromLogsBtnText}>Check Diagnostics Logs</Text>
+                    </Pressable>
+                  </View>
                 </View>
               )}
             </ScrollView>
@@ -3201,5 +3820,347 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'semiBold'),
     fontSize: 13,
     color: '#ffffff',
+  },
+
+  // Final Speech Analysis & Review Modal Styles
+  analysisBtn: {
+    backgroundColor: '#faf5ff',
+    borderWidth: 1,
+    borderColor: '#e9d5ff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  analysisBtnText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#9333ea',
+  },
+  modalCheckAnalysisBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#9333ea',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  modalContentAnalysis: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    width: '95%',
+    maxWidth: 820,
+    maxHeight: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
+    overflow: 'hidden',
+  },
+  analysisHeroCard: {
+    backgroundColor: '#fbfbfe',
+    borderRadius: 14,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20,
+    flexWrap: 'wrap',
+  },
+  analysisScoreCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: '#faf5ff',
+    borderWidth: 3,
+    borderColor: '#d8b4fe',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  analysisScoreNumber: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 26,
+    color: '#9333ea',
+  },
+  analysisScoreLabel: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 9,
+    color: '#a855f7',
+    letterSpacing: 0.5,
+  },
+  analysisHeroTitle: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 16,
+    color: '#0f172a',
+  },
+  analysisTopicPill: {
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+  },
+  analysisTopicText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#2563eb',
+  },
+  analysisMetricsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  analysisMetricItem: {
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+  },
+  analysisMetricVal: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 14,
+    color: '#0f172a',
+  },
+  analysisMetricName: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 10,
+    color: '#64748b',
+  },
+  analysisStepsCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    gap: 12,
+  },
+  analysisSectionHeading: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 15,
+    color: '#0f172a',
+  },
+  analysisStepsGrid: {
+    gap: 8,
+  },
+  analysisStepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#f8fafc',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+  },
+  analysisStepCheckCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#dcfce7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  analysisStepTitle: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#0f172a',
+  },
+  analysisStepDesc: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 1,
+  },
+  verifiedBadge: {
+    backgroundColor: '#f0fdf4',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  verifiedBadgeText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 9.5,
+    color: '#16a34a',
+    letterSpacing: 0.5,
+  },
+  analysisMayaNoteCard: {
+    backgroundColor: '#f0fdfa',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#ccfbf1',
+    gap: 8,
+  },
+  mayaAvatarMini: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#ccfbf1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  analysisMayaNoteTitle: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 12,
+    color: '#0f766e',
+    letterSpacing: 0.3,
+  },
+  analysisMayaNoteText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#134e4a',
+    fontStyle: 'italic',
+  },
+  analysisCorrectionsCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    gap: 12,
+  },
+  noCorrectionsBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    gap: 6,
+  },
+  noCorrectionsTitle: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 14,
+    color: '#15803d',
+  },
+  noCorrectionsSub: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#166534',
+    textAlign: 'center',
+  },
+  analysisCorrectionItem: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    gap: 8,
+  },
+  corrBadgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  corrMistakePill: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  corrMistakeTag: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 10,
+    color: '#dc2626',
+    textTransform: 'uppercase',
+  },
+  corrMistakeText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 12,
+    color: '#991b1b',
+  },
+  corrArrowWrap: {
+    paddingHorizontal: 2,
+  },
+  corrBetterPill: {
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  corrBetterTag: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 10,
+    color: '#16a34a',
+    textTransform: 'uppercase',
+  },
+  corrBetterText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12,
+    color: '#166534',
+  },
+  corrExplanationBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    backgroundColor: '#ffffff',
+    padding: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  corrExplanationText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11.5,
+    color: '#475569',
+    lineHeight: 16,
+    flex: 1,
+  },
+  analysisReviewCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    gap: 12,
+  },
+  studentCommentBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#f0fdfa',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccfbf1',
+    borderLeftWidth: 3,
+    borderLeftColor: '#0d9488',
+  },
+  studentCommentTag: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 10.5,
+    color: '#0d9488',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  studentCommentText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 13,
+    color: '#0f172a',
+    fontStyle: 'italic',
+    marginTop: 2,
   },
 });

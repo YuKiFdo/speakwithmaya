@@ -12,6 +12,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
@@ -21,6 +22,7 @@ import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
 import { AdminSessionTranscriptAndPlayer } from '@/components/admin/AdminSessionTranscriptAndPlayer';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import { authService } from '@/services/auth/auth-service';
 
 export interface TestAccountItem {
   id: string;
@@ -2507,24 +2509,44 @@ export default function AdminUsersScreen() {
                           </Text>
                         </View>
 
-                        <Pressable
-                          onPress={() => handleDeleteTestAccount(t)}
-                          disabled={deletingTestAccountId === t.id}
-                          style={({ pressed }) => [
-                            styles.deleteTestBtn,
-                            pressed && { opacity: 0.8 },
-                            deletingTestAccountId === t.id && { opacity: 0.5 },
-                          ]}
-                        >
-                          {deletingTestAccountId === t.id ? (
-                            <ActivityIndicator size="small" color="#ef4444" />
-                          ) : (
-                            <>
-                              <Feather name="trash-2" size={14} color="#ef4444" />
-                              <Text style={styles.deleteTestBtnText}>Remove</Text>
-                            </>
-                          )}
-                        </Pressable>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Pressable
+                            onPress={async () => {
+                              try {
+                                const res = await authService.sendOtp(t.phoneNumber, { isLoginMode: true });
+                                if (res.isTestAccount) {
+                                  setIsTestAccountsModalOpen(false);
+                                  router.push('/onboarding/goal' as any);
+                                }
+                              } catch (err: any) {
+                                mayaAlert.alert('Demo Login Error', err?.message || 'Could not launch onboarding');
+                              }
+                            }}
+                            style={({ pressed }) => [styles.launchDemoBtn, pressed && { opacity: 0.8 }]}
+                          >
+                            <Feather name="play-circle" size={13} color="#0d9488" />
+                            <Text style={styles.launchDemoBtnText}>Demo Onboarding</Text>
+                          </Pressable>
+
+                          <Pressable
+                            onPress={() => handleDeleteTestAccount(t)}
+                            disabled={deletingTestAccountId === t.id}
+                            style={({ pressed }) => [
+                              styles.deleteTestBtn,
+                              pressed && { opacity: 0.8 },
+                              deletingTestAccountId === t.id && { opacity: 0.5 },
+                            ]}
+                          >
+                            {deletingTestAccountId === t.id ? (
+                              <ActivityIndicator size="small" color="#ef4444" />
+                            ) : (
+                              <>
+                                <Feather name="trash-2" size={14} color="#ef4444" />
+                                <Text style={styles.deleteTestBtnText}>Remove</Text>
+                              </>
+                            )}
+                          </Pressable>
+                        </View>
                       </View>
                     ))}
                   </View>
@@ -3819,6 +3841,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#0d9488',
     marginTop: 2,
+  },
+  launchDemoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#f0fdfa',
+    borderWidth: 1,
+    borderColor: '#ccfbf1',
+  },
+  launchDemoBtnText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11.5,
+    color: '#0d9488',
   },
   deleteTestBtn: {
     flexDirection: 'row',

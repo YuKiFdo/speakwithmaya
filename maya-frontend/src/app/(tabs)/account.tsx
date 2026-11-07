@@ -775,6 +775,8 @@ export default function AccountScreen() {
                     rank={stats.rank}
                   />
 
+                  {stats.isTestAccount && <TestAccountDemoCard />}
+
                   <AccountActionCards
                     language={stats.nativeLanguageDisplay}
                     onLanguagePress={() => setIsLanguageModalOpen(true)}
@@ -835,6 +837,8 @@ export default function AccountScreen() {
                   levelNumber={stats.currentLevelNumber}
                   rank={stats.rank}
                 />
+
+                {stats.isTestAccount && <TestAccountDemoCard />}
 
                 <AccountActionCards
                   language={stats.nativeLanguageDisplay}
@@ -1652,6 +1656,51 @@ function StatsCard({
           <Text style={styles.statNumberText}>{rank && rank > 0 ? `#${rank}` : 'N/A'}</Text>
           <Text style={styles.statLabelText}>Your Rank</Text>
         </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * 2b. Test Account Demo Card (Unrestricted Onboarding Screens Access)
+ */
+function TestAccountDemoCard() {
+  const screens = [
+    { label: 'Questionnaire Goal', route: '/onboarding/goal', icon: 'target' },
+    { label: 'English Level', route: '/onboarding/level', icon: 'bar-chart-2' },
+    { label: 'Practice Call', route: '/onboarding/call', icon: 'phone-call' },
+    { label: 'Speech Analyzing', route: '/onboarding/analyzing', icon: 'activity' },
+    { label: 'Feedback Report', route: '/onboarding/feedback', icon: 'award' },
+    { label: 'Personalized Plan', route: '/onboarding/personalized-plan', icon: 'check-circle' },
+  ];
+
+  return (
+    <View style={styles.testAccountCard}>
+      <View style={styles.testAccountHeader}>
+        <View style={styles.testAccountBadge}>
+          <Text style={{ fontSize: 13 }}>🧪</Text>
+          <Text style={styles.testAccountBadgeText}>Demo Account Mode</Text>
+        </View>
+        <Text style={styles.testAccountTitle}>Onboarding Screens Access</Text>
+        <Text style={styles.testAccountDesc}>
+          As a registered test account, you can access and preview all onboarding screens directly anytime without OTP or re-registration.
+        </Text>
+      </View>
+
+      <View style={styles.testAccountGrid}>
+        {screens.map((s) => (
+          <Pressable
+            key={s.route}
+            onPress={() => router.push(s.route as any)}
+            style={({ pressed }) => [
+              styles.testScreenPill,
+              pressed && { opacity: 0.8 },
+            ]}
+          >
+            <Feather name={s.icon as any} size={13} color="#0d9488" />
+            <Text style={styles.testScreenPillText}>{s.label}</Text>
+          </Pressable>
+        ))}
       </View>
     </View>
   );
@@ -3166,6 +3215,67 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     color: '#FFFFFF',
     ...fontStyle('inter', 'bold'),
+  },
+
+  /* Test Account Demo Card */
+  testAccountCard: {
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#ccfbf1',
+    backgroundColor: '#f0fdfa',
+    gap: 12,
+  },
+  testAccountHeader: {
+    gap: 4,
+  },
+  testAccountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: '#ccfbf1',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  testAccountBadgeText: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 11,
+    color: '#0f766e',
+  },
+  testAccountTitle: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 15,
+    color: '#0f172a',
+    marginTop: 2,
+  },
+  testAccountDesc: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#475569',
+    lineHeight: 17,
+  },
+  testAccountGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  testScreenPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#99f6e4',
+  },
+  testScreenPillText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11.5,
+    color: '#0f766e',
   },
 
   /* Profile Header Actions (Edit & Logout) */
