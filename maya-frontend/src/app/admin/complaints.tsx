@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,11 @@ import {
   Pressable,
   TextInput,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
+import Svg, { Rect, Line, Text as SvgText, G } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
@@ -18,7 +20,12 @@ import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import { AdminAuthStore } from '@/services/store/admin-auth-store';
 import type { AdminComplaintItem } from './users';
+
+/* -------------------------------------------------------------------------- */
+/*  Types                                                                     */
+/* -------------------------------------------------------------------------- */
 
 export interface AdminSessionReviewItem {
   id: string;
@@ -46,112 +53,389 @@ export interface SessionReviewStats {
   starCounts: Record<number, number>;
 }
 
-type MainTab = 'complaints' | 'session_reviews';
-type ReviewContentFilter = 'ALL' | 'WITH_COMMENT' | 'RATING_ONLY';
-type ReviewStarFilter = 'ALL' | 5 | 4 | 3 | 2 | 1;
+type MainTab = 'reviews' | 'complaints';
+type ContentFilter = 'ALL' | 'WITH_COMMENT' | 'RATING_ONLY';
+type StarFilter = 'ALL' | 5 | 4 | 3 | 2 | 1;
+type SortKey = 'newest' | 'oldest' | 'highest' | 'lowest';
+type ComplaintFilter = 'ALL' | 'open' | 'resolved';
+type ComplaintSort = 'newest' | 'oldest';
 
-function StarRatingDisplay({
-  rating,
-  size = 14,
-  showNumber = false,
-}: {
-  rating: number;
-  size?: number;
-  showNumber?: boolean;
-}) {
+/* -------------------------------------------------------------------------- */
+/*  Theme + helpers                                                           */
+/* -------------------------------------------------------------------------- */
+
+const C = {
+  bg: '#f6f8fb',
+  card: '#ffffff',
+  border: '#e6eaf0',
+  text: '#0f172a',
+  muted: '#64748b',
+  faint: '#94a3b8',
+  soft: '#f1f5f9',
+  teal: '#0d9488',
+  blue: '#3b82f6',
+  amber: '#f59e0b',
+  green: '#16a34a',
+  red: '#ef4444',
+};
+
+const PAGE_SIZE = 15;
+
+const shadow = {
+  shadowColor: '#0f172a',
+  shadowOpacity: 0.04,
+  shadowOffset: { width: 0, height: 2 },
+  shadowRadius: 8,
+  elevation: 1,
+} as const;
+
+const adminHeaders = (): Record<string, string> => {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = AdminAuthStore.getToken();
+  if (token) h['x-admin-token'] = token;
+  return h;
+};
+
+const getInitials = (name?: string, phone?: string) => {
+  if (name && name.trim().length > 0) {
+    const parts = name.trim().split(' ');
+    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  }
+  if (phone && phone.length > 2) return phone.slice(-2);
+  return 'ST';
+};
+
+const getTierColor = (tier: string) => {
+  switch (tier?.toLowerCase()) {
+    case 'premium':
+      return { bg: '#faf5ff', text: '#9333ea', border: '#e9d5ff' };
+    case 'pro':
+      return { bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' };
+    case 'basic':
+      return { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' };
+    default:
+      return { bg: '#f1f5f9', text: '#475569', border: '#cbd5e1' };
+  }
+};
+
+const formatDuration = (seconds: number) => {
+  if (!seconds || seconds <= 0) return '0s';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m === 0 ? `${s}s` : `${m}m ${s}s`;
+};
+
+const timeAgo = (iso?: string) => {
+  if (!iso) return '-';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+};
+
+const dayKey = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+
+const sentimentColor = (r: number) => (r >= 4 ? C.green : r === 3 ? C.amber : C.red);
+
+/* -------------------------------------------------------------------------- */
+/*  Small reusable pieces                                                     */
+/* -------------------------------------------------------------------------- */
+
+function StarRating({ rating, size = 14, showNumber = false }: { rating: number; size?: number; showNumber?: boolean }) {
   const rounded = Math.round(rating);
   return (
-    <View style={styles.starRow}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-        {[1, 2, 3, 4, 5].map((s) => (
-          <Ionicons
-            key={s}
-            name={s <= rounded ? 'star' : 'star-outline'}
-            size={size}
-            color={s <= rounded ? '#f59e0b' : '#cbd5e1'}
-          />
+    <View style={s.starRow}>
+      <View style={{ flexDirection: 'row', gap: 2 }}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <Ionicons key={n} name={n <= rounded ? 'star' : 'star-outline'} size={size} color={n <= rounded ? C.amber : '#cbd5e1'} />
         ))}
       </View>
-      {showNumber && (
-        <Text style={styles.starNumberText}>
-          {Number(rating).toFixed(1)}
-        </Text>
+      {showNumber ? <Text style={s.starNumber}>{Number(rating).toFixed(1)}</Text> : null}
+    </View>
+  );
+}
+
+function Avatar({ url, name, phone, size = 38 }: { url?: string | null; name?: string; phone?: string; size?: number }) {
+  return (
+    <View style={[s.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
+      {url ? (
+        <Image source={{ uri: url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+      ) : (
+        <Text style={s.avatarText}>{getInitials(name, phone)}</Text>
       )}
     </View>
   );
 }
 
+function PlanBadge({ tier }: { tier?: string }) {
+  const t = getTierColor(tier || 'starter');
+  return (
+    <View style={[s.badge, { backgroundColor: t.bg, borderColor: t.border }]}>
+      <Text style={[s.badgeText, { color: t.text }]}>{(tier || 'starter').toUpperCase()}</Text>
+    </View>
+  );
+}
+
+function Segmented<T extends string | number>({
+  options,
+  value,
+  onChange,
+}: {
+  options: Array<{ key: T; label: string }>;
+  value: T;
+  onChange: (k: T) => void;
+}) {
+  return (
+    <View style={s.segment}>
+      {options.map((o) => {
+        const active = o.key === value;
+        return (
+          <Pressable key={String(o.key)} onPress={() => onChange(o.key)} style={[s.segItem, active && s.segItemActive]}>
+            <Text style={[s.segText, active && s.segTextActive]}>{o.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  icon,
+  tint,
+  footer,
+  footerColor,
+  right,
+  onPress,
+  active,
+}: {
+  label: string;
+  value: string;
+  icon: string;
+  tint: string;
+  footer?: string;
+  footerColor?: string;
+  right?: React.ReactNode;
+  onPress?: () => void;
+  active?: boolean;
+}) {
+  const Wrapper: any = onPress ? Pressable : View;
+  return (
+    <Wrapper
+      onPress={onPress}
+      style={[s.kpiCard, active && { borderColor: tint, backgroundColor: `${tint}08` }]}
+    >
+      <View style={s.kpiTop}>
+        <View style={[s.kpiIcon, { backgroundColor: `${tint}18` }]}>
+          <Feather name={icon as any} size={16} color={tint} />
+        </View>
+        <Text style={s.kpiLabel}>{label}</Text>
+      </View>
+      <View style={s.kpiMid}>
+        <Text style={s.kpiValue}>{value}</Text>
+        {right}
+      </View>
+      {footer ? <Text style={[s.kpiFooter, footerColor ? { color: footerColor } : null]}>{footer}</Text> : null}
+    </Wrapper>
+  );
+}
+
+function Card({ title, subtitle, icon, tint = C.teal, right, children, style }: any) {
+  return (
+    <View style={[s.card, style]}>
+      <View style={s.cardHeader}>
+        <View style={s.cardHeaderLeft}>
+          <View style={[s.cardIcon, { backgroundColor: `${tint}18` }]}>
+            <Feather name={icon} size={16} color={tint} />
+          </View>
+          <View style={{ flexShrink: 1 }}>
+            <Text style={s.cardTitle}>{title}</Text>
+            {subtitle ? <Text style={s.cardSubtitle}>{subtitle}</Text> : null}
+          </View>
+        </View>
+        {right}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  color = C.teal,
+  onPress,
+  icon,
+}: {
+  label: string;
+  active: boolean;
+  color?: string;
+  onPress: () => void;
+  icon?: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ hovered }: any) => [
+        s.chip,
+        hovered && !active && { backgroundColor: C.soft },
+        active && { backgroundColor: `${color}14`, borderColor: color },
+      ]}
+    >
+      {icon ? <Feather name={icon as any} size={12} color={active ? color : C.muted} /> : null}
+      <Text style={[s.chipText, active && { color }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function EmptyState({ icon, title, text, action }: { icon: string; title: string; text: string; action?: { label: string; onPress: () => void } }) {
+  return (
+    <View style={s.empty}>
+      <View style={s.emptyIcon}>
+        <Feather name={icon as any} size={26} color={C.faint} />
+      </View>
+      <Text style={s.emptyTitle}>{title}</Text>
+      <Text style={s.emptyText}>{text}</Text>
+      {action ? (
+        <Pressable onPress={action.onPress} style={s.emptyBtn}>
+          <Text style={s.emptyBtnText}>{action.label}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** Tiny bar chart: reviews per day, hover/tap for the day's numbers. */
+function ReviewsPerDay({ data }: { data: Array<{ label: string; full: string; count: number; avg: number }> }) {
+  const [w, setW] = useState(320);
+  const [idx, setIdx] = useState<number | null>(null);
+  const h = 110;
+  const pad = { t: 8, b: 20, l: 4, r: 4 };
+  const iw = Math.max(w - pad.l - pad.r, 40);
+  const ih = h - pad.t - pad.b;
+  const max = Math.max(...data.map((d) => d.count), 1);
+  const colW = iw / data.length;
+  const bw = Math.min(colW * 0.6, 18);
+  const act = idx !== null ? data[idx] : null;
+
+  return (
+    <View>
+      <Text style={s.miniTooltip}>
+        {act
+          ? `${act.full}: ${act.count} review${act.count === 1 ? '' : 's'}${act.count ? ` · avg ${act.avg.toFixed(1)}★` : ''}`
+          : 'Hover or tap a day'}
+      </Text>
+      <View style={{ height: h }} onLayout={(e) => setW(e.nativeEvent.layout.width)}>
+        <Svg width={w} height={h}>
+          <Line x1={pad.l} x2={w - pad.r} y1={pad.t + ih} y2={pad.t + ih} stroke="#dbe2ea" strokeWidth={1} />
+          {data.map((d, i) => {
+            const cx = pad.l + i * colW + colW / 2;
+            const bh = (d.count / max) * ih;
+            return (
+              <G key={d.full}>
+                <Rect
+                  x={cx - bw / 2}
+                  y={pad.t + ih - Math.max(bh, d.count > 0 ? 3 : 0)}
+                  width={bw}
+                  height={Math.max(bh, d.count > 0 ? 3 : 0)}
+                  rx={3}
+                  fill={d.count ? (d.avg >= 4 ? C.green : d.avg >= 3 ? C.amber : C.red) : C.soft}
+                  opacity={idx !== null && idx !== i ? 0.4 : 1}
+                />
+                {i % 2 === 0 || data.length <= 7 ? (
+                  <SvgText x={cx} y={h - 6} fontSize="9" fill={C.muted} textAnchor="middle">
+                    {d.label}
+                  </SvgText>
+                ) : null}
+              </G>
+            );
+          })}
+        </Svg>
+        <View style={[StyleSheet.absoluteFill, { left: pad.l, right: pad.r, flexDirection: 'row' }]}>
+          {data.map((d, i) => (
+            <Pressable
+              key={d.full}
+              style={{ flex: 1 }}
+              onPress={() => setIdx(idx === i ? null : i)}
+              {...({ onHoverIn: () => setIdx(i), onHoverOut: () => setIdx(null) } as any)}
+            />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Screen                                                                    */
+/* -------------------------------------------------------------------------- */
+
 export default function AdminComplaintsScreen() {
   const { isPhone } = useBreakpoint();
   const [sidebarOpen, setSidebarOpen] = useState(!isPhone);
+  const [activeTab, setActiveTab] = useState<MainTab>('reviews');
 
-  // Active Main Tab: 'complaints' vs 'session_reviews'
-  const [activeTab, setActiveTab] = useState<MainTab>('session_reviews');
-
-  // --- Complaints State ---
+  // Complaints
   const [complaints, setComplaints] = useState<AdminComplaintItem[]>([]);
-  const [complaintStats, setComplaintStats] = useState({ total: 0, open: 0, resolved: 0 });
   const [isComplaintsLoading, setIsComplaintsLoading] = useState(true);
+  const [complaintsError, setComplaintsError] = useState<string | null>(null);
   const [complaintSearch, setComplaintSearch] = useState('');
-  const [complaintStatusFilter, setComplaintStatusFilter] = useState<'ALL' | 'open' | 'resolved'>('ALL');
+  const [complaintFilter, setComplaintFilter] = useState<ComplaintFilter>('ALL');
+  const [complaintSort, setComplaintSort] = useState<ComplaintSort>('newest');
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  // --- Session Reviews State ---
+  // Reviews
   const [reviews, setReviews] = useState<AdminSessionReviewItem[]>([]);
-  const [reviewStats, setReviewStats] = useState<SessionReviewStats>({
-    totalReviews: 0,
-    avgRating: 0,
-    commentsCount: 0,
-    withoutCommentsCount: 0,
-    starCounts: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
-  });
   const [isReviewsLoading, setIsReviewsLoading] = useState(true);
   const [reviewSearch, setReviewSearch] = useState('');
-  const [reviewContentFilter, setReviewContentFilter] = useState<ReviewContentFilter>('ALL');
-  const [reviewStarFilter, setReviewStarFilter] = useState<ReviewStarFilter>('ALL');
-  const [reviewViewMode, setReviewViewMode] = useState<'table' | 'cards'>('table');
+  const [contentFilter, setContentFilter] = useState<ContentFilter>('ALL');
+  const [starFilter, setStarFilter] = useState<StarFilter>('ALL');
+  const [sortKey, setSortKey] = useState<SortKey>('newest');
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  // Fetch Complaints
-  const fetchComplaints = async () => {
+  /* ------------------------------- Data layer ------------------------------ */
+
+  const fetchComplaints = useCallback(async () => {
     setIsComplaintsLoading(true);
+    setComplaintsError(null);
     try {
-      const baseUrl = getBackendBaseUrl();
-      const res = await fetch(`${baseUrl}/v1/admin/complaints`);
-      if (res.ok) {
-        const data = await res.json();
-        setComplaints(Array.isArray(data.complaints) ? data.complaints : []);
-        if (data.stats) {
-          setComplaintStats(data.stats);
-        }
-      }
-    } catch (err) {
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/complaints`, { headers: adminHeaders() });
+      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+      const data = await res.json();
+      setComplaints(Array.isArray(data.complaints) ? data.complaints : []);
+    } catch (err: any) {
       console.warn('[AdminComplaints] Failed to load complaints:', err);
+      setComplaintsError(err?.message || 'Failed to load complaints.');
     } finally {
       setIsComplaintsLoading(false);
     }
-  };
+  }, []);
 
-  // Fetch Session Reviews (with resilient direct-Supabase fallback)
-  const fetchReviews = async () => {
+  const fetchReviews = useCallback(async () => {
     setIsReviewsLoading(true);
     try {
-      const baseUrl = getBackendBaseUrl();
-      const res = await fetch(`${baseUrl}/v1/admin/session-reviews`);
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/session-reviews`, { headers: adminHeaders() });
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.reviews)) {
-          setReviews(data.reviews);
-        }
-        if (data.stats) {
-          setReviewStats(data.stats);
-        }
+        if (Array.isArray(data.reviews)) setReviews(data.reviews);
         setIsReviewsLoading(false);
         return;
       }
     } catch {
-      // Backend request fallback to Supabase query below
+      // fall through to Supabase fallback
     }
 
-    // Direct Supabase Fallback
     try {
       if (supabase) {
         const [{ data: sessionRows }, { data: profiles }] = await Promise.all([
@@ -164,9 +448,7 @@ export default function AdminComplaintsScreen() {
         ]);
 
         const profileMap = new Map<string, any>();
-        for (const p of profiles || []) {
-          profileMap.set(p.id, p);
-        }
+        for (const p of profiles || []) profileMap.set(p.id, p);
 
         const items: AdminSessionReviewItem[] = (sessionRows || []).map((row: any) => {
           const prof = row.user_id ? profileMap.get(row.user_id) : null;
@@ -189,61 +471,54 @@ export default function AdminComplaintsScreen() {
             createdAt: row.created_at || row.start_time || new Date().toISOString(),
           };
         });
-
-        const starCounts: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
-        let totalScore = 0;
-        let commentsCount = 0;
-
-        for (const r of items) {
-          const s = Math.min(5, Math.max(1, Math.round(r.rating)));
-          starCounts[s] = (starCounts[s] || 0) + 1;
-          totalScore += r.rating;
-          if (r.feedback) commentsCount += 1;
-        }
-
-        const totalReviews = items.length;
-        const avgRating = totalReviews > 0 ? Number((totalScore / totalReviews).toFixed(1)) : 0;
-
         setReviews(items);
-        setReviewStats({
-          totalReviews,
-          avgRating,
-          commentsCount,
-          withoutCommentsCount: totalReviews - commentsCount,
-          starCounts,
-        });
       }
     } catch (err) {
       console.warn('[AdminComplaints] Failed to load session reviews via fallback:', err);
     } finally {
       setIsReviewsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchComplaints();
     fetchReviews();
-  }, []);
+  }, [fetchComplaints, fetchReviews]);
+
+  useEffect(() => {
+    setSidebarOpen(!isPhone);
+  }, [isPhone]);
+
+  // Reset pagination whenever filters change
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [reviewSearch, contentFilter, starFilter, sortKey]);
 
   const handleRefresh = () => {
     fetchComplaints();
     fetchReviews();
   };
 
-  // Complaint Actions
+  /* -------------------------------- Actions -------------------------------- */
+
   const handleToggleStatus = async (item: AdminComplaintItem) => {
     const nextStatus = item.status === 'resolved' ? 'open' : 'resolved';
+    setBusyId(item.id);
+    // optimistic update
+    setComplaints((prev) => prev.map((c) => (c.id === item.id ? { ...c, status: nextStatus } : c)));
     try {
-      const baseUrl = getBackendBaseUrl();
-      const res = await fetch(`${baseUrl}/v1/admin/complaints/${item.id}/status`, {
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/complaints/${item.id}/status`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: adminHeaders(),
         body: JSON.stringify({ status: nextStatus }),
       });
-      if (res.ok) {
-        fetchComplaints();
-      }
-    } catch {}
+      if (!res.ok) throw new Error('failed');
+    } catch {
+      // rollback
+      setComplaints((prev) => prev.map((c) => (c.id === item.id ? { ...c, status: item.status } : c)));
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const handleDeleteComplaint = async (item: AdminComplaintItem) => {
@@ -256,19 +531,15 @@ export default function AdminComplaintsScreen() {
       isDestructive: true,
     });
     if (!confirmed) return;
-
     try {
-      const baseUrl = getBackendBaseUrl();
-      const res = await fetch(`${baseUrl}/v1/admin/complaints/${item.id}`, {
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/complaints/${item.id}`, {
         method: 'DELETE',
+        headers: adminHeaders(),
       });
-      if (res.ok) {
-        fetchComplaints();
-      }
+      if (res.ok) setComplaints((prev) => prev.filter((c) => c.id !== item.id));
     } catch {}
   };
 
-  // Delete / Clear Session Review
   const handleDeleteReview = async (item: AdminSessionReviewItem) => {
     const confirmed = await mayaAlert.confirm({
       title: 'Delete Session Review',
@@ -281,1019 +552,667 @@ export default function AdminComplaintsScreen() {
     if (!confirmed) return;
 
     try {
-      const baseUrl = getBackendBaseUrl();
-      const res = await fetch(`${baseUrl}/v1/admin/session-reviews/${item.sessionId}`, {
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/session-reviews/${item.sessionId}`, {
         method: 'DELETE',
+        headers: adminHeaders(),
       });
       if (res.ok) {
-        fetchReviews();
+        setReviews((prev) => prev.filter((r) => r.id !== item.id));
         return;
       }
     } catch {}
 
-    // Fallback: update in Supabase directly
     try {
       if (supabase) {
-        await supabase
-          .from('sessions')
-          .update({ user_rating: null, user_feedback: null })
-          .eq('id', item.sessionId);
-        fetchReviews();
+        await supabase.from('sessions').update({ user_rating: null, user_feedback: null }).eq('id', item.sessionId);
+        setReviews((prev) => prev.filter((r) => r.id !== item.id));
       }
     } catch {}
   };
 
-  // Filtered Complaints
-  const filteredComplaints = useMemo(() => {
-    return complaints.filter((c) => {
-      if (complaintStatusFilter !== 'ALL' && c.status !== complaintStatusFilter) return false;
-      if (complaintSearch.trim()) {
-        const q = complaintSearch.toLowerCase().trim();
-        const matchName = (c.displayName || '').toLowerCase().includes(q);
-        const matchPhone = (c.phoneNumber || '').toLowerCase().includes(q);
-        const matchEmail = (c.email || '').toLowerCase().includes(q);
-        const matchMsg = (c.message || '').toLowerCase().includes(q);
-        return matchName || matchPhone || matchEmail || matchMsg;
-      }
-      return true;
-    });
-  }, [complaints, complaintStatusFilter, complaintSearch]);
+  /* ------------------------------ Derived: reviews ------------------------- */
 
-  // Filtered Session Reviews
+  const rv = useMemo(() => {
+    const total = reviews.length;
+    const starCounts: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    let withComment = 0;
+    for (const r of reviews) {
+      const st = Math.min(5, Math.max(1, Math.round(r.rating)));
+      starCounts[st] += 1;
+      if (r.feedback) withComment += 1;
+    }
+    const avgRating = avg(reviews.map((r) => r.rating));
+    const positive = starCounts[5] + starCounts[4];
+    const neutral = starCounts[3];
+    const negative = starCounts[2] + starCounts[1];
+
+    const now = new Date();
+    const days: Array<{ label: string; full: string; key: string; count: number; avg: number }> = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      days.push({
+        key: dayKey(d),
+        label: `${d.getDate()}/${d.getMonth() + 1}`,
+        full: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        count: 0,
+        avg: 0,
+      });
+    }
+    const sums: Record<string, number> = {};
+    for (const r of reviews) {
+      const k = dayKey(new Date(r.createdAt));
+      const slot = days.find((x) => x.key === k);
+      if (slot) {
+        slot.count += 1;
+        sums[k] = (sums[k] || 0) + r.rating;
+      }
+    }
+    days.forEach((d) => (d.avg = d.count ? sums[d.key] / d.count : 0));
+
+    const last7 = reviews.filter((r) => Date.now() - new Date(r.createdAt).getTime() < 7 * 86400000);
+    const prev7 = reviews.filter((r) => {
+      const age = Date.now() - new Date(r.createdAt).getTime();
+      return age >= 7 * 86400000 && age < 14 * 86400000;
+    });
+    const avgDelta = last7.length && prev7.length ? avg(last7.map((r) => r.rating)) - avg(prev7.map((r) => r.rating)) : null;
+
+    const attention = reviews.filter((r) => Math.round(r.rating) <= 2).length;
+
+    return {
+      total,
+      starCounts,
+      withComment,
+      withoutComment: total - withComment,
+      avgRating,
+      positive,
+      neutral,
+      negative,
+      days,
+      last7Count: last7.length,
+      avgDelta,
+      attention,
+      commentRate: total ? (withComment / total) * 100 : 0,
+    };
+  }, [reviews]);
+
   const filteredReviews = useMemo(() => {
-    return reviews.filter((r) => {
-      // Star Filter
-      if (reviewStarFilter !== 'ALL' && Math.round(r.rating) !== reviewStarFilter) {
-        return false;
-      }
-      // Content Filter
-      if (reviewContentFilter === 'WITH_COMMENT' && !r.feedback) {
-        return false;
-      }
-      if (reviewContentFilter === 'RATING_ONLY' && r.feedback) {
-        return false;
-      }
-      // Search
-      if (reviewSearch.trim()) {
-        const q = reviewSearch.toLowerCase().trim();
-        const matchName = (r.displayName || '').toLowerCase().includes(q);
-        const matchPhone = (r.phoneNumber || '').toLowerCase().includes(q);
-        const matchTopic = (r.topic || '').toLowerCase().includes(q);
-        const matchFeedback = (r.feedback || '').toLowerCase().includes(q);
-        return matchName || matchPhone || matchTopic || matchFeedback;
+    const q = reviewSearch.toLowerCase().trim();
+    const list = reviews.filter((r) => {
+      if (starFilter !== 'ALL' && Math.round(r.rating) !== starFilter) return false;
+      if (contentFilter === 'WITH_COMMENT' && !r.feedback) return false;
+      if (contentFilter === 'RATING_ONLY' && r.feedback) return false;
+      if (q) {
+        return (
+          (r.displayName || '').toLowerCase().includes(q) ||
+          (r.phoneNumber || '').toLowerCase().includes(q) ||
+          (r.topic || '').toLowerCase().includes(q) ||
+          (r.feedback || '').toLowerCase().includes(q)
+        );
       }
       return true;
     });
-  }, [reviews, reviewStarFilter, reviewContentFilter, reviewSearch]);
+    const t = (r: AdminSessionReviewItem) => new Date(r.createdAt).getTime();
+    list.sort((a, b) => {
+      switch (sortKey) {
+        case 'oldest':
+          return t(a) - t(b);
+        case 'highest':
+          return b.rating - a.rating || t(b) - t(a);
+        case 'lowest':
+          return a.rating - b.rating || t(b) - t(a);
+        default:
+          return t(b) - t(a);
+      }
+    });
+    return list;
+  }, [reviews, starFilter, contentFilter, reviewSearch, sortKey]);
 
-  const getInitials = (name?: string, phone?: string) => {
-    if (name && name.trim().length > 0) {
-      const parts = name.trim().split(' ');
-      if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-      return name.slice(0, 2).toUpperCase();
-    }
-    if (phone && phone.length > 2) return phone.slice(-2);
-    return 'ST';
+  const activeReviewFilters =
+    (starFilter !== 'ALL' ? 1 : 0) + (contentFilter !== 'ALL' ? 1 : 0) + (reviewSearch.trim() ? 1 : 0);
+
+  const clearReviewFilters = () => {
+    setStarFilter('ALL');
+    setContentFilter('ALL');
+    setReviewSearch('');
   };
 
-  const getTierColor = (tier: string) => {
-    switch (tier?.toLowerCase()) {
-      case 'premium':
-        return { bg: '#faf5ff', text: '#9333ea', border: '#e9d5ff' };
-      case 'pro':
-        return { bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' };
-      case 'basic':
-        return { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' };
-      default:
-        return { bg: '#f1f5f9', text: '#475569', border: '#cbd5e1' };
-    }
+  /* ---------------------------- Derived: complaints ------------------------ */
+
+  const cp = useMemo(() => {
+    const total = complaints.length;
+    const open = complaints.filter((c) => c.status !== 'resolved').length;
+    const resolved = total - open;
+    const oldestOpen = complaints
+      .filter((c) => c.status !== 'resolved' && c.createdAt)
+      .sort((a, b) => new Date(a.createdAt as any).getTime() - new Date(b.createdAt as any).getTime())[0];
+    return {
+      total,
+      open,
+      resolved,
+      rate: total ? (resolved / total) * 100 : 0,
+      oldestOpen,
+    };
+  }, [complaints]);
+
+  const filteredComplaints = useMemo(() => {
+    const q = complaintSearch.toLowerCase().trim();
+    const list = complaints.filter((c) => {
+      if (complaintFilter !== 'ALL') {
+        const isResolved = c.status === 'resolved';
+        if (complaintFilter === 'resolved' && !isResolved) return false;
+        if (complaintFilter === 'open' && isResolved) return false;
+      }
+      if (q) {
+        return (
+          (c.displayName || '').toLowerCase().includes(q) ||
+          (c.phoneNumber || '').toLowerCase().includes(q) ||
+          (c.email || '').toLowerCase().includes(q) ||
+          (c.message || '').toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+    const t = (c: AdminComplaintItem) => (c.createdAt ? new Date(c.createdAt as any).getTime() : 0);
+    list.sort((a, b) => (complaintSort === 'newest' ? t(b) - t(a) : t(a) - t(b)));
+    return list;
+  }, [complaints, complaintFilter, complaintSearch, complaintSort]);
+
+  /* --------------------------------- Renders ------------------------------- */
+
+  const renderSearch = (value: string, onChange: (v: string) => void, placeholder: string) => (
+    <View style={s.searchWrap}>
+      <Feather name="search" size={16} color={C.faint} />
+      <TextInput
+        style={s.searchInput}
+        placeholder={placeholder}
+        placeholderTextColor={C.faint}
+        value={value}
+        onChangeText={onChange}
+      />
+      {value.length > 0 ? (
+        <Pressable onPress={() => onChange('')} hitSlop={8}>
+          <Feather name="x-circle" size={16} color={C.faint} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+
+  const renderReviews = () => {
+    const shown = filteredReviews.slice(0, visibleCount);
+    const pct = (n: number) => (rv.total ? Math.round((n / rv.total) * 100) : 0);
+
+    return (
+      <>
+        {/* KPIs */}
+        <View style={s.kpiGrid}>
+          <KpiCard
+            label="Average rating"
+            icon="star"
+            tint={C.amber}
+            value={rv.total ? rv.avgRating.toFixed(1) : '-'}
+            right={rv.total ? <StarRating rating={rv.avgRating} size={14} /> : undefined}
+            footer={
+              rv.avgDelta === null
+                ? `${rv.total} total ratings`
+                : `${rv.avgDelta >= 0 ? '+' : ''}${rv.avgDelta.toFixed(1)} vs previous 7 days`
+            }
+            footerColor={rv.avgDelta === null ? undefined : rv.avgDelta >= 0 ? C.green : C.red}
+          />
+          <KpiCard
+            label="Reviews (7 days)"
+            icon="inbox"
+            tint={C.blue}
+            value={String(rv.last7Count)}
+            footer={`${rv.total} all time`}
+          />
+          <KpiCard
+            label="With comments"
+            icon="message-circle"
+            tint={C.teal}
+            value={`${rv.commentRate.toFixed(0)}%`}
+            footer={`${rv.withComment} written · ${rv.withoutComment} rating only`}
+            onPress={() => setContentFilter(contentFilter === 'WITH_COMMENT' ? 'ALL' : 'WITH_COMMENT')}
+            active={contentFilter === 'WITH_COMMENT'}
+          />
+          <KpiCard
+            label="Needs attention"
+            icon="alert-triangle"
+            tint={C.red}
+            value={String(rv.attention)}
+            footer={rv.attention ? 'Tap to see 1-2 star reviews' : 'No low ratings'}
+            onPress={() => {
+              if (!rv.attention) return;
+              const isOn = starFilter === 1 || starFilter === 2;
+              setStarFilter(isOn ? 'ALL' : 2);
+            }}
+            active={starFilter === 2 || starFilter === 1}
+          />
+        </View>
+
+        {/* Distribution + trend */}
+        <View style={s.grid}>
+          <Card title="Rating breakdown" subtitle="Tap a row to filter" icon="bar-chart-2" tint={C.amber} style={s.gridItem}>
+            <View style={s.sentimentBar}>
+              {rv.total > 0 ? (
+                <>
+                  <View style={{ flex: Math.max(rv.positive, 0.0001), backgroundColor: C.green }} />
+                  <View style={{ flex: Math.max(rv.neutral, 0.0001), backgroundColor: C.amber }} />
+                  <View style={{ flex: Math.max(rv.negative, 0.0001), backgroundColor: C.red }} />
+                </>
+              ) : (
+                <View style={{ flex: 1, backgroundColor: C.soft }} />
+              )}
+            </View>
+            <View style={s.sentimentLegend}>
+              <Text style={[s.sentimentText, { color: C.green }]}>{pct(rv.positive)}% positive</Text>
+              <Text style={[s.sentimentText, { color: C.amber }]}>{pct(rv.neutral)}% neutral</Text>
+              <Text style={[s.sentimentText, { color: C.red }]}>{pct(rv.negative)}% negative</Text>
+            </View>
+
+            {([5, 4, 3, 2, 1] as const).map((star) => {
+              const count = rv.starCounts[star];
+              const p = pct(count);
+              const selected = starFilter === star;
+              return (
+                <Pressable
+                  key={star}
+                  onPress={() => setStarFilter(selected ? 'ALL' : star)}
+                  style={({ hovered }: any) => [s.distRow, (selected || hovered) && { backgroundColor: C.bg }]}
+                >
+                  <View style={s.distLabel}>
+                    <Text style={s.distLabelText}>{star}</Text>
+                    <Ionicons name="star" size={12} color={C.amber} />
+                  </View>
+                  <View style={s.distTrack}>
+                    <View style={[s.distFill, { width: `${p}%`, backgroundColor: sentimentColor(star) }]} />
+                  </View>
+                  <Text style={s.distCount}>{count}</Text>
+                  <Text style={s.distPct}>{p}%</Text>
+                </Pressable>
+              );
+            })}
+          </Card>
+
+          <Card title="Reviews per day" subtitle="Last 14 days, colored by average rating" icon="trending-up" tint={C.blue} style={s.gridItem}>
+            <ReviewsPerDay data={rv.days} />
+          </Card>
+        </View>
+
+        {/* Filters */}
+        <View style={s.filterCard}>
+          {renderSearch(reviewSearch, setReviewSearch, 'Search student, phone, topic or comment...')}
+          <View style={s.filterRow}>
+            <Segmented<ContentFilter>
+              options={[
+                { key: 'ALL', label: `All ${rv.total}` },
+                { key: 'WITH_COMMENT', label: `Comments ${rv.withComment}` },
+                { key: 'RATING_ONLY', label: `Rating only ${rv.withoutComment}` },
+              ]}
+              value={contentFilter}
+              onChange={setContentFilter}
+            />
+            <Segmented<SortKey>
+              options={[
+                { key: 'newest', label: 'Newest' },
+                { key: 'oldest', label: 'Oldest' },
+                { key: 'highest', label: 'Highest' },
+                { key: 'lowest', label: 'Lowest' },
+              ]}
+              value={sortKey}
+              onChange={setSortKey}
+            />
+          </View>
+          <View style={s.filterRow}>
+            <FilterChip label="All stars" active={starFilter === 'ALL'} onPress={() => setStarFilter('ALL')} />
+            {([5, 4, 3, 2, 1] as const).map((st) => (
+              <FilterChip
+                key={st}
+                label={`${st}★ ${rv.starCounts[st]}`}
+                color={sentimentColor(st)}
+                active={starFilter === st}
+                onPress={() => setStarFilter(starFilter === st ? 'ALL' : st)}
+              />
+            ))}
+            {activeReviewFilters > 0 ? (
+              <Pressable onPress={clearReviewFilters} style={s.clearBtn}>
+                <Feather name="x" size={12} color={C.red} />
+                <Text style={s.clearBtnText}>Clear filters</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+
+        {/* List */}
+        <View style={s.listCard}>
+          <View style={s.listHeader}>
+            <Text style={s.listTitle}>Student reviews</Text>
+            <Text style={s.listSub}>
+              Showing {Math.min(visibleCount, filteredReviews.length)} of {filteredReviews.length}
+              {filteredReviews.length !== reviews.length ? ` (filtered from ${reviews.length})` : ''}
+            </Text>
+          </View>
+
+          {isReviewsLoading && reviews.length === 0 ? (
+            <AdminTableSkeleton rows={5} />
+          ) : filteredReviews.length === 0 ? (
+            reviews.length === 0 ? (
+              <EmptyState icon="star" title="No reviews yet" text="When students rate their sessions, their ratings and comments will appear here." />
+            ) : (
+              <EmptyState
+                icon="filter"
+                title="No reviews match your filters"
+                text="Try removing a filter or searching for something else."
+                action={{ label: 'Clear filters', onPress: clearReviewFilters }}
+              />
+            )
+          ) : (
+            <>
+              {shown.map((rev) => {
+                const hasComment = !!(rev.feedback && rev.feedback.trim().length);
+                const isLong = (rev.feedback?.length || 0) > 180;
+                const isOpen = !!expanded[rev.id];
+                const color = sentimentColor(rev.rating);
+                return (
+                  <View key={rev.id} style={[s.reviewRow, { borderLeftColor: color }]}>
+                    <View style={s.reviewHead}>
+                      <Avatar url={rev.avatarUrl} name={rev.displayName} phone={rev.phoneNumber} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <View style={s.nameRow}>
+                          <Text style={s.userName} numberOfLines={1}>
+                            {rev.displayName || 'Anonymous Student'}
+                          </Text>
+                          <PlanBadge tier={rev.planTier} />
+                        </View>
+                        <Text style={s.userSub} numberOfLines={1}>
+                          {rev.phoneNumber || 'No phone'}
+                          {rev.level ? ` · ${rev.level}` : ''}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                        <StarRating rating={rev.rating} size={14} showNumber />
+                        <Text style={s.userSub}>{timeAgo(rev.createdAt)}</Text>
+                      </View>
+                    </View>
+
+                    {hasComment ? (
+                      <View style={s.commentBox}>
+                        <Text style={s.commentText} numberOfLines={isOpen ? undefined : 3}>
+                          {rev.feedback}
+                        </Text>
+                        {isLong ? (
+                          <Pressable onPress={() => setExpanded((p) => ({ ...p, [rev.id]: !isOpen }))}>
+                            <Text style={s.moreLink}>{isOpen ? 'Show less' : 'Read more'}</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ) : null}
+
+                    <View style={s.reviewFoot}>
+                      <View style={s.metaWrap}>
+                        <View style={s.metaPill}>
+                          <Feather name="book-open" size={11} color={C.muted} />
+                          <Text style={s.metaText} numberOfLines={1}>
+                            {rev.topic}
+                          </Text>
+                        </View>
+                        <View style={s.metaPill}>
+                          <Feather name="clock" size={11} color={C.muted} />
+                          <Text style={s.metaText}>{formatDuration(rev.durationSeconds)}</Text>
+                        </View>
+                        <View style={s.metaPill}>
+                          <Feather name="award" size={11} color={C.muted} />
+                          <Text style={s.metaText}>Score {rev.overallScore}%</Text>
+                        </View>
+                        {!hasComment ? <Text style={s.noComment}>Rating only</Text> : null}
+                      </View>
+                      <Pressable
+                        onPress={() => handleDeleteReview(rev)}
+                        style={({ hovered }: any) => [s.iconBtn, hovered && { backgroundColor: '#fee2e2' }]}
+                        accessibilityLabel="Delete review"
+                      >
+                        <Feather name="trash-2" size={14} color={C.red} />
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })}
+
+              {visibleCount < filteredReviews.length ? (
+                <Pressable onPress={() => setVisibleCount((v) => v + PAGE_SIZE)} style={s.moreBtn}>
+                  <Text style={s.moreBtnText}>
+                    Show {Math.min(PAGE_SIZE, filteredReviews.length - visibleCount)} more
+                  </Text>
+                  <Feather name="chevron-down" size={14} color={C.teal} />
+                </Pressable>
+              ) : null}
+            </>
+          )}
+        </View>
+      </>
+    );
   };
 
-  const formatDuration = (seconds: number) => {
-    if (!seconds || seconds <= 0) return '0s';
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    if (m === 0) return `${s}s`;
-    return `${m}m ${s}s`;
-  };
+  const renderComplaints = () => (
+    <>
+      {complaintsError ? (
+        <View style={s.errorBanner}>
+          <Feather name="alert-triangle" size={18} color={C.red} />
+          <Text style={s.errorText}>{complaintsError}</Text>
+          <Pressable onPress={fetchComplaints} style={s.retryBtn}>
+            <Text style={s.retryText}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <View style={s.kpiGrid}>
+        <KpiCard label="Total submissions" icon="message-square" tint={C.teal} value={String(cp.total)} footer="All time" />
+        <KpiCard
+          label="Open issues"
+          icon="alert-circle"
+          tint={C.red}
+          value={String(cp.open)}
+          footer={cp.oldestOpen ? `Oldest waiting ${timeAgo(cp.oldestOpen.createdAt as any).replace(' ago', '')}` : 'All caught up'}
+          footerColor={cp.open ? C.red : C.green}
+          onPress={() => setComplaintFilter(complaintFilter === 'open' ? 'ALL' : 'open')}
+          active={complaintFilter === 'open'}
+        />
+        <KpiCard
+          label="Resolved"
+          icon="check-circle"
+          tint={C.green}
+          value={String(cp.resolved)}
+          footer={`${cp.rate.toFixed(0)}% resolution rate`}
+          onPress={() => setComplaintFilter(complaintFilter === 'resolved' ? 'ALL' : 'resolved')}
+          active={complaintFilter === 'resolved'}
+        />
+      </View>
+
+      <View style={s.filterCard}>
+        {renderSearch(complaintSearch, setComplaintSearch, 'Search student, phone, email or message...')}
+        <View style={s.filterRow}>
+          <Segmented<ComplaintFilter>
+            options={[
+              { key: 'ALL', label: `All ${cp.total}` },
+              { key: 'open', label: `Open ${cp.open}` },
+              { key: 'resolved', label: `Resolved ${cp.resolved}` },
+            ]}
+            value={complaintFilter}
+            onChange={setComplaintFilter}
+          />
+          <Segmented<ComplaintSort>
+            options={[
+              { key: 'newest', label: 'Newest' },
+              { key: 'oldest', label: 'Oldest' },
+            ]}
+            value={complaintSort}
+            onChange={setComplaintSort}
+          />
+        </View>
+      </View>
+
+      <View style={s.listCard}>
+        <View style={s.listHeader}>
+          <Text style={s.listTitle}>Complaints & inquiries</Text>
+          <Text style={s.listSub}>
+            Showing {filteredComplaints.length} of {complaints.length}
+          </Text>
+        </View>
+
+        {isComplaintsLoading && complaints.length === 0 ? (
+          <AdminTableSkeleton rows={5} />
+        ) : filteredComplaints.length === 0 ? (
+          complaints.length === 0 ? (
+            <EmptyState icon="message-square" title="No complaints yet" text="When students send complaints or feedback from the Account screen, they will appear here." />
+          ) : (
+            <EmptyState
+              icon="filter"
+              title="Nothing matches your filters"
+              text="Try a different status or search."
+              action={{
+                label: 'Reset',
+                onPress: () => {
+                  setComplaintFilter('ALL');
+                  setComplaintSearch('');
+                },
+              }}
+            />
+          )
+        ) : (
+          filteredComplaints.map((c) => {
+            const isResolved = c.status === 'resolved';
+            return (
+              <View key={c.id} style={[s.reviewRow, { borderLeftColor: isResolved ? C.green : C.red }]}>
+                <View style={s.reviewHead}>
+                  <Avatar url={c.avatarUrl} name={c.displayName} phone={c.phoneNumber} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={s.nameRow}>
+                      <Text style={s.userName} numberOfLines={1}>
+                        {c.displayName || 'Anonymous Student'}
+                      </Text>
+                      <PlanBadge tier={c.planTier} />
+                    </View>
+                    <Text style={s.userSub} numberOfLines={1}>
+                      {c.phoneNumber || 'No phone'}
+                      {c.email ? ` · ${c.email}` : ''}
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                    <View
+                      style={[
+                        s.badge,
+                        { backgroundColor: isResolved ? '#f0fdf4' : '#fef2f2', borderColor: isResolved ? '#bbf7d0' : '#fecaca' },
+                      ]}
+                    >
+                      <Text style={[s.badgeText, { color: isResolved ? C.green : '#dc2626' }]}>{isResolved ? 'RESOLVED' : 'OPEN'}</Text>
+                    </View>
+                    <Text style={s.userSub}>{timeAgo(c.createdAt as any)}</Text>
+                  </View>
+                </View>
+
+                <View style={s.commentBox}>
+                  <Text style={s.complaintText}>{c.message}</Text>
+                </View>
+
+                <View style={s.reviewFoot}>
+                  <Text style={s.userSub}>
+                    {c.createdAt ? new Date(c.createdAt as any).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : ''}
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <Pressable
+                      onPress={() => handleToggleStatus(c)}
+                      disabled={busyId === c.id}
+                      style={({ hovered }: any) => [
+                        s.actionBtn,
+                        isResolved ? s.reopenBtn : s.resolveBtn,
+                        hovered && { opacity: 0.85 },
+                        busyId === c.id && { opacity: 0.5 },
+                      ]}
+                    >
+                      {busyId === c.id ? (
+                        <ActivityIndicator size="small" color={C.teal} />
+                      ) : (
+                        <Feather name={isResolved ? 'rotate-ccw' : 'check'} size={13} color={isResolved ? '#475569' : C.teal} />
+                      )}
+                      <Text style={isResolved ? s.reopenText : s.resolveText}>{isResolved ? 'Reopen' : 'Mark resolved'}</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => handleDeleteComplaint(c)}
+                      style={({ hovered }: any) => [s.iconBtn, hovered && { backgroundColor: '#fee2e2' }]}
+                      accessibilityLabel="Delete complaint"
+                    >
+                      <Feather name="trash-2" size={14} color={C.red} />
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            );
+          })
+        )}
+      </View>
+    </>
+  );
+
+  const isLoadingAny = isReviewsLoading || isComplaintsLoading;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <View style={styles.mainLayout}>
-        <AdminSidebar
-          activeRoute="/admin/complaints"
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-        />
+    <SafeAreaView style={s.container} edges={['top', 'left', 'right']}>
+      <View style={s.mainLayout}>
+        <AdminSidebar activeRoute="/admin/complaints" isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-        <View style={styles.contentArea}>
+        <View style={s.contentArea}>
           <AdminTopBar
-            title={
-              activeTab === 'session_reviews'
-                ? 'Student Feedback & Session Reviews'
-                : 'Student Complaints & Inquiries'
-            }
+            title="Student Feedback"
             subtitle={
-              activeTab === 'session_reviews'
-                ? 'Real-time star ratings and optional post-session comments submitted by students.'
-                : 'Review and resolve issues or inquiries submitted by students from the Account screen.'
+              activeTab === 'reviews'
+                ? 'Star ratings and comments students leave after sessions'
+                : 'Issues and inquiries sent from the Account screen'
             }
             badgeText={
-              activeTab === 'session_reviews'
-                ? `${reviewStats.totalReviews} Reviews • ${reviewStats.avgRating} ★`
-                : `${complaintStats.open} Open`
+              activeTab === 'reviews'
+                ? `${rv.total} reviews${rv.total ? ` · ${rv.avgRating.toFixed(1)} ★` : ''}`
+                : `${cp.open} open`
             }
             sidebarOpen={sidebarOpen}
             onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
             rightElement={
               <Pressable
                 onPress={handleRefresh}
-                style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.8 }]}
+                disabled={isLoadingAny}
+                style={({ hovered }: any) => [s.refreshBtn, hovered && { backgroundColor: '#ccfbf1' }, isLoadingAny && { opacity: 0.6 }]}
               >
-                <Feather name="refresh-cw" size={14} color="#0d9488" />
-                <Text style={styles.refreshBtnText}>Refresh</Text>
+                {isLoadingAny ? <ActivityIndicator size="small" color={C.teal} /> : <Feather name="refresh-cw" size={14} color={C.teal} />}
+                <Text style={s.refreshText}>Refresh</Text>
               </Pressable>
             }
           />
 
-          <ScrollView style={styles.scrollBody} contentContainerStyle={styles.scrollBodyContent}>
-            {/* Top Navigation Tabs Switcher */}
-            <View style={styles.tabSwitcherContainer}>
-              <Pressable
-                onPress={() => setActiveTab('session_reviews')}
-                style={[
-                  styles.tabButton,
-                  activeTab === 'session_reviews' && styles.tabButtonActive,
-                ]}
-              >
-                <Ionicons
-                  name={activeTab === 'session_reviews' ? 'star' : 'star-outline'}
-                  size={17}
-                  color={activeTab === 'session_reviews' ? '#f59e0b' : '#64748b'}
-                />
-                <Text
-                  style={[
-                    styles.tabButtonText,
-                    activeTab === 'session_reviews' && styles.tabButtonTextActive,
-                  ]}
-                >
-                  Session Reviews
-                </Text>
-                <View
-                  style={[
-                    styles.tabBadge,
-                    activeTab === 'session_reviews' && styles.tabBadgeActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.tabBadgeText,
-                      activeTab === 'session_reviews' && styles.tabBadgeTextActive,
-                    ]}
-                  >
-                    {reviewStats.totalReviews}
-                  </Text>
+          {/* Tabs */}
+          <View style={s.tabBar}>
+            <Pressable onPress={() => setActiveTab('reviews')} style={[s.tab, activeTab === 'reviews' && s.tabActive]}>
+              <Ionicons name={activeTab === 'reviews' ? 'star' : 'star-outline'} size={15} color={activeTab === 'reviews' ? C.amber : C.muted} />
+              <Text style={[s.tabText, activeTab === 'reviews' && s.tabTextActive]}>Session reviews</Text>
+              <View style={[s.tabCount, activeTab === 'reviews' && { backgroundColor: '#ccfbf1' }]}>
+                <Text style={[s.tabCountText, activeTab === 'reviews' && { color: C.teal }]}>{rv.total}</Text>
+              </View>
+            </Pressable>
+            <Pressable onPress={() => setActiveTab('complaints')} style={[s.tab, activeTab === 'complaints' && s.tabActive]}>
+              <Feather name="alert-circle" size={15} color={activeTab === 'complaints' ? C.teal : C.muted} />
+              <Text style={[s.tabText, activeTab === 'complaints' && s.tabTextActive]}>Complaints</Text>
+              {cp.open > 0 ? (
+                <View style={[s.tabCount, { backgroundColor: '#fee2e2' }]}>
+                  <Text style={[s.tabCountText, { color: '#dc2626' }]}>{cp.open} open</Text>
                 </View>
-              </Pressable>
-
-              <Pressable
-                onPress={() => setActiveTab('complaints')}
-                style={[
-                  styles.tabButton,
-                  activeTab === 'complaints' && styles.tabButtonActive,
-                ]}
-              >
-                <Feather
-                  name="alert-circle"
-                  size={16}
-                  color={activeTab === 'complaints' ? '#0d9488' : '#64748b'}
-                />
-                <Text
-                  style={[
-                    styles.tabButtonText,
-                    activeTab === 'complaints' && styles.tabButtonTextActive,
-                  ]}
-                >
-                  Complaints & Inquiries
-                </Text>
-                {complaintStats.open > 0 && (
-                  <View style={styles.tabBadgeAlert}>
-                    <Text style={styles.tabBadgeAlertText}>{complaintStats.open} Open</Text>
-                  </View>
-                )}
-              </Pressable>
-            </View>
-
-            {/* TAB CONTENT: SESSION REVIEWS */}
-            {activeTab === 'session_reviews' && (
-              <>
-                {/* Review Metric Cards (Overall Score + Star Count Breakdown + Comments Breakdown) */}
-                <View style={styles.metricCardsGrid}>
-                  {/* Card 1: Average Rating & Overall Quality */}
-                  <View style={styles.metricCard}>
-                    <View style={styles.ratingHeroWrap}>
-                      <Text style={styles.ratingHeroNumber}>
-                        {reviewStats.avgRating ? reviewStats.avgRating.toFixed(1) : '5.0'}
-                      </Text>
-                      <View style={{ gap: 4 }}>
-                        <StarRatingDisplay rating={reviewStats.avgRating || 5} size={18} />
-                        <Text style={styles.ratingHeroSubtext}>
-                          Based on {reviewStats.totalReviews} total ratings
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Card 2: Star Counts Distribution (5★, 4★, 3★, 2★, 1★) */}
-                  <View style={[styles.metricCard, { flex: 1.4 }]}>
-                    <View style={styles.cardHeaderSmall}>
-                      <Text style={styles.metricLabelBold}>Star Rating Count</Text>
-                      <Text style={styles.metricLabelSub}>Click a row to filter</Text>
-                    </View>
-                    <View style={styles.starDistributionList}>
-                      {([5, 4, 3, 2, 1] as const).map((star) => {
-                        const count = reviewStats.starCounts[star] || 0;
-                        const pct =
-                          reviewStats.totalReviews > 0
-                            ? Math.round((count / reviewStats.totalReviews) * 100)
-                            : 0;
-                        const isSelected = reviewStarFilter === star;
-                        return (
-                          <Pressable
-                            key={star}
-                            onPress={() =>
-                              setReviewStarFilter(isSelected ? 'ALL' : star)
-                            }
-                            style={[
-                              styles.starDistRow,
-                              isSelected && styles.starDistRowSelected,
-                            ]}
-                          >
-                            <View style={styles.starDistLabel}>
-                              <Text style={styles.starDistLabelText}>{star}</Text>
-                              <Ionicons name="star" size={12} color="#f59e0b" />
-                            </View>
-
-                            <View style={styles.starProgressBarTrack}>
-                              <View
-                                style={[
-                                  styles.starProgressBarFill,
-                                  { width: `${pct}%` },
-                                  isSelected && { backgroundColor: '#f59e0b' },
-                                ]}
-                              />
-                            </View>
-
-                            <View style={styles.starDistCountWrap}>
-                              <Text style={styles.starDistCountText}>{count}</Text>
-                              <Text style={styles.starDistPctText}>({pct}%)</Text>
-                            </View>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-
-                  {/* Card 3: Feedback vs Rating Only Breakdown */}
-                  <View style={styles.metricCard}>
-                    <Text style={styles.metricLabelBold}>Feedback Separation</Text>
-                    <View style={styles.commentSplitGrid}>
-                      <Pressable
-                        onPress={() =>
-                          setReviewContentFilter(
-                            reviewContentFilter === 'WITH_COMMENT' ? 'ALL' : 'WITH_COMMENT'
-                          )
-                        }
-                        style={[
-                          styles.commentSplitPill,
-                          reviewContentFilter === 'WITH_COMMENT' && styles.commentSplitPillActive,
-                        ]}
-                      >
-                        <View style={[styles.splitIconBox, { backgroundColor: '#f0fdfa' }]}>
-                          <Feather name="message-circle" size={16} color="#0d9488" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.splitCountValue}>{reviewStats.commentsCount}</Text>
-                          <Text style={styles.splitCountLabel}>With Written Comments</Text>
-                        </View>
-                      </Pressable>
-
-                      <Pressable
-                        onPress={() =>
-                          setReviewContentFilter(
-                            reviewContentFilter === 'RATING_ONLY' ? 'ALL' : 'RATING_ONLY'
-                          )
-                        }
-                        style={[
-                          styles.commentSplitPill,
-                          reviewContentFilter === 'RATING_ONLY' && styles.commentSplitPillActive,
-                        ]}
-                      >
-                        <View style={[styles.splitIconBox, { backgroundColor: '#f8fafc' }]}>
-                          <Feather name="star" size={16} color="#64748b" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.splitCountValue}>{reviewStats.withoutCommentsCount}</Text>
-                          <Text style={styles.splitCountLabel}>Rating Only (No Text)</Text>
-                        </View>
-                      </Pressable>
-                    </View>
-                  </View>
+              ) : (
+                <View style={s.tabCount}>
+                  <Text style={s.tabCountText}>{cp.total}</Text>
                 </View>
+              )}
+            </Pressable>
+          </View>
 
-                {/* Filter & Search Bar */}
-                <View style={styles.filterBarCard}>
-                  <View style={styles.searchInputWrap}>
-                    <Feather name="search" size={16} color="#94a3b8" />
-                    <TextInput
-                      style={styles.searchInput}
-                      placeholder="Search by student name, phone, topic, or comment..."
-                      placeholderTextColor="#94a3b8"
-                      value={reviewSearch}
-                      onChangeText={setReviewSearch}
-                    />
-                    {reviewSearch.length > 0 && (
-                      <Pressable onPress={() => setReviewSearch('')}>
-                        <Feather name="x-circle" size={16} color="#94a3b8" />
-                      </Pressable>
-                    )}
-                  </View>
-
-                  {/* Comment Separation Filter Pills */}
-                  <View style={styles.filterPillRow}>
-                    <Text style={styles.filterSectionTitle}>Show:</Text>
-                    <Pressable
-                      onPress={() => setReviewContentFilter('ALL')}
-                      style={[
-                        styles.filterPill,
-                        reviewContentFilter === 'ALL' && styles.filterPillActive,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.filterPillText,
-                          reviewContentFilter === 'ALL' && styles.filterPillTextActive,
-                        ]}
-                      >
-                        All ({reviewStats.totalReviews})
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => setReviewContentFilter('WITH_COMMENT')}
-                      style={[
-                        styles.filterPill,
-                        styles.filterPillComment,
-                        reviewContentFilter === 'WITH_COMMENT' && styles.filterPillCommentActive,
-                      ]}
-                    >
-                      <Feather
-                        name="message-circle"
-                        size={12}
-                        color={reviewContentFilter === 'WITH_COMMENT' ? '#ffffff' : '#0d9488'}
-                      />
-                      <Text
-                        style={[
-                          styles.filterPillText,
-                          { color: reviewContentFilter === 'WITH_COMMENT' ? '#ffffff' : '#0d9488' },
-                        ]}
-                      >
-                        With Comments ({reviewStats.commentsCount})
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => setReviewContentFilter('RATING_ONLY')}
-                      style={[
-                        styles.filterPill,
-                        reviewContentFilter === 'RATING_ONLY' && styles.filterPillActive,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.filterPillText,
-                          reviewContentFilter === 'RATING_ONLY' && styles.filterPillTextActive,
-                        ]}
-                      >
-                        Rating Only ({reviewStats.withoutCommentsCount})
-                      </Text>
-                    </Pressable>
-                  </View>
-
-                  {/* Star Filter Pills */}
-                  <View style={styles.filterPillRow}>
-                    <Text style={styles.filterSectionTitle}>Stars:</Text>
-                    <Pressable
-                      onPress={() => setReviewStarFilter('ALL')}
-                      style={[
-                        styles.filterPillSmall,
-                        reviewStarFilter === 'ALL' && styles.filterPillSmallActive,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.filterPillSmallText,
-                          reviewStarFilter === 'ALL' && styles.filterPillSmallTextActive,
-                        ]}
-                      >
-                        All
-                      </Text>
-                    </Pressable>
-
-                    {([5, 4, 3, 2, 1] as const).map((s) => (
-                      <Pressable
-                        key={s}
-                        onPress={() => setReviewStarFilter(reviewStarFilter === s ? 'ALL' : s)}
-                        style={[
-                          styles.filterPillSmall,
-                          reviewStarFilter === s && styles.filterPillSmallActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.filterPillSmallText,
-                            reviewStarFilter === s && styles.filterPillSmallTextActive,
-                          ]}
-                        >
-                          {s} ★ ({reviewStats.starCounts[s] || 0})
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  {/* View Mode Toggle: Table vs Cards */}
-                  <View style={styles.viewModeGroup}>
-                    <Pressable
-                      onPress={() => setReviewViewMode('table')}
-                      style={[
-                        styles.viewModeBtn,
-                        reviewViewMode === 'table' && styles.viewModeBtnActive,
-                      ]}
-                      accessibilityLabel="Table View"
-                    >
-                      <Feather
-                        name="list"
-                        size={14}
-                        color={reviewViewMode === 'table' ? '#0d9488' : '#64748b'}
-                      />
-                      <Text
-                        style={[
-                          styles.viewModeBtnText,
-                          reviewViewMode === 'table' && styles.viewModeBtnTextActive,
-                        ]}
-                      >
-                        Table
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => setReviewViewMode('cards')}
-                      style={[
-                        styles.viewModeBtn,
-                        reviewViewMode === 'cards' && styles.viewModeBtnActive,
-                      ]}
-                      accessibilityLabel="Comments Feed View"
-                    >
-                      <Feather
-                        name="grid"
-                        size={14}
-                        color={reviewViewMode === 'cards' ? '#0d9488' : '#64748b'}
-                      />
-                      <Text
-                        style={[
-                          styles.viewModeBtnText,
-                          reviewViewMode === 'cards' && styles.viewModeBtnTextActive,
-                        ]}
-                      >
-                        Comments Feed
-                      </Text>
-                    </Pressable>
-                  </View>
-                </View>
-
-                {/* Session Reviews Table or Cards Feed */}
-                <View style={styles.tableCard}>
-                  <View style={styles.tableCardHeader}>
-                    <View>
-                      <Text style={styles.tableTitle}>
-                        {reviewContentFilter === 'WITH_COMMENT'
-                          ? 'Student Written Comments & Feedback'
-                          : 'Student Session Reviews'}
-                      </Text>
-                      <Text style={styles.tableSubtitle}>
-                        Showing {filteredReviews.length} of {reviews.length} reviews
-                        {reviewStarFilter !== 'ALL' ? ` • ${reviewStarFilter} Stars only` : ''}
-                        {reviewContentFilter === 'WITH_COMMENT'
-                          ? ' • Filtered to show written comments'
-                          : reviewContentFilter === 'RATING_ONLY'
-                          ? ' • Filtered to show rating only'
-                          : ''}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {isReviewsLoading ? (
-                    <AdminTableSkeleton rows={5} />
-                  ) : filteredReviews.length === 0 ? (
-                    <View style={styles.emptyState}>
-                      <Ionicons name="star-outline" size={40} color="#94a3b8" />
-                      <Text style={styles.emptyTitle}>No session reviews found</Text>
-                      <Text style={styles.emptySubtitle}>
-                        {reviewSearch || reviewStarFilter !== 'ALL' || reviewContentFilter !== 'ALL'
-                          ? 'Try resetting the filters or clearing the search query.'
-                          : 'When students rate their sessions, their star counts and comments will appear here.'}
-                      </Text>
-                    </View>
-                  ) : reviewViewMode === 'cards' ? (
-                    /* CARDS / COMMENTS FEED VIEW */
-                    <View style={styles.reviewCardsGrid}>
-                      {filteredReviews.map((rev) => {
-                        const tierStyle = getTierColor(rev.planTier);
-                        const hasComment = Boolean(rev.feedback && rev.feedback.trim().length > 0);
-                        return (
-                          <View
-                            key={rev.id}
-                            style={[
-                              styles.reviewFeedCard,
-                              hasComment && styles.reviewFeedCardHighlighted,
-                            ]}
-                          >
-                            <View style={styles.cardTopRow}>
-                              <View style={styles.cardStudentInfo}>
-                                <View style={styles.userAvatar}>
-                                  {rev.avatarUrl ? (
-                                    <Image
-                                      source={{ uri: rev.avatarUrl }}
-                                      style={styles.userAvatarImage}
-                                      resizeMode="cover"
-                                    />
-                                  ) : (
-                                    <Text style={styles.avatarText}>
-                                      {getInitials(rev.displayName, rev.phoneNumber)}
-                                    </Text>
-                                  )}
-                                </View>
-                                <View>
-                                  <Text style={styles.userName} numberOfLines={1}>
-                                    {rev.displayName || 'Anonymous Student'}
-                                  </Text>
-                                  <Text style={styles.userPhone} numberOfLines={1}>
-                                    {rev.phoneNumber || 'No phone'}
-                                  </Text>
-                                </View>
-                              </View>
-
-                              <View
-                                style={[
-                                  styles.planBadge,
-                                  { backgroundColor: tierStyle.bg, borderColor: tierStyle.border },
-                                ]}
-                              >
-                                <Text style={[styles.planBadgeText, { color: tierStyle.text }]}>
-                                  {(rev.planTier || 'starter').toUpperCase()}
-                                </Text>
-                              </View>
-                            </View>
-
-                            {/* Rating and Star Count Display */}
-                            <View style={styles.cardRatingRow}>
-                              <StarRatingDisplay rating={rev.rating} size={16} showNumber />
-                              <Text style={styles.cardTopicBadge}>{rev.topic}</Text>
-                            </View>
-
-                            {/* Separately Highlighted Student Comment */}
-                            {hasComment ? (
-                              <View style={styles.commentHighlightBox}>
-                                <View style={styles.commentIconRow}>
-                                  <Feather name="message-circle" size={14} color="#0d9488" />
-                                  <Text style={styles.commentBoxTag}>Student Comment</Text>
-                                </View>
-                                <Text style={styles.commentBoxText}>"{rev.feedback}"</Text>
-                              </View>
-                            ) : (
-                              <View style={styles.noCommentPill}>
-                                <Text style={styles.noCommentPillText}>
-                                  Rating only • No written comment
-                                </Text>
-                              </View>
-                            )}
-
-                            {/* Card Footer: Date, Duration, and Action */}
-                            <View style={styles.cardFooterRow}>
-                              <Text style={styles.cardMetaText}>
-                                {new Date(rev.createdAt).toLocaleDateString()} • {formatDuration(rev.durationSeconds)}
-                              </Text>
-
-                              <Pressable
-                                onPress={() => handleDeleteReview(rev)}
-                                style={({ pressed }) => [
-                                  styles.deleteBtn,
-                                  pressed && { opacity: 0.8 },
-                                ]}
-                                accessibilityLabel="Delete review"
-                              >
-                                <Feather name="trash-2" size={13} color="#ef4444" />
-                              </Pressable>
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  ) : (
-                    /* STRUCTURED TABLE VIEW */
-                    <View style={styles.table}>
-                      <View style={styles.tableHeaderRow}>
-                        <Text style={[styles.tableColHeader, { flex: 1.8 }]}>STUDENT</Text>
-                        <Text style={[styles.tableColHeader, { flex: 1.2 }]}>STAR RATING</Text>
-                        <Text style={[styles.tableColHeader, { flex: 3.2 }]}>
-                          STUDENT COMMENT (SEPARATE)
-                        </Text>
-                        <Text style={[styles.tableColHeader, { flex: 1.6 }]}>SESSION TOPIC</Text>
-                        <Text style={[styles.tableColHeader, { flex: 1.1 }]}>DATE</Text>
-                        <Text style={[styles.tableColHeader, { flex: 0.7, textAlign: 'right' }]}>
-                          ACTIONS
-                        </Text>
-                      </View>
-
-                      {filteredReviews.map((rev) => {
-                        const tierStyle = getTierColor(rev.planTier);
-                        const hasComment = Boolean(rev.feedback && rev.feedback.trim().length > 0);
-                        return (
-                          <View key={rev.id} style={styles.tableRow}>
-                            {/* Col 1: Student info */}
-                            <View
-                              style={[
-                                styles.tableCol,
-                                { flex: 1.8, flexDirection: 'row', alignItems: 'center', gap: 10 },
-                              ]}
-                            >
-                              <View style={styles.userAvatar}>
-                                {rev.avatarUrl ? (
-                                  <Image
-                                    source={{ uri: rev.avatarUrl }}
-                                    style={styles.userAvatarImage}
-                                    resizeMode="cover"
-                                  />
-                                ) : (
-                                  <Text style={styles.avatarText}>
-                                    {getInitials(rev.displayName, rev.phoneNumber)}
-                                  </Text>
-                                )}
-                              </View>
-                              <View style={{ flex: 1 }}>
-                                <Text style={styles.userName} numberOfLines={1}>
-                                  {rev.displayName || 'Anonymous Student'}
-                                </Text>
-                                <Text style={styles.userPhone} numberOfLines={1}>
-                                  {rev.phoneNumber || 'No phone'}
-                                </Text>
-                                <View
-                                  style={[
-                                    styles.planBadge,
-                                    {
-                                      backgroundColor: tierStyle.bg,
-                                      borderColor: tierStyle.border,
-                                      marginTop: 4,
-                                    },
-                                  ]}
-                                >
-                                  <Text style={[styles.planBadgeText, { color: tierStyle.text }]}>
-                                    {(rev.planTier || 'starter').toUpperCase()}
-                                  </Text>
-                                </View>
-                              </View>
-                            </View>
-
-                            {/* Col 2: Star Rating & Count */}
-                            <View style={[styles.tableCol, { flex: 1.2 }]}>
-                              <StarRatingDisplay rating={rev.rating} size={15} showNumber />
-                              <Text style={styles.starColSub}>
-                                {rev.rating === 5
-                                  ? '5 / 5 Stars'
-                                  : `${Number(rev.rating).toFixed(1)} / 5 Stars`}
-                              </Text>
-                            </View>
-
-                            {/* Col 3: Student Comment (Separately formatted) */}
-                            <View style={[styles.tableCol, { flex: 3.2, paddingRight: 14 }]}>
-                              {hasComment ? (
-                                <View style={styles.commentTableCellBox}>
-                                  <View style={styles.commentTableCellHeader}>
-                                    <Feather name="message-circle" size={13} color="#0d9488" />
-                                    <Text style={styles.commentTableCellLabel}>Student Comment</Text>
-                                  </View>
-                                  <Text style={styles.commentTableCellText}>
-                                    "{rev.feedback}"
-                                  </Text>
-                                </View>
-                              ) : (
-                                <View style={styles.noCommentTableCell}>
-                                  <Feather name="minus" size={12} color="#94a3b8" />
-                                  <Text style={styles.noCommentTableCellText}>
-                                    Rating only • No written comment
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-
-                            {/* Col 4: Session Topic & Duration */}
-                            <View style={[styles.tableCol, { flex: 1.6 }]}>
-                              <Text style={styles.topicText} numberOfLines={1}>
-                                {rev.topic}
-                              </Text>
-                              <Text style={styles.durationSubText}>
-                                {formatDuration(rev.durationSeconds)} • Score: {rev.overallScore}%
-                              </Text>
-                            </View>
-
-                            {/* Col 5: Date */}
-                            <View style={[styles.tableCol, { flex: 1.1 }]}>
-                              <Text style={styles.dateText}>
-                                {new Date(rev.createdAt).toLocaleDateString()}
-                              </Text>
-                              <Text style={styles.timeSubText}>
-                                {new Date(rev.createdAt).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </Text>
-                            </View>
-
-                            {/* Col 6: Actions */}
-                            <View
-                              style={[
-                                styles.tableCol,
-                                { flex: 0.7, flexDirection: 'row', justifyContent: 'flex-end' },
-                              ]}
-                            >
-                              <Pressable
-                                onPress={() => handleDeleteReview(rev)}
-                                style={({ pressed }) => [
-                                  styles.actionBtn,
-                                  styles.deleteBtn,
-                                  pressed && { opacity: 0.8 },
-                                ]}
-                                accessibilityLabel="Delete review"
-                              >
-                                <Feather name="trash-2" size={13} color="#ef4444" />
-                              </Pressable>
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  )}
-                </View>
-              </>
-            )}
-
-            {/* TAB CONTENT: COMPLAINTS & INQUIRIES */}
-            {activeTab === 'complaints' && (
-              <>
-                {/* KPI Summary Cards */}
-                <View style={styles.metricCardsGrid}>
-                  <View style={styles.metricCard}>
-                    <View style={styles.metricIconWrap}>
-                      <Feather name="message-square" size={18} color="#0d9488" />
-                    </View>
-                    <View>
-                      <Text style={styles.metricLabel}>Total Submissions</Text>
-                      <Text style={styles.metricValue}>{complaintStats.total}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.metricCard}>
-                    <View style={[styles.metricIconWrap, { backgroundColor: '#fef2f2' }]}>
-                      <Feather name="alert-circle" size={18} color="#dc2626" />
-                    </View>
-                    <View>
-                      <Text style={styles.metricLabel}>Open Issues</Text>
-                      <Text style={[styles.metricValue, { color: '#dc2626' }]}>
-                        {complaintStats.open}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.metricCard}>
-                    <View style={[styles.metricIconWrap, { backgroundColor: '#f0fdf4' }]}>
-                      <Feather name="check-circle" size={18} color="#16a34a" />
-                    </View>
-                    <View>
-                      <Text style={styles.metricLabel}>Resolved</Text>
-                      <Text style={[styles.metricValue, { color: '#16a34a' }]}>
-                        {complaintStats.resolved}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Filter & Search Bar */}
-                <View style={styles.filterBarCard}>
-                  <View style={styles.searchInputWrap}>
-                    <Feather name="search" size={16} color="#94a3b8" />
-                    <TextInput
-                      style={styles.searchInput}
-                      placeholder="Search by student name, phone, email, or complaint text..."
-                      placeholderTextColor="#94a3b8"
-                      value={complaintSearch}
-                      onChangeText={setComplaintSearch}
-                    />
-                    {complaintSearch.length > 0 && (
-                      <Pressable onPress={() => setComplaintSearch('')}>
-                        <Feather name="x-circle" size={16} color="#94a3b8" />
-                      </Pressable>
-                    )}
-                  </View>
-
-                  <View style={styles.statusFilterGroup}>
-                    {(['ALL', 'open', 'resolved'] as const).map((st) => (
-                      <Pressable
-                        key={st}
-                        onPress={() => setComplaintStatusFilter(st)}
-                        style={[
-                          styles.filterPill,
-                          complaintStatusFilter === st && styles.filterPillActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.filterPillText,
-                            complaintStatusFilter === st && styles.filterPillTextActive,
-                          ]}
-                        >
-                          {st === 'ALL' ? 'All' : st.toUpperCase()}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-
-                {/* Complaints Table */}
-                <View style={styles.tableCard}>
-                  <View style={styles.tableCardHeader}>
-                    <Text style={styles.tableTitle}>Submitted Complaints & Feedback</Text>
-                    <Text style={styles.tableSubtitle}>
-                      Showing {filteredComplaints.length} of {complaints.length} items
-                    </Text>
-                  </View>
-
-                  {isComplaintsLoading ? (
-                    <AdminTableSkeleton rows={5} />
-                  ) : filteredComplaints.length === 0 ? (
-                    <View style={styles.emptyState}>
-                      <Feather name="message-square" size={36} color="#94a3b8" />
-                      <Text style={styles.emptyTitle}>No complaints found</Text>
-                      <Text style={styles.emptySubtitle}>
-                        When students submit complaints or feedback, they will appear here.
-                      </Text>
-                    </View>
-                  ) : (
-                    <View style={styles.table}>
-                      <View style={styles.tableHeaderRow}>
-                        <Text style={[styles.tableColHeader, { flex: 1.8 }]}>STUDENT</Text>
-                        <Text style={[styles.tableColHeader, { flex: 0.9 }]}>PLAN</Text>
-                        <Text style={[styles.tableColHeader, { flex: 2.8 }]}>
-                          COMPLAINT / FEEDBACK MESSAGE
-                        </Text>
-                        <Text style={[styles.tableColHeader, { flex: 1.1 }]}>SUBMITTED</Text>
-                        <Text style={[styles.tableColHeader, { flex: 0.9 }]}>STATUS</Text>
-                        <Text style={[styles.tableColHeader, { flex: 1.2, textAlign: 'right' }]}>
-                          ACTIONS
-                        </Text>
-                      </View>
-
-                      {filteredComplaints.map((c) => {
-                        const tierStyle = getTierColor(c.planTier);
-                        const isResolved = c.status === 'resolved';
-                        return (
-                          <View key={c.id} style={styles.tableRow}>
-                            <View
-                              style={[
-                                styles.tableCol,
-                                { flex: 1.8, flexDirection: 'row', alignItems: 'center', gap: 10 },
-                              ]}
-                            >
-                              <View style={styles.userAvatar}>
-                                {c.avatarUrl ? (
-                                  <Image
-                                    source={{ uri: c.avatarUrl }}
-                                    style={styles.userAvatarImage}
-                                    resizeMode="cover"
-                                  />
-                                ) : (
-                                  <Text style={styles.avatarText}>
-                                    {getInitials(c.displayName, c.phoneNumber)}
-                                  </Text>
-                                )}
-                              </View>
-                              <View style={{ flex: 1 }}>
-                                <Text style={styles.userName} numberOfLines={1}>
-                                  {c.displayName || 'Anonymous Student'}
-                                </Text>
-                                <Text style={styles.userPhone} numberOfLines={1}>
-                                  {c.phoneNumber || 'No phone'}
-                                  {c.email ? ` • ${c.email}` : ''}
-                                </Text>
-                              </View>
-                            </View>
-
-                            <View style={[styles.tableCol, { flex: 0.9 }]}>
-                              <View
-                                style={[
-                                  styles.planBadge,
-                                  { backgroundColor: tierStyle.bg, borderColor: tierStyle.border },
-                                ]}
-                              >
-                                <Text style={[styles.planBadgeText, { color: tierStyle.text }]}>
-                                  {(c.planTier || 'starter').toUpperCase()}
-                                </Text>
-                              </View>
-                            </View>
-
-                            <View style={[styles.tableCol, { flex: 2.8, paddingRight: 12 }]}>
-                              <Text style={styles.messageText}>{c.message}</Text>
-                            </View>
-
-                            <View style={[styles.tableCol, { flex: 1.1 }]}>
-                              <Text style={styles.dateText}>
-                                {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '-'}
-                              </Text>
-                              <Text style={styles.timeSubText}>
-                                {c.createdAt
-                                  ? new Date(c.createdAt).toLocaleTimeString([], {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                    })
-                                  : ''}
-                              </Text>
-                            </View>
-
-                            <View style={[styles.tableCol, { flex: 0.9 }]}>
-                              <View
-                                style={[
-                                  styles.planBadge,
-                                  {
-                                    backgroundColor: isResolved ? '#f0fdf4' : '#fef2f2',
-                                    borderColor: isResolved ? '#bbf7d0' : '#fecaca',
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.planBadgeText,
-                                    { color: isResolved ? '#16a34a' : '#dc2626' },
-                                  ]}
-                                >
-                                  {isResolved ? 'RESOLVED' : 'OPEN'}
-                                </Text>
-                              </View>
-                            </View>
-
-                            <View
-                              style={[
-                                styles.tableCol,
-                                { flex: 1.2, flexDirection: 'row', justifyContent: 'flex-end', gap: 6 },
-                              ]}
-                            >
-                              <Pressable
-                                onPress={() => handleToggleStatus(c)}
-                                style={({ pressed }) => [
-                                  styles.actionBtn,
-                                  isResolved ? styles.reopenBtn : styles.resolveBtn,
-                                  pressed && { opacity: 0.8 },
-                                ]}
-                              >
-                                <Feather
-                                  name={isResolved ? 'rotate-ccw' : 'check'}
-                                  size={13}
-                                  color={isResolved ? '#475569' : '#0d9488'}
-                                />
-                                <Text
-                                  style={isResolved ? styles.reopenBtnText : styles.resolveBtnText}
-                                >
-                                  {isResolved ? 'Reopen' : 'Resolve'}
-                                </Text>
-                              </Pressable>
-
-                              <Pressable
-                                onPress={() => handleDeleteComplaint(c)}
-                                style={({ pressed }) => [
-                                  styles.actionBtn,
-                                  styles.deleteBtn,
-                                  pressed && { opacity: 0.8 },
-                                ]}
-                              >
-                                <Feather name="trash-2" size={13} color="#ef4444" />
-                              </Pressable>
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  )}
-                </View>
-              </>
-            )}
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={[s.scroll, isPhone && { padding: 14 }]} showsVerticalScrollIndicator={false}>
+            {activeTab === 'reviews' ? renderReviews() : renderComplaints()}
           </ScrollView>
         </View>
       </View>
@@ -1301,26 +1220,16 @@ export default function AdminComplaintsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  mainLayout: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  contentArea: {
-    flex: 1,
-    flexDirection: 'column',
-  },
-  scrollBody: {
-    flex: 1,
-  },
-  scrollBodyContent: {
-    padding: 24,
-    gap: 20,
-  },
+/* -------------------------------------------------------------------------- */
+/*  Styles                                                                    */
+/* -------------------------------------------------------------------------- */
+
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  mainLayout: { flex: 1, flexDirection: 'row' },
+  contentArea: { flex: 1, flexDirection: 'column' },
+  scroll: { padding: 24, paddingBottom: 64, gap: 16 },
+
   refreshBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1332,715 +1241,176 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ccfbf1',
   },
-  refreshBtnText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 12,
-    color: '#0d9488',
-  },
+  refreshText: { ...fontStyle('inter', 'medium'), fontSize: 12, color: C.teal },
 
-  // Tab Switcher
-  tabSwitcherContainer: {
+  // Tabs
+  tabBar: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 6,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    gap: 4,
+    paddingHorizontal: 24,
+    backgroundColor: C.card,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
   },
-  tabButton: {
+  tab: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  tabButtonActive: {
-    backgroundColor: '#f0fdfa',
-    borderWidth: 1,
-    borderColor: '#ccfbf1',
-  },
-  tabButtonText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 13,
-    color: '#64748b',
-  },
-  tabButtonTextActive: {
-    color: '#0d9488',
-  },
-  tabBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 12,
-    backgroundColor: '#f1f5f9',
-  },
-  tabBadgeActive: {
-    backgroundColor: '#ccfbf1',
-  },
-  tabBadgeText: {
-    ...fontStyle('inter', 'bold'),
-    fontSize: 11,
-    color: '#64748b',
-  },
-  tabBadgeTextActive: {
-    color: '#0d9488',
-  },
-  tabBadgeAlert: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 12,
+  tabActive: { borderBottomColor: C.teal },
+  tabText: { ...fontStyle('inter', 'medium'), fontSize: 13, color: C.muted },
+  tabTextActive: { ...fontStyle('inter', 'semiBold'), color: C.teal },
+  tabCount: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: C.soft },
+  tabCountText: { ...fontStyle('inter', 'bold'), fontSize: 11, color: C.muted },
+
+  // Errors
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     backgroundColor: '#fef2f2',
     borderWidth: 1,
     borderColor: '#fecaca',
-  },
-  tabBadgeAlertText: {
-    ...fontStyle('inter', 'bold'),
-    fontSize: 11,
-    color: '#dc2626',
-  },
-
-  // Metric Cards
-  metricCardsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 14,
-  },
-  metricCard: {
-    flex: 1,
-    minWidth: 220,
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  ratingHeroWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  ratingHeroNumber: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 44,
-    color: '#0f172a',
-    lineHeight: 48,
-  },
-  ratingHeroSubtext: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  cardHeaderSmall: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  metricLabelBold: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 13,
-    color: '#0f172a',
-  },
-  metricLabelSub: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#94a3b8',
-  },
-
-  // Star Distribution
-  starDistributionList: {
-    gap: 6,
-  },
-  starDistRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-    borderRadius: 6,
-  },
-  starDistRowSelected: {
-    backgroundColor: '#fffbeb',
-  },
-  starDistLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    width: 24,
-  },
-  starDistLabelText: {
-    ...fontStyle('inter', 'bold'),
-    fontSize: 12,
-    color: '#334155',
-  },
-  starProgressBarTrack: {
-    flex: 1,
-    height: 8,
-    backgroundColor: '#f1f5f9',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  starProgressBarFill: {
-    height: '100%',
-    backgroundColor: '#fcd34d',
-    borderRadius: 4,
-  },
-  starDistCountWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    width: 60,
-    justifyContent: 'flex-end',
-  },
-  starDistCountText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 12,
-    color: '#0f172a',
-  },
-  starDistPctText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#94a3b8',
-  },
-
-  // Comment Split Grid
-  commentSplitGrid: {
-    gap: 8,
-    marginTop: 10,
-  },
-  commentSplitPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: '#f8fafc',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  commentSplitPillActive: {
-    borderColor: '#0d9488',
-    backgroundColor: '#f0fdfa',
-  },
-  splitIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  splitCountValue: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 17,
-    color: '#0f172a',
-  },
-  splitCountLabel: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#64748b',
-  },
-
-  metricIconWrap: {
-    width: 42,
-    height: 42,
     borderRadius: 10,
-    backgroundColor: '#f0fdfa',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  metricLabel: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 12,
-    color: '#64748b',
-  },
-  metricValue: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 22,
-    color: '#0f172a',
-    marginTop: 2,
-  },
-
-  // Filter Bar
-  filterBarCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
     padding: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 12,
   },
-  searchInputWrap: {
-    flex: 1,
-    minWidth: 240,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    height: 38,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 13,
-    color: '#0f172a',
-    ...fontStyle('inter', 'regular'),
-  },
-  filterPillRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flexWrap: 'wrap',
-  },
-  filterSectionTitle: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 11,
-    color: '#94a3b8',
-    marginRight: 2,
-  },
-  filterPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: '#f1f5f9',
-  },
-  filterPillActive: {
-    backgroundColor: '#0d9488',
-  },
-  filterPillComment: {
-    backgroundColor: '#f0fdfa',
-    borderWidth: 1,
-    borderColor: '#ccfbf1',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  filterPillCommentActive: {
-    backgroundColor: '#0d9488',
-    borderColor: '#0d9488',
-  },
-  filterPillText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 12,
-    color: '#64748b',
-  },
-  filterPillTextActive: {
-    color: '#ffffff',
-  },
-  filterPillSmall: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 16,
-    backgroundColor: '#f8fafc',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  filterPillSmallActive: {
-    backgroundColor: '#f59e0b',
-    borderColor: '#f59e0b',
-  },
-  filterPillSmallText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 11,
-    color: '#475569',
-  },
-  filterPillSmallTextActive: {
-    color: '#ffffff',
-    ...fontStyle('inter', 'bold'),
-  },
-  viewModeGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f1f5f9',
-    borderRadius: 8,
-    padding: 2,
-  },
-  viewModeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
-  },
-  viewModeBtnActive: {
-    backgroundColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  viewModeBtnText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 11,
-    color: '#64748b',
-  },
-  viewModeBtnTextActive: {
-    color: '#0d9488',
-    ...fontStyle('inter', 'semiBold'),
-  },
+  errorText: { flex: 1, ...fontStyle('inter', 'medium'), fontSize: 13, color: '#991b1b' },
+  retryBtn: { backgroundColor: C.red, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  retryText: { ...fontStyle('inter', 'semiBold'), fontSize: 12, color: '#fff' },
 
-  statusFilterGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-
-  // Table Structure
-  tableCard: {
-    backgroundColor: '#ffffff',
+  // KPI
+  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
+  kpiCard: {
+    flexGrow: 1,
+    flexBasis: 210,
+    minWidth: 190,
+    backgroundColor: C.card,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    overflow: 'hidden',
-  },
-  tableCardHeader: {
     padding: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-  },
-  tableTitle: {
-    ...fontStyle('outfit', 'semiBold'),
-    fontSize: 16,
-    color: '#0f172a',
-  },
-  tableSubtitle: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  table: {
-    width: '100%',
-  },
-  tableHeaderRow: {
-    flexDirection: 'row',
-    backgroundColor: '#f8fafc',
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-  },
-  tableColHeader: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 11,
-    color: '#64748b',
-    letterSpacing: 0.5,
-  },
-  tableRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-  },
-  tableCol: {
-    justifyContent: 'center',
-  },
-
-  // User Avatar & Name
-  userAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#e0f2fe',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  userAvatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 18,
-  },
-  avatarText: {
-    ...fontStyle('outfit', 'bold'),
-    fontSize: 13,
-    color: '#0284c7',
-  },
-  userName: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 13,
-    color: '#0f172a',
-  },
-  userPhone: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#64748b',
-    marginTop: 1,
-  },
-  planBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
     borderWidth: 1,
+    borderColor: C.border,
+    ...shadow,
   },
-  planBadgeText: {
-    ...fontStyle('inter', 'bold'),
-    fontSize: 10,
-    letterSpacing: 0.5,
-  },
+  kpiTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  kpiIcon: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  kpiLabel: { ...fontStyle('inter', 'semiBold'), fontSize: 12, color: C.muted },
+  kpiMid: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, marginBottom: 6 },
+  kpiValue: { ...fontStyle('outfit', 'bold'), fontSize: 30, color: C.text },
+  kpiFooter: { ...fontStyle('inter', 'regular'), fontSize: 12, color: C.muted },
 
-  // Star Display
-  starRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  starNumberText: {
-    ...fontStyle('inter', 'bold'),
-    fontSize: 13,
-    color: '#0f172a',
-  },
-  starColSub: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#94a3b8',
-    marginTop: 3,
-  },
+  // Cards / grid
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
+  gridItem: { flexGrow: 1, flexBasis: 380, minWidth: 0 },
+  card: { backgroundColor: C.card, borderRadius: 14, padding: 20, borderWidth: 1, borderColor: C.border, ...shadow },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
+  cardHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1 },
+  cardIcon: { width: 34, height: 34, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  cardTitle: { ...fontStyle('outfit', 'bold'), fontSize: 16, color: C.text },
+  cardSubtitle: { ...fontStyle('inter', 'regular'), fontSize: 12, color: C.muted, marginTop: 2 },
 
-  // Separate Comment Styling in Table
-  commentTableCellBox: {
-    backgroundColor: '#f0fdfa',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#ccfbf1',
-    borderLeftWidth: 3,
-    borderLeftColor: '#0d9488',
-  },
-  commentTableCellHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 3,
-  },
-  commentTableCellLabel: {
-    ...fontStyle('inter', 'bold'),
-    fontSize: 10,
-    color: '#0d9488',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  commentTableCellText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 13,
-    color: '#0f172a',
-    lineHeight: 18,
-    fontStyle: 'italic',
-  },
-  noCommentTableCell: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingVertical: 4,
-  },
-  noCommentTableCellText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 12,
-    color: '#94a3b8',
-    fontStyle: 'italic',
-  },
+  // Distribution
+  sentimentBar: { height: 10, borderRadius: 5, overflow: 'hidden', flexDirection: 'row', backgroundColor: C.soft },
+  sentimentLegend: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, marginBottom: 12 },
+  sentimentText: { ...fontStyle('inter', 'semiBold'), fontSize: 11.5 },
+  distRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingHorizontal: 6, borderRadius: 8 },
+  distLabel: { flexDirection: 'row', alignItems: 'center', gap: 3, width: 28 },
+  distLabelText: { ...fontStyle('inter', 'bold'), fontSize: 12.5, color: '#334155' },
+  distTrack: { flex: 1, height: 8, backgroundColor: C.soft, borderRadius: 4, overflow: 'hidden' },
+  distFill: { height: '100%', borderRadius: 4 },
+  distCount: { ...fontStyle('inter', 'semiBold'), fontSize: 12, color: C.text, width: 30, textAlign: 'right' },
+  distPct: { ...fontStyle('inter', 'regular'), fontSize: 11.5, color: C.faint, width: 36, textAlign: 'right' },
+  miniTooltip: { ...fontStyle('inter', 'medium'), fontSize: 12, color: C.muted, marginBottom: 6, minHeight: 18 },
 
-  // Topic & Duration
-  topicText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 13,
-    color: '#1e293b',
-  },
-  durationSubText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#64748b',
-    marginTop: 2,
-  },
-
-  // Date
-  dateText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 12,
-    color: '#334155',
-  },
-  timeSubText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#94a3b8',
-    marginTop: 2,
-  },
-
-  // Actions
-  actionBtn: {
+  // Filters
+  filterCard: { backgroundColor: C.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: C.border, gap: 12, ...shadow },
+  searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
-  },
-  resolveBtn: {
-    backgroundColor: '#f0fdfa',
-    borderWidth: 1,
-    borderColor: '#ccfbf1',
-  },
-  resolveBtnText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 11,
-    color: '#0d9488',
-  },
-  reopenBtn: {
-    backgroundColor: '#f8fafc',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  reopenBtnText: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 11,
-    color: '#475569',
-  },
-  deleteBtn: {
-    backgroundColor: '#fef2f2',
-    borderWidth: 1,
-    borderColor: '#fecaca',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-  },
-
-  // Cards / Comments Feed View
-  reviewCardsGrid: {
-    padding: 18,
-    gap: 14,
-  },
-  reviewFeedCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    gap: 12,
-  },
-  reviewFeedCardHighlighted: {
-    borderColor: '#99f6e4',
-    backgroundColor: '#fdfffe',
-  },
-  cardTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  cardStudentInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  cardRatingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#f8fafc',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  cardTopicBadge: {
-    ...fontStyle('inter', 'medium'),
-    fontSize: 12,
-    color: '#475569',
-  },
-  commentHighlightBox: {
-    backgroundColor: '#f0fdfa',
-    borderRadius: 10,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#ccfbf1',
-    borderLeftWidth: 4,
-    borderLeftColor: '#0d9488',
-    gap: 6,
-  },
-  commentIconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  commentBoxTag: {
-    ...fontStyle('inter', 'bold'),
-    fontSize: 11,
-    color: '#0d9488',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  commentBoxText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#0f172a',
-    fontStyle: 'italic',
-  },
-  noCommentPill: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    backgroundColor: '#f8fafc',
-    alignSelf: 'flex-start',
-  },
-  noCommentPillText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#94a3b8',
-    fontStyle: 'italic',
-  },
-  cardFooterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-  },
-  cardMetaText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 11,
-    color: '#94a3b8',
-  },
-
-  // Complaints message text
-  messageText: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 13,
-    lineHeight: 19,
-    color: '#1e293b',
-  },
-
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 48,
     gap: 8,
+    backgroundColor: C.bg,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 40,
+    borderWidth: 1,
+    borderColor: C.border,
   },
-  emptyTitle: {
-    ...fontStyle('outfit', 'semiBold'),
-    fontSize: 16,
-    color: '#334155',
-    marginTop: 8,
+  searchInput: { flex: 1, fontSize: 13, color: C.text, ...fontStyle('inter', 'regular') },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: '#fff',
   },
-  emptySubtitle: {
-    ...fontStyle('inter', 'regular'),
-    fontSize: 13,
-    color: '#94a3b8',
-    textAlign: 'center',
-    maxWidth: 400,
+  chipText: { ...fontStyle('inter', 'medium'), fontSize: 12, color: C.muted },
+  clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5 },
+  clearBtnText: { ...fontStyle('inter', 'semiBold'), fontSize: 12, color: C.red },
+  segment: { flexDirection: 'row', backgroundColor: C.soft, borderRadius: 8, padding: 2 },
+  segItem: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
+  segItemActive: { backgroundColor: '#fff', ...shadow },
+  segText: { ...fontStyle('inter', 'medium'), fontSize: 12, color: C.muted },
+  segTextActive: { ...fontStyle('inter', 'semiBold'), color: C.text },
+
+  // List
+  listCard: { backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: C.border, overflow: 'hidden', ...shadow },
+  listHeader: { padding: 18, borderBottomWidth: 1, borderBottomColor: C.soft },
+  listTitle: { ...fontStyle('outfit', 'bold'), fontSize: 16, color: C.text },
+  listSub: { ...fontStyle('inter', 'regular'), fontSize: 12, color: C.muted, marginTop: 2 },
+
+  reviewRow: {
+    padding: 18,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.soft,
+    borderLeftWidth: 4,
   },
+  reviewHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  userName: { ...fontStyle('inter', 'semiBold'), fontSize: 13.5, color: C.text, flexShrink: 1 },
+  userSub: { ...fontStyle('inter', 'regular'), fontSize: 11.5, color: C.muted, marginTop: 1 },
+
+  commentBox: { backgroundColor: C.bg, borderRadius: 10, padding: 12 },
+  commentText: { ...fontStyle('inter', 'regular'), fontSize: 13.5, lineHeight: 20, color: '#1e293b' },
+  complaintText: { ...fontStyle('inter', 'regular'), fontSize: 13.5, lineHeight: 20, color: '#1e293b' },
+  moreLink: { ...fontStyle('inter', 'semiBold'), fontSize: 12, color: C.teal, marginTop: 6 },
+
+  reviewFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 },
+  metaWrap: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, flexShrink: 1 },
+  metaPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.soft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, maxWidth: 220 },
+  metaText: { ...fontStyle('inter', 'medium'), fontSize: 11, color: C.muted, flexShrink: 1 },
+  noComment: { ...fontStyle('inter', 'regular'), fontSize: 11, color: C.faint, fontStyle: 'italic' },
+
+  moreBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14 },
+  moreBtnText: { ...fontStyle('inter', 'semiBold'), fontSize: 13, color: C.teal },
+
+  // Atoms
+  starRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  starNumber: { ...fontStyle('inter', 'bold'), fontSize: 13, color: C.text },
+  avatar: { backgroundColor: '#e0f2fe', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarText: { ...fontStyle('outfit', 'bold'), fontSize: 13, color: '#0284c7' },
+  badge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1 },
+  badgeText: { ...fontStyle('inter', 'bold'), fontSize: 10, letterSpacing: 0.5 },
+  iconBtn: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca' },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 32, borderRadius: 8 },
+  resolveBtn: { backgroundColor: '#f0fdfa', borderWidth: 1, borderColor: '#ccfbf1' },
+  resolveText: { ...fontStyle('inter', 'semiBold'), fontSize: 12, color: C.teal },
+  reopenBtn: { backgroundColor: C.bg, borderWidth: 1, borderColor: C.border },
+  reopenText: { ...fontStyle('inter', 'semiBold'), fontSize: 12, color: '#475569' },
+
+  // Empty
+  empty: { alignItems: 'center', padding: 48, gap: 8 },
+  emptyIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: C.soft, alignItems: 'center', justifyContent: 'center' },
+  emptyTitle: { ...fontStyle('outfit', 'semiBold'), fontSize: 16, color: '#334155', marginTop: 6 },
+  emptyText: { ...fontStyle('inter', 'regular'), fontSize: 13, color: C.faint, textAlign: 'center', maxWidth: 380 },
+  emptyBtn: { marginTop: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: '#f0fdfa', borderWidth: 1, borderColor: '#ccfbf1' },
+  emptyBtnText: { ...fontStyle('inter', 'semiBold'), fontSize: 12.5, color: C.teal },
 });

@@ -5,7 +5,7 @@ import { AdminAuthStore } from '@/services/store/admin-auth-store';
 export default function AdminIndexRedirect() {
   useEffect(() => {
     if (AdminAuthStore.isAuthenticated()) {
-      router.replace('/admin/users' as any);
+      router.replace('/admin/dashboard' as any);
     } else {
       router.replace('/admin/login' as any);
     }

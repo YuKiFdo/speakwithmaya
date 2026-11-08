@@ -2304,6 +2304,424 @@ export class AuthService {
   }
 
   /**
+   * Admin: Get comprehensive analytics overview for dashboard (levels, language modes, plans, goals, demographics, trends)
+   */
+  async getAdminAnalyticsOverview() {
+    if (!this.supabase) {
+      throw new InternalServerErrorException('Supabase database client not configured.');
+    }
+
+    try {
+      const [
+        { data: profiles, error: pErr },
+        { data: sessions, error: sErr },
+        { data: langEvents, error: lErr },
+        { data: ledger, error: ledErr },
+        registeredTestAccounts,
+      ] = await Promise.all([
+        this.supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        this.supabase.from('sessions').select('id, user_id, duration_seconds, created_at'),
+        this.supabase.from('onboarding_events').select('user_id, metadata, created_at').eq('event_name', 'select_language_mode'),
+        this.supabase.from('usage_ledger').select('user_id, cost_lkr, cost_usd, total_tokens'),
+        this.getTestAccounts().catch(() => [] as TestAccountItem[]),
+      ]);
+
+      if (pErr) {
+        this.logger.error(`Failed to fetch profiles for analytics: ${pErr.message}`);
+        throw new InternalServerErrorException('Database query failed for profiles.');
+      }
+
+      const allProfiles = (profiles || []) as any[];
+      const allSessions = (sessions || []) as any[];
+      const allLedger = (ledger || []) as any[];
+      const allLangEvents = (langEvents || []) as any[];
+
+      // Test account identification - strictly exclude from all analytics
+      const testPhoneDigitsSet = new Set<string>(
+        (registeredTestAccounts || [])
+          .map((t) => (t.phoneNumber || '').replace(/\D/g, ''))
+          .filter(Boolean),
+      );
+      const testAccountIdSet = new Set<string>(
+        (registeredTestAccounts || [])
+          .map((t) => t.id)
+          .filter(Boolean),
+      );
+      const isTestProfile = (p: any): boolean => {
+        if (p.id && testAccountIdSet.has(p.id)) return true;
+        const rawPhone = (p.phone_number || '').replace(/\D/g, '');
+        if (rawPhone && testPhoneDigitsSet.has(rawPhone)) return true;
+        if ((p.monthly_minutes_allowance || 0) >= 9000 || (p.minutes_balance || 0) >= 9000) return true;
+        if ((p.monthly_minutes_allowance || 0) >= 9000 || (p.minutes_balance || 0) >= 9000) return true;
+        const name = (p.display_name || '').toLowerCase();
+        return (
+          name.startsWith('test') ||
+          name.includes('test user') ||
+          name.includes('qa automation') ||
+          rawPhone.startsWith('94770000') ||
+          rawPhone.startsWith('94710000')
+        );
+      };
+
+      // Filter only genuine, real learners
+      const realProfiles = allProfiles.filter((p) => !isTestProfile(p));
+      const realUserIdSet = new Set(realProfiles.map((p) => p.id));
+      const totalUsers = realProfiles.length;
+
+      // Filter sessions and usage ledger to include only real users
+      const realSessions = allSessions.filter((s) => s.user_id && realUserIdSet.has(s.user_id));
+      const realLedger = allLedger.filter((l) => l.user_id && realUserIdSet.has(l.user_id));
+
+      // 1. Language Coaching Modes (3 choices: Sinhala Support vs English Only vs Deep Guidance)
+      // Collect real user's latest choice from onboarding_events or profile.language_mode
+      const userLangModeMap = new Map<string, string>();
+      allLangEvents.forEach((ev: any) => {
+        const mode = ev.metadata?.languageMode || ev.metadata?.mode;
+        if (mode && ev.user_id && realUserIdSet.has(ev.user_id)) {
+          userLangModeMap.set(ev.user_id, mode);
+        }
+      });
+      realProfiles.forEach((p) => {
+        if (!userLangModeMap.has(p.id) && p.language_mode) {
+          userLangModeMap.set(p.id, p.language_mode);
+        }
+      });
+
+      let sinhalaSupportCount = 0;
+      let englishOnlyCount = 0;
+      let deepGuidanceCount = 0;
+      let otherModeCount = 0;
+
+      userLangModeMap.forEach((mode) => {
+        if (mode === 'sinhala_support') sinhalaSupportCount++;
+        else if (mode === 'english_only') englishOnlyCount++;
+        else if (mode === 'deep_guidance') deepGuidanceCount++;
+        else otherModeCount++;
+      });
+
+      const totalLangSelections = userLangModeMap.size;
+      const calcPct = (cnt: number, tot: number) => (tot > 0 ? Number(((cnt / tot) * 100).toFixed(1)) : 0);
+
+      const languageModes = {
+        totalSelections: totalLangSelections,
+        breakdown: [
+          {
+            key: 'sinhala_support',
+            label: 'Sinhala Support',
+            sinhalaLabel: 'සිංහල සහාය',
+            description: 'Speaks mostly English, but explains grammar rules and hard words in Sinhala',
+            count: sinhalaSupportCount,
+            percentage: calcPct(sinhalaSupportCount, totalLangSelections),
+            color: '#0d9488', // teal
+          },
+          {
+            key: 'english_only',
+            label: 'English Only',
+            sinhalaLabel: 'ඉංග්‍රීසි පමණි',
+            description: 'Speaks 100% in English without using Sinhala (for learners who want full English)',
+            count: englishOnlyCount,
+            percentage: calcPct(englishOnlyCount, totalLangSelections),
+            color: '#3b82f6', // blue
+          },
+          {
+            key: 'deep_guidance',
+            label: 'Deep Guidance',
+            sinhalaLabel: 'සම්පූර්ණ මඟපෙන්වීම',
+            description: 'Sentence-by-sentence help with Sinhala translations (for beginners who need extra help)',
+            count: deepGuidanceCount,
+            percentage: calcPct(deepGuidanceCount, totalLangSelections),
+            color: '#8b5cf6', // purple
+          },
+        ],
+      };
+
+      // 2. English Proficiency Levels (calculated strictly on real learners)
+      const rawLevelsCount: Record<string, number> = {
+        beginner: 0,
+        intermediate: 0,
+        'upper-intermediate': 0,
+        advanced: 0,
+        unset: 0,
+      };
+
+      realProfiles.forEach((p) => {
+        const lvl = (p.level || '').trim().toLowerCase();
+        if (lvl === 'beginner') rawLevelsCount.beginner++;
+        else if (lvl === 'intermediate') rawLevelsCount.intermediate++;
+        else if (lvl === 'upper-intermediate') rawLevelsCount['upper-intermediate']++;
+        else if (lvl === 'advanced') rawLevelsCount.advanced++;
+        else rawLevelsCount.unset++;
+      });
+
+      const levels = {
+        breakdown: [
+          {
+            key: 'beginner',
+            label: 'Beginner',
+            tag: 'Basic English',
+            description: 'Knows basic words, struggles to make complete sentences',
+            count: rawLevelsCount.beginner,
+            percentage: calcPct(rawLevelsCount.beginner, totalUsers),
+            color: '#10b981',
+          },
+          {
+            key: 'intermediate',
+            label: 'Intermediate',
+            tag: 'Everyday English',
+            description: 'Can speak simple sentences, needs practice to speak smoothly',
+            count: rawLevelsCount.intermediate,
+            percentage: calcPct(rawLevelsCount.intermediate, totalUsers),
+            color: '#0ea5e9',
+          },
+          {
+            key: 'upper-intermediate',
+            label: 'Upper-Intermediate',
+            tag: 'Good English',
+            description: 'Speaks comfortably, wants to speak naturally without pauses',
+            count: rawLevelsCount['upper-intermediate'],
+            percentage: calcPct(rawLevelsCount['upper-intermediate'], totalUsers),
+            color: '#8b5cf6',
+          },
+          {
+            key: 'advanced',
+            label: 'Advanced',
+            tag: 'Fluent English',
+            description: 'Speaks fluently, polishing professional vocabulary and accent',
+            count: rawLevelsCount.advanced,
+            percentage: calcPct(rawLevelsCount.advanced, totalUsers),
+            color: '#f59e0b',
+          },
+        ],
+      };
+
+      // 3. Primary Learning Goals (real learners only)
+      const rawGoalsCount: Record<string, number> = {};
+      realProfiles.forEach((p) => {
+        const g = (p.goal || 'unset').trim().toLowerCase();
+        rawGoalsCount[g] = (rawGoalsCount[g] || 0) + 1;
+      });
+
+      const goalDefs = [
+        { key: 'speak-confidently', label: 'Speak Confidently', icon: 'mic', description: 'Stop hesitating and speak English naturally' },
+        { key: 'better-job', label: 'Better Job / Career', icon: 'briefcase', description: 'Job interviews, office meetings & promotions' },
+        { key: 'work-abroad', label: 'Work or Study Abroad', icon: 'globe', description: 'Visa interviews, living or studying in another country' },
+        { key: 'exams', label: 'Exams & IELTS', icon: 'award', description: 'IELTS speaking, PTE, or school/university exams' },
+        { key: 'travel', label: 'Travel & Daily Life', icon: 'compass', description: 'Trips overseas, hotels & everyday conversations' },
+      ];
+
+      const goalsBreakdown = goalDefs.map((gd) => {
+        const cnt = rawGoalsCount[gd.key] || 0;
+        return {
+          ...gd,
+          count: cnt,
+          percentage: calcPct(cnt, totalUsers),
+        };
+      });
+
+      const unsetGoalsCount = rawGoalsCount['unset'] || 0;
+      if (unsetGoalsCount > 0) {
+        goalsBreakdown.push({
+          key: 'unset',
+          label: 'Not Specified',
+          icon: 'help-circle',
+          description: 'Learners who skipped goal selection during signup',
+          count: unsetGoalsCount,
+          percentage: calcPct(unsetGoalsCount, totalUsers),
+        });
+      }
+
+      // 4. Subscription Plans & Statuses (real learners only)
+      const rawTiersCount: Record<string, number> = {};
+      const rawStatusesCount: Record<string, number> = {};
+      realProfiles.forEach((p) => {
+        const t = (p.plan_tier || 'starter').trim().toLowerCase();
+        rawTiersCount[t] = (rawTiersCount[t] || 0) + 1;
+        const s = (p.plan_status || 'active').trim().toLowerCase();
+        rawStatusesCount[s] = (rawStatusesCount[s] || 0) + 1;
+      });
+
+      const plans = {
+        tiers: [
+          {
+            tier: 'starter',
+            label: 'Free / Starter',
+            count: rawTiersCount['starter'] || 0,
+            percentage: calcPct(rawTiersCount['starter'] || 0, totalUsers),
+            color: '#64748b',
+          },
+          {
+            tier: 'pro',
+            label: 'Pro Plan',
+            count: rawTiersCount['pro'] || 0,
+            percentage: calcPct(rawTiersCount['pro'] || 0, totalUsers),
+            color: '#0d9488',
+          },
+          {
+            tier: 'basic',
+            label: 'Basic Plan',
+            count: rawTiersCount['basic'] || 0,
+            percentage: calcPct(rawTiersCount['basic'] || 0, totalUsers),
+            color: '#3b82f6',
+          },
+        ],
+        statuses: [
+          {
+            status: 'active',
+            label: 'Active Users',
+            count: rawStatusesCount['active'] || 0,
+            percentage: calcPct(rawStatusesCount['active'] || 0, totalUsers),
+            color: '#10b981',
+          },
+          {
+            status: 'canceled',
+            label: 'Canceled / Inactive',
+            count: rawStatusesCount['canceled'] || 0,
+            percentage: calcPct(rawStatusesCount['canceled'] || 0, totalUsers),
+            color: '#ef4444',
+          },
+        ],
+      };
+
+      // 5. Daily Commitment (real learners only)
+      const rawDailyCount: Record<number, number> = { 5: 0, 10: 0, 15: 0, 30: 0 };
+      realProfiles.forEach((p) => {
+        const mins = Number(p.daily_goal_minutes) || 5;
+        if (rawDailyCount[mins] !== undefined) {
+          rawDailyCount[mins]++;
+        } else {
+          rawDailyCount[5]++;
+        }
+      });
+
+      const dailyCommitment = {
+        breakdown: [
+          { minutes: 5, label: '5 min/day', count: rawDailyCount[5], percentage: calcPct(rawDailyCount[5], totalUsers) },
+          { minutes: 10, label: '10 min/day', count: rawDailyCount[10], percentage: calcPct(rawDailyCount[10], totalUsers) },
+          { minutes: 15, label: '15 min/day', count: rawDailyCount[15], percentage: calcPct(rawDailyCount[15], totalUsers) },
+          { minutes: 30, label: '30 min/day', count: rawDailyCount[30], percentage: calcPct(rawDailyCount[30], totalUsers) },
+        ],
+      };
+
+      // 6. Employment Status (real learners only)
+      const rawEmploymentCount: Record<string, number> = {};
+      realProfiles.forEach((p) => {
+        const emp = (p.employment_status || 'unset').trim().toLowerCase();
+        rawEmploymentCount[emp] = (rawEmploymentCount[emp] || 0) + 1;
+      });
+
+      const employmentLabels: Record<string, string> = {
+        'full-time': 'Working Full-Time',
+        student: 'Student / University',
+        other: 'Freelancers / Other',
+        'looking-for-job': 'Looking for a Job',
+        'part-time': 'Working Part-Time',
+        unset: 'Not Specified',
+      };
+
+      const employment = {
+        breakdown: Object.keys(employmentLabels).map((key) => {
+          const cnt = rawEmploymentCount[key] || 0;
+          return {
+            key,
+            label: employmentLabels[key],
+            count: cnt,
+            percentage: calcPct(cnt, totalUsers),
+          };
+        }),
+      };
+
+      // 7. KPIs & Usage Calculations (real sessions only)
+      let totalDurationSecs = 0;
+
+      realSessions.forEach((s) => {
+        totalDurationSecs += Number(s.duration_seconds || 0);
+      });
+
+      let totalCostLkr = 0;
+      let totalCostUsd = 0;
+      let totalTokens = 0;
+
+      realLedger.forEach((l) => {
+        totalCostLkr += Number(l.cost_lkr || 0);
+        totalCostUsd += Number(l.cost_usd || 0);
+        totalTokens += Number(l.total_tokens || 0);
+      });
+
+      // 8. 14-Day Growth and Session Activity Trends (Sri Lanka Timezone, real users only)
+      const slDateStr = (dateInput?: string | Date | null): string => {
+        if (!dateInput) return '';
+        try {
+          const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+          return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' });
+        } catch {
+          return '';
+        }
+      };
+
+      const past14Days = Array.from({ length: 14 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (13 - i));
+        const dateKey = slDateStr(d);
+        const dayLabel = d.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          timeZone: 'Asia/Colombo',
+        });
+        const weekday = d.toLocaleDateString('en-US', {
+          weekday: 'short',
+          timeZone: 'Asia/Colombo',
+        });
+        return { dateKey, dayLabel, weekday, isToday: i === 13 };
+      });
+
+      const todaySlKey = slDateStr(new Date());
+
+      const days14 = past14Days.map(({ dateKey, dayLabel, weekday, isToday }) => {
+        const registrations = realProfiles.filter((p) => slDateStr(p.created_at) === dateKey).length;
+        const sessionCount = realSessions.filter((s) => slDateStr(s.created_at) === dateKey).length;
+        return {
+          date: dateKey,
+          dayLabel: isToday ? 'Today' : `${weekday} ${dayLabel}`,
+          shortLabel: isToday ? 'Today' : dayLabel,
+          registrations,
+          sessions: sessionCount,
+          isToday,
+        };
+      });
+
+      const newUsersLast7Days = days14.slice(7).reduce((acc, d) => acc + d.registrations, 0);
+      const newUsersToday = realProfiles.filter((p) => slDateStr(p.created_at) === todaySlKey).length;
+
+      return {
+        kpis: {
+          totalUsers,
+          activeSubscriptions: rawStatusesCount['active'] || 0,
+          totalPracticeMinutes: Math.round(totalDurationSecs / 60),
+          totalSessions: realSessions.length,
+          avgSessionDurationSeconds: realSessions.length > 0 ? Math.round(totalDurationSecs / realSessions.length) : 0,
+          totalCostLkr: Number(totalCostLkr.toFixed(2)),
+          totalCostUsd: Number(totalCostUsd.toFixed(2)),
+          totalTokens,
+          newUsersLast7Days,
+          newUsersToday,
+        },
+        languageModes,
+        levels,
+        goals: { breakdown: goalsBreakdown },
+        plans,
+        dailyCommitment,
+        employment,
+        trends: {
+          days14,
+        },
+      };
+    } catch (err: any) {
+      this.logger.error(`Error in getAdminAnalyticsOverview: ${err?.message}`);
+      throw new InternalServerErrorException(err?.message || 'Failed to generate admin analytics overview.');
+    }
+  }
+
+  /**
    * Admin: Get full personalized detail for a specific user, including sessions history,
    * recent grammar corrections, orders/billing, and roadmap achievements.
    */

@@ -20,6 +20,12 @@ export interface AdminNavGroup {
 
 export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
+    group: 'ANALYTICS & OVERVIEW',
+    items: [
+      { id: 'admin-dashboard', label: 'Analytics Dashboard', icon: 'pie-chart', route: '/admin/dashboard' },
+    ],
+  },
+  {
     group: 'USER MANAGEMENT',
     items: [
       { id: 'users-directory', label: 'Users & Profiles', icon: 'users', route: '/admin/users' },

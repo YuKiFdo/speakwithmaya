@@ -162,6 +162,15 @@ export class AuthController {
   }
 
   /**
+   * Admin: Comprehensive analytics overview for dashboard
+   */
+  @Get('admin/analytics/overview')
+  @UseGuards(AdminGuard)
+  async getAdminAnalyticsOverview() {
+    return this.authService.getAdminAnalyticsOverview();
+  }
+
+  /**
    * Admin: List users with analytics and usage metrics
    */
   @Get('admin/users')
