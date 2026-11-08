@@ -232,7 +232,12 @@ export default function SessionCompleteScreen() {
     const scoreVal = (rawScoreParam === 0 && (sentencesVal >= 2 || durationSecs >= 30))
       ? (isPassedVal ? 85 : 70)
       : rawScoreParam;
-    const xpVal = params.xpEarned ? parseInt(params.xpEarned, 10) : (isGeneralVal ? 50 : (isPassedVal ? 100 : 0));
+
+    const practiceMinutes = Math.max(1, Math.floor(durationSecs / 60));
+    const computedGeneralXp = isPassedVal && durationSecs >= 30 ? Math.max(5, practiceMinutes * 5) : 0;
+    const xpVal = params.xpEarned && parseInt(params.xpEarned, 10) > 0
+      ? parseInt(params.xpEarned, 10)
+      : (isGeneralVal ? computedGeneralXp : (isPassedVal ? 100 : 25));
 
     return {
       roadmapLevelId: params.roadmapLevelId || '',
@@ -289,8 +294,11 @@ export default function SessionCompleteScreen() {
   const talkSecs = report?.talkTimeSeconds || totalSecs;
   const talkMins = Math.max(1, Math.round(talkSecs / 60));
 
-  // XP & Sentences
-  const xpEarned = report?.xpEarned ?? (isGeneral ? (isPassed ? 50 : 0) : (isPassed ? 100 : 0));
+  // XP & Sentences: 5 XP per 1 minute practiced for general/practice sessions (Math.max(5, mins * 5))
+  const calculatedGeneralXp = isPassed && totalSecs >= 30 ? Math.max(5, Math.max(1, Math.floor(totalSecs / 60)) * 5) : 0;
+  const xpEarned = report?.xpEarned && report.xpEarned > 0
+    ? report.xpEarned
+    : (isGeneral ? calculatedGeneralXp : (isPassed ? 100 : 25));
   const sentencesCount = report?.userSentencesCount ?? 0;
   const hintsCount = report?.hintsUsedCount ?? (report?.activeHints?.length || (params.hintsUsedCount ? parseInt(params.hintsUsedCount, 10) : 0));
   const rawScore = report?.overallScore ?? (isGeneral ? 85 : 75);

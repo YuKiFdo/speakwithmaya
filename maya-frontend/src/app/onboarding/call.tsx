@@ -277,6 +277,7 @@ export default function CallScreen() {
   const hintsUsedCountRef = useRef<number>(0);
   const hasRevealedHintThisTurnRef = useRef<boolean>(false);
   const lastPrefetchedHintPromptRef = useRef<string>('');
+  const hintPromptRef = useRef<string>('');
   const isFetchingHintRef = useRef<boolean>(false);
 
   const translationTargetPromptRef = useRef<string>('');
@@ -294,6 +295,7 @@ export default function CallScreen() {
       setIsHintVisible(false);
       setIsHintLoading(false);
       setHintData(null);
+      hintPromptRef.current = '';
       hasRevealedHintThisTurnRef.current = false;
       lastPrefetchedHintPromptRef.current = '';
       isFetchingHintRef.current = false;
@@ -378,7 +380,8 @@ export default function CallScreen() {
   useEffect(() => {
     if (liveCall.status !== 'listening' || isWrappingUp) return;
 
-    const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
+    // Use current spoken subtitles from Maya for the current turn (never stale previousSubtitles)
+    const question = (liveCall.subtitles || '').trim() || effectiveTopic;
     if (!question || question.length < 3) return;
 
     const norm = question.toLowerCase().trim().replace(/[?!.,]/g, '');
@@ -399,7 +402,11 @@ export default function CallScreen() {
     })
       .then((res) => {
         isFetchingHintRef.current = false;
-        if (res && res.hintEnglish) {
+        // Verify Maya is still listening and the active question has not changed during fetch
+        const currentActive = (liveCall.subtitles || '').trim() || effectiveTopic;
+        const currentNorm = currentActive.toLowerCase().trim().replace(/[?!.,]/g, '');
+        if (currentNorm === norm && res && res.hintEnglish) {
+          hintPromptRef.current = norm;
           setHintData(res);
           setIsHintLoading(false);
         }
@@ -410,7 +417,6 @@ export default function CallScreen() {
   }, [
     liveCall.status,
     liveCall.subtitles,
-    liveCall.previousSubtitles,
     isWrappingUp,
     effectiveTopic,
     effectiveUserName,
@@ -448,8 +454,11 @@ export default function CallScreen() {
       return;
     }
 
-    // If hint is already pre-fetched in background, show it immediately (0ms delay)
-    if (hintData) {
+    const activeQuestion = (liveCall.subtitles || '').trim() || effectiveTopic || 'What would you like to say?';
+    const activeNorm = activeQuestion.toLowerCase().trim().replace(/[?!.,]/g, '');
+
+    // If hint is already pre-fetched in background AND matches the current question, show it immediately (0ms delay)
+    if (hintData && hintPromptRef.current === activeNorm) {
       if (!hasRevealedHintThisTurnRef.current) {
         hintsUsedCountRef.current += 1;
         hasRevealedHintThisTurnRef.current = true;
@@ -461,16 +470,17 @@ export default function CallScreen() {
       return;
     }
 
-    // Fallback: If user tapped before background prefetch completed
-    // Open the hint card immediately with a loading spinner so the user gets instant feedback
-    const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic || 'What would you like to say?';
+    // If hintData is stale (from a previous question) or null, clear it so old hint is NEVER shown
+    setHintData(null);
+    hintPromptRef.current = '';
 
+    // Open the hint card immediately in Skeleton loading state
     setIsHintVisible(true);
     setIsHintLoading(true);
 
     isFetchingHintRef.current = true;
     try {
-      const res = await fetchHint(question, {
+      const res = await fetchHint(activeQuestion, {
         topic: effectiveTopic,
         level: params.level,
         scenarioId: params.scenarioId,
@@ -487,29 +497,28 @@ export default function CallScreen() {
       }
 
       if (res && res.hintEnglish) {
-        setHintData(res);
-        if (!hasRevealedHintThisTurnRef.current) {
-          hintsUsedCountRef.current += 1;
-          hasRevealedHintThisTurnRef.current = true;
-        }
-        if (!hintsHistoryRef.current.includes(res.hintEnglish)) {
-          hintsHistoryRef.current.push(res.hintEnglish);
+        const latestQuestion = (liveCall.subtitles || '').trim() || effectiveTopic;
+        const latestNorm = latestQuestion.toLowerCase().trim().replace(/[?!.,]/g, '');
+        if (latestNorm === activeNorm) {
+          hintPromptRef.current = activeNorm;
+          setHintData(res);
+          if (!hasRevealedHintThisTurnRef.current) {
+            hintsUsedCountRef.current += 1;
+            hasRevealedHintThisTurnRef.current = true;
+          }
+          if (!hintsHistoryRef.current.includes(res.hintEnglish)) {
+            hintsHistoryRef.current.push(res.hintEnglish);
+          }
         }
       } else {
-        // Fallback default helpful hint so the card never stays blank
-        setHintData({
-          hintEnglish: `Try answering: "Yes, I agree" or share your thoughts on ${effectiveTopic || 'this topic'}.`,
-          hintSinhala: 'ඔබේ අදහස කෙටියෙන් පවසන්න.',
-        });
+        // If hint generation failed or was empty, dismiss cleanly without showing fake fallback text
+        setIsHintVisible(false);
+        setHintData(null);
       }
     } catch (err) {
       console.warn('[call.tsx] Error in handleToggleHint:', err);
-      if ((liveCall.status as string) !== 'speaking' && !isWrappingUp) {
-        setHintData({
-          hintEnglish: `Try speaking what comes to mind about ${effectiveTopic || 'this topic'}.`,
-          hintSinhala: 'ඔබේ අදහස කෙටියෙන් පවසන්න.',
-        });
-      }
+      setIsHintVisible(false);
+      setHintData(null);
     } finally {
       isFetchingHintRef.current = false;
       setIsHintLoading(false);

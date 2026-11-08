@@ -1546,9 +1546,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
     // 3. Assemble Post-Call Session & Mission Report
     const isGeneral = !options.roadmapLevelId;
+    const practiceMins = Math.max(1, Math.floor(secs / 60));
+    const generalPracticeXp = !isVeryShortSession && passed ? Math.max(5, practiceMins * 5) : 0;
     const xpEarned = isRoadmap
       ? (passed ? 100 : (!isVeryShortSession ? 25 : 0))
-      : (passed ? 50 : 0);
+      : generalPracticeXp;
 
     const report: MissionReportData = {
       roadmapLevelId: options.roadmapLevelId || '',

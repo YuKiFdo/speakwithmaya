@@ -204,6 +204,13 @@ export class SessionsService {
   private readonly supabase: SupabaseClient | null = null;
   private readonly geminiApiKey: string | undefined;
   private readonly liveModel: string;
+  private readonly flashCandidateModels = [
+    process.env.GEMINI_HINT_MODEL,
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
+  ].filter(Boolean) as string[];
   private readonly usdToLkr = Number(process.env.USD_TO_LKR) || 308.50;
   private readonly activeSessions = new Map<string, { userId?: string; userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string; roadmapLevelId?: string }>();
   private readonly recentDiagnostics = new Map<string, SessionDiagnosticsRecord>();
@@ -3819,10 +3826,18 @@ STRICT SCRIPT RULES:
 - Write ONLY in Sinhala script (Unicode U+0D80 to U+0DFF) and Latin English loanwords.
 - ABSOLUTELY FORBIDDEN: Arabic (العربية), Farsi/Persian (فارسی), Hindi/Devanagari (हिन्दी), Tamil, or ANY non-Sinhala script.
 - Output ONLY the Sinhala translation, without quotes, notes, or extra text.`;
-        const res = await ai.models.generateContent({
-          model: 'gemini-3.5-flash-lite',
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        });
+        let res: any = null;
+        for (const model of this.flashCandidateModels) {
+          try {
+            res = await ai.models.generateContent({
+              model,
+              contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            });
+            if (res) break;
+          } catch (err: any) {
+            this.logger.warn(`Gemini translation fallback with ${model} failed: ${err?.message}`);
+          }
+        }
         const sinhalaText = res.text?.trim() || '';
         if (sinhalaText && (targetLang !== 'si' || this.isValidSinhala(sinhalaText))) {
           this.translationCache.set(cacheKey, sinhalaText);
@@ -3901,41 +3916,49 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
 
         const executeCall = async () => {
           const ai = this.genAiClient || new GoogleGenAI({ apiKey });
-          return ai.models.generateContent({
-            model: 'gemini-3.5-flash-lite',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            config: {
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  hintEnglish: {
-                    type: Type.STRING,
-                    description: 'Short, natural conversational English model answer (1 sentence) the student can say.',
+          let lastError: any = null;
+
+          for (const model of this.flashCandidateModels) {
+            try {
+              const res = await ai.models.generateContent({
+                model,
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                config: {
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                      hintEnglish: {
+                        type: Type.STRING,
+                        description: 'Short, natural conversational English model answer (1 sentence) the student can say.',
+                      },
+                      hintSinhala: {
+                        type: Type.STRING,
+                        description: 'Accurate and natural spoken Sri Lankan Sinhala translation using ONLY Sinhala script (U+0D80-U+0DFF). NEVER use Tamil (தமிழ்), Arabic, Farsi, Hindi, or Devanagari script. Use "අවශ්‍ය" instead of Tamil "தேவையான".',
+                      },
+                    },
+                    required: ['hintEnglish', 'hintSinhala'],
                   },
-                  hintSinhala: {
-                    type: Type.STRING,
-                    description: 'Accurate and natural spoken Sri Lankan Sinhala translation using ONLY Sinhala script (U+0D80-U+0DFF). NEVER use Tamil (தமிழ்), Arabic, Farsi, Hindi, or Devanagari script. Use "අවශ්‍ය" instead of Tamil "தேவையான".',
-                  },
+                  temperature: 0.3,
                 },
-                required: ['hintEnglish', 'hintSinhala'],
-              },
-              temperature: 0.3,
-            },
-          });
+              });
+              if (res) {
+                return res;
+              }
+            } catch (err: any) {
+              lastError = err;
+              const is429 = err?.status === 429 || String(err?.message || '').includes('429') || String(err?.message || '').includes('quota');
+              this.logger.warn(`Gemini hint generation failed with ${model} (${is429 ? '429 Quota Exceeded' : err?.message}). Cascading to next candidate model...`);
+            }
+          }
+          throw lastError;
         };
 
         let res: any = null;
         try {
           res = await executeCall();
         } catch (err: any) {
-          this.logger.warn(`Gemini hint generation initial attempt failed: ${err?.message || err}. Retrying...`);
-          await new Promise((r) => setTimeout(r, 500));
-          try {
-            res = await executeCall();
-          } catch (retryErr: any) {
-            this.logger.warn(`Gemini hint generation failed on retry: ${retryErr?.message || retryErr}`);
-          }
+          this.logger.warn(`Gemini hint generation failed across all candidate models: ${err?.message || err}`);
         }
 
         if (res) {
@@ -4513,58 +4536,67 @@ CRITICAL RULES:
 8. Provide "nextFollowupTopic": A short natural suggestion for what to practice next when resuming this scenario (1 concise sentence).
 9. Output structured JSON matching the schema.`;
 
-        const res = await ai.models.generateContent({
-          model: 'gemini-3.5-flash-lite',
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                conversationSummary: { type: Type.STRING },
-                nextFollowupTopic: { type: Type.STRING },
-                items: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      type: {
-                        type: Type.STRING,
-                        enum: ['grammar', 'more_natural', 'pronunciation'],
+        let res: any = null;
+        for (const model of this.flashCandidateModels) {
+          try {
+            res = await ai.models.generateContent({
+              model,
+              contents: [{ role: 'user', parts: [{ text: prompt }] }],
+              config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    conversationSummary: { type: Type.STRING },
+                    nextFollowupTopic: { type: Type.STRING },
+                    items: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          type: {
+                            type: Type.STRING,
+                            enum: ['grammar', 'more_natural', 'pronunciation'],
+                          },
+                          badge: { type: Type.STRING },
+                          title: { type: Type.STRING },
+                          subtitle: { type: Type.STRING },
+                          youSaid: { type: Type.STRING },
+                          youSaidHighlight: { type: Type.STRING },
+                          youSaidDetail: { type: Type.STRING },
+                          betterWay: { type: Type.STRING },
+                          betterWayHighlight: { type: Type.STRING },
+                          ipa: { type: Type.STRING },
+                          whyExplanation: { type: Type.STRING },
+                          spokenIntro: { type: Type.STRING },
+                          userTurnIndex: { type: Type.NUMBER },
+                        },
+                        required: [
+                          'type',
+                          'badge',
+                          'title',
+                          'subtitle',
+                          'youSaid',
+                          'betterWay',
+                          'whyExplanation',
+                          'spokenIntro',
+                          'userTurnIndex',
+                        ],
                       },
-                      badge: { type: Type.STRING },
-                      title: { type: Type.STRING },
-                      subtitle: { type: Type.STRING },
-                      youSaid: { type: Type.STRING },
-                      youSaidHighlight: { type: Type.STRING },
-                      youSaidDetail: { type: Type.STRING },
-                      betterWay: { type: Type.STRING },
-                      betterWayHighlight: { type: Type.STRING },
-                      ipa: { type: Type.STRING },
-                      whyExplanation: { type: Type.STRING },
-                      spokenIntro: { type: Type.STRING },
-                      userTurnIndex: { type: Type.NUMBER },
                     },
-                    required: [
-                      'type',
-                      'badge',
-                      'title',
-                      'subtitle',
-                      'youSaid',
-                      'betterWay',
-                      'whyExplanation',
-                      'spokenIntro',
-                      'userTurnIndex',
-                    ],
                   },
+                  required: ['items'],
                 },
+                temperature: 0.2,
+                maxOutputTokens: 1800,
               },
-              required: ['items'],
-            },
-            temperature: 0.2,
-            maxOutputTokens: 1800,
-          },
-        });
+            });
+            if (res) break;
+          } catch (modelErr: any) {
+            const is429 = modelErr?.status === 429 || String(modelErr?.message || '').includes('429');
+            this.logger.warn(`Gemini session analysis failed with ${model} (${is429 ? '429 Quota Exceeded' : modelErr?.message}). Cascading to next model...`);
+          }
+        }
 
         const effectiveSessionId = dto.sessionId || this.lastSavedSessionId || '';
         const validSessionId = toValidUuid(effectiveSessionId);
@@ -4840,7 +4872,7 @@ CRITICAL RULES:
             };
         }
       } catch (err: any) {
-        this.logger.warn(`Gemini session analysis failed with gemini-3.5-flash-lite: ${err?.message}`);
+        this.logger.warn(`Gemini session analysis failed across candidate models: ${err?.message}`);
       }
     }
 

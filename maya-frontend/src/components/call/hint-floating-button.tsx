@@ -7,7 +7,6 @@ import {
   Animated,
   Easing,
   Platform,
-  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
@@ -101,18 +100,14 @@ export function HintFloatingButton({
           accessibilityRole="button"
           accessibilityLabel="Ask for conversation hint"
         >
-          {isLoading ? (
-            <ActivityIndicator size="small" color="#0085DB" />
-          ) : (
-            <Ionicons
-              name={isActive || isRippling ? 'bulb' : 'bulb-outline'}
-              size={26}
-              color={isActive || isRippling ? '#0085DB' : '#0F172A'}
-            />
-          )}
+          <Ionicons
+            name={isActive || isRippling ? 'bulb' : 'bulb-outline'}
+            size={26}
+            color={isActive || isRippling ? '#0085DB' : '#0F172A'}
+          />
         </Pressable>
       </View>
-      <Text style={styles.label}>{isLoading ? 'Loading...' : 'Hint'}</Text>
+      <Text style={styles.label}>Hint</Text>
     </View>
   );
 }

@@ -6,11 +6,11 @@ import {
   Animated,
   Platform,
   Pressable,
-  ActivityIndicator,
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
 import { triggerHaptic } from '@/utils/haptics-audio';
 import { isValidSinhalaText } from '@/services/assistance/assistance-service';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface HintSuggestionCardProps {
   hintEnglish: string;
@@ -70,21 +70,39 @@ export function HintSuggestionCard({
         disabled={!onDismiss}
       >
         {isLoading ? (
-          <>
-            {/* Pill Badge: Thinking... */}
-            <View style={styles.badgeRow}>
-              <View style={[styles.badgePill, { borderColor: '#BAE6FD', backgroundColor: '#F0F9FF' }]}>
-                <Text style={[styles.badgeText, { color: '#0284C7' }]}>💡 Thinking...</Text>
-              </View>
+          <View style={{ width: '100%', alignItems: 'center', gap: 12, paddingVertical: 4 }}>
+            {/* Skeleton Badge Pill Placeholder */}
+            <Skeleton
+              width={100}
+              height={26}
+              borderRadius={13}
+              style={{ backgroundColor: '#F1F5F9' }}
+            />
+
+            {/* Skeleton Model Answer Lines */}
+            <View style={{ width: '100%', alignItems: 'center', gap: 8, marginVertical: 4 }}>
+              <Skeleton
+                width={isWebOrDesktop ? '60%' : '80%'}
+                height={22}
+                borderRadius={6}
+                style={{ backgroundColor: '#E2E8F0' }}
+              />
+              <Skeleton
+                width={isWebOrDesktop ? '40%' : '55%'}
+                height={22}
+                borderRadius={6}
+                style={{ backgroundColor: '#E2E8F0' }}
+              />
             </View>
 
-            <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 12, gap: 10 }}>
-              <ActivityIndicator size="small" color="#0085DB" />
-              <Text style={[styles.englishText, isWebOrDesktop && styles.englishTextDesktop, { fontSize: 17, color: '#64748B' }]}>
-                Maya is preparing a hint for you...
-              </Text>
-            </View>
-          </>
+            {/* Skeleton Sinhala Translation Line */}
+            <Skeleton
+              width={isWebOrDesktop ? '35%' : '45%'}
+              height={16}
+              borderRadius={5}
+              style={{ backgroundColor: '#E2E8F0', marginTop: 2 }}
+            />
+          </View>
         ) : isLimitReached ? (
           <>
             {/* Pill Badge: Hint Limit Reached */}
