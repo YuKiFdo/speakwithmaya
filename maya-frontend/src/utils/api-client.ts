@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import { Platform } from 'react-native';
 import { getBackendBaseUrl } from './backend-url';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 
@@ -8,19 +9,25 @@ import { OnboardingStore } from '@/services/store/onboarding-store';
  * Handles:
  * 1. Automatic base URL resolution (production on native, localhost for local web).
  * 2. Automatic bearer token attachment from OnboardingStore.
- * 3. Prevention of Android OkHttp zstd binary corruption via `Accept-Encoding: identity`.
+ * 3. Prevention of Android OkHttp zstd binary corruption via `Accept-Encoding: identity` (native only, unsafe in browser).
  * 4. Cache-busting headers to prevent 304 empty responses when state is not cached.
  * 5. Sensible default timeouts.
  */
+const defaultHeaders: Record<string, string> = {
+  Accept: 'application/json',
+  'Cache-Control': 'no-cache, no-store, no-transform, must-revalidate',
+  Pragma: 'no-cache',
+};
+
+// 'Accept-Encoding' is a forbidden header in browsers and triggers:
+// "Refused to set unsafe header Accept-Encoding". Only apply on native platforms.
+if (Platform.OS !== 'web') {
+  defaultHeaders['Accept-Encoding'] = 'identity';
+}
+
 export const apiClient: AxiosInstance = axios.create({
   timeout: 20000,
-  headers: {
-    Accept: 'application/json',
-    'Accept-Encoding': 'identity',
-    'Cache-Control': 'no-cache, no-store, no-transform, must-revalidate',
-    Pragma: 'no-cache',
-    Expires: '0',
-  },
+  headers: defaultHeaders,
 });
 
 apiClient.interceptors.request.use((config) => {
@@ -38,8 +45,11 @@ apiClient.interceptors.request.use((config) => {
   } catch {}
 
   // Guarantee headers are set on every request
-  config.headers.set('Accept-Encoding', 'identity');
+  if (Platform.OS !== 'web') {
+    config.headers.set('Accept-Encoding', 'identity');
+  }
   config.headers.set('Cache-Control', 'no-cache, no-store, no-transform, must-revalidate');
+  config.headers.set('Pragma', 'no-cache');
 
   return config;
 });

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
+  AccessibilityInfo,
   View,
   Text,
   Image,
@@ -19,11 +20,41 @@ interface ConnectingViewProps {
   onCancel?: () => void;
   style?: any;
   isConnected?: boolean;
+  /**
+   * Pads the top by the device safe-area inset (notch / status bar).
+   * Set to false if the parent screen already wraps this view in a SafeAreaView.
+   */
+  applyTopInset?: boolean;
 }
 
+const RING_BORDER = 1.8;
+
+// Each tip icon loops forever with one small motion that matches its meaning.
+// `ripple` adds a soft ring that expands from the badge and fades out (signal / sound).
+const TIPS = [
+  { icon: 'wifi', idle: 'signal', ripple: true, duration: 1500, title: 'Use a stable internet connection', desc: 'Helps to keep the conversation smooth.' },
+  { icon: 'home-outline', idle: 'bob', ripple: false, duration: 1300, title: 'Find a quiet place', desc: 'Reduces background noise.' },
+  { icon: 'mic-outline', idle: 'pulse', ripple: true, duration: 1000, title: 'Allow microphone access', desc: 'So Maya can hear you clearly.' },
+] as const;
+
+const IDLE_STYLES = {
+  signal: (v: Animated.Value) => ({
+    opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }),
+  }),
+  bob: (v: Animated.Value) => ({
+    transform: [
+      { translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, -2.5] }) },
+      { scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] }) },
+    ],
+  }),
+  pulse: (v: Animated.Value) => ({
+    transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.16] }) }],
+  }),
+} as const;
+
 /**
- * Isolated title component so the 500ms dot ticker never re-renders the orbital rings or tips,
- * and uses fixed-width opacity dots so "Connecting to Maya" never shifts left/right when centered!
+ * Isolated title component so the dot ticker never re-renders the orbital rings or tips,
+ * and uses fixed-width opacity dots so "Connecting to Maya" never shifts when centered.
  */
 const ConnectingTitle = React.memo(function ConnectingTitle({
   isConnected,
@@ -81,6 +112,7 @@ export function ConnectingView({
   onCancel,
   style,
   isConnected = false,
+  applyTopInset = true,
 }: ConnectingViewProps) {
   const [isCancelHovered, setIsCancelHovered] = useState(false);
   const [hoveredTip, setHoveredTip] = useState<number | null>(null);
@@ -88,26 +120,43 @@ export function ConnectingView({
   const insets = useSafeAreaInsets();
   const useNative = Platform.OS !== 'web';
 
-  // Dynamic bottom padding to ensure Quick Tips card comes up above gesture bars and mobile browser chrome
+  const topInset = applyTopInset ? insets.top : 0;
+
+  // Keep the tips card clear of gesture bars / home indicator / mobile browser chrome
   const bottomPadding = Math.max(
-    insets.bottom + 24,
-    Platform.select({ web: 64, ios: 52, default: 44 })
+    insets.bottom + 16,
+    Platform.select({ web: 64, ios: 24, default: 20 }) as number
   );
 
-  // Dynamic hero animation size: compact and visually balanced with Quick Tips card
+  // Hero size is based on the height actually available to this screen (minus safe areas),
+  // not the raw window height, so it stays balanced on tall notched phones and short Androids.
   const heroSize = useMemo(() => {
-    const heightBased = Math.round(windowHeight * 0.28);
+    const availableHeight = windowHeight - insets.top - insets.bottom;
+    const heightBased = Math.round(availableHeight * 0.28);
     const contentWidth = isPhone ? windowWidth : Math.min(windowWidth, 440);
     const maxSafeWidth = Math.round(contentWidth - 80);
-    return Math.min(240, maxSafeWidth, Math.max(180, heightBased));
-  }, [windowHeight, windowWidth, isPhone]);
+    return Math.min(240, maxSafeWidth, Math.max(170, heightBased));
+  }, [windowHeight, windowWidth, isPhone, insets.top, insets.bottom]);
 
   const dashedRingSize = Math.round(heroSize * 0.9);
   const haloSize = Math.round(heroSize * 0.72);
   const avatarContainerSize = Math.round(heroSize * 0.54);
   const avatarInnerSize = avatarContainerSize - 6;
   const dotSize = Math.max(7, Math.round(heroSize * 0.034));
-  const dotOffset = Math.round(dashedRingSize * 0.146 - (dotSize - 7) / 2);
+
+  // Satellite dots are placed by their centre point on the ring's centre line.
+  // This doesn't depend on how each platform treats border width for absolute children.
+  const satellites = useMemo(() => {
+    const centre = dashedRingSize / 2;
+    const radius = dashedRingSize / 2 - RING_BORDER / 2;
+    return [45, 135, 225, 315].map((deg) => {
+      const rad = (deg * Math.PI) / 180;
+      return {
+        left: centre + radius * Math.cos(rad) - dotSize / 2,
+        top: centre + radius * Math.sin(rad) - dotSize / 2,
+      };
+    });
+  }, [dashedRingSize, dotSize]);
 
   // Continuous loop animation values
   const rotateAnim = useRef(new Animated.Value(0)).current;
@@ -118,12 +167,20 @@ export function ConnectingView({
   const heroEntranceAnim = useRef(new Animated.Value(0)).current;
   const connectedPopAnim = useRef(new Animated.Value(1)).current;
   const cardEntranceAnim = useRef(new Animated.Value(0)).current;
-  const tip1Anim = useRef(new Animated.Value(0)).current;
-  const tip2Anim = useRef(new Animated.Value(0)).current;
-  const tip3Anim = useRef(new Animated.Value(0)).current;
+  const tipAnims = useRef(TIPS.map(() => new Animated.Value(0))).current;
+  const iconPopAnims = useRef(TIPS.map(() => new Animated.Value(0))).current;
+  const iconIdleAnims = useRef(TIPS.map(() => new Animated.Value(0))).current;
+  const rippleAnims = useRef(TIPS.map(() => new Animated.Value(0))).current;
+  const [reduceMotion, setReduceMotion] = useState(false);
 
   useEffect(() => {
-    // 1. Continuous smooth rotation for orbital ring and satellite dots
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then(setReduceMotion)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    // 1. Continuous rotation for orbital ring and satellite dots
     const rotationLoop = Animated.loop(
       Animated.timing(rotateAnim, {
         toValue: 1,
@@ -133,7 +190,7 @@ export function ConnectingView({
       })
     );
 
-    // 2. Subtle sine breathing pulse for concentric rings
+    // 2. Subtle breathing pulse for concentric rings
     const pulseLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
@@ -151,7 +208,7 @@ export function ConnectingView({
       ])
     );
 
-    // 3. Gentle avatar levitation
+    // 3. Gentle avatar float
     const floatLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(floatAnim, {
@@ -169,7 +226,7 @@ export function ConnectingView({
       ])
     );
 
-    // 4. Smooth staggered entrance for Hero, Tips Card, and Tip Rows
+    // 4. Staggered entrance for hero, tips card and tip rows
     Animated.parallel([
       Animated.spring(heroEntranceAnim, {
         toValue: 1,
@@ -184,26 +241,32 @@ export function ConnectingView({
         easing: Easing.out(Easing.cubic),
         useNativeDriver: useNative,
       }),
-      Animated.stagger(110, [
-        Animated.spring(tip1Anim, {
-          toValue: 1,
-          tension: 75,
-          friction: 8,
-          useNativeDriver: useNative,
-        }),
-        Animated.spring(tip2Anim, {
-          toValue: 1,
-          tension: 75,
-          friction: 8,
-          useNativeDriver: useNative,
-        }),
-        Animated.spring(tip3Anim, {
-          toValue: 1,
-          tension: 75,
-          friction: 8,
-          useNativeDriver: useNative,
-        }),
-      ]),
+      Animated.stagger(
+        110,
+        tipAnims.map((anim) =>
+          Animated.spring(anim, {
+            toValue: 1,
+            tension: 75,
+            friction: 8,
+            useNativeDriver: useNative,
+          })
+        )
+      ),
+      // Icon badges pop in just after their row lands
+      Animated.stagger(
+        110,
+        iconPopAnims.map((anim) =>
+          Animated.sequence([
+            Animated.delay(200),
+            Animated.spring(anim, {
+              toValue: 1,
+              tension: 90,
+              friction: 7,
+              useNativeDriver: useNative,
+            }),
+          ])
+        )
+      ),
     ]).start();
 
     rotationLoop.start();
@@ -221,13 +284,68 @@ export function ConnectingView({
     floatAnim,
     heroEntranceAnim,
     cardEntranceAnim,
-    tip1Anim,
-    tip2Anim,
-    tip3Anim,
+    tipAnims,
+    iconPopAnims,
     useNative,
   ]);
 
-  // 5. Celebratory spring pop when `isConnected` turns true!
+  // Looping micro-motion for tip icons (skipped when the user prefers reduced motion)
+  useEffect(() => {
+    if (reduceMotion) return;
+    const loops: Animated.CompositeAnimation[] = [];
+
+    TIPS.forEach((tip, i) => {
+      const startDelay = 500 + i * 250;
+
+      // Back-and-forth motion on the icon itself
+      loops.push(
+        Animated.sequence([
+          Animated.delay(startDelay),
+          Animated.loop(
+            Animated.sequence([
+              Animated.timing(iconIdleAnims[i], {
+                toValue: 1,
+                duration: tip.duration,
+                easing: Easing.inOut(Easing.sin),
+                useNativeDriver: useNative,
+              }),
+              Animated.timing(iconIdleAnims[i], {
+                toValue: 0,
+                duration: tip.duration,
+                easing: Easing.inOut(Easing.sin),
+                useNativeDriver: useNative,
+              }),
+            ])
+          ),
+        ])
+      );
+
+      // Expanding ring behind the badge (wifi signal / mic sound)
+      if (tip.ripple) {
+        loops.push(
+          Animated.sequence([
+            Animated.delay(startDelay),
+            Animated.loop(
+              Animated.sequence([
+                Animated.timing(rippleAnims[i], {
+                  toValue: 1,
+                  duration: 1500,
+                  easing: Easing.out(Easing.quad),
+                  useNativeDriver: useNative,
+                }),
+                Animated.delay(600),
+              ])
+            ),
+          ])
+        );
+      }
+    });
+
+    loops.forEach((l) => l.start());
+    return () => loops.forEach((l) => l.stop());
+  }, [reduceMotion, iconIdleAnims, rippleAnims, useNative]);
+
+  // 5. Spring pop when `isConnected` turns true
   useEffect(() => {
     if (isConnected) {
       connectedPopAnim.setValue(0.93);
@@ -250,21 +368,6 @@ export function ConnectingView({
     outputRange: ['360deg', '0deg'],
   });
 
-  const makeTipStyle = (anim: Animated.Value, isHovered: boolean) => ({
-    opacity: anim,
-    transform: [
-      {
-        translateY: anim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [14, 0],
-        }),
-      },
-      {
-        translateX: isHovered ? 2 : 0,
-      },
-    ],
-  });
-
   return (
     <View style={[styles.safeArea, style]}>
       <View style={[styles.mainWrapper, !isPhone && styles.mainWrapperDesktop]}>
@@ -272,208 +375,156 @@ export function ConnectingView({
           style={styles.scrollArea}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: bottomPadding },
+            { paddingTop: topInset + 12, paddingBottom: bottomPadding },
           ]}
           showsVerticalScrollIndicator={false}
           bounces={false}
+          overScrollMode="never"
         >
-          {/* Top-Right Dismiss Button */}
-          {onCancel ? (
-            <Pressable
-              style={({ pressed }) => [
-                styles.cancelButton,
-                isCancelHovered && styles.cancelButtonHovered,
-                pressed && styles.cancelButtonPressed,
+          {/* Hero area takes the free space and centres the avatar + text in it,
+              so the layout holds up on both short and tall screens. */}
+          <View style={styles.heroArea}>
+            <Animated.View
+              style={[
+                styles.topContentGroup,
+                {
+                  opacity: heroEntranceAnim,
+                  transform: [
+                    {
+                      scale: Animated.multiply(
+                        heroEntranceAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.92, 1],
+                        }),
+                        connectedPopAnim
+                      ),
+                    },
+                  ],
+                },
               ]}
-              onPress={onCancel}
-              hitSlop={12}
-              onHoverIn={() => setIsCancelHovered(true)}
-              onHoverOut={() => setIsCancelHovered(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Cancel connecting"
             >
-              <Ionicons name="close" size={16} color="#64748b" />
-            </Pressable>
-          ) : null}
-
-          {/* Top Content: Hero Avatar with Orbital Rings & Status Text */}
-          <Animated.View
-            style={[
-              styles.topContentGroup,
-              {
-                opacity: heroEntranceAnim,
-                transform: [
-                  {
-                    scale: Animated.multiply(
-                      heroEntranceAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0.92, 1],
-                      }),
-                      connectedPopAnim
-                    ),
-                  },
-                ],
-              },
-            ]}
-          >
-            <View style={styles.heroSection}>
-              <View
-                style={[
-                  styles.animationArea,
-                  { width: heroSize, height: heroSize },
-                ]}
-              >
-                {/* Outermost Faint Dashed Ring */}
-                <Animated.View
-                  renderToHardwareTextureAndroid={true}
-                  shouldRasterizeIOS={true}
+              <View style={styles.heroSection}>
+                <View
                   style={[
-                    styles.orbitalRingOuter,
-                    isConnected && styles.orbitalRingOuterConnected,
-                    {
-                      width: heroSize,
-                      height: heroSize,
-                      borderRadius: heroSize / 2,
-                      transform: [
-                        { rotate: spinReverse },
-                        { scale: pulseAnim },
-                      ],
-                    },
-                  ]}
-                />
-
-                {/* Middle Dashed Ring with 4 Satellite Dots */}
-                <Animated.View
-                  renderToHardwareTextureAndroid={true}
-                  shouldRasterizeIOS={true}
-                  style={[
-                    styles.orbitalRingDashed,
-                    isConnected && styles.orbitalRingDashedConnected,
-                    {
-                      width: dashedRingSize,
-                      height: dashedRingSize,
-                      borderRadius: dashedRingSize / 2,
-                      transform: [{ rotate: spin }, { scale: pulseAnim }],
-                    },
+                    styles.animationArea,
+                    { width: heroSize, height: heroSize },
                   ]}
                 >
-                  <View
+                  {/* Outermost faint dashed ring */}
+                  <Animated.View
                     style={[
-                      styles.satelliteDot,
-                      isConnected && styles.satelliteDotConnected,
+                      styles.orbitalRingOuter,
+                      isConnected && styles.orbitalRingOuterConnected,
                       {
-                        top: dotOffset,
-                        left: dotOffset,
-                        width: dotSize,
-                        height: dotSize,
-                        borderRadius: dotSize / 2,
+                        width: heroSize,
+                        height: heroSize,
+                        borderRadius: heroSize / 2,
+                        transform: [
+                          { rotate: spinReverse },
+                          { scale: pulseAnim },
+                        ],
                       },
                     ]}
                   />
-                  <View
-                    style={[
-                      styles.satelliteDot,
-                      isConnected && styles.satelliteDotConnected,
-                      {
-                        top: dotOffset,
-                        right: dotOffset,
-                        width: dotSize,
-                        height: dotSize,
-                        borderRadius: dotSize / 2,
-                      },
-                    ]}
-                  />
-                  <View
-                    style={[
-                      styles.satelliteDot,
-                      isConnected && styles.satelliteDotConnected,
-                      {
-                        bottom: dotOffset,
-                        left: dotOffset,
-                        width: dotSize,
-                        height: dotSize,
-                        borderRadius: dotSize / 2,
-                      },
-                    ]}
-                  />
-                  <View
-                    style={[
-                      styles.satelliteDot,
-                      isConnected && styles.satelliteDotConnected,
-                      {
-                        bottom: dotOffset,
-                        right: dotOffset,
-                        width: dotSize,
-                        height: dotSize,
-                        borderRadius: dotSize / 2,
-                      },
-                    ]}
-                  />
-                </Animated.View>
 
-                {/* Inner Solid Halo Ring (Line Only) */}
-                <Animated.View
-                  style={[
-                    styles.orbitalRingHalo,
-                    isConnected && styles.orbitalRingHaloConnected,
-                    {
-                      width: haloSize,
-                      height: haloSize,
-                      borderRadius: haloSize / 2,
-                      transform: [{ scale: pulseAnim }],
-                    },
-                  ]}
-                />
-
-                {/* Central Maya Waving Avatar Circle */}
-                <Animated.View
-                  renderToHardwareTextureAndroid={true}
-                  shouldRasterizeIOS={true}
-                  style={[
-                    styles.avatarContainer,
-                    isConnected && styles.avatarContainerConnected,
-                    {
-                      width: avatarContainerSize,
-                      height: avatarContainerSize,
-                      borderRadius: avatarContainerSize / 2,
-                      transform: [{ translateY: floatAnim }],
-                    },
-                  ]}
-                >
-                  <View
+                  {/* Middle ring + satellite dots, rotating together as one unit */}
+                  <Animated.View
                     style={[
-                      styles.avatarInnerCircle,
-                      isConnected && styles.avatarInnerCircleConnected,
+                      styles.orbitWrapper,
                       {
-                        width: avatarInnerSize,
-                        height: avatarInnerSize,
-                        borderRadius: avatarInnerSize / 2,
+                        width: dashedRingSize,
+                        height: dashedRingSize,
+                        transform: [{ rotate: spin }, { scale: pulseAnim }],
                       },
                     ]}
                   >
-                    <Image
-                      source={require('@/assets/images/maya-connecting.png')}
-                      style={styles.avatarImage}
-                      resizeMode="cover"
-                      accessibilityLabel="Maya AI Tutor"
+                    <View
+                      style={[
+                        styles.orbitalRingDashed,
+                        isConnected && styles.orbitalRingDashedConnected,
+                        { borderRadius: dashedRingSize / 2 },
+                      ]}
                     />
-                  </View>
-                </Animated.View>
-              </View>
+                    {satellites.map((pos, idx) => (
+                      <View
+                        key={idx}
+                        style={[
+                          styles.satelliteDot,
+                          isConnected && styles.satelliteDotConnected,
+                          {
+                            left: pos.left,
+                            top: pos.top,
+                            width: dotSize,
+                            height: dotSize,
+                            borderRadius: dotSize / 2,
+                          },
+                        ]}
+                      />
+                    ))}
+                  </Animated.View>
 
-              {/* Title & Status Message */}
-              <View style={styles.textSection}>
-                <ConnectingTitle isConnected={isConnected} />
-                <Text style={styles.subtitle}>
-                  {isConnected
-                    ? 'Connected with Maya! Starting your conversation.'
-                    : `Setting things up for your conversation.\nMaya will welcome you in just a moment.`}
-                </Text>
-              </View>
-            </View>
-          </Animated.View>
+                  {/* Inner halo */}
+                  <Animated.View
+                    style={[
+                      styles.orbitalRingHalo,
+                      isConnected && styles.orbitalRingHaloConnected,
+                      {
+                        width: haloSize,
+                        height: haloSize,
+                        borderRadius: haloSize / 2,
+                        transform: [{ scale: pulseAnim }],
+                      },
+                    ]}
+                  />
 
-          {/* Quick Tips Card (Sticky / Pinned to Bottom with Generous Sizing) */}
+                  {/* Maya avatar */}
+                  <Animated.View
+                    style={[
+                      styles.avatarContainer,
+                      isConnected && styles.avatarContainerConnected,
+                      {
+                        width: avatarContainerSize,
+                        height: avatarContainerSize,
+                        borderRadius: avatarContainerSize / 2,
+                        transform: [{ translateY: floatAnim }],
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.avatarInnerCircle,
+                        isConnected && styles.avatarInnerCircleConnected,
+                        {
+                          width: avatarInnerSize,
+                          height: avatarInnerSize,
+                          borderRadius: avatarInnerSize / 2,
+                        },
+                      ]}
+                    >
+                      <Image
+                        source={require('@/assets/images/maya-connecting.png')}
+                        style={styles.avatarImage}
+                        resizeMode="cover"
+                        accessibilityLabel="Maya AI Tutor"
+                      />
+                    </View>
+                  </Animated.View>
+                </View>
+
+                {/* Title & status message */}
+                <View style={styles.textSection}>
+                  <ConnectingTitle isConnected={isConnected} />
+                  <Text style={styles.subtitle}>
+                    {isConnected
+                      ? 'Connected with Maya! Starting your conversation.'
+                      : `Setting things up for your conversation.\nMaya will welcome you in just a moment.`}
+                  </Text>
+                </View>
+              </View>
+            </Animated.View>
+          </View>
+
+          {/* Quick Tips card, sits at the bottom */}
           <Animated.View
             style={[
               styles.tipsCard,
@@ -496,82 +547,103 @@ export function ConnectingView({
             </Text>
 
             <View style={styles.tipsList}>
-              {/* Tip 1: Stable Internet */}
-              <Pressable
-                onHoverIn={() => setHoveredTip(1)}
-                onHoverOut={() => setHoveredTip(null)}
-              >
-                <Animated.View
-                  style={[
-                    styles.tipRow,
-                    hoveredTip === 1 && styles.tipRowHovered,
-                    makeTipStyle(tip1Anim, hoveredTip === 1),
-                  ]}
+              {TIPS.map((tip, idx) => (
+                <Pressable
+                  key={tip.title}
+                  onHoverIn={() => setHoveredTip(idx)}
+                  onHoverOut={() => setHoveredTip(null)}
                 >
-                  <View style={styles.tipIconBadge}>
-                    <Ionicons name="wifi" size={18} color="#2563eb" />
-                  </View>
-                  <View style={styles.tipTextGroup}>
-                    <Text style={styles.tipTitle}>
-                      Use a stable internet connection
-                    </Text>
-                    <Text style={styles.tipDesc}>
-                      Helps to keep the conversation smooth.
-                    </Text>
-                  </View>
-                </Animated.View>
-              </Pressable>
-
-              {/* Tip 2: Quiet Place */}
-              <Pressable
-                onHoverIn={() => setHoveredTip(2)}
-                onHoverOut={() => setHoveredTip(null)}
-              >
-                <Animated.View
-                  style={[
-                    styles.tipRow,
-                    hoveredTip === 2 && styles.tipRowHovered,
-                    makeTipStyle(tip2Anim, hoveredTip === 2),
-                  ]}
-                >
-                  <View style={styles.tipIconBadge}>
-                    <Ionicons name="home-outline" size={18} color="#2563eb" />
-                  </View>
-                  <View style={styles.tipTextGroup}>
-                    <Text style={styles.tipTitle}>Find a quiet place</Text>
-                    <Text style={styles.tipDesc}>
-                      Reduces background noise.
-                    </Text>
-                  </View>
-                </Animated.View>
-              </Pressable>
-
-              {/* Tip 3: Microphone Access */}
-              <Pressable
-                onHoverIn={() => setHoveredTip(3)}
-                onHoverOut={() => setHoveredTip(null)}
-              >
-                <Animated.View
-                  style={[
-                    styles.tipRow,
-                    hoveredTip === 3 && styles.tipRowHovered,
-                    makeTipStyle(tip3Anim, hoveredTip === 3),
-                  ]}
-                >
-                  <View style={styles.tipIconBadge}>
-                    <Ionicons name="mic-outline" size={18} color="#2563eb" />
-                  </View>
-                  <View style={styles.tipTextGroup}>
-                    <Text style={styles.tipTitle}>Allow microphone access</Text>
-                    <Text style={styles.tipDesc}>
-                      So Maya can hear you clearly.
-                    </Text>
-                  </View>
-                </Animated.View>
-              </Pressable>
+                  <Animated.View
+                    style={[
+                      styles.tipRow,
+                      hoveredTip === idx && styles.tipRowHovered,
+                      {
+                        opacity: tipAnims[idx],
+                        transform: [
+                          {
+                            translateY: tipAnims[idx].interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [14, 0],
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  >
+                    <View style={styles.tipIconSlot}>
+                    {tip.ripple && !reduceMotion ? (
+                      <Animated.View
+                        pointerEvents="none"
+                        style={[
+                          styles.tipRipple,
+                          {
+                            opacity: rippleAnims[idx].interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [0.5, 0],
+                            }),
+                            transform: [
+                              {
+                                scale: rippleAnims[idx].interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [1, 1.45],
+                                }),
+                              },
+                            ],
+                          },
+                        ]}
+                      />
+                    ) : null}
+                    <Animated.View
+                      style={[
+                        styles.tipIconBadge,
+                        {
+                          opacity: iconPopAnims[idx],
+                          transform: [
+                            {
+                              scale: iconPopAnims[idx].interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [0.6, 1],
+                              }),
+                            },
+                          ],
+                        },
+                      ]}
+                    >
+                      <Animated.View style={IDLE_STYLES[tip.idle](iconIdleAnims[idx])}>
+                        <Ionicons name={tip.icon} size={18} color="#2563eb" />
+                      </Animated.View>
+                    </Animated.View>
+                    </View>
+                    <View style={styles.tipTextGroup}>
+                      <Text style={styles.tipTitle}>{tip.title}</Text>
+                      <Text style={styles.tipDesc}>{tip.desc}</Text>
+                    </View>
+                  </Animated.View>
+                </Pressable>
+              ))}
             </View>
           </Animated.View>
         </ScrollView>
+
+        {/* Dismiss button: pinned to the top-right, below the notch / status bar */}
+        {onCancel ? (
+          <Pressable
+            style={({ pressed }) => [
+              styles.cancelButton,
+              { top: topInset + 12 },
+              isCancelHovered && styles.cancelButtonHovered,
+              pressed && styles.cancelButtonPressed,
+            ]}
+            onPress={onCancel}
+            hitSlop={12}
+            onHoverIn={() => setIsCancelHovered(true)}
+            onHoverOut={() => setIsCancelHovered(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel connecting"
+          >
+            <Ionicons name="close" size={16} color="#64748b" />
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -600,15 +672,18 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     width: '100%',
     paddingHorizontal: 16,
-    paddingTop: Platform.select({ web: 14, ios: 10, default: 10 }),
     alignItems: 'center',
-    justifyContent: 'space-between',
-    position: 'relative',
+  },
+  heroArea: {
+    flexGrow: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
   },
   cancelButton: {
     position: 'absolute',
-    top: Platform.select({ web: 14, ios: 10, default: 12 }),
-    right: 20,
+    right: 16,
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -618,24 +693,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 20,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
     ...(Platform.OS === 'web'
       ? ({
-          transition: 'transform 0.15s ease, background-color 0.15s ease',
+          transition: 'background-color 0.15s ease',
         } as any)
       : {}),
   },
   cancelButtonHovered: {
     backgroundColor: '#f8fafc',
-    transform: [{ scale: 1.08 }],
   },
   cancelButtonPressed: {
     backgroundColor: '#f1f5f9',
-    transform: [{ scale: 0.94 }],
   },
   topContentGroup: {
     width: '100%',
@@ -644,7 +712,6 @@ const styles = StyleSheet.create({
   heroSection: {
     alignItems: 'center',
     width: '100%',
-    marginTop: Platform.select({ web: 6, ios: 4, default: 4 }),
   },
   animationArea: {
     alignItems: 'center',
@@ -659,15 +726,17 @@ const styles = StyleSheet.create({
     opacity: 0.85,
     ...(Platform.OS === 'web' ? ({ willChange: 'transform' } as any) : {}),
   },
-  orbitalRingDashed: {
+  orbitWrapper: {
     position: 'absolute',
-    borderWidth: 1.8,
-    borderColor: '#38bdf8',
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
     ...(Platform.OS === 'web' ? ({ willChange: 'transform' } as any) : {}),
   },
+  orbitalRingDashed: {
+    ...StyleSheet.absoluteFill,
+    borderWidth: RING_BORDER,
+    borderColor: '#38bdf8',
+    borderStyle: 'dashed',
+  },
+  // Glow is iOS/web only. Android elevation draws a grey box shadow on tiny dots.
   satelliteDot: {
     position: 'absolute',
     backgroundColor: '#007aff',
@@ -675,15 +744,16 @@ const styles = StyleSheet.create({
       web: {
         boxShadow: '0 0 8px rgba(0, 122, 255, 0.8)',
       } as any,
-      default: {
+      ios: {
         shadowColor: '#007aff',
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.65,
         shadowRadius: 4,
-        elevation: 4,
       },
+      default: {},
     }),
   },
+  // No elevation here: on Android a translucent background lets the shadow show through as a dark disc.
   orbitalRingHalo: {
     position: 'absolute',
     borderWidth: 2,
@@ -694,13 +764,13 @@ const styles = StyleSheet.create({
         boxShadow: '0 0 20px rgba(56, 189, 248, 0.38)',
         willChange: 'transform',
       } as any,
-      default: {
+      ios: {
         shadowColor: '#38bdf8',
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.45,
         shadowRadius: 14,
-        elevation: 5,
       },
+      default: {},
     }),
   },
   avatarContainer: {
@@ -736,7 +806,7 @@ const styles = StyleSheet.create({
   },
   textSection: {
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: 16,
     paddingHorizontal: 16,
   },
   title: {
@@ -769,13 +839,13 @@ const styles = StyleSheet.create({
       web: {
         boxShadow: '0 0 12px rgba(34, 197, 94, 0.95)',
       } as any,
-      default: {
+      ios: {
         shadowColor: '#22c55e',
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.8,
         shadowRadius: 6,
-        elevation: 5,
       },
+      default: {},
     }),
   },
   orbitalRingHaloConnected: {
@@ -785,13 +855,13 @@ const styles = StyleSheet.create({
       web: {
         boxShadow: '0 0 22px rgba(34, 197, 94, 0.45)',
       } as any,
-      default: {
+      ios: {
         shadowColor: '#22c55e',
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.5,
         shadowRadius: 16,
-        elevation: 6,
       },
+      default: {},
     }),
   },
   avatarContainerConnected: {
@@ -818,24 +888,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748b',
     textAlign: 'center',
-    marginTop: 5,
+    marginTop: 6,
     lineHeight: 21,
   },
   tipsCard: {
     width: '100%',
-    backgroundColor: 'rgba(240, 246, 255, 0.94)',
+    backgroundColor: '#f0f6ff',
     borderWidth: 1,
     borderColor: '#dbeafe',
     borderRadius: 20,
     paddingHorizontal: 15,
     paddingVertical: 14,
-    shadowColor: '#93c5fd',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-    marginTop: 'auto',
-    marginBottom: Platform.select({ web: 8, ios: 6, default: 4 }),
   },
   tipsHeader: {
     ...fontStyle('outfit', 'bold'),
@@ -863,14 +926,23 @@ const styles = StyleSheet.create({
     gap: 11,
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
-    elevation: 1,
   },
   tipRowHovered: {
     backgroundColor: '#f8fafc',
+  },
+  tipIconSlot: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tipRipple: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: '#60a5fa',
   },
   tipIconBadge: {
     width: 36,
