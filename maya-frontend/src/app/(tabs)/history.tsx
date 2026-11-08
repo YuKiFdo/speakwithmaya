@@ -21,7 +21,7 @@ import { Radii } from '@/theme/tokens';
 import { fontStyle } from '@/theme/fonts';
 import { getBackendBaseUrl } from '@/utils/backend-url';
 import {
-  PressableScale, Reveal, SpringScale, SelectionAccent, PlayToggle, SpeedPill,
+  PressableScale, Reveal, SpringScale, PlayToggle, SpeedPill,
   ListenPill, CorrectionChevron, AnimatedCard, AnimatedCollapse,
   AnimatedSearchBar, PulseView, haptic,
 } from '@/components/history/history-motion';
@@ -243,8 +243,6 @@ const DesktopSessionCard = React.memo(function DesktopSessionCard({
       ]}
       onPress={() => onSelect(item.id)}
     >
-      <SelectionAccent active={isSelected} />
-
       {/* Mode Icon in Colored Square */}
       <SpringScale to={isSelected ? 1.06 : 1}>
         <View style={[styles.modeIconSquare, { backgroundColor: getModeBadgeBg(item.mode) }]}>
@@ -338,8 +336,6 @@ const MobileSessionCard = React.memo(function MobileSessionCard({
       ]}
       onPress={() => onSelect(item.id)}
     >
-      <SelectionAccent active={isSelected} />
-
       <SpringScale to={isSelected ? 1.06 : 1}>
         <View style={[styles.modeIconSquare, { backgroundColor: getModeBadgeBg(item.mode) }]}>
           {renderModeIcon(item.mode, 22)}
@@ -2420,7 +2416,7 @@ const styles = StyleSheet.create({
     opacity: 0.96,
   },
   sessionCardSelected: {
-    borderColor: '#BFD2FF',
+    // borderColor: '#BFD2FF',
     backgroundColor: '#F5F8FF',
     ...(Platform.OS === 'web'
       ? { boxShadow: '0 4px 14px rgba(43, 91, 255, 0.10)' }
@@ -2946,7 +2942,7 @@ const styles = StyleSheet.create({
     opacity: 0.96,
   },
   mobileSessionCardSelected: {
-    borderColor: '#BFD2FF',
+    // borderColor: '#BFD2FF',
     backgroundColor: '#F5F8FF',
     ...(Platform.OS === 'web'
       ? { boxShadow: '0 4px 14px rgba(43, 91, 255, 0.10)' }

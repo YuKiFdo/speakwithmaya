@@ -56,9 +56,9 @@ function SidebarNavItem({
         isUpgrade && styles.upgradeNavItem,
         isCompact && styles.navItemCompact,
         isCompact && isUpgrade && styles.upgradeNavItemCompact,
-        isActive && styles.navItemActive,
         isHovered && !isActive && (isUpgrade ? styles.upgradeItemHovered : styles.navItemHovered),
-        pressed && styles.navItemPressed,
+        isActive && styles.navItemActive,
+        pressed && !isActive && styles.navItemPressed,
       ]}
       onPress={onPress}
       onHoverIn={() => setIsHovered(true)}
@@ -66,31 +66,15 @@ function SidebarNavItem({
       accessibilityRole="tab"
       accessibilityState={{ selected: isActive }}
     >
-      {/* Active Left Indicator Notch */}
-      <View
-        style={[
-          styles.activeIndicatorNotch,
-          isActive && styles.activeIndicatorNotchVisible,
-        ]}
-      />
-
-      {/* Icon with micro-scale on active/hover */}
-      <View
-        style={[
-          styles.navIconWrapper,
-          (isActive || isHovered) && styles.navIconWrapperActive,
-        ]}
-      >
-        {icon(isActive, isHovered)}
-      </View>
+      {icon(isActive, isHovered)}
 
       <Text
         style={[
           styles.navLabel,
           isCompact && styles.navLabelCompact,
-          isActive && styles.navLabelActive,
           isHovered && !isActive && styles.navLabelHovered,
           isUpgrade && styles.upgradeLabel,
+          isActive && styles.navLabelActive,
         ]}
         numberOfLines={1}
       >
@@ -182,7 +166,7 @@ export function DesktopSidebar({
           </Text>
         </View>
 
-        {/* Navigation Menu with Interactive Tab Animations */}
+        {/* Navigation Menu */}
         <View style={[styles.sidebarNav, isCompact && styles.sidebarNavCompact]}>
           {/* Home */}
           <SidebarNavItem
@@ -341,7 +325,7 @@ export function DesktopSidebar({
           )}
         </Pressable>
 
-        {/* Exceeded limit alert notice matching user design */}
+        {/* Exceeded limit alert notice */}
         {isExceeded && (
           <View style={[styles.exceededAlertBox, isCompact && styles.exceededAlertBoxCompact]}>
             <Ionicons name="alert-circle" size={isCompact ? 16 : 18} color="#EF4444" style={styles.alertIcon} />
@@ -396,51 +380,23 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   sidebarNav: {
-    gap: 10,
+    gap: 4,
   },
-  activeIndicatorNotch: {
-    position: 'absolute',
-    left: 0,
-    top: '50%',
-    width: 0,
-    height: 22,
-    marginTop: -11,
-    backgroundColor: '#2B5BFF',
-    borderTopRightRadius: 4,
-    borderBottomRightRadius: 4,
-    opacity: 0,
-    ...(Platform.OS === 'web'
-      ? ({ transition: 'all 0.18s cubic-bezier(0.34, 1.56, 0.64, 1)' } as any)
-      : {}),
-  },
-  activeIndicatorNotchVisible: {
-    width: 4,
-    opacity: 1,
-  },
-  navIconWrapper: {
-    ...(Platform.OS === 'web'
-      ? ({ transition: 'transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1)' } as any)
-      : {}),
-  },
-  navIconWrapperActive: {
-    transform: [{ scale: 1.1 }],
-  },
+
+  /* Nav items: flat rounded rows. Active = solid tint + blue text.
+     No sliding, scaling or springy transitions. */
   navItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     paddingVertical: 11,
-    paddingLeft: 14,
-    paddingRight: 14,
-    borderTopLeftRadius: 16,
-    borderBottomLeftRadius: 16,
-    borderTopRightRadius: 0,
-    borderBottomRightRadius: 0,
-    position: 'relative',
+    paddingHorizontal: 14,
+    marginRight: 14,
+    borderRadius: 12,
     ...(Platform.OS === 'web'
       ? ({
           cursor: 'pointer',
-          transition: 'all 0.18s cubic-bezier(0.34, 1.56, 0.64, 1)',
+          transition: 'background-color 0.15s ease',
         } as any)
       : {}),
   },
@@ -453,20 +409,16 @@ const styles = StyleSheet.create({
     paddingRight: 10,
   },
   navItemActive: {
-    backgroundColor: '#EDF3FF',
-    transform: [{ translateX: 2 }],
+    backgroundColor: '#E6EDFF',
   },
   navItemHovered: {
-    backgroundColor: '#EEF2F6',
-    transform: [{ translateX: 3 }],
+    backgroundColor: '#EBEEF5',
   },
   upgradeItemHovered: {
     backgroundColor: '#FEF3C7',
-    transform: [{ translateX: 3 }],
   },
   navItemPressed: {
-    transform: [{ scale: 0.98 }],
-    opacity: 0.9,
+    backgroundColor: '#E2E7F1',
   },
   navLabel: {
     ...fontStyle('outfit', 'semiBold'),
@@ -490,21 +442,6 @@ const styles = StyleSheet.create({
     marginRight: 14,
     marginLeft: 4,
   },
-  upgradeItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    paddingLeft: 14,
-    paddingRight: 14,
-    borderTopLeftRadius: 16,
-    borderBottomLeftRadius: 16,
-    borderTopRightRadius: 0,
-    borderBottomRightRadius: 0,
-  },
-  upgradeItemActive: {
-    backgroundColor: '#EDF3FF',
-  },
   upgradeLabel: {
     ...fontStyle('outfit', 'semiBold'),
     fontSize: 14.5,
@@ -512,10 +449,6 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     color: '#000036',
     flexShrink: 1,
-  },
-  upgradeLabelActive: {
-    ...fontStyle('outfit', 'bold'),
-    color: '#2B5BFF',
   },
   discountBadge: {
     paddingHorizontal: 7,
@@ -639,10 +572,6 @@ const styles = StyleSheet.create({
   talkTimeMinutesInactive: {
     color: '#64748B',
   },
-  progressBarFillInactive: {
-    width: '0%',
-    backgroundColor: '#CBD5E1',
-  },
   extraTimeButtonInactive: {
     borderColor: '#FCA5A5',
     backgroundColor: '#FEF2F2',
@@ -720,10 +649,10 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   sidebarNavCompact: {
-    gap: 10,
+    gap: 4,
   },
   navItemCompact: {
-    paddingVertical: 7,
+    paddingVertical: 8,
     gap: 10,
   },
   navLabelCompact: {
@@ -731,12 +660,6 @@ const styles = StyleSheet.create({
   },
   sidebarDividerCompact: {
     marginVertical: 6,
-  },
-  upgradeItemCompact: {
-    paddingVertical: 6,
-  },
-  upgradeLabelCompact: {
-    fontSize: 13.5,
   },
   talkTimeCardCompact: {
     padding: 12,
