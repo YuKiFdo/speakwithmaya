@@ -225,6 +225,8 @@ export class SessionsService {
   private readonly sessionRecordingsMap = new Map<string, { userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string }>();
   private readonly sessionTurnAudioMap = new Map<string, Map<number, string>>();
   private readonly sessionTurnTranscriptMap = new Map<string, Map<number, string>>();
+  private readonly usageCache = new Map<string, { timestamp: number; data: any }>();
+  private lastOrphanReconcileTime = 0;
   private readonly authoritativeTurnsMap = new Map<string, Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>();
   private readonly saveTurnsLocks = new Map<string, Promise<void>>();
   private readonly finalizingSessionIds = new Set<string>();
@@ -2864,17 +2866,33 @@ ${memoryPart}`;
   }
 
   async getUsageData(query: QueryUsageDto) {
-    await this.reconcileOrphanedSessions();
     const range = query?.range || '30d';
     const search = (query?.search || '').toLowerCase().trim();
     const statusFilter = (query?.status || '').toLowerCase().trim();
     const modelFilter = (query?.model || '').toLowerCase().trim();
 
+    // 15-second in-memory response cache to make admin navigation instantaneous
+    const cacheKey = `${range}_${search}_${statusFilter}_${modelFilter}`;
+    const cached = this.usageCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 15000) {
+      return cached.data;
+    }
+
+    // Trigger orphan reconciliation in the background (at most once every 10 minutes)
+    // Never block the HTTP response!
+    const now = Date.now();
+    if (now - this.lastOrphanReconcileTime > 10 * 60 * 1000) {
+      this.lastOrphanReconcileTime = now;
+      this.reconcileOrphanedSessions().catch((err) => {
+        this.logger.debug?.(`[SessionsService] Background orphan reconcile error: ${err?.message}`);
+      });
+    }
+
     let records: UsageRecord[] = [];
 
     if (this.supabase) {
       try {
-        const { data: ledgerEntries, error } = await this.supabase
+        let queryBuilder = this.supabase
           .from('usage_ledger')
           .select(`
             id,
@@ -2910,6 +2928,24 @@ ${memoryPart}`;
           `)
           .order('created_at', { ascending: false });
 
+        // Database date range indexing
+        if (range === 'today') {
+          const startOfDay = new Date();
+          startOfDay.setHours(0, 0, 0, 0);
+          queryBuilder = queryBuilder.gte('created_at', startOfDay.toISOString());
+        } else if (range === '7d') {
+          const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+          queryBuilder = queryBuilder.gte('created_at', sevenDaysAgo.toISOString());
+        } else if (range === '30d') {
+          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+          queryBuilder = queryBuilder.gte('created_at', thirtyDaysAgo.toISOString());
+        }
+
+        // Sensible cap to prevent unbound network fetches
+        queryBuilder = queryBuilder.limit(300);
+
+        const { data: ledgerEntries, error } = await queryBuilder;
+
         if (error) {
           this.logger.error(`Error querying usage_ledger from Supabase: ${error.message}`);
         } else if (ledgerEntries) {
@@ -2922,25 +2958,28 @@ ${memoryPart}`;
             return true;
           });
 
-          // Fetch turn counts and correction counts for sessions
+          // Fetch turn counts and correction counts for visible sessions in parallel
           const sessionIds = uniqueLedgerEntries.map((l: any) => l.session_id).filter(Boolean);
           const turnsCountMap = new Map<string, number>();
           const correctionsCountMap = new Map<string, number>();
 
-          if (sessionIds.length > 0) {
-            const { data: turnsData } = await this.supabase
-              .from('session_turns')
-              .select('session_id')
-              .in('session_id', sessionIds);
-            turnsData?.forEach((t: any) => {
+          const targetSessionIds = sessionIds.slice(0, 100);
+          if (targetSessionIds.length > 0) {
+            const [turnsRes, corrRes] = await Promise.all([
+              this.supabase
+                .from('session_turns')
+                .select('session_id')
+                .in('session_id', targetSessionIds),
+              this.supabase
+                .from('grammar_corrections')
+                .select('session_id')
+                .in('session_id', targetSessionIds),
+            ]);
+
+            turnsRes.data?.forEach((t: any) => {
               turnsCountMap.set(t.session_id, (turnsCountMap.get(t.session_id) || 0) + 1);
             });
-
-            const { data: corrData } = await this.supabase
-              .from('grammar_corrections')
-              .select('session_id')
-              .in('session_id', sessionIds);
-            corrData?.forEach((c: any) => {
+            corrRes.data?.forEach((c: any) => {
               correctionsCountMap.set(c.session_id, (correctionsCountMap.get(c.session_id) || 0) + 1);
             });
           }
@@ -3162,7 +3201,7 @@ ${memoryPart}`;
     const totalMinutes = Math.max(1, Math.round(filtered.reduce((sum, r) => sum + r.durationSeconds, 0) / 60));
     const avgCostPerMin = Number((totalCostLkr / totalMinutes).toFixed(2));
 
-    return {
+    const responsePayload = {
       dailyUsage: dailyPoints,
       sessions: filtered,
       stats: {
@@ -3180,6 +3219,9 @@ ${memoryPart}`;
         avgCostPerMin: totalSessions > 0 && totalCostLkr > 0 ? avgCostPerMin : 0,
       },
     };
+
+    this.usageCache.set(cacheKey, { timestamp: Date.now(), data: responsePayload });
+    return responsePayload;
   }
 
   async getSessionDetail(sessionId: string) {
