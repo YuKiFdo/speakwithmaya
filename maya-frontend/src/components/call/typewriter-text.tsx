@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Text, StyleSheet, TextStyle, StyleProp, Animated } from 'react-native';
+import { Text, StyleSheet, TextStyle, StyleProp, Animated, Platform } from 'react-native';
 
 interface TypewriterTextProps {
   text: string;
@@ -31,12 +31,12 @@ export function TypewriterText({
           Animated.timing(cursorOpacity, {
             toValue: 0.15,
             duration: 350,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(cursorOpacity, {
             toValue: 1,
             duration: 350,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
         ])
       );
@@ -45,7 +45,7 @@ export function TypewriterText({
       Animated.timing(cursorOpacity, {
         toValue: 0,
         duration: 250,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
     }
 

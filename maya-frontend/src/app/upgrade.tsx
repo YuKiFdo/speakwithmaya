@@ -554,13 +554,13 @@ export default function UpgradeScreen() {
           toValue: 1.8,
           duration: 850,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(chevronBounce, {
           toValue: 0,
           duration: 850,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
       ])
     );
@@ -576,12 +576,12 @@ export default function UpgradeScreen() {
         Animated.timing(testimonialFadeAnim, {
           toValue: 0,
           duration: 250,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(testimonialSlideAnim, {
           toValue: -15,
           duration: 250,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start(() => {
         setActiveTestimonialIdx((prev) => (prev + 1) % UPGRADE_TESTIMONIALS.length);
@@ -591,12 +591,12 @@ export default function UpgradeScreen() {
           Animated.timing(testimonialFadeAnim, {
             toValue: 1,
             duration: 300,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(testimonialSlideAnim, {
             toValue: 0,
             duration: 300,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
         ]).start();
       });
