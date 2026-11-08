@@ -419,6 +419,7 @@ export default function HistoryScreen() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   // Heavy detail view state (transitioned concurrently to keep list clicks 60fps)
   const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
+  const [isTransitioningDetail, setIsTransitioningDetail] = useState(false);
   const [, startTransition] = useTransition();
 
   // Audio Playback State
@@ -460,11 +461,20 @@ export default function HistoryScreen() {
       stopAudio();
       setSelectedSessionId(null);
       setDetailSessionId(null);
+      setIsTransitioningDetail(false);
       return;
     }
+    // Instantly highlight the newly clicked session card
     setSelectedSessionId(id);
-    startTransition(() => {
-      setDetailSessionId(id);
+    stopAudio();
+    setIsTransitioningDetail(true);
+
+    // Let the skeleton render on the next animation frame, then populate the heavy detail data
+    requestAnimationFrame(() => {
+      startTransition(() => {
+        setDetailSessionId(id);
+        setIsTransitioningDetail(false);
+      });
     });
   }, [startTransition, stopAudio]);
 
@@ -1431,7 +1441,7 @@ export default function HistoryScreen() {
 
                 {/* ── RIGHT COLUMN: SELECTED SESSION DETAIL ── */}
                 <View style={styles.desktopDetailColumn}>
-                  {isLoading ? (
+                  {isLoading || isTransitioningDetail ? (
                     <HistoryDetailSkeleton />
                   ) : activeSession ? (
                     <Reveal key={activeSession.id} variant="fade" style={{ flex: 1 }}>
@@ -1838,7 +1848,11 @@ export default function HistoryScreen() {
               </ScrollView>
 
               {/* ── MOBILE DETAIL VIEW (Slide-in overlay) ── */}
-              {selectedSessionId && activeSession ? (
+              {selectedSessionId && (isLoading || isTransitioningDetail) ? (
+                <View style={[styles.mobileDetailContainer, StyleSheet.absoluteFill, { zIndex: 10 }]}>
+                  <HistoryDetailSkeleton />
+                </View>
+              ) : selectedSessionId && activeSession ? (
                 <Reveal
                   key={activeSession.id}
                   variant="slide"

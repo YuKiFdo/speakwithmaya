@@ -13,6 +13,9 @@ const GOOD_JOB_ASSET = require('@/assets/sounds/good job.mp3');
 const HINT_BUTTON_ASSET = require('@/assets/sounds/hint button press.mp3');
 const OTHER_BUTTON_ASSET = require('@/assets/sounds/other button press.mp3');
 const UNDERSTOOD_BUTTON_ASSET = require('@/assets/sounds/understood button press.mp3');
+const SCANNING_RADAR_ASSET = require('@/assets/sounds/scanning_radar.wav');
+const ANALYSIS_COMPLETE_ASSET = require('@/assets/sounds/analysis_complete.wav');
+const STEP_POP_ASSET = require('@/assets/sounds/step_pop.wav');
 const MAYA_WELCOME_ASSET = require('@/assets/sounds/maya-welcome.wav');
 const MAYA_NAME_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-name.wav');
 const MAYA_PHONE_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-phone.wav');
@@ -63,6 +66,7 @@ const DAILY_GOAL_AUDIO_ASSETS: Record<string, any> = {
 
 let audioCtx: AudioContext | null = null;
 let activeWhooshNodes: { noise: AudioBufferSourceNode; gain: GainNode } | null = null;
+let activeNativeScanningPlayer: any = null;
 
 interface VoicePlayerHandle {
   stop: () => void;
@@ -536,6 +540,9 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
         HINT_BUTTON_ASSET,
         OTHER_BUTTON_ASSET,
         UNDERSTOOD_BUTTON_ASSET,
+        SCANNING_RADAR_ASSET,
+        ANALYSIS_COMPLETE_ASSET,
+        STEP_POP_ASSET,
       ].forEach((asset) => {
         const uri = getAssetUri(asset);
         if (uri) getPreloadedAudio(uri);
@@ -767,13 +774,27 @@ export function playUnderstoodTapSound(): void {
 export const playUnderstoodButtonSound = playUnderstoodTapSound;
 
 /**
- * 1. Gentle Soft Whoosh / Wind Shimmer Sweep
+ * 1. Gentle Soft Whoosh / Wind Shimmer Sweep / Native Radar Scanning
  */
 export function playScanningSound(): void {
+  stopScanningSound();
+
+  // Mobile Native Audio SFX playback (iOS / Android)
+  if (Platform.OS !== 'web') {
+    try {
+      const player = createAudioPlayer(SCANNING_RADAR_ASSET);
+      player.volume = 0.55;
+      player.play();
+      activeNativeScanningPlayer = player;
+    } catch (err) {
+      console.warn('[sound-service] Native playScanningSound error:', err);
+    }
+    return;
+  }
+
+  // Web Audio API dynamic synthesis
   const ctx = getAudioContext();
   if (!ctx) return;
-
-  stopScanningSound();
 
   try {
     const duration = 3.4;
@@ -843,9 +864,21 @@ export function playScanningSound(): void {
 }
 
 /**
- * Stop active scanning sound
+ * Stop active scanning sound across Native and Web
  */
 export function stopScanningSound(): void {
+  // Mobile Native cleanup
+  if (Platform.OS !== 'web' && activeNativeScanningPlayer) {
+    try {
+      activeNativeScanningPlayer.pause();
+    } catch {}
+    try {
+      activeNativeScanningPlayer.remove?.();
+    } catch {}
+    activeNativeScanningPlayer = null;
+  }
+
+  // Web Audio API cleanup
   if (activeWhooshNodes && audioCtx) {
     try {
       activeWhooshNodes.gain.gain.setValueAtTime(
@@ -866,7 +899,7 @@ export function stopScanningSound(): void {
 /**
  * 2. Juicy Gamified Checkmark Pop
  */
-export function playStepPop(stepIndex: number = 0): void {
+function playSynthesizedStepPop(stepIndex: number = 0): void {
   const ctx = getAudioContext();
   if (!ctx) return;
 
@@ -894,6 +927,18 @@ export function playStepPop(stepIndex: number = 0): void {
   } catch (err) {
     console.error('[sound-service] Step pop error:', err);
   }
+}
+
+export function playStepPop(stepIndex: number = 0): void {
+  playSoundAsset(
+    STEP_POP_ASSET,
+    0.55,
+    () => {
+      playSynthesizedStepPop(stepIndex);
+    },
+    undefined,
+    300,
+  );
 }
 
 /**
@@ -964,9 +1009,7 @@ export function playTryAgainSound(): void {
 /**
  * 3. Celebratory Analysis Complete Chime
  */
-export function playAnalysisCompleteSound(): void {
-  stopScanningSound();
-
+function playSynthesizedAnalysisComplete(): void {
   const ctx = getAudioContext();
   if (!ctx) return;
 
@@ -1005,6 +1048,19 @@ export function playAnalysisCompleteSound(): void {
   } catch (err) {
     console.error('[sound-service] Complete sound error:', err);
   }
+}
+
+export function playAnalysisCompleteSound(): void {
+  stopScanningSound();
+  playSoundAsset(
+    ANALYSIS_COMPLETE_ASSET,
+    0.7,
+    () => {
+      playSynthesizedAnalysisComplete();
+    },
+    undefined,
+    1500,
+  );
 }
 
 /**
@@ -1059,7 +1115,7 @@ function playSynthesizedUnderstoodTap(): void {
 /**
  * 5. Celebratory "Finish Review" Victory Fanfare
  */
-export function playFinishReviewFanfare(): void {
+function playSynthesizedFinishReviewFanfare(): void {
   const ctx = getAudioContext();
   if (!ctx) return;
 
@@ -1097,6 +1153,18 @@ export function playFinishReviewFanfare(): void {
   } catch (err) {
     console.warn('[sound-service] Finish review fanfare error:', err);
   }
+}
+
+export function playFinishReviewFanfare(): void {
+  playSoundAsset(
+    ANALYSIS_COMPLETE_ASSET,
+    0.75,
+    () => {
+      playSynthesizedFinishReviewFanfare();
+    },
+    undefined,
+    1800,
+  );
 }
 
 /**

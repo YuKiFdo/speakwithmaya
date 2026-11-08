@@ -217,6 +217,9 @@ export class AuthService {
       const userProfile = await this.findOrCreateProfileByPhone(phone);
       const planTier = (testAccount.plan === 'unlimited' ? 'pro' : testAccount.plan) as any;
       const mins = testAccount.minutesBalance || (testAccount.plan === 'unlimited' ? 9999 : 120);
+      const isPaidTier = planTier !== 'starter';
+      const resetIntervalMs = isPaidTier ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+      const targetResetIso = new Date(Date.now() + resetIntervalMs).toISOString();
 
       await this.supabase
         .from('profiles')
@@ -224,8 +227,10 @@ export class AuthService {
           display_name: testAccount.name || userProfile.display_name,
           plan_tier: planTier,
           plan_status: 'active',
+          billing_cycle: isPaidTier ? 'monthly' : 'daily',
           minutes_balance: Math.max(userProfile.minutes_balance || 0, mins),
           monthly_minutes_allowance: Math.max(userProfile.monthly_minutes_allowance || 0, mins),
+          minutes_reset_at: targetResetIso,
           onboarding_completed_at: userProfile.onboarding_completed_at || new Date().toISOString(),
           last_active_step: '/(tabs)/dashboard',
           updated_at: new Date().toISOString(),
@@ -235,7 +240,10 @@ export class AuthService {
       userProfile.display_name = testAccount.name || userProfile.display_name;
       userProfile.plan_tier = planTier;
       userProfile.plan_status = 'active';
+      userProfile.billing_cycle = isPaidTier ? 'monthly' : 'daily';
       userProfile.minutes_balance = Math.max(userProfile.minutes_balance || 0, mins);
+      userProfile.monthly_minutes_allowance = Math.max(userProfile.monthly_minutes_allowance || 0, mins);
+      userProfile.minutes_reset_at = targetResetIso;
       userProfile.last_active_step = '/(tabs)/dashboard';
       userProfile.onboarding_completed_at = userProfile.onboarding_completed_at || new Date().toISOString();
 
@@ -449,6 +457,9 @@ export class AuthService {
       const userProfile = await this.findOrCreateProfileByPhone(phone);
       const planTier = (testAccount.plan === 'unlimited' ? 'pro' : testAccount.plan) as any;
       const mins = testAccount.minutesBalance || (testAccount.plan === 'unlimited' ? 9999 : 120);
+      const isPaidTier = planTier !== 'starter';
+      const resetIntervalMs = isPaidTier ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+      const targetResetIso = new Date(Date.now() + resetIntervalMs).toISOString();
 
       await this.supabase
         .from('profiles')
@@ -456,13 +467,23 @@ export class AuthService {
           display_name: testAccount.name || userProfile.display_name,
           plan_tier: planTier,
           plan_status: 'active',
+          billing_cycle: isPaidTier ? 'monthly' : 'daily',
           minutes_balance: Math.max(userProfile.minutes_balance || 0, mins),
           monthly_minutes_allowance: Math.max(userProfile.monthly_minutes_allowance || 0, mins),
+          minutes_reset_at: targetResetIso,
           onboarding_completed_at: userProfile.onboarding_completed_at || new Date().toISOString(),
           last_active_step: '/(tabs)/dashboard',
           updated_at: new Date().toISOString(),
         })
         .eq('id', userProfile.id);
+
+      userProfile.display_name = testAccount.name || userProfile.display_name;
+      userProfile.plan_tier = planTier;
+      userProfile.plan_status = 'active';
+      userProfile.billing_cycle = isPaidTier ? 'monthly' : 'daily';
+      userProfile.minutes_balance = Math.max(userProfile.minutes_balance || 0, mins);
+      userProfile.monthly_minutes_allowance = Math.max(userProfile.monthly_minutes_allowance || 0, mins);
+      userProfile.minutes_reset_at = targetResetIso;
 
       const accessToken = this.generateTokenForUser(userProfile);
       return {
@@ -3222,6 +3243,9 @@ export class AuthService {
     // 2. Provision / update profile in Supabase
     const userProfile = await this.findOrCreateProfileByPhone(phone);
     const planTier = (dto.plan === 'unlimited' ? 'pro' : dto.plan) as any;
+    const isPaidTier = planTier !== 'starter';
+    const resetIntervalMs = isPaidTier ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+    const targetResetIso = new Date(Date.now() + resetIntervalMs).toISOString();
 
     await this.supabase
       .from('profiles')
@@ -3229,8 +3253,10 @@ export class AuthService {
         display_name: name,
         plan_tier: planTier,
         plan_status: 'active',
+        billing_cycle: isPaidTier ? 'monthly' : 'daily',
         minutes_balance: mins,
         monthly_minutes_allowance: mins,
+        minutes_reset_at: targetResetIso,
         onboarding_completed_at: userProfile.onboarding_completed_at || new Date().toISOString(),
         last_active_step: '/(tabs)/dashboard',
         updated_at: new Date().toISOString(),

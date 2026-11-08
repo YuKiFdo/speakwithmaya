@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Animated,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -18,6 +19,9 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { playOtherButtonSound } from '@/services/sound/sound-service';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { getLatestSessionReport } from '@/utils/session-report-store';
+
+const RATING_LABELS = ['Poor', 'Fair', 'Good', 'Very good', 'Excellent'];
+const MAX_FEEDBACK_LENGTH = 500;
 
 function ReviewStarIcon({
   width = 32,
@@ -42,6 +46,45 @@ function ReviewStarIcon({
   );
 }
 
+/** One star. Gives a quick pop when tapped so the choice feels acknowledged. */
+function RatingStar({
+  index,
+  filled,
+  checked,
+  onPress,
+}: {
+  index: number;
+  filled: boolean;
+  checked: boolean;
+  onPress: () => void;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const useNative = Platform.OS !== 'web';
+
+  const handlePress = () => {
+    Animated.sequence([
+      Animated.timing(scale, { toValue: 1.22, duration: 90, useNativeDriver: useNative }),
+      Animated.spring(scale, { toValue: 1, friction: 5, tension: 140, useNativeDriver: useNative }),
+    ]).start();
+    onPress();
+  };
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      style={styles.starPressable}
+      hitSlop={6}
+      accessibilityRole="radio"
+      accessibilityState={{ checked }}
+      accessibilityLabel={`${index} ${index === 1 ? 'star' : 'stars'}`}
+    >
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <ReviewStarIcon width={36} height={35} selected={filled} />
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 export default function SessionReviewScreen() {
   const params = useLocalSearchParams<{
     sessionId?: string;
@@ -55,9 +98,26 @@ export default function SessionReviewScreen() {
   const { isPhone } = useBreakpoint();
   const isWebOrDesktop = !isPhone;
 
-  const [rating, setRating] = useState<number>(5);
+  // Starts unrated so the score reflects an actual choice (was pre-filled with 5).
+  const [rating, setRating] = useState<number>(0);
   const [feedbackText, setFeedbackText] = useState<string>('');
+  const [isInputFocused, setIsInputFocused] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  const canSubmit = rating > 0 && !isSubmitting;
+
+  const navigateOut = () => {
+    if (params.isIntro === 'true') {
+      router.replace('/onboarding/building-plan' as any);
+      return;
+    }
+    const isGeneral = params.isGeneral === 'true' || !params.roadmapLevelId;
+    if (isGeneral) {
+      router.replace('/(tabs)/dashboard');
+    } else {
+      router.replace('/(tabs)/roadmap');
+    }
+  };
 
   const handleBack = () => {
     playOtherButtonSound();
@@ -73,21 +133,8 @@ export default function SessionReviewScreen() {
     navigateOut();
   };
 
-  const navigateOut = () => {
-    if (params.isIntro === 'true') {
-      router.replace('/onboarding/building-plan' as any);
-      return;
-    }
-    const isGeneral = params.isGeneral === 'true' || !params.roadmapLevelId;
-    if (isGeneral) {
-      router.replace('/(tabs)/dashboard');
-    } else {
-      router.replace('/(tabs)/roadmap');
-    }
-  };
-
   const handleSubmit = async () => {
-    if (isSubmitting) return;
+    if (!canSubmit) return;
     setIsSubmitting(true);
     playOtherButtonSound();
 
@@ -119,7 +166,8 @@ export default function SessionReviewScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+    // Bottom inset is handled by the bottom bar below, so only the top edge is padded here.
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -129,10 +177,12 @@ export default function SessionReviewScreen() {
             style={styles.scrollArea}
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             showsVerticalScrollIndicator={false}
             bounces={false}
+            overScrollMode="never"
           >
-            {/* Top Navigation Row: Back Arrow + Circular Close Button */}
+            {/* Top navigation: back + close */}
             <View style={styles.topNavRow}>
               <Pressable
                 onPress={handleBack}
@@ -155,7 +205,7 @@ export default function SessionReviewScreen() {
               </Pressable>
             </View>
 
-            {/* Main Header Presentation */}
+            {/* Heading */}
             <View style={styles.headerGroup}>
               <Text style={styles.mainHeading}>How was your practice session?</Text>
               <Text style={styles.subHeading}>
@@ -163,79 +213,86 @@ export default function SessionReviewScreen() {
               </Text>
             </View>
 
-            {/* Interactive 5-Star Rating Row */}
-            <View style={styles.starsContainer}>
-              {[1, 2, 3, 4, 5].map((starIndex) => {
-                const isSelected = starIndex <= rating;
-                return (
-                  <Pressable
+            {/* Star rating + live label */}
+            <View style={styles.ratingSection}>
+              <View
+                style={styles.starsContainer}
+                accessibilityRole="radiogroup"
+                accessibilityLabel="Session rating"
+              >
+                {[1, 2, 3, 4, 5].map((starIndex) => (
+                  <RatingStar
                     key={starIndex}
+                    index={starIndex}
+                    filled={starIndex <= rating}
+                    checked={starIndex === rating}
                     onPress={() => {
                       playOtherButtonSound();
                       setRating(starIndex);
                     }}
-                    style={({ pressed }) => [
-                      styles.starPressable,
-                      pressed && styles.starPressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Rate ${starIndex} stars`}
-                    hitSlop={8}
-                  >
-                    <ReviewStarIcon
-                      width={34}
-                      height={33}
-                      selected={isSelected}
-                    />
-                  </Pressable>
-                );
-              })}
+                  />
+                ))}
+              </View>
+              <Text style={[styles.ratingLabel, rating === 0 && styles.ratingLabelEmpty]}>
+                {rating === 0 ? 'Tap a star to rate' : RATING_LABELS[rating - 1]}
+              </Text>
             </View>
 
-            {/* Additional Written Feedback Input */}
+            {/* Written feedback */}
             <View style={styles.feedbackInputGroup}>
-              <Text style={styles.inputLabel}>Anything else you’d like to share?</Text>
-              <View style={styles.textInputCard}>
+              <Text style={styles.inputLabel}>
+                Anything else you’d like to share?
+                <Text style={styles.inputLabelOptional}> (optional)</Text>
+              </Text>
+              <View style={[styles.textInputCard, isInputFocused && styles.textInputCardFocused]}>
                 <TextInput
                   style={styles.textInput}
                   value={feedbackText}
                   onChangeText={setFeedbackText}
-                  placeholder="Tell us about your experience..."
+                  onFocus={() => setIsInputFocused(true)}
+                  onBlur={() => setIsInputFocused(false)}
+                  placeholder="What went well? What could be better?"
                   placeholderTextColor="#94A3B8"
                   multiline
                   numberOfLines={5}
+                  maxLength={MAX_FEEDBACK_LENGTH}
                   textAlignVertical="top"
                 />
+                <Text style={styles.charCount}>
+                  {feedbackText.length}/{MAX_FEEDBACK_LENGTH}
+                </Text>
               </View>
             </View>
           </ScrollView>
 
-          {/* Submit Action Button pinned at bottom */}
+          {/* Submit button pinned at bottom */}
           <View
             style={[
               styles.bottomBar,
               {
                 paddingBottom: Math.max(
-                  insets.bottom + 4,
-                  Platform.select({ web: isPhone ? 16 : 24, default: 16 })
+                  insets.bottom,
+                  Platform.select({ web: isPhone ? 16 : 24, default: 16 }) as number
                 ),
               },
             ]}
           >
             <Pressable
               onPress={handleSubmit}
-              disabled={isSubmitting}
+              disabled={!canSubmit}
               style={({ pressed }) => [
                 styles.submitButton,
                 isPhone && styles.submitButtonPhone,
-                pressed && styles.submitButtonPressed,
+                !canSubmit && styles.submitButtonDisabled,
+                pressed && canSubmit && styles.submitButtonPressed,
               ]}
               accessibilityRole="button"
+              accessibilityState={{ disabled: !canSubmit }}
+              accessibilityLabel="Submit feedback"
             >
-              <View style={styles.submitButtonContent}>
-                <Text style={[styles.submitButtonText, isPhone && styles.submitButtonTextPhone]}>Submit</Text>
-                <Feather name="arrow-right" size={19} color="#ffffff" style={styles.submitArrow} />
-              </View>
+              <Text style={[styles.submitButtonText, isPhone && styles.submitButtonTextPhone]}>
+                Submit feedback
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -283,7 +340,16 @@ const styles = StyleSheet.create({
   mainWrapperDesktop: {
     maxWidth: 440,
     alignSelf: 'center',
-    boxShadow: '0 8px 30px rgba(15, 23, 42, 0.08)',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 8px 30px rgba(15, 23, 42, 0.08)',
+      } as any,
+      default: {
+        borderLeftWidth: 1,
+        borderRightWidth: 1,
+        borderColor: '#E2E8F0',
+      },
+    }),
   },
   scrollArea: {
     flex: 1,
@@ -301,7 +367,7 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
 
-  /* Top Navigation */
+  /* Top navigation */
   topNavRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -324,14 +390,13 @@ const styles = StyleSheet.create({
   },
   buttonPressed: {
     opacity: 0.75,
-    transform: [{ scale: 0.94 }],
   },
 
   /* Headings */
   headerGroup: {
     alignItems: 'center',
-    marginTop: 36,
-    marginBottom: 32,
+    marginTop: 28,
+    marginBottom: 28,
     paddingHorizontal: 12,
   },
   mainHeading: {
@@ -339,7 +404,7 @@ const styles = StyleSheet.create({
     fontSize: 27,
     color: '#0F172A',
     textAlign: 'center',
-    lineHeight: 36,
+    lineHeight: 35,
     letterSpacing: -0.3,
   },
   subHeading: {
@@ -348,26 +413,37 @@ const styles = StyleSheet.create({
     color: '#64748B',
     textAlign: 'center',
     lineHeight: 23,
-    marginTop: 12,
+    marginTop: 10,
     maxWidth: 320,
   },
 
-  /* Star Rating */
+  /* Rating */
+  ratingSection: {
+    alignItems: 'center',
+    marginBottom: 36,
+  },
   starsContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 44,
+    gap: 6,
   },
   starPressable: {
     padding: 4,
   },
-  starPressed: {
-    transform: [{ scale: 1.18 }],
+  ratingLabel: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 15,
+    color: '#0F172A',
+    marginTop: 10,
+    minHeight: 20,
+  },
+  ratingLabelEmpty: {
+    ...fontStyle('inter', 'regular'),
+    color: '#94A3B8',
   },
 
-  /* Additional Feedback Input */
+  /* Written feedback */
   feedbackInputGroup: {
     width: '100%',
     marginBottom: 16,
@@ -378,70 +454,86 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     marginBottom: 12,
   },
+  inputLabelOptional: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#94A3B8',
+  },
   textInputCard: {
     width: '100%',
-    minHeight: 135,
+    minHeight: 140,
     backgroundColor: '#ffffff',
     borderWidth: 1.5,
     borderColor: '#E2E8F0',
-    borderRadius: 18,
-    padding: 16,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
+  },
+  textInputCardFocused: {
+    borderColor: '#006BE5',
   },
   textInput: {
     ...fontStyle('inter', 'regular'),
     fontSize: 15,
     color: '#0F172A',
     lineHeight: 22,
-    minHeight: 100,
-    outlineStyle: 'none',
-  } as any,
+    minHeight: 96,
+    padding: 0,
+    ...Platform.select({
+      web: { outlineStyle: 'none' } as any,
+    }),
+  },
+  charCount: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11.5,
+    color: '#94A3B8',
+    textAlign: 'right',
+    marginTop: 6,
+  },
 
-  /* Bottom Submit Button */
+  /* Submit */
   bottomBar: {
     paddingHorizontal: 24,
     paddingTop: 12,
     backgroundColor: '#ffffff',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
     flexShrink: 0,
   },
   submitButton: {
     width: '100%',
     height: 56,
     backgroundColor: '#006BE5',
-    borderRadius: 22,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 8px 24px rgba(0, 107, 229, 0.38)',
     ...Platform.select({
       web: {
-        backgroundImage: 'linear-gradient(180deg, #087FF5 0%, #006BE5 100%)',
         cursor: 'pointer',
         userSelect: 'none',
       } as any,
     }),
   },
   submitButtonPhone: {
-    height: 48,
-    borderRadius: 18,
+    height: 50,
+    borderRadius: 14,
   },
-  submitButtonTextPhone: {
-    fontSize: 16,
+  submitButtonDisabled: {
+    backgroundColor: '#A9CBF5',
+    ...Platform.select({
+      web: { cursor: 'not-allowed' } as any,
+    }),
   },
   submitButtonPressed: {
-    transform: [{ scale: 0.985 }],
-    opacity: 0.92,
-  },
-  submitButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    backgroundColor: '#005CC8',
   },
   submitButtonText: {
     ...fontStyle('outfit', 'semiBold'),
     fontSize: 17,
     color: '#ffffff',
   },
-  submitArrow: {
-    marginTop: 1,
+  submitButtonTextPhone: {
+    fontSize: 16,
   },
 });
