@@ -19,7 +19,7 @@
   - **Right Column:**
     1. **This Month's Practice Card:** Big stat display "3h 42m left", Pro Plan badge, progress bar ("Used: 1h 18m", "Total: 5h 00m"), and dual stat cards ("Total practice time" 5 Hours, "Plan renews on" 25 Jun 2026).
     2. **Your Pro Plan Card:** "☆ Manage Plan" button, 5 perks grid (Unlimited conversations, Advanced AI memory, Detailed feedback & corrections, Priority voice access, Custom learning goals), and "★ You are enjoying all Pro Plan benefits." blue banner.
-    3. **Customer Support Card:** Phone icon, description, and clickable `support@talkwithmaya.com` link.
+    3. **Customer Support Card:** Phone icon, description, and clickable `speakwithmaya.com@gmail.com` link.
 
 ### B. Mobile Layout (1-Column Stack)
 - **Top Bar:** Fixed pinned top bar with SpeakwithMaya brand and Level 4 XP badge.

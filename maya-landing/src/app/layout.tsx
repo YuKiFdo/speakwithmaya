@@ -120,7 +120,7 @@ const structuredData = {
       sameAs: [],
       contactPoint: {
         "@type": "ContactPoint",
-        email: "support@speakwithmaya.com",
+        email: "speakwithmaya.com@gmail.com",
         contactType: "customer support",
         areaServed: "LK",
         availableLanguage: ["en", "si", "ta"],

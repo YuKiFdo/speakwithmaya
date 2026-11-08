@@ -92,7 +92,7 @@ export default function RefundPage() {
               </p>
               <ul className="list-disc pl-6 space-y-2 text-[#475569]">
                 <li><strong>No Lock-In Contract:</strong> All subscriptions are month-to-month or year-to-year. There are no cancellation fees or lock-in contracts.</li>
-                <li><strong>How to Cancel:</strong> You can initiate cancellation through your account settings or by emailing <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a> with your registered mobile phone number.</li>
+                <li><strong>How to Cancel:</strong> You can initiate cancellation through your account settings or by emailing <a href="mailto:speakwithmaya.com@gmail.com" className="text-[#0D4EFD] underline font-medium">speakwithmaya.com@gmail.com</a> with your registered mobile phone number.</li>
                 <li><strong>Retained Access:</strong> Once cancelled, recurring renewals will cease immediately. You will retain full access to all features, remaining practice minutes, and feedback tools until the conclusion of your current paid billing period.</li>
               </ul>
             </section>
@@ -210,7 +210,7 @@ export default function RefundPage() {
               </p>
               <ol className="list-decimal pl-6 space-y-2 text-[#475569]">
                 <li>
-                  Send an email to <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a> with the subject line <strong>&ldquo;Refund Request - [Your Registered Phone Number]&rdquo;</strong>.
+                  Send an email to <a href="mailto:speakwithmaya.com@gmail.com" className="text-[#0D4EFD] underline font-medium">speakwithmaya.com@gmail.com</a> with the subject line <strong>&ldquo;Refund Request - [Your Registered Phone Number]&rdquo;</strong>.
                 </li>
                 <li>
                   Include your <strong>PayHere Payment Reference Number</strong> or the receipt received via email/SMS.
@@ -232,7 +232,7 @@ export default function RefundPage() {
               <div className="p-5 rounded-2xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-2 text-[13.5px]">
                 <p><strong>Merchant Name:</strong> IDEACIPHER (PVT) LTD</p>
                 <p><strong>Brand:</strong> SpeakwithMaya</p>
-                <p><strong>Billing & Support Email:</strong> <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a></p>
+                <p><strong>Billing & Support Email:</strong> <a href="mailto:speakwithmaya.com@gmail.com" className="text-[#0D4EFD] underline font-medium">speakwithmaya.com@gmail.com</a></p>
                 <p><strong>Support Operating Hours:</strong> Monday – Saturday, 9:00 AM – 6:00 PM (Sri Lanka Time, UTC+5:30)</p>
               </div>
             </section>

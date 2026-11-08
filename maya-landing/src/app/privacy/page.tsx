@@ -157,7 +157,7 @@ export default function PrivacyPage() {
                 <li><strong>Right to Withdraw Consent:</strong> You may withdraw your consent for voice processing or account communications at any time.</li>
               </ul>
               <p>
-                To exercise any of these rights, email our Data Protection team at <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a>. We will process your verified request within 14 business days.
+                To exercise any of these rights, email our Data Protection team at <a href="mailto:speakwithmaya.com@gmail.com" className="text-[#0D4EFD] underline font-medium">speakwithmaya.com@gmail.com</a>. We will process your verified request within 14 business days.
               </p>
             </section>
 
@@ -183,7 +183,7 @@ export default function PrivacyPage() {
                 <p><strong>Data Controller:</strong> IDEACIPHER (PVT) LTD</p>
                 <p><strong>Service:</strong> SpeakwithMaya</p>
                 <p><strong>Location:</strong> Colombo, Sri Lanka</p>
-                <p><strong>Privacy & Data Rights Desk:</strong> <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a></p>
+                <p><strong>Privacy & Data Rights Desk:</strong> <a href="mailto:speakwithmaya.com@gmail.com" className="text-[#0D4EFD] underline font-medium">speakwithmaya.com@gmail.com</a></p>
               </div>
             </section>
           </div>

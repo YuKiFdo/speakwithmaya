@@ -272,7 +272,7 @@ export default function AccountScreen() {
   };
 
   const handleSupportEmail = () => {
-    Linking.openURL('mailto:support@talkwithmaya.com').catch(() => {});
+    Linking.openURL('mailto:speakwithmaya.com@gmail.com').catch(() => {});
   };
 
   const handleSelectExplanationLanguage = async (lang: 'sinhala' | 'tamil' | 'english') => {
@@ -308,7 +308,7 @@ export default function AccountScreen() {
   const handleLogout = async () => {
     const confirmed = await mayaAlert.confirm({
       title: 'Log Out',
-      message: 'Are you sure you want to log out of TalkWithMaya? You can sign back in anytime with your mobile number.',
+      message: 'Are you sure you want to log out of SpeakWithMaya? You can sign back in anytime with your mobile number.',
       confirmText: 'Log Out',
       cancelText: 'Cancel',
       type: 'warning',
@@ -2130,7 +2130,7 @@ function CustomerSupportCard({ onEmailPress }: { onEmailPress: () => void }) {
           <Text style={styles.supportSubtitle}>
             We're here to help you with any questions or issues.
           </Text>
-          <Text style={styles.supportEmailLink}>support@talkwithmaya.com</Text>
+          <Text style={styles.supportEmailLink}>speakwithmaya.com@gmail.com</Text>
         </View>
 
         <Feather name="chevron-right" size={18} color="#94A3B8" />
@@ -2147,9 +2147,9 @@ function AboutCard() {
     <View style={styles.cardContainer}>
       <View style={styles.aboutRow}>
         <View style={styles.aboutLeftCol}>
-          <Text style={styles.aboutAppTitle}>About TalkWithMaya</Text>
+          <Text style={styles.aboutAppTitle}>About SpeakWithMaya</Text>
           <Text style={styles.aboutDescriptionText}>
-            TalkWithMaya is your AI English partner that helps you speak with confidence in real-life situations.
+            SpeakWithMaya is your AI English partner that helps you speak with confidence in real-life situations.
           </Text>
           <Text style={styles.versionText}>Version 1.0.0</Text>
         </View>

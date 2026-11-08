@@ -291,7 +291,7 @@ export class PayHereService {
       hash,
       first_name: firstName,
       last_name: lastName,
-      email: profile?.email || `${userId.slice(0, 8)}@talkwithmaya.com`,
+      email: profile?.email || `${userId.slice(0, 8)}@speakwithmaya.com`,
       phone: profile?.phone_number || '+94770000000',
       address: 'Sri Lanka',
       city: 'Colombo',
