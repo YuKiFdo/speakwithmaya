@@ -69,22 +69,22 @@ export function resolveScenarioBriefingData(item: MilestoneItem | null | undefin
 
   // 2. Maya's Role with context-aware fallback
   let mayaRole = (item.mayaRole || '').trim();
-  if (!mayaRole) {
-    const textToCheck = `${item.title} ${item.scenarioPrompt || ''} ${item.scenarioBriefing || ''}`.toLowerCase();
-    if (textToCheck.includes('hotel') || textToCheck.includes('room')) {
-      mayaRole = 'Hotel receptionist';
-    } else if (textToCheck.includes('interview')) {
-      mayaRole = 'Hiring Manager';
-    } else if (textToCheck.includes('flight') || textToCheck.includes('airport')) {
-      mayaRole = 'Airline service agent';
-    } else if (textToCheck.includes('cafe') || textToCheck.includes('coffee')) {
-      mayaRole = 'Barista';
-    } else if (textToCheck.includes('friend')) {
-      mayaRole = 'Close friend';
-    } else {
-      mayaRole = 'Maya (English Coach)';
-    }
-  }
+  // if (!mayaRole) {
+  //   const textToCheck = `${item.title} ${item.scenarioPrompt || ''} ${item.scenarioBriefing || ''}`.toLowerCase();
+  //   if (textToCheck.includes('hotel') || textToCheck.includes('room')) {
+  //     mayaRole = 'Hotel receptionist';
+  //   } else if (textToCheck.includes('interview')) {
+  //     mayaRole = 'Hiring Manager';
+  //   } else if (textToCheck.includes('flight') || textToCheck.includes('airport')) {
+  //     mayaRole = 'Airline service agent';
+  //   } else if (textToCheck.includes('cafe') || textToCheck.includes('coffee')) {
+  //     mayaRole = 'Barista';
+  //   } else if (textToCheck.includes('friend')) {
+  //     mayaRole = 'Close friend';
+  //   } else {
+  //     mayaRole = 'Maya (English Coach)';
+  //   }
+  // }
 
   // 3. Goal Title with context-aware fallback
   let goalTitle = (item.goalTitle || '').trim();

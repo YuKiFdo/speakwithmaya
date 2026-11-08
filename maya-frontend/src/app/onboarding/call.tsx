@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -355,6 +355,10 @@ export default function CallScreen() {
     }
     setIsTranslating(false);
   };
+
+  const toggleTranslationRef = useRef(handleToggleTranslation);
+  toggleTranslationRef.current = handleToggleTranslation;
+  const stableToggleTranslation = useCallback(() => toggleTranslationRef.current(), []);
 
   // Timer & Farewell logic
   const hasTriggeredFarewellRef = useRef(false);
@@ -1248,8 +1252,10 @@ export default function CallScreen() {
                 }
                 isTranslationVisible={isTranslationVisible}
                 isTranslating={isTranslating}
-                onToggleTranslation={handleToggleTranslation}
+                onToggleTranslation={stableToggleTranslation}
                 isTranslationHighlighted={guideStepIndex === 2}
+                speechSync={liveCall.speechSync}
+                turnId={liveCall.speechSync.getTurnSeq()}
               />
 
               {/* Hint Suggestion Card */}

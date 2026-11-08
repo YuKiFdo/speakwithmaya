@@ -1,4 +1,11 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   View,
   Text,
@@ -11,6 +18,7 @@ import {
 import { fontStyle } from '@/theme/fonts';
 import { TranslationToggleButton } from './translation-toggle-button';
 import { BeaconRing } from './beacon-ring';
+import type { SpeechSyncSource } from '@/utils/speech-sync';
 
 interface ConversationDisplayProps {
   previousText?: string;
@@ -22,27 +30,93 @@ interface ConversationDisplayProps {
   isTranslating?: boolean;
   onToggleTranslation?: () => void;
   isTranslationHighlighted?: boolean;
+  /**
+   * Optional but recommended: any value that changes when Maya starts a new
+   * reply (turn index, message id...). Without it, new turns are detected by
+   * comparing words with the previous text.
+   */
+  turnId?: string | number;
+  /**
+   * Audio-synced reveal. Pass `liveCall.speechSync`: words then appear exactly
+   * as the voice reaches them. Without it (or before the first real
+   * transcript, e.g. the intro guide text) a timer-based reveal is used.
+   */
+  speechSync?: SpeechSyncSource;
 }
 
-/**
- * Returns large, confident typography matching the official design reference.
- */
-function getPromptTypography(textLength: number, isDesktop: boolean) {
-  if (isDesktop) {
-    if (textLength <= 80) return { fontSize: 32, lineHeight: 44 };
-    if (textLength <= 160) return { fontSize: 26, lineHeight: 37 };
-    return { fontSize: 22, lineHeight: 32 };
-  }
+/* -------------------------------------------------------------------------- */
+/*  Typography (3 steps; a turn may only move to a SMALLER step, never bigger) */
+/* -------------------------------------------------------------------------- */
 
-  // Mobile Typography:
-  if (textLength <= 70) {
-    return { fontSize: 27, lineHeight: 38 };
-  } else if (textLength <= 140) {
-    return { fontSize: 23.5, lineHeight: 33 };
-  } else {
-    return { fontSize: 20.5, lineHeight: 29 };
-  }
+const TYPE_SCALE = {
+  desktop: {
+    thresholds: [80, 160],
+    sizes: [
+      { fontSize: 32, lineHeight: 44 },
+      { fontSize: 26, lineHeight: 37 },
+      { fontSize: 22, lineHeight: 32 },
+    ],
+  },
+  mobile: {
+    thresholds: [70, 140],
+    sizes: [
+      { fontSize: 27, lineHeight: 38 },
+      { fontSize: 23.5, lineHeight: 33 },
+      { fontSize: 20.5, lineHeight: 29 },
+    ],
+  },
+} as const;
+
+function levelFor(len: number, isDesktop: boolean): 0 | 1 | 2 {
+  const [a, b] = (isDesktop ? TYPE_SCALE.desktop : TYPE_SCALE.mobile).thresholds;
+  return len <= a ? 0 : len <= b ? 1 : 2;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Pacing                                                                    */
+/* -------------------------------------------------------------------------- */
+
+const MIN_DELAY = 270;
+const MAX_DELAY = 520;
+const FLUSH_DELAY = 90; // after Maya stops talking, finish remaining words quickly
+const SPEAKING_GRACE_MS = 800; // ignore short "speaking" -> "listening" flickers
+const NEWEST_WORD_COLOR = '#64748B'; // set to '#0F172A' to disable the "typing" shade
+const TEXT_COLOR = '#0F172A';
+
+/** Delay to wait AFTER word number `n` (1-based) has been revealed. */
+function delayAfter(words: string[], n: number, speaking: boolean): number {
+  if (!speaking) return FLUSH_DELAY;
+
+  const last = words[n - 1] || '';
+  const next = words[n] || '';
+  const cleanLen = next.replace(/[^\w]/g, '').length;
+
+  let d = Math.max(MIN_DELAY, Math.min(MAX_DELAY, cleanLen * 52 + 210));
+  if (/[.?!]["')\]]*$/.test(last)) d += 380;
+  else if (/[,;:\-\u2013\u2014]$/.test(last)) d += 200;
+
+  // Big backlog (text arrived much faster than we reveal): speed up a little
+  const backlog = words.length - n;
+  if (backlog > 14) d *= 0.6;
+  else if (backlog > 8) d *= 0.8;
+  return d;
+}
+
+/** True when `next` is the same reply as `prev`, just with more/updated words. */
+function isContinuation(prev: string[], next: string[]): boolean {
+  if (prev.length === 0) return false;
+  const max = Math.min(prev.length, next.length);
+  let common = 0;
+  while (common < max && prev[common] === next[common]) common += 1;
+  // allow the last word to change (partial word completing while streaming)
+  return common >= prev.length - 1;
+}
+
+const EMPTY_WORDS: string[] = [];
+
+/* -------------------------------------------------------------------------- */
+/*  Component                                                                 */
+/* -------------------------------------------------------------------------- */
 
 function ConversationDisplayComponent({
   previousText,
@@ -54,159 +128,210 @@ function ConversationDisplayComponent({
   isTranslating = false,
   onToggleTranslation,
   isTranslationHighlighted = false,
+  turnId,
+  speechSync,
 }: ConversationDisplayProps) {
-  const scrollRef = useRef<ScrollView>(null);
   const useNative = Platform.OS !== 'web';
+  const scrollRef = useRef<ScrollView>(null);
+  const viewportH = useRef(0);
+  const contentH = useRef(0);
 
-  // Progressive word-by-word pacing state
-  const [displayedCount, setDisplayedCount] = useState<number>(0);
-  const tickerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTurnPrefixRef = useRef<string>('');
-  const lastContentHeightRef = useRef<number>(0);
+  /* ----------------------------- Words + turns ----------------------------- */
 
-  // Subtle fade animation for the newest revealed word (zero DOM bloat)
-  const latestWordFade = useRef(new Animated.Value(1)).current;
-
-  // Transition animations for previous turn
-  const prevFadeAnim = useRef(new Animated.Value(0.5)).current;
-  const prevSlideAnim = useRef(new Animated.Value(0)).current;
-
-  // Translation text fade-in animation
-  const translationAnim = useRef(new Animated.Value(0)).current;
-
-  const prevTextRef = useRef<string>(previousText || '');
-
-  // Parse all words from incoming speech stream
   const fullRawText = (currentText || '').trim();
-  const allTargetWords = useMemo(() => {
-    if (!fullRawText) return [];
-    return fullRawText.split(/\s+/).filter(Boolean);
-  }, [fullRawText]);
+  const allWords = useMemo(
+    () => (fullRawText ? fullRawText.split(/\s+/).filter(Boolean) : EMPTY_WORDS),
+    [fullRawText],
+  );
+  const wordsRef = useRef<string[]>(allWords);
+  wordsRef.current = allWords;
 
-  // Keep latest target words in a ref so incoming stream chunks don't cancel the active word timer
-  const targetWordsRef = useRef<string[]>(allTargetWords);
-  targetWordsRef.current = allTargetWords;
-
-  const isSpeakingRef = useRef<boolean>(isSpeaking);
-  isSpeakingRef.current = isSpeaking;
-
-  const fullSentence = fullRawText || previousText?.trim() || '';
-  const { fontSize, lineHeight } = useMemo(
-    () => getPromptTypography(fullSentence.length, isWebOrDesktop),
-    [fullSentence.length, isWebOrDesktop]
+  const fallbackWords = useMemo(
+    () => (previousText || '').trim().split(/\s+/).filter(Boolean),
+    [previousText],
   );
 
-  // 1. Detect brand new turn vs streaming update
+  // Turn tracking is derived during render so the very first frame of a new
+  // turn already has the right key / font size (no flash of old state).
+  const turnRef = useRef<{
+    key: number;
+    words: string[];
+    turnId: string | number | undefined;
+    level: number;
+  }>({ key: 0, words: EMPTY_WORDS, turnId: undefined, level: 0 });
+  const turn = turnRef.current;
+
+  if (allWords.length === 0) {
+    turn.words = EMPTY_WORDS; // next text starts a new turn
+  } else if (turn.words !== allWords) {
+    // A changed turnId always means a new reply; otherwise compare the words
+    // (this also restarts cleanly when the intro text is replaced by live text).
+    const turnIdChanged = turnId !== undefined && turn.key > 0 && turn.turnId !== turnId;
+    const sameTurn = turnIdChanged ? false : isContinuation(turn.words, allWords);
+    if (!sameTurn) {
+      turn.key += 1;
+      turn.level = 0;
+    }
+    turn.words = allWords;
+    turn.turnId = turnId;
+  }
+  const turnKey = turn.key;
+
+  const showingFallback = allWords.length === 0;
+  const shownWords = showingFallback ? fallbackWords : allWords;
+
+  /* ------------------------------- Typography ------------------------------ */
+
+  const lvl = levelFor(
+    (fullRawText || previousText?.trim() || '').length,
+    isWebOrDesktop,
+  );
+  if (!showingFallback) turn.level = Math.max(turn.level, lvl);
+  const level = showingFallback ? lvl : turn.level;
+  const { fontSize, lineHeight } = (
+    isWebOrDesktop ? TYPE_SCALE.desktop : TYPE_SCALE.mobile
+  ).sizes[level];
+
+  /* ------------------------------ Reveal engine ---------------------------- */
+
+  // `reveal.key` ties the count to a turn so a new turn never shows the old count
+  const [reveal, setReveal] = useState({ key: -1, count: 0 });
+  const displayedCount = reveal.key === turnKey ? reveal.count : 0;
+
+  // Audio-synced mode: active as soon as the speech timeline has words for the
+  // current reply. The timer engine below then stays idle.
+  const syncMode = !!speechSync && speechSync.getWordCount() > 0;
+  const syncModeRef = useRef(syncMode);
+  syncModeRef.current = syncMode;
+
+  const countRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nextAtRef = useRef(0);
+  const lastKeyRef = useRef(-1);
+  const turnKeyRef = useRef(turnKey);
+  turnKeyRef.current = turnKey;
+
+  const isSpeakingRef = useRef(isSpeaking);
+  const lastSpeakingAtRef = useRef(0);
+  isSpeakingRef.current = isSpeaking;
+  if (isSpeaking) lastSpeakingAtRef.current = Date.now();
+
+  // One self-correcting loop. Reveals every word that is "due", so if the JS
+  // thread was busy it catches up instead of falling further behind.
+  const run = useCallback(() => {
+    timerRef.current = null;
+    if (syncModeRef.current) return; // audio clock drives the reveal instead
+    const words = wordsRef.current;
+    let n = countRef.current;
+    if (n >= words.length) return;
+
+    const now = Date.now();
+    const speaking =
+      isSpeakingRef.current || now - lastSpeakingAtRef.current < SPEAKING_GRACE_MS;
+
+    while (n < words.length && now >= nextAtRef.current) {
+      n += 1;
+      nextAtRef.current += delayAfter(words, n, speaking);
+    }
+
+    if (n !== countRef.current) {
+      countRef.current = n;
+      setReveal({ key: turnKeyRef.current, count: n });
+    }
+    if (n < words.length) {
+      timerRef.current = setTimeout(run, Math.max(0, nextAtRef.current - Date.now()));
+    }
+  }, []);
+
   useEffect(() => {
-    if (!fullRawText) {
-      setDisplayedCount(0);
-      lastTurnPrefixRef.current = '';
-      if (tickerTimerRef.current) {
-        clearTimeout(tickerTimerRef.current);
-        tickerTimerRef.current = null;
+    if (allWords.length === 0 || syncModeRef.current) return;
+
+    if (lastKeyRef.current !== turnKey) {
+      lastKeyRef.current = turnKey;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
-      return;
+      countRef.current = 0;
+      nextAtRef.current = Date.now();
     }
-
-    const prefix = fullRawText.slice(0, 12);
-    const prevPrefix = lastTurnPrefixRef.current;
-
-    const isNewTurn =
-      !prevPrefix ||
-      (!fullRawText.startsWith(prevPrefix) && !prevPrefix.startsWith(prefix));
-
-    if (isNewTurn) {
-      lastTurnPrefixRef.current = prefix;
-      if (tickerTimerRef.current) {
-        clearTimeout(tickerTimerRef.current);
-        tickerTimerRef.current = null;
-      }
-      // Start with the first word immediately
-      setDisplayedCount(1);
-    } else {
-      lastTurnPrefixRef.current = prefix;
-      setDisplayedCount((prev) => (prev === 0 ? 1 : prev));
+    if (!timerRef.current) {
+      nextAtRef.current = Math.max(nextAtRef.current, Date.now());
+      run();
     }
-  }, [fullRawText]);
+  }, [turnKey, allWords, run]);
 
-  // 2. Natural Voice-Synced Word Ticker (~135-145 WPM while speaking)
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  // Audio-synced reveal: poll the speech timeline (~30Hz while speaking) and
+  // only re-render when the number of visible words actually changes.
   useEffect(() => {
-    const totalWords = targetWordsRef.current.length;
+    if (!speechSync) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    if (displayedCount === 0 || displayedCount >= totalWords) {
-      return;
+    const tick = () => {
+      if (cancelled) return;
+      const now = Date.now();
+      if (speechSync.getWordCount() > 0) {
+        const n = Math.min(speechSync.getRevealedCount(now), wordsRef.current.length);
+        const key = turnKeyRef.current;
+        setReveal((prev) => (prev.key === key && prev.count === n ? prev : { key, count: n }));
+      }
+      timer = setTimeout(tick, speechSync.isBusy(now) ? 33 : 120);
+    };
+    tick();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [speechSync]);
+
+  const total = shownWords.length;
+  const count = showingFallback ? total : Math.min(displayedCount, total);
+  const isRevealing = !showingFallback && count < total;
+
+  /* -------------------------- Scroll (only if overflow) -------------------- */
+
+  useEffect(() => {
+    const overflow = contentH.current - viewportH.current;
+    if (!showingFallback && overflow > 4 && total > 0) {
+      scrollRef.current?.scrollTo({
+        y: overflow * (count / total),
+        animated: false,
+      });
     }
+  }, [count, total, showingFallback]);
 
-    // Smoothly fade in the newly revealed word
-    latestWordFade.setValue(0.2);
-    Animated.timing(latestWordFade, {
+  /* -------------------------------- Animations ----------------------------- */
+
+  // Whole-turn fade-in (opacity on a View works natively, unlike nested Text)
+  const turnFade = useRef(new Animated.Value(0)).current;
+  useLayoutEffect(() => {
+    turnFade.setValue(0);
+    Animated.timing(turnFade, {
       toValue: 1,
-      duration: 210,
+      duration: 180,
       easing: Easing.out(Easing.quad),
       useNativeDriver: useNative,
     }).start();
+  }, [turnKey, turnFade, useNative]);
 
-    const lastRevealedWord = targetWordsRef.current[displayedCount - 1] || '';
-    const nextWordToReveal = targetWordsRef.current[displayedCount] || '';
-    const cleanLen = nextWordToReveal.replace(/[^\w]/g, '').length;
-
-    let nextDelay = 360;
-
-    if (!isSpeakingRef.current) {
-      // Maya's audio has finished playing: smoothly finish any remaining words
-      nextDelay = 95;
-    } else {
-      // Maya is actively speaking: pace strictly to natural spoken English (~135-145 WPM)
-      // Scales by word length (270ms for short words up to 520ms for longer multi-syllable words)
-      nextDelay = Math.max(270, Math.min(520, cleanLen * 52 + 210));
-
-      // Add realistic spoken breath pauses after punctuation on the word just spoken
-      if (/[.?!]$/.test(lastRevealedWord)) {
-        nextDelay += 380; // End-of-sentence pause
-      } else if (/[,;:\--]$/.test(lastRevealedWord)) {
-        nextDelay += 200; // Mid-sentence comma/clause pause
-      }
-    }
-
-    tickerTimerRef.current = setTimeout(() => {
-      tickerTimerRef.current = null;
-      setDisplayedCount((prev) =>
-        Math.min(prev + 1, targetWordsRef.current.length)
-      );
-    }, nextDelay);
-
-    return () => {
-      if (tickerTimerRef.current) {
-        clearTimeout(tickerTimerRef.current);
-        tickerTimerRef.current = null;
-      }
-    };
-  }, [displayedCount, isSpeaking, latestWordFade, useNative]);
-
-  // If new stream chunks arrive after displayedCount had momentarily caught up, resume ticking
-  useEffect(() => {
-    if (
-      displayedCount > 0 &&
-      displayedCount < allTargetWords.length &&
-      !tickerTimerRef.current
-    ) {
-      tickerTimerRef.current = setTimeout(() => {
-        tickerTimerRef.current = null;
-        setDisplayedCount((prev) =>
-          Math.min(prev + 1, targetWordsRef.current.length)
-        );
-      }, 180);
-    }
-  }, [allTargetWords.length, displayedCount]);
-
-  // 3. Smooth upward glide & fade transition when previous turn changes
-  useEffect(() => {
+  // Previous turn glide
+  const prevFadeAnim = useRef(new Animated.Value(0.5)).current;
+  const prevSlideAnim = useRef(new Animated.Value(0)).current;
+  const prevTextRef = useRef<string>(previousText || '');
+  useLayoutEffect(() => {
     if (previousText && previousText !== prevTextRef.current) {
       prevTextRef.current = previousText;
-
       prevFadeAnim.setValue(0.85);
       prevSlideAnim.setValue(8);
-
       Animated.parallel([
         Animated.timing(prevFadeAnim, {
           toValue: 0.5,
@@ -224,7 +349,8 @@ function ConversationDisplayComponent({
     }
   }, [previousText, prevFadeAnim, prevSlideAnim, useNative]);
 
-  // 4. Animate translation text fade-in
+  // Translation text fade-in
+  const translationAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (isTranslationVisible && translationText) {
       Animated.timing(translationAnim, {
@@ -238,26 +364,47 @@ function ConversationDisplayComponent({
     }
   }, [isTranslationVisible, translationText, translationAnim, useNative]);
 
-  // Split visible words into:
-  // 1) `settledText` (a single fast string for all already-revealed words)
-  // 2) `latestWord` (only the 1 newest word gets an Animated.Text node)
-  const { settledText, latestWord, hasVisibleWords } = useMemo(() => {
-    const words = allTargetWords.length
-      ? allTargetWords.slice(0, Math.min(displayedCount, allTargetWords.length))
-      : (previousText || '').trim().split(/\s+/).filter(Boolean);
+  // Translation button: space is always reserved (no layout jump), it only
+  // fades in once the text is done, and only after it stays done for a moment.
+  const isTextFinished = !isSpeaking && (showingFallback || count >= total);
+  const [buttonVisible, setButtonVisible] = useState(false);
+  useEffect(() => {
+    if (!isTextFinished && !isTranslationHighlighted) {
+      setButtonVisible(false);
+      return;
+    }
+    const t = setTimeout(
+      () => setButtonVisible(true),
+      isTranslationHighlighted ? 0 : 350,
+    );
+    return () => clearTimeout(t);
+  }, [isTextFinished, isTranslationHighlighted]);
 
-    if (words.length === 0) {
-      return { settledText: '', latestWord: '', hasVisibleWords: false };
-    }
-    if (words.length === 1) {
-      return { settledText: '', latestWord: words[0], hasVisibleWords: true };
-    }
+  const buttonFade = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(buttonFade, {
+      toValue: buttonVisible ? 1 : 0,
+      duration: 180,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: useNative,
+    }).start();
+  }, [buttonVisible, buttonFade, useNative]);
+
+  /* --------------------------------- Segments ------------------------------ */
+
+  // The WHOLE sentence is always rendered so the layout never changes while
+  // words appear. Unrevealed words are simply transparent.
+  const { settled, latest, rest } = useMemo(() => {
+    const n = Math.min(count, shownWords.length);
+    if (n <= 0) return { settled: '', latest: '', rest: shownWords.join(' ') };
     return {
-      settledText: words.slice(0, -1).join(' ') + ' ',
-      latestWord: words[words.length - 1],
-      hasVisibleWords: true,
+      settled: n > 1 ? shownWords.slice(0, n - 1).join(' ') + ' ' : '',
+      latest: shownWords[n - 1],
+      rest: n < shownWords.length ? ' ' + shownWords.slice(n).join(' ') : '',
     };
-  }, [allTargetWords, displayedCount, previousText]);
+  }, [shownWords, count]);
+
+  if (shownWords.length === 0) return null;
 
   const hasPrevious = !!(
     previousText &&
@@ -265,62 +412,41 @@ function ConversationDisplayComponent({
     previousText.trim() !== currentText?.trim()
   );
 
-  if (!hasVisibleWords) {
-    return null;
-  }
-
-  // True when all words have finished appearing and Maya has stopped speaking
-  const isTextFinished =
-    !isSpeaking &&
-    (displayedCount >= allTargetWords.length || !currentText?.trim());
-
   return (
-    <View
-      style={[
-        styles.outerContainer,
-        isWebOrDesktop && styles.outerContainerDesktop,
-      ]}
-    >
+    <View style={[styles.outerContainer, isWebOrDesktop && styles.outerContainerDesktop]}>
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        nestedScrollEnabled={true}
+        nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
-        onContentSizeChange={(_, contentHeight) => {
-          // Only scroll when a new line is added (prevents per-word scroll jitter)
-          if (Math.abs(contentHeight - lastContentHeightRef.current) > 8) {
-            lastContentHeightRef.current = contentHeight;
-            scrollRef.current?.scrollToEnd({ animated: true });
-          }
+        onLayout={(e) => {
+          viewportH.current = e.nativeEvent.layout.height;
+        }}
+        onContentSizeChange={(_, h) => {
+          contentH.current = h;
         }}
       >
-        {/* 1. Previous Model Turn (Faded upward with smooth transition) */}
+        {/* Previous model turn */}
         {hasPrevious && !!currentText?.trim() && (
           <Animated.View
             style={[
               styles.previousWrapper,
-              {
-                opacity: prevFadeAnim,
-                transform: [{ translateY: prevSlideAnim }],
-              },
+              { opacity: prevFadeAnim, transform: [{ translateY: prevSlideAnim }] },
             ]}
           >
             <Text
               numberOfLines={2}
               ellipsizeMode="tail"
-              style={[
-                styles.previousText,
-                isWebOrDesktop && styles.previousTextDesktop,
-              ]}
+              style={[styles.previousText, isWebOrDesktop && styles.previousTextDesktop]}
             >
               {previousText}
             </Text>
           </Animated.View>
         )}
 
-        {/* 2. Current Active Model Turn */}
-        <View style={styles.currentWrapper}>
+        {/* Current turn */}
+        <Animated.View style={[styles.currentWrapper, { opacity: turnFade }]}>
           <Text
             style={[
               styles.promptText,
@@ -328,15 +454,13 @@ function ConversationDisplayComponent({
               isWebOrDesktop && styles.promptTextDesktop,
             ]}
           >
-            {settledText}
-            <Animated.Text
-              style={[styles.wordItem, { opacity: latestWordFade }]}
-            >
-              {latestWord}
-            </Animated.Text>
+            {settled}
+            <Text style={{ color: isRevealing ? NEWEST_WORD_COLOR : TEXT_COLOR }}>
+              {latest}
+            </Text>
+            <Text style={styles.hiddenText}>{rest}</Text>
           </Text>
 
-          {/* Sinhala Translation of Active Prompt */}
           {isTranslationVisible && !!translationText && (
             <Animated.Text
               style={[
@@ -349,23 +473,24 @@ function ConversationDisplayComponent({
             </Animated.Text>
           )}
 
-          {/* Translation Toggle Pill Button */}
-          {!!onToggleTranslation &&
-            (isTextFinished || isTranslationHighlighted) && (
-              <View style={styles.translationButtonWrapper}>
-                <BeaconRing
-                  color="#14B8A6"
-                  radius={999}
-                  active={isTranslationHighlighted}
-                />
-                <TranslationToggleButton
-                  isExpanded={Boolean(isTranslationVisible)}
-                  isLoading={isTranslating}
-                  onToggle={onToggleTranslation}
-                />
-              </View>
-            )}
-        </View>
+          {!!onToggleTranslation && (
+            <Animated.View
+              pointerEvents={buttonVisible ? 'auto' : 'none'}
+              style={[styles.translationButtonWrapper, { opacity: buttonFade }]}
+            >
+              <BeaconRing
+                color="#14B8A6"
+                radius={999}
+                active={isTranslationHighlighted}
+              />
+              <TranslationToggleButton
+                isExpanded={Boolean(isTranslationVisible)}
+                isLoading={isTranslating}
+                onToggle={onToggleTranslation}
+              />
+            </Animated.View>
+          )}
+        </Animated.View>
       </ScrollView>
     </View>
   );
@@ -411,15 +536,15 @@ const styles = StyleSheet.create({
   },
   promptText: {
     ...fontStyle('outfit', 'bold'),
-    color: '#0F172A',
+    color: TEXT_COLOR,
     textAlign: 'center',
     letterSpacing: -0.4,
   },
   promptTextDesktop: {
     letterSpacing: -0.5,
   },
-  wordItem: {
-    color: '#0F172A',
+  hiddenText: {
+    color: 'transparent',
   },
   sinhalaTranslationText: {
     ...fontStyle('inter', 'regular'),

@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { createAudioCapture } from '@/services/audio/AudioCapture';
 import { createAudioPlayer } from '@/services/audio/AudioPlayer';
+import { SpeechSyncTimeline } from '@/utils/speech-sync';
 import {
   LiveTransport,
   ILiveTransport,
@@ -166,6 +167,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
   const captureRef = useRef(createAudioCapture());
   const playerRef = useRef(createAudioPlayer());
+  const speechSyncRef = useRef(new SpeechSyncTimeline());
   const transportRef = useRef<ILiveTransport>(USE_SERVER_LIVE ? new ServerLiveTransport() : new LiveTransport());
 
   const turnStartTimeRef = useRef<number | null>(null);
@@ -361,6 +363,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           isModelSpeakingRef.current = false;
           isFirstGreetingPendingRef.current = false;
           playerRef.current.clear();
+          speechSyncRef.current.interrupt();
           setStatus('listening');
         }
       }, 1000);
@@ -412,6 +415,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         setStatus('connecting');
         sessionIdRef.current = `session-${Date.now()}`;
         turnsRef.current = [];
+        speechSyncRef.current.reset();
         correctionsRef.current = [];
         reconnectAttemptsRef.current = 0;
         rateMultiplierRef.current = Number((0.37 + Math.random() * 0.03).toFixed(4));
@@ -795,6 +799,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
                 }
               }, 12000);
             }
+            speechSyncRef.current.onAudio(samples.length / 24000);
             playerRef.current.playFloat32Chunk?.(samples);
           },
           onAudioChunk: (base64) => {
@@ -848,6 +853,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
                 }
               }, 12000);
             }
+            speechSyncRef.current.onAudio(Math.floor((base64.length * 3) / 4) / 48000);
             playerRef.current.playPcmChunk(base64);
           },
           onOutputTranscript: (text) => {
@@ -873,7 +879,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               responseTimeoutRef.current = null;
             }
             setIsSlowResponse(false);
+            let startedNewModelTurn = false;
             if (activeRoleRef.current !== 'model') {
+              startedNewModelTurn = true;
               if (currentModelTextRef.current.trim()) {
                 setPreviousSubtitles(sanitizeModelText(currentModelTextRef.current.trim()));
               }
@@ -903,7 +911,10 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
                   : currentModelTextRef.current + ' ' + text)
               : text;
 
-            setSubtitles(sanitizeModelText(currentModelTextRef.current));
+            const cleanedSubtitles = sanitizeModelText(currentModelTextRef.current);
+            setSubtitles(cleanedSubtitles);
+            if (startedNewModelTurn) speechSyncRef.current.startTurn();
+            speechSyncRef.current.updateWords(cleanedSubtitles.split(/\s+/).filter(Boolean));
           },
           onInputTranscript: (text) => {
             // Guard against phantom transcripts during opening greeting
@@ -947,6 +958,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             }
 
             playerRef.current.flush();
+            speechSyncRef.current.endTurn();
 
             // Commit any verified student turn text from this exchange
             const userTurnText = (data?.userText || currentUserTextRef.current).trim();
@@ -1036,6 +1048,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             isModelSpeakingRef.current = false;
             echoHangoverUntilRef.current = 0;
             playerRef.current.clear();
+            speechSyncRef.current.interrupt();
             setStatus('listening');
             setModelVolume(0);
             if (currentModelTextRef.current.trim()) {
@@ -1248,13 +1261,16 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             if (quality === 'poor') {
               setIsSlowResponse(true);
               playerRef.current.setJitterBuffer?.(350);
+              speechSyncRef.current.setLatencyMs(410);
               captureRef.current.setNetworkQuality?.('poor');
             } else if (quality === 'fair') {
               playerRef.current.setJitterBuffer?.(250);
+              speechSyncRef.current.setLatencyMs(310);
               captureRef.current.setNetworkQuality?.('fair');
             } else {
               setIsSlowResponse(false);
               playerRef.current.setJitterBuffer?.(150);
+              speechSyncRef.current.setLatencyMs(210);
               captureRef.current.setNetworkQuality?.('good');
             }
           },
@@ -1315,6 +1331,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     setUserVolume(0);
     setModelVolume(0);
     setPreviousSubtitles('');
+    speechSyncRef.current.reset();
 
     if (concludeTimerRef.current) {
       clearTimeout(concludeTimerRef.current);
@@ -1704,6 +1721,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     isModelSpeakingRef.current = false;
     echoHangoverUntilRef.current = 0;
     playerRef.current.clear();
+    speechSyncRef.current.interrupt();
     transportRef.current.sendInterrupted();
     setStatus('listening');
     setModelVolume(0);
@@ -1761,6 +1779,15 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     );
     isInitialGreetingHeldRef.current = false;
 
+    const syncTl = speechSyncRef.current;
+    initialGreetingBufferRef.current.forEach((item) => {
+      syncTl.onAudio(
+        item.type === 'samples'
+          ? item.data.length / 24000
+          : Math.floor((item.data.length * 3) / 4) / 48000,
+      );
+    });
+
     // Ensure WebAudio context is resumed on user gesture (e.g. "Got it" button in intro guide)
     playerRef.current.resume().catch(() => {});
 
@@ -1771,8 +1798,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       initialGreetingTranscriptRef.current = '';
       activeRoleRef.current = 'model';
       setSubtitles(cleanTranscript);
+      syncTl.startTurn();
+      syncTl.updateWords(cleanTranscript.split(/\s+/).filter(Boolean));
 
       if (isInitialGreetingTurnCompleteRef.current && cleanTranscript) {
+        syncTl.endTurn();
         const lastTurn = turnsRef.current[turnsRef.current.length - 1];
         if (!lastTurn || lastTurn.role !== 'model' || lastTurn.text !== cleanTranscript) {
           turnsRef.current.push({
@@ -1887,6 +1917,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     isConnected,
     releaseGreeting,
     suppressMicFor,
+    speechSync: speechSyncRef.current,
   };
 }
 
