@@ -6,6 +6,7 @@ import {
   Animated,
   Platform,
   Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
 import { triggerHaptic } from '@/utils/haptics-audio';
@@ -17,6 +18,7 @@ interface HintSuggestionCardProps {
   onDismiss?: () => void;
   isWebOrDesktop?: boolean;
   isLimitReached?: boolean;
+  isLoading?: boolean;
   onUpgrade?: () => void;
 }
 
@@ -26,6 +28,7 @@ export function HintSuggestionCard({
   onDismiss,
   isWebOrDesktop = false,
   isLimitReached = false,
+  isLoading = false,
   onUpgrade,
 }: HintSuggestionCardProps) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -46,9 +49,9 @@ export function HintSuggestionCard({
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
-  }, [hintEnglish]);
+  }, [hintEnglish, isLoading]);
 
-  if (!hintEnglish) return null;
+  if (!hintEnglish && !isLoading) return null;
 
   return (
     <Animated.View
@@ -66,7 +69,23 @@ export function HintSuggestionCard({
         style={{ width: '100%', alignItems: 'center' }}
         disabled={!onDismiss}
       >
-        {isLimitReached ? (
+        {isLoading ? (
+          <>
+            {/* Pill Badge: Thinking... */}
+            <View style={styles.badgeRow}>
+              <View style={[styles.badgePill, { borderColor: '#BAE6FD', backgroundColor: '#F0F9FF' }]}>
+                <Text style={[styles.badgeText, { color: '#0284C7' }]}>💡 Thinking...</Text>
+              </View>
+            </View>
+
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 12, gap: 10 }}>
+              <ActivityIndicator size="small" color="#0085DB" />
+              <Text style={[styles.englishText, isWebOrDesktop && styles.englishTextDesktop, { fontSize: 17, color: '#64748B' }]}>
+                Maya is preparing a hint for you...
+              </Text>
+            </View>
+          </>
+        ) : isLimitReached ? (
           <>
             {/* Pill Badge: Hint Limit Reached */}
             <View style={styles.badgeRow}>

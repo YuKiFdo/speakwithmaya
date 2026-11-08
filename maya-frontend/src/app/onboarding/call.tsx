@@ -271,6 +271,7 @@ export default function CallScreen() {
 
   const [hintData, setHintData] = useState<HintResponse | null>(null);
   const [isHintVisible, setIsHintVisible] = useState(false);
+  const [isHintLoading, setIsHintLoading] = useState(false);
   const [showHintLimitPopup, setShowHintLimitPopup] = useState(false);
   const hintsHistoryRef = useRef<string[]>([]);
   const hintsUsedCountRef = useRef<number>(0);
@@ -291,6 +292,7 @@ export default function CallScreen() {
       translationTargetPromptRef.current = '';
 
       setIsHintVisible(false);
+      setIsHintLoading(false);
       setHintData(null);
       hasRevealedHintThisTurnRef.current = false;
       lastPrefetchedHintPromptRef.current = '';
@@ -367,6 +369,7 @@ export default function CallScreen() {
   useEffect(() => {
     if (isWrappingUp) {
       setIsHintVisible(false);
+      setIsHintLoading(false);
       setHintData(null);
     }
   }, [isWrappingUp]);
@@ -398,6 +401,7 @@ export default function CallScreen() {
         isFetchingHintRef.current = false;
         if (res && res.hintEnglish) {
           setHintData(res);
+          setIsHintLoading(false);
         }
       })
       .catch(() => {
@@ -416,8 +420,10 @@ export default function CallScreen() {
   ]);
 
   const handleToggleHint = async () => {
-    if (isWrappingUp) {
+    // Only allow hint interaction while Maya is done speaking and waiting/listening for user
+    if (isWrappingUp || liveCall.status !== 'listening') {
       setIsHintVisible(false);
+      setIsHintLoading(false);
       return;
     }
 
@@ -426,6 +432,7 @@ export default function CallScreen() {
     // If already visible, tapping closes the card (does not consume another hint credit)
     if (isHintVisible) {
       setIsHintVisible(false);
+      setIsHintLoading(false);
       return;
     }
 
@@ -455,8 +462,11 @@ export default function CallScreen() {
     }
 
     // Fallback: If user tapped before background prefetch completed
-    const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic;
-    if (!question || question.length < 3) return;
+    // Open the hint card immediately with a loading spinner so the user gets instant feedback
+    const question = (liveCall.subtitles || '').trim() || (liveCall.previousSubtitles || '').trim() || effectiveTopic || 'What would you like to say?';
+
+    setIsHintVisible(true);
+    setIsHintLoading(true);
 
     isFetchingHintRef.current = true;
     try {
@@ -469,7 +479,14 @@ export default function CallScreen() {
         isPrefetch: false,
       });
 
-      if (res && res.hintEnglish && !isWrappingUp) {
+      // If Maya started speaking in the meantime, respect auto-dismiss
+      if ((liveCall.status as string) === 'speaking' || isWrappingUp) {
+        setIsHintVisible(false);
+        setIsHintLoading(false);
+        return;
+      }
+
+      if (res && res.hintEnglish) {
         setHintData(res);
         if (!hasRevealedHintThisTurnRef.current) {
           hintsUsedCountRef.current += 1;
@@ -478,10 +495,24 @@ export default function CallScreen() {
         if (!hintsHistoryRef.current.includes(res.hintEnglish)) {
           hintsHistoryRef.current.push(res.hintEnglish);
         }
-        setIsHintVisible(true);
+      } else {
+        // Fallback default helpful hint so the card never stays blank
+        setHintData({
+          hintEnglish: `Try answering: "Yes, I agree" or share your thoughts on ${effectiveTopic || 'this topic'}.`,
+          hintSinhala: 'ඔබේ අදහස කෙටියෙන් පවසන්න.',
+        });
+      }
+    } catch (err) {
+      console.warn('[call.tsx] Error in handleToggleHint:', err);
+      if ((liveCall.status as string) !== 'speaking' && !isWrappingUp) {
+        setHintData({
+          hintEnglish: `Try speaking what comes to mind about ${effectiveTopic || 'this topic'}.`,
+          hintSinhala: 'ඔබේ අදහස කෙටියෙන් පවසන්න.',
+        });
       }
     } finally {
       isFetchingHintRef.current = false;
+      setIsHintLoading(false);
     }
   };
 
@@ -1213,27 +1244,32 @@ export default function CallScreen() {
               />
 
               {/* Hint Suggestion Card */}
-              {isHintVisible && !!hintData && (
+              {isHintVisible && (!!hintData || isHintLoading) && (
                 <View style={styles.hintCardWrapper}>
                   <HintSuggestionCard
-                    hintEnglish={hintData.hintEnglish}
-                    hintSinhala={hintData.hintSinhala}
-                    onDismiss={() => setIsHintVisible(false)}
+                    hintEnglish={hintData?.hintEnglish || ''}
+                    hintSinhala={hintData?.hintSinhala || ''}
+                    isLoading={isHintLoading}
+                    onDismiss={() => {
+                      setIsHintVisible(false);
+                      setIsHintLoading(false);
+                    }}
                     isWebOrDesktop={isWebOrDesktop}
-                    isLimitReached={isStarter && hintsUsedCountRef.current >= 2 && hintData.hintEnglish.includes('Upgrade')}
+                    isLimitReached={isStarter && hintsUsedCountRef.current >= 2 && !!hintData?.hintEnglish?.includes('Upgrade')}
                     onUpgrade={() => setShowHintLimitPopup(true)}
                   />
                 </View>
               )}
             </View>
 
-            {/* Floating Hint Button in Bottom Right Corner */}
-            {!isHintVisible && !isWrappingUp && (
+            {/* Floating Hint Button in Bottom Right Corner: Only appears after Maya is done speaking (listening state) */}
+            {!isHintVisible && !isWrappingUp && liveCall.status === 'listening' && (
               <View style={[styles.floatingHintContainer, { pointerEvents: 'box-none' }]}>
                 <HintFloatingButton
                   onPress={handleToggleHint}
                   isActive={isHintVisible}
-                  disabled={liveCall.status === 'connecting' || liveCall.status === 'idle'}
+                  isLoading={isHintLoading}
+                  disabled={liveCall.status !== 'listening'}
                   isHighlighted={guideStepIndex === 3}
                 />
               </View>

@@ -7,16 +7,18 @@ import {
   Animated,
   Easing,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
-import { triggerHaptic, playMicroChime } from '@/utils/haptics-audio';
+import { triggerHaptic } from '@/utils/haptics-audio';
 import { playHintButtonSound } from '@/services/sound/sound-service';
 import { BeaconRing } from './beacon-ring';
 
 interface HintFloatingButtonProps {
   onPress: () => void;
   isActive?: boolean;
+  isLoading?: boolean;
   disabled?: boolean;
   isHighlighted?: boolean;
 }
@@ -24,6 +26,7 @@ interface HintFloatingButtonProps {
 export function HintFloatingButton({
   onPress,
   isActive = false,
+  isLoading = false,
   disabled = false,
   isHighlighted = false,
 }: HintFloatingButtonProps) {
@@ -32,7 +35,7 @@ export function HintFloatingButton({
   const [isRippling, setIsRippling] = useState(false);
 
   const handlePress = () => {
-    if (disabled || isRippling) return;
+    if (disabled || isRippling || isLoading) return;
 
     // Immediately trigger onPress so mic suppression (suppressMicFor) gates the audio
     // BEFORE any audio chime sound leaves the speaker!
@@ -89,23 +92,27 @@ export function HintFloatingButton({
         <Pressable
           style={({ pressed }) => [
             styles.circleButton,
-            (isActive || isRippling) && styles.circleButtonActive,
+            (isActive || isRippling || isLoading) && styles.circleButtonActive,
             pressed && styles.circleButtonPressed,
-            disabled && styles.circleButtonDisabled,
+            (disabled || isLoading) && styles.circleButtonDisabled,
           ]}
           onPress={handlePress}
-          disabled={disabled || isRippling}
+          disabled={disabled || isRippling || isLoading}
           accessibilityRole="button"
           accessibilityLabel="Ask for conversation hint"
         >
-          <Ionicons
-            name={isActive || isRippling ? 'bulb' : 'bulb-outline'}
-            size={26}
-            color={isActive || isRippling ? '#0085DB' : '#0F172A'}
-          />
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#0085DB" />
+          ) : (
+            <Ionicons
+              name={isActive || isRippling ? 'bulb' : 'bulb-outline'}
+              size={26}
+              color={isActive || isRippling ? '#0085DB' : '#0F172A'}
+            />
+          )}
         </Pressable>
       </View>
-      <Text style={styles.label}>Hint</Text>
+      <Text style={styles.label}>{isLoading ? 'Loading...' : 'Hint'}</Text>
     </View>
   );
 }
