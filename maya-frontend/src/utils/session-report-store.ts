@@ -1,4 +1,5 @@
 import { MissionReportData } from '@/components/roadmap/mission-report-modal';
+import { AppStorage } from '@/services/storage/storage-adapter';
 
 export interface FeedbackItem {
   type: 'grammar' | 'more_natural' | 'pronunciation';
@@ -33,11 +34,9 @@ let inMemoryFeedbackItems: FeedbackItem[] | null = null;
 
 export function setLatestFeedbackItems(items: FeedbackItem[]) {
   inMemoryFeedbackItems = items;
-  if (typeof window !== 'undefined' && window.sessionStorage) {
-    try {
-      window.sessionStorage.setItem('maya_latest_feedback_items', JSON.stringify(items));
-    } catch {}
-  }
+  try {
+    AppStorage.setItem('maya_latest_feedback_items', JSON.stringify(items));
+  } catch {}
 }
 
 export function getLatestFeedbackItems(): FeedbackItem[] | null {
@@ -50,40 +49,34 @@ export function getLatestFeedbackItems(): FeedbackItem[] | null {
   };
 
   if (inMemoryFeedbackItems) return sanitize(inMemoryFeedbackItems);
-  if (typeof window !== 'undefined' && window.sessionStorage) {
-    try {
-      const raw = window.sessionStorage.getItem('maya_latest_feedback_items');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          inMemoryFeedbackItems = sanitize(parsed);
-          return inMemoryFeedbackItems;
-        }
+  try {
+    const raw = AppStorage.getSync('maya_latest_feedback_items');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        inMemoryFeedbackItems = sanitize(parsed);
+        return inMemoryFeedbackItems;
       }
-    } catch {}
-  }
+    }
+  } catch {}
   return null;
 }
 
 export function setLatestSessionReport(report: ExtendedSessionReport) {
   inMemoryReport = report;
-  if (typeof window !== 'undefined' && window.sessionStorage) {
-    try {
-      window.sessionStorage.setItem('maya_latest_session_report', JSON.stringify(report));
-    } catch {}
-  }
+  try {
+    AppStorage.setItem('maya_latest_session_report', JSON.stringify(report));
+  } catch {}
 }
 
 export function getLatestSessionReport(): ExtendedSessionReport | null {
   if (inMemoryReport) return inMemoryReport;
-  if (typeof window !== 'undefined' && window.sessionStorage) {
-    try {
-      const raw = window.sessionStorage.getItem('maya_latest_session_report');
-      if (raw) {
-        inMemoryReport = JSON.parse(raw);
-        return inMemoryReport;
-      }
-    } catch {}
-  }
+  try {
+    const raw = AppStorage.getSync('maya_latest_session_report');
+    if (raw) {
+      inMemoryReport = JSON.parse(raw);
+      return inMemoryReport;
+    }
+  } catch {}
   return null;
 }

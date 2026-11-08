@@ -19,10 +19,10 @@ export default function TabsLayout() {
       tabBar={(props) => <MobileBottomTabs {...props} />}
       screenOptions={{
         headerShown: false,
-        // Freeze inactive screens to reduce memory usage while keeping them mounted
-        freezeOnBlur: true,
-        // Use lazy loading: screens render only when first visited
-        lazy: true,
+        // Keep screens mounted without freezing so tab switching is instantaneous
+        freezeOnBlur: false,
+        // Pre-mount all tabs to eliminate cold-start lag when first switching tabs
+        lazy: false,
       }}
     >
       <Tabs.Screen

@@ -506,104 +506,55 @@ export default function RootHtml({ children }: PropsWithChildren) {
           </div>
         </div>
 
-        {/* Enterprise Boot Watchdog: script-error auto-recovery, cache-busting reload & dismissal */}
+        {/* Resilient Boot Watchdog: smooth dismissal, slow-network handling, zero reload-loops */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
                 var isDismissed = false;
-                var RETRY_KEY = '__maya_boot_auto_retry_ts';
 
-                function setStatusText(text) {
+                function setStatus(text) {
                   var el = document.getElementById('app-loader-status-text');
                   if (el) el.textContent = text;
                 }
 
-                function showManualRetry(reasonText) {
+                function showRetry(msg) {
                   if (isDismissed) return;
-                  if (reasonText) setStatusText(reasonText);
+                  if (msg) setStatus(msg);
                   var box = document.getElementById('app-loader-retry-box');
                   if (box) box.style.display = 'flex';
                 }
 
-                function hardReloadWithCacheBust() {
-                  try {
-                    if ('serviceWorker' in navigator && navigator.serviceWorker.getRegistrations) {
-                      navigator.serviceWorker.getRegistrations().then(function(regs) {
-                        for (var i = 0; i < regs.length; i++) regs[i].unregister();
-                      });
-                    }
-                    if (window.caches && window.caches.keys) {
-                      window.caches.keys().then(function(keys) {
-                        for (var i = 0; i < keys.length; i++) window.caches.delete(keys[i]);
-                      });
-                    }
-                  } catch (e) {}
-                  var url = new URL(window.location.href);
-                  url.searchParams.set('_v', String(Date.now()));
-                  window.location.replace(url.toString());
-                }
-
-                function attemptAutoRecovery() {
-                  if (isDismissed) return false;
-                  try {
-                    var lastRetry = Number(sessionStorage.getItem(RETRY_KEY) || '0');
-                    var now = Date.now();
-                    // Allow 1 automatic cache-busting reload per 60 seconds
-                    if (!lastRetry || (now - lastRetry) > 60000) {
-                      sessionStorage.setItem(RETRY_KEY, String(now));
-                      setStatusText('Updating SpeakwithMaya...');
-                      hardReloadWithCacheBust();
-                      return true;
-                    }
-                  } catch (e) {}
-                  return false;
-                }
-
-                // Bind manual retry button
+                // Manual retry on click
                 var retryBtn = document.getElementById('app-loader-retry-btn');
                 if (retryBtn) {
                   retryBtn.addEventListener('click', function() {
-                    setStatusText('Reconnecting...');
-                    try { sessionStorage.removeItem(RETRY_KEY); } catch (e) {}
-                    hardReloadWithCacheBust();
+                    setStatus('Reconnecting...');
+                    window.location.reload();
                   });
                 }
 
-                // Detect failed <script> bundle loads (e.g. stale HTML after deploy or dropped transfer)
-                window.addEventListener('error', function(event) {
-                  if (isDismissed) return;
-                  var target = event && event.target;
-                  if (target && target.tagName === 'SCRIPT') {
-                    var src = target.src || '';
-                    if (src.indexOf('/_expo/') !== -1 || src.indexOf('entry-') !== -1) {
-                      if (!attemptAutoRecovery()) {
-                        showManualRetry('Connection interrupted');
-                      }
-                    }
+                // If loading takes > 8 seconds on slow mobile data, inform user without breaking in-flight download
+                var slowTimer = setTimeout(function() {
+                  if (!isDismissed && !window.__mayaAppMounted) {
+                    setStatus('Connecting to Maya...');
                   }
-                }, true);
+                }, 8000);
 
-                // Handle browser back-forward cache (bfcache) restoring a stale unmounted document
-                window.addEventListener('pageshow', function(event) {
-                  if (event && event.persisted && !isDismissed && !window.__mayaAppMounted) {
-                    window.location.reload();
+                // If loading takes > 18 seconds, offer manual retry button (never force auto-reload loop)
+                var timeoutTimer = setTimeout(function() {
+                  if (!isDismissed && !window.__mayaAppMounted) {
+                    showRetry('Connection is taking longer than usual');
                   }
-                });
+                }, 18000);
 
-                function dismissLoader() {
+                function dismiss() {
                   if (isDismissed) return;
                   isDismissed = true;
                   window.__mayaAppMounted = true;
-                  try {
-                    sessionStorage.removeItem(RETRY_KEY);
-                    // Clean up temporary cache-bust query param (_v) without reloading
-                    if (window.location.search.indexOf('_v=') !== -1 && window.history && window.history.replaceState) {
-                      var cleanUrl = new URL(window.location.href);
-                      cleanUrl.searchParams.delete('_v');
-                      window.history.replaceState({}, document.title, cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
-                    }
-                  } catch (e) {}
+                  clearTimeout(slowTimer);
+                  clearTimeout(timeoutTimer);
+
                   var loader = document.getElementById('app-initial-loader');
                   if (loader) {
                     loader.style.transition = 'opacity 0.24s cubic-bezier(0.22, 1, 0.36, 1)';
@@ -617,26 +568,14 @@ export default function RootHtml({ children }: PropsWithChildren) {
                   }
                 }
 
-                // Staged progress feedback: never blindly remove loader before React mounts!
-                var slowTimer = setTimeout(function() {
-                  if (!isDismissed) {
-                    setStatusText('Optimizing connection...');
-                  }
-                }, 7000);
+                window.__dismissAppLoader = dismiss;
 
-                var watchdogTimer = setTimeout(function() {
-                  if (!isDismissed && !window.__mayaAppMounted) {
-                    if (!attemptAutoRecovery()) {
-                      showManualRetry('Connection is taking longer than usual');
-                    }
+                // Handle browser back-forward cache (bfcache)
+                window.addEventListener('pageshow', function(event) {
+                  if (event && event.persisted && !isDismissed && !window.__mayaAppMounted) {
+                    window.location.reload();
                   }
-                }, 16000);
-
-                window.__dismissAppLoader = function() {
-                  clearTimeout(slowTimer);
-                  clearTimeout(watchdogTimer);
-                  dismissLoader();
-                };
+                });
               })();
             `,
           }}

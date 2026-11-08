@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
   Image,
   ActivityIndicator,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -18,7 +19,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Radii } from '@/theme/tokens';
 import { fontStyle } from '@/theme/fonts';
-import { getBackendBaseUrl } from '@/hooks/useLiveCall';
+import { getBackendBaseUrl } from '@/utils/backend-url';
+import {
+  PressableScale, Reveal, SpringScale, SelectionAccent, PlayToggle, SpeedPill,
+  ListenPill, CorrectionChevron, AnimatedCard, AnimatedCollapse,
+  AnimatedSearchBar, PulseView, haptic,
+} from '@/components/history/history-motion';
 
 import {
   SearchIcon,
@@ -48,6 +54,7 @@ import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { HistoryDetailSkeleton } from '@/components/ui/skeleton';
 import { fetchAllPracticeSessions, isIntroSessionTopic } from '@/services/supabase';
 import { useUserStats } from '@/hooks/useUserStats';
+import { createUniversalSound, UniversalSound } from '@/services/audio/universal-sound';
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
@@ -124,7 +131,8 @@ function generateSpeechEnvelopeBars(count = 42): number[] {
 }
 
 function formatAudioTime(sec: number): string {
-  const s = Math.max(0, Math.floor(sec));
+  if (!sec || isNaN(sec) || !isFinite(sec) || sec <= 0) return '0:00';
+  const s = Math.floor(sec);
   const m = Math.floor(s / 60);
   const remainingS = s % 60;
   return `${m}:${remainingS < 10 ? '0' : ''}${remainingS}`;
@@ -225,25 +233,24 @@ const DesktopSessionCard = React.memo(function DesktopSessionCard({
   );
 
   return (
-    <Pressable
-      style={({ pressed, hovered }: any) => [
+    <PressableScale
+      scaleTo={0.985}
+      haptic="selection"
+      style={({ hovered }: any) => [
         styles.sessionCard,
         hovered && !isSelected && styles.sessionCardHovered,
         isSelected && styles.sessionCardSelected,
-        pressed && styles.sessionCardPressed,
       ]}
       onPress={() => onSelect(item.id)}
     >
+      <SelectionAccent active={isSelected} />
+
       {/* Mode Icon in Colored Square */}
-      <View
-        style={[
-          styles.modeIconSquare,
-          { backgroundColor: getModeBadgeBg(item.mode) },
-          isSelected && styles.modeIconSquareSelected,
-        ]}
-      >
-        {renderModeIcon(item.mode, 20)}
-      </View>
+      <SpringScale to={isSelected ? 1.06 : 1}>
+        <View style={[styles.modeIconSquare, { backgroundColor: getModeBadgeBg(item.mode) }]}>
+          {renderModeIcon(item.mode, 20)}
+        </View>
+      </SpringScale>
 
       {/* Center Info */}
       <View style={styles.sessionCardCenter}>
@@ -278,21 +285,12 @@ const DesktopSessionCard = React.memo(function DesktopSessionCard({
       {/* Right Side: Play Button & Options */}
       <View style={styles.sessionCardActions}>
         {hasAudio ? (
-          <Pressable
-            style={({ pressed }: any) => [
-              styles.cardPlayButton,
-              pressed && { transform: [{ scale: 0.92 }] },
-            ]}
+          <PlayToggle
+            playing={isPlayingThisSession}
+            size={34}
             onPress={(e) => onTogglePlay(e, item)}
-            accessibilityRole="button"
-            accessibilityLabel="Play conversation recording"
-          >
-            {isPlayingThisSession ? (
-              <HistoryPauseIcon size={34} color="#2B5BFF" />
-            ) : (
-              <HistoryPlayIcon size={34} color="#2B5BFF" />
-            )}
-          </Pressable>
+            label="Play conversation recording"
+          />
         ) : (
           <View
             style={styles.cardNoAudioPill}
@@ -310,7 +308,7 @@ const DesktopSessionCard = React.memo(function DesktopSessionCard({
           <MoreVerticalIcon color="#94A3B8" size={16} />
         </Pressable>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 });
 
@@ -330,24 +328,23 @@ const MobileSessionCard = React.memo(function MobileSessionCard({
   );
 
   return (
-    <Pressable
-      style={({ pressed, hovered }: any) => [
+    <PressableScale
+      scaleTo={0.985}
+      haptic="selection"
+      style={({ hovered }: any) => [
         styles.mobileSessionCard,
         hovered && !isSelected && styles.sessionCardHovered,
         isSelected && styles.mobileSessionCardSelected,
-        pressed && styles.mobileSessionCardPressed,
       ]}
       onPress={() => onSelect(item.id)}
     >
-      <View
-        style={[
-          styles.modeIconSquare,
-          { backgroundColor: getModeBadgeBg(item.mode) },
-          isSelected && styles.modeIconSquareSelected,
-        ]}
-      >
-        {renderModeIcon(item.mode, 22)}
-      </View>
+      <SelectionAccent active={isSelected} />
+
+      <SpringScale to={isSelected ? 1.06 : 1}>
+        <View style={[styles.modeIconSquare, { backgroundColor: getModeBadgeBg(item.mode) }]}>
+          {renderModeIcon(item.mode, 22)}
+        </View>
+      </SpringScale>
 
       <View style={styles.sessionCardCenter}>
         <Text style={styles.sessionCardTitle} numberOfLines={1}>
@@ -377,21 +374,12 @@ const MobileSessionCard = React.memo(function MobileSessionCard({
 
       <View style={styles.sessionCardActions}>
         {hasAudio ? (
-          <Pressable
-            style={({ pressed }: any) => [
-              styles.cardPlayButton,
-              pressed && { transform: [{ scale: 0.92 }] },
-            ]}
+          <PlayToggle
+            playing={isPlayingThisSession}
+            size={34}
             onPress={(e) => onTogglePlay(e, item)}
-            accessibilityRole="button"
-            accessibilityLabel="Play conversation recording"
-          >
-            {isPlayingThisSession ? (
-              <HistoryPauseIcon size={34} color="#2B5BFF" />
-            ) : (
-              <HistoryPlayIcon size={34} color="#2B5BFF" />
-            )}
-          </Pressable>
+            label="Play conversation recording"
+          />
         ) : (
           <View
             style={styles.cardNoAudioPill}
@@ -409,7 +397,7 @@ const MobileSessionCard = React.memo(function MobileSessionCard({
           <MoreVerticalIcon color="#94A3B8" size={18} />
         </Pressable>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 });
 
@@ -437,13 +425,6 @@ export default function HistoryScreen() {
   const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
-  const handleSelectSession = useCallback((id: string | null) => {
-    setSelectedSessionId(id);
-    startTransition(() => {
-      setDetailSessionId(id);
-    });
-  }, [startTransition]);
-
   // Audio Playback State
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackProgress, setPlaybackProgress] = useState(0);
@@ -455,19 +436,18 @@ export default function HistoryScreen() {
   const [playingTurnId, setPlayingTurnId] = useState<string | null>(null);
   const [unreachableAudioUrls, setUnreachableAudioUrls] = useState<Set<string>>(new Set());
 
-  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeAudioRef = useRef<UniversalSound | null>(null);
   const activeAudioSessionIdRef = useRef<string | null>(null);
   const playlistIndexRef = useRef<number>(-1);
   const isPlaylistModeRef = useRef<boolean>(false);
 
   // Stop active audio helper
-  const stopAudio = () => {
+  const stopAudio = useCallback(() => {
     isPlaylistModeRef.current = false;
     playlistIndexRef.current = -1;
     if (activeAudioRef.current) {
       try {
-        activeAudioRef.current.pause();
-        activeAudioRef.current.currentTime = 0;
+        activeAudioRef.current.stop();
       } catch {}
       activeAudioRef.current = null;
     }
@@ -476,7 +456,38 @@ export default function HistoryScreen() {
     setPlayingTurnId(null);
     setPlaybackProgress(0);
     setCurrentTimeSeconds(0);
-  };
+  }, []);
+
+  const handleSelectSession = useCallback((id: string | null) => {
+    if (id === null) {
+      // Instant back transition without concurrent lag or audio stutter
+      stopAudio();
+      setSelectedSessionId(null);
+      setDetailSessionId(null);
+      return;
+    }
+    setSelectedSessionId(id);
+    startTransition(() => {
+      setDetailSessionId(id);
+    });
+  }, [startTransition, stopAudio]);
+
+  // Handle Android back gesture / hardware back button when inside a session detail
+  useEffect(() => {
+    if (!selectedSessionId) return;
+
+    const onBackPress = () => {
+      handleSelectSession(null);
+      return true; // Prevents popping tab to dashboard home
+    };
+
+    const backSubscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      onBackPress
+    );
+
+    return () => backSubscription.remove();
+  }, [selectedSessionId, handleSelectSession]);
 
   useEffect(() => {
     return () => {
@@ -983,34 +994,43 @@ export default function HistoryScreen() {
 
     const cleanAudioUrl = withCacheBust(turn.audioUrl);
 
-    if (cleanAudioUrl && typeof window !== 'undefined') {
-      const audio = new Audio(cleanAudioUrl);
-      audio.playbackRate = playbackSpeed;
+    if (cleanAudioUrl) {
+      const sound = createUniversalSound(
+        cleanAudioUrl,
+        {
+          onTimeUpdate: (cur, dur) => {
+            const fallbackDur = session.durationSeconds || totalDurationSeconds || 17;
+            const effectiveDur = (dur && isFinite(dur) && dur > 0) ? dur : fallbackDur;
+            if (typeof cur === 'number' && !isNaN(cur)) {
+              setCurrentTimeSeconds(Math.round(cur));
+            }
+            if (effectiveDur > 0) {
+              setPlaybackProgress(Math.min(1, Math.max(0, cur / effectiveDur)));
+              if (dur && isFinite(dur) && dur > 0) {
+                setTotalDurationSeconds(Math.round(dur));
+              }
+            }
+          },
+          onEnded: () => {
+            if (isPlaylistModeRef.current) {
+              playTurnInSequence(session, targetIdx + 1);
+            } else {
+              stopAudio();
+            }
+          },
+          onError: () => {
+            if (isPlaylistModeRef.current) {
+              playTurnInSequence(session, targetIdx + 1);
+            } else {
+              stopAudio();
+            }
+          },
+        },
+        playbackSpeed,
+      );
 
-      audio.ontimeupdate = () => {
-        if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-          setCurrentTimeSeconds(Math.round(audio.currentTime));
-        }
-      };
-
-      audio.onended = () => {
-        if (isPlaylistModeRef.current) {
-          playTurnInSequence(session, targetIdx + 1);
-        } else {
-          stopAudio();
-        }
-      };
-
-      audio.onerror = () => {
-        if (isPlaylistModeRef.current) {
-          playTurnInSequence(session, targetIdx + 1);
-        } else {
-          stopAudio();
-        }
-      };
-
-      activeAudioRef.current = audio;
-      audio.play().then(() => {
+      activeAudioRef.current = sound;
+      sound.play().then(() => {
         setIsPlaying(true);
       }).catch(() => {
         if (isPlaylistModeRef.current) {
@@ -1049,7 +1069,7 @@ export default function HistoryScreen() {
 
     // If resuming after pause on the same session (single audio element)
     if (activeAudioRef.current && activeAudioSessionIdRef.current === session.id && !isPlaylistModeRef.current) {
-      activeAudioRef.current.playbackRate = playbackSpeed;
+      activeAudioRef.current.setPlaybackRate(playbackSpeed);
       activeAudioRef.current.play().then(() => {
         setIsPlaying(true);
       }).catch((e) => {
@@ -1070,39 +1090,46 @@ export default function HistoryScreen() {
     const rawFullAudioUrl = session.fullConversationAudioUrl || (session.id ? `${baseUrl}/v1/sessions/${session.id}/recording-audio?type=full` : '');
     const fullAudioUrl = withCacheBust(rawFullAudioUrl);
 
-    if (fullAudioUrl && typeof window !== 'undefined') {
+    if (fullAudioUrl) {
       try {
-        const audio = new Audio(fullAudioUrl);
-        audio.playbackRate = playbackSpeed;
+        const sound = createUniversalSound(
+          fullAudioUrl,
+          {
+            onTimeUpdate: (cur, dur) => {
+              const fallbackDur = session.durationSeconds || totalDurationSeconds || 17;
+              const effectiveDur = (dur && isFinite(dur) && dur > 0) ? dur : fallbackDur;
+              if (typeof cur === 'number' && !isNaN(cur)) {
+                setCurrentTimeSeconds(Math.round(cur));
+              }
+              if (effectiveDur > 0) {
+                setPlaybackProgress(Math.min(1, Math.max(0, cur / effectiveDur)));
+                if (dur && isFinite(dur) && dur > 0) {
+                  setTotalDurationSeconds(Math.round(dur));
+                }
+              }
+            },
+            onEnded: () => {
+              setIsPlaying(false);
+              setPlaybackProgress(0);
+              setCurrentTimeSeconds(0);
+              setPlayingTurnId(null);
+            },
+            onError: () => {
+              console.log('[History] full_conversation.wav failed to load, falling back to sequential turn playlist');
+              isPlaylistModeRef.current = true;
+              activeAudioSessionIdRef.current = session.id;
+              setIsPlaying(true);
+              playTurnInSequence(session, 0);
+            },
+          },
+          playbackSpeed,
+        );
 
-        audio.ontimeupdate = () => {
-          if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-            setPlaybackProgress(audio.currentTime / audio.duration);
-            setCurrentTimeSeconds(Math.round(audio.currentTime));
-            setTotalDurationSeconds(Math.round(audio.duration));
-          }
-        };
-
-        audio.onended = () => {
-          setIsPlaying(false);
-          setPlaybackProgress(0);
-          setCurrentTimeSeconds(0);
-          setPlayingTurnId(null);
-        };
-
-        audio.onerror = () => {
-          console.log('[History] full_conversation.wav failed to load, falling back to sequential turn playlist');
-          isPlaylistModeRef.current = true;
-          activeAudioSessionIdRef.current = session.id;
-          setIsPlaying(true);
-          playTurnInSequence(session, 0);
-        };
-
-        activeAudioRef.current = audio;
+        activeAudioRef.current = sound;
         activeAudioSessionIdRef.current = session.id;
         isPlaylistModeRef.current = false;
 
-        audio.play().then(() => {
+        sound.play().then(() => {
           setIsPlaying(true);
         }).catch(() => {
           isPlaylistModeRef.current = true;
@@ -1127,25 +1154,35 @@ export default function HistoryScreen() {
 
     // Priority 3: Fallback to userAudioUrl or modelAudioUrl if available
     const fallbackUrl = (session.userAudioUrl || session.modelAudioUrl || (session.id ? `${baseUrl}/v1/sessions/${session.id}/recording-audio?type=user` : '')).replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
-    if (fallbackUrl && typeof window !== 'undefined') {
+    if (fallbackUrl) {
       try {
-        const audio = new Audio(fallbackUrl);
-        audio.playbackRate = playbackSpeed;
-        audio.ontimeupdate = () => {
-          if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-            setPlaybackProgress(audio.currentTime / audio.duration);
-            setCurrentTimeSeconds(Math.round(audio.currentTime));
-            setTotalDurationSeconds(Math.round(audio.duration));
-          }
-        };
-        audio.onended = () => {
-          setIsPlaying(false);
-          setPlaybackProgress(0);
-          setCurrentTimeSeconds(0);
-        };
-        activeAudioRef.current = audio;
+        const sound = createUniversalSound(
+          fallbackUrl,
+          {
+            onTimeUpdate: (cur, dur) => {
+              const fallbackDur = session.durationSeconds || totalDurationSeconds || 17;
+              const effectiveDur = (dur && isFinite(dur) && dur > 0) ? dur : fallbackDur;
+              if (typeof cur === 'number' && !isNaN(cur)) {
+                setCurrentTimeSeconds(Math.round(cur));
+              }
+              if (effectiveDur > 0) {
+                setPlaybackProgress(Math.min(1, Math.max(0, cur / effectiveDur)));
+                if (dur && isFinite(dur) && dur > 0) {
+                  setTotalDurationSeconds(Math.round(dur));
+                }
+              }
+            },
+            onEnded: () => {
+              setIsPlaying(false);
+              setPlaybackProgress(0);
+              setCurrentTimeSeconds(0);
+            },
+          },
+          playbackSpeed,
+        );
+        activeAudioRef.current = sound;
         activeAudioSessionIdRef.current = session.id;
-        audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+        sound.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
       } catch {}
     }
   };
@@ -1173,7 +1210,7 @@ export default function HistoryScreen() {
     const baseUrl = getBackendBaseUrl();
     const rawTurnUrl = turn.audioUrl || (session.id ? `${baseUrl}/v1/sessions/${session.id}/recording-audio?type=turn&speaker=${turn.speaker === 'user' ? 'user' : 'model'}&index=${turn.id || 0}` : '');
     const turnAudioUrl = rawTurnUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
-    if (!turnAudioUrl || typeof window !== 'undefined' && !window.Audio) {
+    if (!turnAudioUrl) {
       console.warn('[History] No audio recording clip available for turn', turn.id);
       return;
     }
@@ -1183,33 +1220,35 @@ export default function HistoryScreen() {
     setIsPlaying(true);
 
     const playUrl = withCacheBust(turnAudioUrl);
-    const audio = new Audio(playUrl);
-    audio.playbackRate = playbackSpeed;
+    const sound = createUniversalSound(
+      playUrl,
+      {
+        onTimeUpdate: (cur, dur) => {
+          if (typeof cur === 'number' && !isNaN(cur)) {
+            setCurrentTimeSeconds(Math.round(cur));
+          }
+          if (dur && isFinite(dur) && dur > 0) {
+            setPlaybackProgress(Math.min(1, Math.max(0, cur / dur)));
+            setTotalDurationSeconds(Math.round(dur));
+          }
+        },
+        onEnded: () => {
+          setPlayingTurnId(null);
+          setIsPlaying(false);
+          setPlaybackProgress(0);
+          setCurrentTimeSeconds(0);
+        },
+        onError: () => {
+          console.warn('[History] Failed to load turn audio clip:', turnAudioUrl);
+          setPlayingTurnId(null);
+          setIsPlaying(false);
+        },
+      },
+      playbackSpeed,
+    );
 
-    audio.ontimeupdate = () => {
-      if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-        setPlaybackProgress(audio.currentTime / audio.duration);
-        setCurrentTimeSeconds(Math.round(audio.currentTime));
-        setTotalDurationSeconds(Math.round(audio.duration));
-      }
-    };
-
-    audio.onended = () => {
-      setPlayingTurnId(null);
-      setIsPlaying(false);
-      setPlaybackProgress(0);
-      setCurrentTimeSeconds(0);
-    };
-
-    audio.onerror = () => {
-      console.warn('[History] Failed to load turn audio clip:', turnAudioUrl);
-      setPlayingTurnId(null);
-      setIsPlaying(false);
-    };
-
-    activeAudioRef.current = audio;
-    audio.play().catch((err) => {
-      console.warn('[History] Playback error on turn audio:', err);
+    activeAudioRef.current = sound;
+    sound.play().then(() => setIsPlaying(true)).catch(() => {
       setPlayingTurnId(null);
       setIsPlaying(false);
     });
@@ -1222,15 +1261,15 @@ export default function HistoryScreen() {
     const nextSpeed = speeds[nextIdx];
     setPlaybackSpeed(nextSpeed);
     if (activeAudioRef.current) {
-      activeAudioRef.current.playbackRate = nextSpeed;
+      activeAudioRef.current.setPlaybackRate(nextSpeed);
     }
   };
 
   const handleSeek = (fraction: number) => {
     setPlaybackProgress(fraction);
-    if (activeAudioRef.current && activeAudioRef.current.duration && !isNaN(activeAudioRef.current.duration)) {
-      const newTime = fraction * activeAudioRef.current.duration;
-      activeAudioRef.current.currentTime = newTime;
+    if (activeAudioRef.current && totalDurationSeconds > 0) {
+      const newTime = fraction * totalDurationSeconds;
+      activeAudioRef.current.seekTo?.(newTime);
       setCurrentTimeSeconds(Math.round(newTime));
     } else if (isPlaylistModeRef.current && activeSession?.transcript) {
       const targetIdx = Math.floor(fraction * activeSession.transcript.length);
@@ -1275,356 +1314,7 @@ export default function HistoryScreen() {
     { id: 'travel', label: 'Travel English' },
   ];
 
-  // Helper to render session detail view (shared between Desktop Right Column and Mobile Active View)
-  const renderSessionDetailContent = () => {
-    if (!activeSession) return null;
 
-    return (
-      <ScrollView
-        ref={transcriptScrollRef}
-        style={styles.detailScroll}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.detailScrollContent}
-      >
-        {/* Session Header Box */}
-        <View style={styles.detailHeaderBox}>
-          <View style={styles.detailHeaderLeft}>
-            <View
-              style={[
-                styles.detailModeSquare,
-                { backgroundColor: getModeBadgeBg(activeSession.mode) },
-              ]}
-            >
-              {renderModeIcon(activeSession.mode, 24)}
-            </View>
-            <View style={styles.detailHeaderTextGroup}>
-              <Text style={styles.detailSessionTitle}>
-                {activeSession.title}
-              </Text>
-              <View style={styles.detailMetaRow}>
-                <View style={styles.metaItem}>
-                  <CalendarSmallIcon color="#94A3B8" size={12} />
-                  <Text style={styles.metaText}>{activeSession.dateString}</Text>
-                </View>
-                <Text style={styles.metaDot}>•</Text>
-                <View style={styles.metaItem}>
-                  <ClockSmallIcon color="#94A3B8" size={12} />
-                  <Text style={styles.metaText}>{activeSession.timeString}</Text>
-                </View>
-                <Text style={styles.metaDot}>•</Text>
-                <View style={styles.metaItem}>
-                  <TimerSmallIcon color="#94A3B8" size={12} />
-                  <Text style={styles.metaText}>{activeSession.durationString}</Text>
-                </View>
-                <Text style={styles.metaDot}>•</Text>
-                <View style={styles.metaItem}>
-                  <RefreshCorrectionsIcon color="#94A3B8" size={12} />
-                  <Text style={styles.metaText}>
-                    {activeSession.correctionsCount} corrections
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          <Pressable
-            style={styles.closeDetailButton}
-            hitSlop={10}
-            onPress={() => setSelectedSessionId(null)}
-          >
-            <CloseCrossIcon size={18} color="#94A3B8" />
-          </Pressable>
-        </View>
-
-        {/* ── VOICE RECORDING SECTION ── */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionHeaderTitle}>Voice Recording</Text>
-          <View style={styles.voiceRecordingCard}>
-            {hasActiveRecording ? (
-              <View style={styles.voicePlayerRow}>
-                {/* Play/Pause Button */}
-                <Pressable
-                  style={styles.voicePlayButton}
-                  onPress={() => togglePlay()}
-                  accessibilityRole="button"
-                  accessibilityLabel={isPlaying ? 'Pause recording' : 'Play recording'}
-                >
-                  {isPlaying ? (
-                    <HistoryPauseIcon size={44} color="#2B5BFF" />
-                  ) : (
-                    <HistoryPlayIcon size={44} color="#2B5BFF" />
-                  )}
-                </Pressable>
-
-                {/* Waveform Visualizer */}
-                <View style={styles.waveformContainer}>
-                  {waveformBars.map((barHeight, idx) => {
-                    const fraction = idx / waveformBars.length;
-                    const isPlayed = fraction <= playbackProgress;
-                    return (
-                      <Pressable
-                        key={idx}
-                        onPress={() => handleSeek(fraction)}
-                        hitSlop={{ top: 8, bottom: 8, left: 1, right: 1 }}
-                        style={styles.waveformBarTouch}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Seek to ${Math.round(fraction * 100)}%`}
-                      >
-                        <View
-                          style={[
-                            styles.waveformBar,
-                            {
-                              height: barHeight,
-                              backgroundColor: isPlayed ? '#2B5BFF' : '#CBD5E1',
-                            },
-                          ]}
-                        />
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                {/* Time & Speed Controls */}
-                <Text style={styles.voiceDurationText}>
-                  {isPlaying || currentTimeSeconds > 0
-                    ? `${formatAudioTime(currentTimeSeconds)} / ${formatAudioTime(totalDurationSeconds || activeSession.durationSeconds || 17)}`
-                    : activeSession.recordingLengthString || formatAudioTime(totalDurationSeconds || 17)}
-                </Text>
-                <Pressable
-                  style={styles.speedPill}
-                  onPress={cyclePlaybackSpeed}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Change speed: current ${playbackSpeed.toFixed(1)}x`}
-                >
-                  <Text style={styles.speedPillText}>
-                    {playbackSpeed.toFixed(1)}x
-                  </Text>
-                </Pressable>
-              </View>
-            ) : (
-              /* Recording Not Available State */
-              <View style={styles.noRecordingRow}>
-                <View style={styles.noRecordingIconCircle}>
-                  <Ionicons name="mic-off-outline" size={22} color="#64748B" />
-                </View>
-                <View style={styles.noRecordingTextCol}>
-                  <View style={styles.noRecordingHeadingRow}>
-                    <Text style={styles.noRecordingTitle}>Recording Not Available</Text>
-                    <View style={styles.noRecordingExpiredTag}>
-                      <Text style={styles.noRecordingExpiredTagText}>7-Day Retention</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.noRecordingSubtitle}>
-                    Voice audio is retained for 7 days in accordance with privacy rules. The complete transcript, grammar analysis, and corrections are permanently saved below.
-                  </Text>
-                </View>
-                <View style={styles.noRecordingDurationBadge}>
-                  <Ionicons name="time-outline" size={13} color="#64748B" />
-                  <Text style={styles.noRecordingBadgeText}>{activeSession.durationString}</Text>
-                </View>
-              </View>
-            )}
-
-            {/* Auto-remove notice */}
-            <View style={styles.recordingNoticeRow}>
-              <Ionicons name="information-circle-outline" size={14} color="#94A3B8" />
-              <Text style={styles.noticeText}>
-                {hasActiveRecording
-                  ? 'This recording will be automatically removed within 7 days in accordance with privacy rules.'
-                  : 'Audio recordings expire after 7 days. Text transcripts and AI suggestions are saved permanently.'}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* ── SESSION TRANSCRIPT SECTION ── */}
-        <View style={styles.sectionContainer}>
-          <View style={styles.transcriptSectionHeader}>
-            <Text style={styles.sectionHeaderTitle}>Session Transcript</Text>
-            {Boolean(activeSession.correctionsCount > 0 || (activeSession.transcript && activeSession.transcript.some((t) => Boolean(t.correction)))) && (
-              <Pressable
-                style={styles.jumpCorrectionButton}
-                onPress={handleJumpToNextCorrection}
-                accessibilityRole="button"
-                accessibilityLabel="Jump to next grammar correction"
-              >
-                <NextCorrectionIcon color="#0057FF" size={13} />
-                <Text style={styles.jumpCorrectionText}>
-                  Jump to Next Correction
-                </Text>
-              </Pressable>
-            )}
-          </View>
-
-          {/* Transcript turns */}
-          <View style={styles.transcriptList}>
-            {activeSession.transcript.map((turn) => {
-              const isUser = turn.speaker === 'user';
-              return (
-                <View
-                  key={turn.id}
-                  style={styles.turnRow}
-                  onLayout={(e) => {
-                    correctionPositions.current[turn.id] =
-                      e.nativeEvent.layout.y;
-                  }}
-                >
-                  {/* Avatar */}
-                  <View
-                    style={[
-                      styles.turnAvatarCircle,
-                      isUser
-                        ? styles.userAvatarCircle
-                        : styles.aiAvatarCircle,
-                    ]}
-                  >
-                    {isUser ? (
-                      <ModeUserAvatarIcon size={16} color="#64748B" />
-                    ) : (
-                      renderModeIcon(activeSession.mode, 16)
-                    )}
-                  </View>
-
-                  {/* Turn Content */}
-                  <View style={styles.turnContentCol}>
-                    <View style={styles.speakerHeaderRow}>
-                      <View style={styles.speakerNameCol}>
-                        <Text style={styles.speakerNameText}>
-                          {isUser ? 'You' : 'AI'}
-                        </Text>
-                        <Text style={styles.speakerTimeText}>{turn.time}</Text>
-                      </View>
-                      {Boolean(turn.audioUrl) && (
-                        <Pressable
-                          style={[
-                            styles.turnPlayButton,
-                            playingTurnId === turn.id && styles.turnPlayButtonActive,
-                          ]}
-                          onPress={() => togglePlayTurn(turn, activeSession)}
-                          hitSlop={8}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Play ${isUser ? 'your' : 'AI'} audio turn`}
-                        >
-                          {playingTurnId === turn.id ? (
-                            <Ionicons name="pause" size={12} color="#2B5BFF" />
-                          ) : (
-                            <Ionicons name="volume-medium" size={13} color="#64748B" />
-                          )}
-                          <Text
-                            style={[
-                              styles.turnPlayText,
-                              playingTurnId === turn.id && styles.turnPlayTextActive,
-                            ]}
-                          >
-                            {playingTurnId === turn.id ? 'Playing' : 'Listen'}
-                          </Text>
-                        </Pressable>
-                      )}
-                    </View>
-
-                    {/* Message Bubble */}
-                    <View
-                      style={[
-                        styles.turnBubble,
-                        isUser
-                          ? styles.userTurnBubble
-                          : styles.aiTurnBubble,
-                        playingTurnId === turn.id && styles.turnBubblePlaying,
-                      ]}
-                    >
-                      <Text style={styles.turnBubbleText}>{turn.message}</Text>
-                    </View>
-
-                    {turn.correction && (
-                      <View style={styles.correctionCard}>
-                        <Pressable
-                          style={styles.correctionHeaderRow}
-                          onPress={() =>
-                            toggleCorrectionCollapse(turn.correction!.id)
-                          }
-                        >
-                          <View style={styles.correctionTitleLeft}>
-                            <View style={styles.redCrossCircle}>
-                              <Text style={styles.redCrossMark}>✕</Text>
-                            </View>
-                            <Text style={styles.correctionCountText}>
-                              {turn.correction.countText}
-                            </Text>
-                            <Text style={styles.correctionChevron}>
-                              {collapsedCorrections[turn.correction.id]
-                                ? '∨'
-                                : '∧'}
-                            </Text>
-                          </View>
-
-                          <View style={styles.correctionHeaderRight}>
-                            {Boolean(turn.audioUrl || activeSession.fullConversationAudioUrl) && (
-                              <Pressable
-                                style={styles.audioSpeakerButton}
-                                onPress={() => {
-                                  if (turn.audioUrl) {
-                                    togglePlayTurn(turn, activeSession);
-                                  } else {
-                                    togglePlay(activeSession);
-                                  }
-                                }}
-                                hitSlop={6}
-                              >
-                                <VolumeSpeakerIcon color="#94A3B8" size={16} />
-                              </Pressable>
-                            )}
-                            <Image
-                              source={require('@/assets/images/maya-avatar.png')}
-                              style={styles.miniMayaAvatar}
-                            />
-                          </View>
-                        </Pressable>
-
-                        {!collapsedCorrections[turn.correction.id] && (
-                          <View style={styles.correctionBody}>
-                            <View style={styles.comparisonBoxesRow}>
-                              <View style={styles.originalPhraseBox}>
-                                <View style={styles.phraseLine}>
-                                  <Text style={styles.phraseCross}>✕ </Text>
-                                  <Text style={styles.originalStrikethroughText}>
-                                    {turn.correction.originalText}
-                                  </Text>
-                                </View>
-                                <Text style={styles.phraseLabel}>Original</Text>
-                              </View>
-
-                              <Text style={styles.comparisonArrow}>→</Text>
-
-                              <View style={styles.correctedPhraseBox}>
-                                <View style={styles.phraseLine}>
-                                  <Text style={styles.phraseCheck}>✓ </Text>
-                                  <Text style={styles.correctedGreenText}>
-                                    {turn.correction.correctedText}
-                                  </Text>
-                                </View>
-                                <Text style={styles.phraseLabel}>Corrected</Text>
-                              </View>
-                            </View>
-
-                            <View style={styles.whyExplanationRow}>
-                              <Text style={styles.whyPrefix}>Why: </Text>
-                              <Text style={styles.whyExplanationText}>
-                                {turn.correction.whyExplanation}
-                              </Text>
-                            </View>
-                          </View>
-                        )}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-      </ScrollView>
-    );
-  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1681,21 +1371,15 @@ export default function HistoryScreen() {
                 {/* ── LEFT COLUMN: SEARCH & SESSION LIST ── */}
                 <View style={styles.desktopListColumn}>
                   {/* Search bar */}
-                  <View style={styles.searchBarContainer}>
-                    <SearchIcon color="#94A3B8" size={18} />
-                    <TextInput
-                      style={styles.searchInput}
-                      placeholder="Search conversations..."
-                      placeholderTextColor="#94A3B8"
-                      value={searchQuery}
-                      onChangeText={setSearchQuery}
-                    />
-                    {searchQuery.length > 0 && (
-                      <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
-                        <CloseCrossIcon size={14} color="#94A3B8" />
-                      </Pressable>
-                    )}
-                  </View>
+                  <AnimatedSearchBar
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    placeholder="Search conversations..."
+                    containerStyle={styles.searchBarContainer}
+                    inputStyle={styles.searchInput}
+                    leading={<SearchIcon color="#94A3B8" size={18} />}
+                    clearIcon={<CloseCrossIcon size={14} color="#94A3B8" />}
+                  />
 
                   {/* Grouped Sessions Scroll */}
                   <ScrollView
@@ -1706,40 +1390,42 @@ export default function HistoryScreen() {
                     {isLoading ? (
                       <View style={styles.skeletonContainer}>
                         {[1, 2, 3, 4, 5].map((idx) => (
-                          <View key={idx} style={styles.skeletonCard}>
+                          <PulseView key={idx} style={styles.skeletonCard}>
                             <View style={styles.skeletonIconBox} />
                             <View style={styles.skeletonInfoCol}>
                               <View style={styles.skeletonTitleBar} />
                               <View style={styles.skeletonMetaBar} />
                             </View>
                             <View style={styles.skeletonPlayCircle} />
-                          </View>
+                          </PulseView>
                         ))}
                       </View>
                     ) : Object.keys(groupedSessions).length === 0 ? (
-                      <View style={styles.emptyResultsBox}>
+                      <Reveal variant="fade" style={styles.emptyResultsBox}>
+                        <Ionicons name="search-outline" size={28} color="#CBD5E1" style={{ marginBottom: 10 }} />
                         <Text style={styles.emptyResultsText}>
                           No conversations found matching your search.
                         </Text>
-                      </View>
+                      </Reveal>
                     ) : (
                       Object.entries(groupedSessions).map(([groupTitle, sessions]) => (
                         <View key={groupTitle} style={styles.groupContainer}>
                           <Text style={styles.groupHeaderTitle}>{groupTitle}</Text>
-                          {sessions.map((item) => (
-                            <DesktopSessionCard
-                              key={item.id}
-                              item={item}
-                              isSelected={item.id === (selectedSessionId || activeSession?.id)}
-                              onSelect={handleSelectSession}
-                              onTogglePlay={handleCardTogglePlay}
-                              isPlayingThisSession={item.id === activeAudioSessionIdRef.current && isPlaying}
-                              isAudioUnreachable={Boolean(
-                                (item.fullConversationAudioUrl && unreachableAudioUrls.has(item.fullConversationAudioUrl)) ||
-                                (item.userAudioUrl && unreachableAudioUrls.has(item.userAudioUrl)) ||
-                                (item.modelAudioUrl && unreachableAudioUrls.has(item.modelAudioUrl))
-                              )}
-                            />
+                          {sessions.map((item, i) => (
+                            <Reveal key={item.id} index={i}>
+                              <DesktopSessionCard
+                                item={item}
+                                isSelected={item.id === (selectedSessionId || activeSession?.id)}
+                                onSelect={handleSelectSession}
+                                onTogglePlay={handleCardTogglePlay}
+                                isPlayingThisSession={item.id === activeAudioSessionIdRef.current && isPlaying}
+                                isAudioUnreachable={Boolean(
+                                  (item.fullConversationAudioUrl && unreachableAudioUrls.has(item.fullConversationAudioUrl)) ||
+                                  (item.userAudioUrl && unreachableAudioUrls.has(item.userAudioUrl)) ||
+                                  (item.modelAudioUrl && unreachableAudioUrls.has(item.modelAudioUrl))
+                                )}
+                              />
+                            </Reveal>
                           ))}
                         </View>
                       ))
@@ -1752,347 +1438,309 @@ export default function HistoryScreen() {
                   {isLoading ? (
                     <HistoryDetailSkeleton />
                   ) : activeSession ? (
-                    <ScrollView
-                      key={activeSession.id}
-                      ref={transcriptScrollRef}
-                      style={[
-                        styles.detailScroll,
-                        Platform.OS === 'web' && ({
-                          animation: 'historyDetailFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
-                        } as any),
-                      ]}
-                      showsVerticalScrollIndicator={false}
-                      contentContainerStyle={styles.detailScrollContent}
-                    >
-                      {/* Session Header Box */}
-                      <View style={styles.detailHeaderBox}>
-                        <View style={styles.detailHeaderLeft}>
-                          <View
-                            style={[
-                              styles.detailModeSquare,
-                              { backgroundColor: getModeBadgeBg(activeSession.mode) },
-                            ]}
-                          >
-                            {renderModeIcon(activeSession.mode, 24)}
-                          </View>
-                          <View style={styles.detailHeaderTextGroup}>
-                            <Text style={styles.detailSessionTitle}>
-                              {activeSession.title}
-                            </Text>
-                            <View style={styles.detailMetaRow}>
-                              <View style={styles.metaItem}>
-                                <CalendarSmallIcon color="#94A3B8" size={12} />
-                                <Text style={styles.metaText}>{activeSession.dateString}</Text>
-                              </View>
-                              <Text style={styles.metaDot}>•</Text>
-                              <View style={styles.metaItem}>
-                                <ClockSmallIcon color="#94A3B8" size={12} />
-                                <Text style={styles.metaText}>{activeSession.timeString}</Text>
-                              </View>
-                              <Text style={styles.metaDot}>•</Text>
-                              <View style={styles.metaItem}>
-                                <TimerSmallIcon color="#94A3B8" size={12} />
-                                <Text style={styles.metaText}>{activeSession.durationString}</Text>
-                              </View>
-                              <Text style={styles.metaDot}>•</Text>
-                              <View style={styles.metaItem}>
-                                <RefreshCorrectionsIcon color="#94A3B8" size={12} />
-                                <Text style={styles.metaText}>
-                                  {activeSession.correctionsCount} corrections
-                                </Text>
-                              </View>
-                            </View>
-                          </View>
-                        </View>
-
-                        <Pressable style={styles.closeDetailButton} hitSlop={10}>
-                          <CloseCrossIcon size={18} color="#94A3B8" />
-                        </Pressable>
-                      </View>
-
-                      {/* ── VOICE RECORDING SECTION ── */}
-                      <View style={styles.sectionContainer}>
-                        <Text style={styles.sectionHeaderTitle}>Voice Recording</Text>
-                        <View style={styles.voiceRecordingCard}>
-                          {hasActiveRecording ? (
-                            <View style={styles.voicePlayerRow}>
-                              {/* Play/Pause Button */}
-                              <Pressable style={styles.voicePlayButton} onPress={() => togglePlay()}>
-                                {isPlaying ? (
-                                  <HistoryPauseIcon size={44} color="#2B5BFF" />
-                                ) : (
-                                  <HistoryPlayIcon size={44} color="#2B5BFF" />
-                                )}
-                              </Pressable>
-
-                              {/* Waveform Visualizer */}
-                              <View style={styles.waveformContainer}>
-                                {waveformBars.map((barHeight, idx) => {
-                                  const fraction = idx / waveformBars.length;
-                                  const isPlayed = fraction <= playbackProgress;
-                                  return (
-                                    <Pressable
-                                      key={idx}
-                                      onPress={() => handleSeek(fraction)}
-                                      hitSlop={{ top: 8, bottom: 8, left: 1, right: 1 }}
-                                      style={styles.waveformBarTouch}
-                                      accessibilityRole="button"
-                                      accessibilityLabel={`Seek to ${Math.round(fraction * 100)}%`}
-                                    >
-                                      <View
-                                        style={[
-                                          styles.waveformBar,
-                                          {
-                                            height: barHeight,
-                                            backgroundColor: isPlayed ? '#2B5BFF' : '#CBD5E1',
-                                          },
-                                        ]}
-                                      />
-                                    </Pressable>
-                                  );
-                                })}
-                              </View>
-
-                              {/* Time & Speed Controls */}
-                              <Text style={styles.voiceDurationText}>
-                                {isPlaying || currentTimeSeconds > 0
-                                  ? `${formatAudioTime(currentTimeSeconds)} / ${formatAudioTime(totalDurationSeconds || activeSession.durationSeconds || 17)}`
-                                  : activeSession.recordingLengthString || formatAudioTime(totalDurationSeconds || 17)}
-                              </Text>
-                              <Pressable
-                                style={styles.speedPill}
-                                onPress={cyclePlaybackSpeed}
-                              >
-                                <Text style={styles.speedPillText}>
-                                  {playbackSpeed.toFixed(1)}x
-                                </Text>
-                              </Pressable>
-                            </View>
-                          ) : (
-                            /* Recording Not Available State */
-                            <View style={styles.noRecordingRow}>
-                              <View style={styles.noRecordingIconCircle}>
-                                <Ionicons name="mic-off-outline" size={20} color="#94A3B8" />
-                              </View>
-                              <View style={styles.noRecordingTextCol}>
-                                <Text style={styles.noRecordingTitle}>Recording Not Available</Text>
-                                <Text style={styles.noRecordingSubtitle}>
-                                  Voice recording is not stored for this session or was removed after the 7-day retention period. Text transcript is saved below.
-                                </Text>
-                              </View>
-                              <View style={styles.noRecordingBadge}>
-                                <Text style={styles.noRecordingBadgeText}>{activeSession.durationString}</Text>
-                              </View>
-                            </View>
-                          )}
-
-                          {/* Auto-remove notice */}
-                          <View style={styles.recordingNoticeRow}>
-                            <Text style={styles.noticeIconCircle}>ⓘ</Text>
-                            <Text style={styles.noticeText}>
-                              {hasActiveRecording
-                                ? 'This recording will be automatically removed within 7 days in accordance with privacy rules.'
-                                : 'Audio recordings expire after 7 days. Text transcripts and AI suggestions are saved permanently.'}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-
-                      {/* ── SESSION TRANSCRIPT SECTION ── */}
-                      <View style={styles.sectionContainer}>
-                        <View style={styles.transcriptSectionHeader}>
-                          <Text style={styles.sectionHeaderTitle}>Session Transcript</Text>
-                          {Boolean(activeSession.correctionsCount > 0 || (activeSession.transcript && activeSession.transcript.some((t) => Boolean(t.correction)))) && (
-                            <Pressable
-                              style={styles.jumpCorrectionButton}
-                              onPress={handleJumpToNextCorrection}
-                              accessibilityRole="button"
-                              accessibilityLabel="Jump to next grammar correction"
+                    <Reveal key={activeSession.id} variant="fade" style={{ flex: 1 }}>
+                      <ScrollView
+                        ref={transcriptScrollRef}
+                        style={styles.detailScroll}
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={styles.detailScrollContent}
+                      >
+                        {/* Session Header Box */}
+                        <View style={styles.detailHeaderBox}>
+                          <View style={styles.detailHeaderLeft}>
+                            <View
+                              style={[
+                                styles.detailModeSquare,
+                                { backgroundColor: getModeBadgeBg(activeSession.mode) },
+                              ]}
                             >
-                              <NextCorrectionIcon color="#0057FF" size={13} />
-                              <Text style={styles.jumpCorrectionText}>
-                                Jump to Next Correction
+                              {renderModeIcon(activeSession.mode, 24)}
+                            </View>
+                            <View style={styles.detailHeaderTextGroup}>
+                              <Text style={styles.detailSessionTitle}>
+                                {activeSession.title}
                               </Text>
-                            </Pressable>
-                          )}
+                              <View style={styles.detailMetaRow}>
+                                <View style={styles.metaItem}>
+                                  <CalendarSmallIcon color="#94A3B8" size={12} />
+                                  <Text style={styles.metaText}>{activeSession.dateString}</Text>
+                                </View>
+                                <Text style={styles.metaDot}>•</Text>
+                                <View style={styles.metaItem}>
+                                  <ClockSmallIcon color="#94A3B8" size={12} />
+                                  <Text style={styles.metaText}>{activeSession.timeString}</Text>
+                                </View>
+                                <Text style={styles.metaDot}>•</Text>
+                                <View style={styles.metaItem}>
+                                  <TimerSmallIcon color="#94A3B8" size={12} />
+                                  <Text style={styles.metaText}>{activeSession.durationString}</Text>
+                                </View>
+                                <Text style={styles.metaDot}>•</Text>
+                                <View style={styles.metaItem}>
+                                  <RefreshCorrectionsIcon color="#94A3B8" size={12} />
+                                  <Text style={styles.metaText}>
+                                    {activeSession.correctionsCount} corrections
+                                  </Text>
+                                </View>
+                              </View>
+                            </View>
+                          </View>
+
+                          <Pressable style={styles.closeDetailButton} hitSlop={10}>
+                            <CloseCrossIcon size={18} color="#94A3B8" />
+                          </Pressable>
                         </View>
 
-                        {/* Transcript turns */}
-                        <View style={styles.transcriptList}>
-                          {activeSession.transcript.map((turn) => {
-                            const isUser = turn.speaker === 'user';
-                            return (
-                              <View
-                                key={turn.id}
-                                style={styles.turnRow}
-                                onLayout={(e) => {
-                                  correctionPositions.current[turn.id] =
-                                    e.nativeEvent.layout.y;
-                                }}
-                              >
-                                {/* Avatar */}
-                                <View
-                                  style={[
-                                    styles.turnAvatarCircle,
-                                    isUser
-                                      ? styles.userAvatarCircle
-                                      : styles.aiAvatarCircle,
-                                  ]}
-                                >
-                                  {isUser ? (
-                                    <ModeUserAvatarIcon size={16} color="#64748B" />
-                                  ) : (
-                                    renderModeIcon(activeSession.mode, 16)
-                                  )}
+                        {/* ── VOICE RECORDING SECTION ── */}
+                        <View style={styles.sectionContainer}>
+                          <Text style={styles.sectionHeaderTitle}>Voice Recording</Text>
+                          <View style={styles.voiceRecordingCard}>
+                            {hasActiveRecording ? (
+                              <View style={styles.voicePlayerRow}>
+                                {/* Play/Pause Button */}
+                                <PlayToggle playing={isPlaying} size={44} onPress={() => togglePlay()} />
+
+                                {/* Waveform Visualizer */}
+                                <View style={styles.waveformContainer}>
+                                  {waveformBars.map((barHeight, idx) => {
+                                    const fraction = idx / waveformBars.length;
+                                    const isPlayed = fraction <= playbackProgress;
+                                    return (
+                                      <Pressable
+                                        key={idx}
+                                        onPress={() => handleSeek(fraction)}
+                                        hitSlop={{ top: 8, bottom: 8, left: 1, right: 1 }}
+                                        style={styles.waveformBarTouch}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`Seek to ${Math.round(fraction * 100)}%`}
+                                      >
+                                        <View
+                                          style={[
+                                            styles.waveformBar,
+                                            {
+                                              height: barHeight,
+                                              backgroundColor: isPlayed ? '#2B5BFF' : '#CBD5E1',
+                                            },
+                                          ]}
+                                        />
+                                      </Pressable>
+                                    );
+                                  })}
                                 </View>
 
-                                {/* Turn Content */}
-                                <View style={styles.turnContentCol}>
-                                  {/* Speaker Name, Time & Audio Play Button */}
-                                  <View style={styles.speakerHeaderRow}>
-                                    <View style={styles.speakerHeaderLeft}>
-                                      <Text style={styles.speakerNameText}>
-                                        {isUser ? 'You' : 'AI'}
-                                      </Text>
-                                      <Text style={styles.speakerTimeText}>{turn.time}</Text>
-                                    </View>
-                                    {Boolean(hasActiveRecording && turn.audioUrl && !unreachableAudioUrls.has(turn.audioUrl)) && (
-                                      <Pressable
-                                        style={[
-                                          styles.turnPlayButton,
-                                          playingTurnId === turn.id && styles.turnPlayButtonActive,
-                                        ]}
-                                        onPress={() => togglePlayTurn(turn, activeSession)}
-                                        hitSlop={8}
-                                        accessibilityRole="button"
-                                        accessibilityLabel={`Play ${isUser ? 'your' : 'AI'} audio turn`}
-                                      >
-                                        {playingTurnId === turn.id ? (
-                                          <Ionicons name="pause" size={12} color="#2B5BFF" />
-                                        ) : (
-                                          <Ionicons name="volume-medium" size={13} color="#64748B" />
-                                        )}
-                                        <Text
-                                          style={[
-                                            styles.turnPlayText,
-                                            playingTurnId === turn.id && styles.turnPlayTextActive,
-                                          ]}
-                                        >
-                                          {playingTurnId === turn.id ? 'Playing' : 'Listen'}
-                                        </Text>
-                                      </Pressable>
+                                {/* Time & Speed Controls */}
+                                <Text style={styles.voiceDurationText}>
+                                  {isPlaying || currentTimeSeconds > 0
+                                    ? `${formatAudioTime(currentTimeSeconds)} / ${formatAudioTime(totalDurationSeconds || activeSession.durationSeconds || 17)}`
+                                    : (activeSession.durationSeconds ? formatAudioTime(activeSession.durationSeconds) : (activeSession.recordingLengthString && activeSession.recordingLengthString !== '0:00' ? activeSession.recordingLengthString : formatAudioTime(totalDurationSeconds || 17)))}
+                                </Text>
+                                <SpeedPill speed={playbackSpeed} onPress={cyclePlaybackSpeed} />
+                              </View>
+                            ) : (
+                              /* Recording Not Available State */
+                              <View style={styles.noRecordingRow}>
+                                <View style={styles.noRecordingIconCircle}>
+                                  <Ionicons name="mic-off-outline" size={20} color="#94A3B8" />
+                                </View>
+                                <View style={styles.noRecordingTextCol}>
+                                  <Text style={styles.noRecordingTitle}>Recording Not Available</Text>
+                                  <Text style={styles.noRecordingSubtitle}>
+                                    Voice recording is not stored for this session or was removed after the 7-day retention period. Text transcript is saved below.
+                                  </Text>
+                                </View>
+                                <View style={styles.noRecordingBadge}>
+                                  <Text style={styles.noRecordingBadgeText}>{activeSession.durationString}</Text>
+                                </View>
+                              </View>
+                            )}
+
+                            {/* Auto-remove notice */}
+                            <View style={styles.recordingNoticeRow}>
+                              <Text style={styles.noticeIconCircle}>ⓘ</Text>
+                              <Text style={styles.noticeText}>
+                                {hasActiveRecording
+                                  ? 'This recording will be automatically removed within 7 days in accordance with privacy rules.'
+                                  : 'Audio recordings expire after 7 days. Text transcripts and AI suggestions are saved permanently.'}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        {/* ── SESSION TRANSCRIPT SECTION ── */}
+                        <View style={styles.sectionContainer}>
+                          <View style={styles.transcriptSectionHeader}>
+                            <Text style={styles.sectionHeaderTitle}>Session Transcript</Text>
+                            {Boolean(activeSession.correctionsCount > 0 || (activeSession.transcript && activeSession.transcript.some((t) => Boolean(t.correction)))) && (
+                              <Pressable
+                                style={styles.jumpCorrectionButton}
+                                onPress={handleJumpToNextCorrection}
+                                accessibilityRole="button"
+                                accessibilityLabel="Jump to next grammar correction"
+                              >
+                                <NextCorrectionIcon color="#0057FF" size={13} />
+                                <Text style={styles.jumpCorrectionText}>
+                                  Jump to Next Correction
+                                </Text>
+                              </Pressable>
+                            )}
+                          </View>
+
+                          {/* Transcript turns */}
+                          <View style={styles.transcriptList}>
+                            {activeSession.transcript.map((turn, idx) => {
+                              const isUser = turn.speaker === 'user';
+                              return (
+                                <Reveal
+                                  key={turn.id}
+                                  index={idx}
+                                  style={styles.turnRow}
+                                  onLayout={(e) => {
+                                    correctionPositions.current[turn.id] =
+                                      e.nativeEvent.layout.y;
+                                  }}
+                                >
+                                  {/* Avatar */}
+                                  <View
+                                    style={[
+                                      styles.turnAvatarCircle,
+                                      isUser
+                                        ? styles.userAvatarCircle
+                                        : styles.aiAvatarCircle,
+                                    ]}
+                                  >
+                                    {isUser ? (
+                                      <ModeUserAvatarIcon size={16} color="#64748B" />
+                                    ) : (
+                                      renderModeIcon(activeSession.mode, 16)
                                     )}
                                   </View>
 
-                                  {/* Message Bubble */}
-                                  <View
-                                    style={[
-                                      styles.turnBubble,
-                                      isUser
-                                        ? styles.userTurnBubble
-                                        : styles.aiTurnBubble,
-                                      playingTurnId === turn.id && styles.turnBubblePlaying,
-                                    ]}
-                                  >
-                                    <Text style={styles.turnBubbleText}>{turn.message}</Text>
-                                  </View>
-
-                                  {/* Grammar Correction Box (if any) */}
-                                  {turn.correction && (
-                                    <View style={styles.correctionCard}>
-                                      {/* Correction Header */}
-                                      <Pressable
-                                        style={styles.correctionHeaderRow}
-                                        onPress={() =>
-                                          toggleCorrectionCollapse(turn.correction!.id)
-                                        }
-                                      >
-                                        <View style={styles.correctionTitleLeft}>
-                                          <View style={styles.redCrossCircle}>
-                                            <Text style={styles.redCrossMark}>✕</Text>
-                                          </View>
-                                          <Text style={styles.correctionCountText}>
-                                            {turn.correction.countText}
-                                          </Text>
-                                          <Text style={styles.correctionChevron}>
-                                            {collapsedCorrections[turn.correction.id]
-                                              ? '∨'
-                                              : '∧'}
-                                          </Text>
-                                        </View>
-
-                                        <View style={styles.correctionHeaderRight}>
-                                          {Boolean(hasActiveRecording && (turn.audioUrl || activeSession.fullConversationAudioUrl)) && (
-                                            <Pressable
-                                              style={styles.audioSpeakerButton}
-                                              onPress={() => {
-                                                if (turn.audioUrl) {
-                                                  togglePlayTurn(turn, activeSession);
-                                                } else {
-                                                  togglePlay(activeSession);
-                                                }
-                                              }}
-                                              hitSlop={6}
-                                            >
-                                              <VolumeSpeakerIcon color="#94A3B8" size={16} />
-                                            </Pressable>
-                                          )}
-                                          <Image
-                                            source={require('@/assets/images/maya-avatar.png')}
-                                            style={styles.miniMayaAvatar}
-                                          />
-                                        </View>
-                                      </Pressable>
-
-                                      {/* Correction Body (Collapsible) */}
-                                      {!collapsedCorrections[turn.correction.id] && (
-                                        <View style={styles.correctionBody}>
-                                          {/* Comparison boxes */}
-                                          <View style={styles.comparisonBoxesRow}>
-                                            {/* Original Box */}
-                                            <View style={styles.originalPhraseBox}>
-                                              <View style={styles.phraseLine}>
-                                                <Text style={styles.phraseCross}>✕ </Text>
-                                                <Text style={styles.originalStrikethroughText}>
-                                                  {turn.correction.originalText}
-                                                </Text>
-                                              </View>
-                                              <Text style={styles.phraseLabel}>Original</Text>
-                                            </View>
-
-                                            {/* Arrow */}
-                                            <Text style={styles.comparisonArrow}>→</Text>
-
-                                            {/* Corrected Box */}
-                                            <View style={styles.correctedPhraseBox}>
-                                              <View style={styles.phraseLine}>
-                                                <Text style={styles.phraseCheck}>✓ </Text>
-                                                <Text style={styles.correctedGreenText}>
-                                                  {turn.correction.correctedText}
-                                                </Text>
-                                              </View>
-                                              <Text style={styles.phraseLabel}>Corrected</Text>
-                                            </View>
-                                          </View>
-
-                                          {/* Explanation Why */}
-                                          <View style={styles.whyExplanationRow}>
-                                            <Text style={styles.whyPrefix}>Why: </Text>
-                                            <Text style={styles.whyExplanationText}>
-                                              {turn.correction.whyExplanation}
-                                            </Text>
-                                          </View>
-                                        </View>
+                                  {/* Turn Content */}
+                                  <View style={styles.turnContentCol}>
+                                    {/* Speaker Name, Time & Audio Play Button */}
+                                    <View style={styles.speakerHeaderRow}>
+                                      <View style={styles.speakerHeaderLeft}>
+                                        <Text style={styles.speakerNameText}>
+                                          {isUser ? 'You' : 'AI'}
+                                        </Text>
+                                        <Text style={styles.speakerTimeText}>{turn.time}</Text>
+                                      </View>
+                                      {Boolean(hasActiveRecording && turn.audioUrl && !unreachableAudioUrls.has(turn.audioUrl)) && (
+                                        <ListenPill
+                                          playing={playingTurnId === turn.id}
+                                          isUser={isUser}
+                                          onPress={() => togglePlayTurn(turn, activeSession)}
+                                        />
                                       )}
                                     </View>
-                                  )}
-                                </View>
-                              </View>
-                            );
-                          })}
+
+                                    {/* Message Bubble */}
+                                    <View
+                                      style={[
+                                        styles.turnBubble,
+                                        isUser
+                                          ? styles.userTurnBubble
+                                          : styles.aiTurnBubble,
+                                        playingTurnId === turn.id && styles.turnBubblePlaying,
+                                      ]}
+                                    >
+                                      <Text style={styles.turnBubbleText}>{turn.message}</Text>
+                                    </View>
+
+                                    {/* Grammar Correction Box (if any) */}
+                                    {turn.correction && (
+                                      <AnimatedCard style={styles.correctionCard}>
+                                        {/* Correction Header */}
+                                        <Pressable
+                                          style={styles.correctionHeaderRow}
+                                          onPress={() => {
+                                            haptic.selection();
+                                            toggleCorrectionCollapse(turn.correction!.id);
+                                          }}
+                                        >
+                                          <View style={styles.correctionTitleLeft}>
+                                            <View style={styles.redCrossCircle}>
+                                              <Text style={styles.redCrossMark}>✕</Text>
+                                            </View>
+                                            <Text style={styles.correctionCountText}>
+                                              {turn.correction.countText}
+                                            </Text>
+                                            <CorrectionChevron open={!collapsedCorrections[turn.correction.id]} />
+                                          </View>
+
+                                          <View style={styles.correctionHeaderRight}>
+                                            {Boolean(hasActiveRecording && (turn.audioUrl || activeSession.fullConversationAudioUrl)) && (
+                                              <Pressable
+                                                style={styles.audioSpeakerButton}
+                                                onPress={() => {
+                                                  if (turn.audioUrl) {
+                                                    togglePlayTurn(turn, activeSession);
+                                                  } else {
+                                                    togglePlay(activeSession);
+                                                  }
+                                                }}
+                                                hitSlop={6}
+                                              >
+                                                <VolumeSpeakerIcon color="#94A3B8" size={16} />
+                                              </Pressable>
+                                            )}
+                                            <Image
+                                              source={require('@/assets/images/maya-avatar.png')}
+                                              style={styles.miniMayaAvatar}
+                                            />
+                                          </View>
+                                        </Pressable>
+
+                                        {/* Correction Body (Collapsible) */}
+                                        <AnimatedCollapse open={!collapsedCorrections[turn.correction.id]}>
+                                          <View style={styles.correctionBody}>
+                                            {/* Comparison boxes */}
+                                            <View style={styles.comparisonBoxesRow}>
+                                              {/* Original Box */}
+                                              <View style={styles.originalPhraseBox}>
+                                                <View style={styles.phraseLine}>
+                                                  <Text style={styles.phraseCross}>✕ </Text>
+                                                  <Text style={styles.originalStrikethroughText}>
+                                                    {turn.correction.originalText}
+                                                  </Text>
+                                                </View>
+                                                <Text style={styles.phraseLabel}>Original</Text>
+                                              </View>
+
+                                              {/* Arrow */}
+                                              <Text style={styles.comparisonArrow}>→</Text>
+
+                                              {/* Corrected Box */}
+                                              <View style={styles.correctedPhraseBox}>
+                                                <View style={styles.phraseLine}>
+                                                  <Text style={styles.phraseCheck}>✓ </Text>
+                                                  <Text style={styles.correctedGreenText}>
+                                                    {turn.correction.correctedText}
+                                                  </Text>
+                                                </View>
+                                                <Text style={styles.phraseLabel}>Corrected</Text>
+                                              </View>
+                                            </View>
+
+                                            {/* Explanation Why */}
+                                            <View style={styles.whyExplanationRow}>
+                                              <Text style={styles.whyPrefix}>Why: </Text>
+                                              <Text style={styles.whyExplanationText}>
+                                                {turn.correction.whyExplanation}
+                                              </Text>
+                                            </View>
+                                          </View>
+                                        </AnimatedCollapse>
+                                      </AnimatedCard>
+                                    )}
+                                  </View>
+                                </Reveal>
+                              );
+                            })}
+                          </View>
                         </View>
-                      </View>
-                    </ScrollView>
+                      </ScrollView>
+                    </Reveal>
                   ) : (
                     <View style={styles.emptyDetailContainer}>
                       <Text style={styles.emptyDetailText}>
@@ -2104,352 +1752,14 @@ export default function HistoryScreen() {
               </View>
             </View>
           ) : (
-            // ─── MOBILE VIEW: LIST VIEW OR DETAIL VIEW ────────────────────
-            selectedSessionId && activeSession ? (
-              // ── MOBILE DETAIL VIEW ──
-              <View
-                key={activeSession.id}
-                style={[
-                  styles.mobileDetailContainer,
-                  Platform.OS === 'web' && ({
-                    animation: 'historyDetailFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
-                  } as any),
-                ]}
-              >
-                {/* Mobile Sub-Header: Back Button, Mode Icon & Title */}
-                <View style={styles.mobileDetailTopNav}>
-                  <Pressable
-                    style={styles.mobileBackButton}
-                    onPress={() => handleSelectSession(null)}
-                    hitSlop={10}
-                  >
-                    <ChevronLeftIcon size={20} color="#0F172A" />
-                  </Pressable>
-
-                  <View
-                    style={[
-                      styles.mobileDetailModeSquare,
-                      { backgroundColor: getModeBadgeBg(activeSession.mode) },
-                    ]}
-                  >
-                    {renderModeIcon(activeSession.mode, 20)}
-                  </View>
-
-                  <Text style={styles.mobileDetailTitle} numberOfLines={1}>
-                    {activeSession.title}
-                  </Text>
-
-                  <Pressable style={styles.mobileMoreButton} hitSlop={10}>
-                    <MoreVerticalIcon color="#94A3B8" size={18} />
-                  </Pressable>
-                </View>
-
-                {/* Sub-meta line */}
-                <View style={styles.mobileDetailMetaRow}>
-                  <View style={styles.metaItem}>
-                    <CalendarSmallIcon color="#94A3B8" size={12} />
-                    <Text style={styles.metaText}>{activeSession.dateString}</Text>
-                  </View>
-                  <Text style={styles.metaDot}>•</Text>
-                  <View style={styles.metaItem}>
-                    <ClockSmallIcon color="#94A3B8" size={12} />
-                    <Text style={styles.metaText}>{activeSession.timeString}</Text>
-                  </View>
-                  <Text style={styles.metaDot}>•</Text>
-                  <View style={styles.metaItem}>
-                    <TimerSmallIcon color="#94A3B8" size={12} />
-                    <Text style={styles.metaText}>{activeSession.durationString}</Text>
-                  </View>
-                  <Text style={styles.metaDot}>•</Text>
-                  <View style={styles.metaItem}>
-                    <RefreshCorrectionsIcon color="#94A3B8" size={12} />
-                    <Text style={styles.metaText}>
-                      {activeSession.correctionsCount} corrections
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Scrollable Detail Body */}
-                <ScrollView
-                  ref={transcriptScrollRef}
-                  style={styles.mobileDetailScroll}
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={styles.mobileDetailScrollContent}
-                >
-                  {/* Voice Recording */}
-                  <View style={styles.sectionContainer}>
-                    <Text style={styles.sectionHeaderTitle}>Voice Recording</Text>
-                    <View style={styles.voiceRecordingCard}>
-                      {hasActiveRecording ? (
-                        <View style={styles.voicePlayerRow}>
-                          <Pressable style={styles.voicePlayButton} onPress={() => togglePlay()}>
-                            {isPlaying ? (
-                              <HistoryPauseIcon size={42} color="#2B5BFF" />
-                            ) : (
-                              <HistoryPlayIcon size={42} color="#2B5BFF" />
-                            )}
-                          </Pressable>
-
-                          <View style={styles.waveformContainer}>
-                            {waveformBars.slice(0, 32).map((barHeight, idx) => {
-                              const fraction = idx / 32;
-                              const isPlayed = fraction <= playbackProgress;
-                              return (
-                                <Pressable
-                                  key={idx}
-                                  onPress={() => handleSeek(fraction)}
-                                  hitSlop={{ top: 8, bottom: 8, left: 1, right: 1 }}
-                                  style={styles.waveformBarTouch}
-                                  accessibilityRole="button"
-                                  accessibilityLabel={`Seek to ${Math.round(fraction * 100)}%`}
-                                >
-                                  <View
-                                    style={[
-                                      styles.waveformBar,
-                                      {
-                                        height: barHeight,
-                                        backgroundColor: isPlayed ? '#2B5BFF' : '#CBD5E1',
-                                      },
-                                    ]}
-                                  />
-                                </Pressable>
-                              );
-                            })}
-                          </View>
-
-                          <Text style={styles.voiceDurationText}>
-                            {isPlaying || currentTimeSeconds > 0
-                              ? `${formatAudioTime(currentTimeSeconds)} / ${formatAudioTime(totalDurationSeconds || activeSession.durationSeconds || 17)}`
-                              : activeSession.recordingLengthString || formatAudioTime(totalDurationSeconds || 17)}
-                          </Text>
-                          <Pressable
-                            style={styles.speedPill}
-                            onPress={cyclePlaybackSpeed}
-                          >
-                            <Text style={styles.speedPillText}>
-                              {playbackSpeed.toFixed(1)}x
-                            </Text>
-                          </Pressable>
-                        </View>
-                      ) : (
-                        /* Recording Not Available State */
-                        <View style={styles.noRecordingRow}>
-                          <View style={styles.noRecordingIconCircle}>
-                            <Ionicons name="mic-off-outline" size={20} color="#94A3B8" />
-                          </View>
-                          <View style={styles.noRecordingTextCol}>
-                            <Text style={styles.noRecordingTitle}>Recording Not Available</Text>
-                            <Text style={styles.noRecordingSubtitle}>
-                              Voice recording is not stored for this session or was removed after the 7-day retention period. Text transcript is saved below.
-                            </Text>
-                          </View>
-                          <View style={styles.noRecordingBadge}>
-                            <Text style={styles.noRecordingBadgeText}>{activeSession.durationString}</Text>
-                          </View>
-                        </View>
-                      )}
-
-                      <View style={styles.recordingNoticeRow}>
-                        <Text style={styles.noticeIconCircle}>ⓘ</Text>
-                        <Text style={styles.noticeText}>
-                          {hasActiveRecording
-                            ? 'This recording will be automatically removed within 7 days in accordance with privacy rules.'
-                            : 'Audio recordings expire after 7 days. Text transcripts and AI suggestions are saved permanently.'}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Session Transcript */}
-                  <View style={styles.sectionContainer}>
-                    <View style={styles.transcriptSectionHeader}>
-                      <Text style={styles.sectionHeaderTitle}>Session Transcript</Text>
-                      {Boolean(activeSession.correctionsCount > 0 || (activeSession.transcript && activeSession.transcript.some((t) => Boolean(t.correction)))) && (
-                        <Pressable
-                          style={styles.jumpCorrectionButton}
-                          onPress={handleJumpToNextCorrection}
-                          accessibilityRole="button"
-                          accessibilityLabel="Jump to next grammar correction"
-                        >
-                          <NextCorrectionIcon color="#0057FF" size={13} />
-                          <Text style={styles.jumpCorrectionText}>
-                            Jump to Next Correction
-                          </Text>
-                        </Pressable>
-                      )}
-                    </View>
-
-                    {/* Messages */}
-                    <View style={styles.transcriptList}>
-                      {activeSession.transcript.map((turn) => {
-                        const isUser = turn.speaker === 'user';
-                        return (
-                          <View
-                            key={turn.id}
-                            style={styles.turnRow}
-                            onLayout={(e) => {
-                              correctionPositions.current[turn.id] =
-                                e.nativeEvent.layout.y;
-                            }}
-                          >
-                            <View
-                              style={[
-                                styles.turnAvatarCircle,
-                                isUser
-                                  ? styles.userAvatarCircle
-                                  : styles.aiAvatarCircle,
-                              ]}
-                            >
-                              {isUser ? (
-                                <ModeUserAvatarIcon size={16} color="#64748B" />
-                              ) : (
-                                renderModeIcon(activeSession.mode, 16)
-                              )}
-                            </View>
-
-                            <View style={styles.turnContentCol}>
-                              {/* Speaker Name, Time & Audio Play Button */}
-                              <View style={styles.speakerHeaderRow}>
-                                <View style={styles.speakerHeaderLeft}>
-                                  <Text style={styles.speakerNameText}>
-                                    {isUser ? 'You' : 'AI'}
-                                  </Text>
-                                  <Text style={styles.speakerTimeText}>{turn.time}</Text>
-                                </View>
-                                {Boolean(hasActiveRecording && turn.audioUrl && !unreachableAudioUrls.has(turn.audioUrl)) && (
-                                  <Pressable
-                                    style={[
-                                      styles.turnPlayButton,
-                                      playingTurnId === turn.id && styles.turnPlayButtonActive,
-                                    ]}
-                                    onPress={() => togglePlayTurn(turn, activeSession)}
-                                    hitSlop={8}
-                                    accessibilityRole="button"
-                                    accessibilityLabel={`Play ${isUser ? 'your' : 'AI'} audio turn`}
-                                  >
-                                    {playingTurnId === turn.id ? (
-                                      <Ionicons name="pause" size={12} color="#2B5BFF" />
-                                    ) : (
-                                      <Ionicons name="volume-medium" size={13} color="#64748B" />
-                                    )}
-                                    <Text
-                                      style={[
-                                        styles.turnPlayText,
-                                        playingTurnId === turn.id && styles.turnPlayTextActive,
-                                      ]}
-                                    >
-                                      {playingTurnId === turn.id ? 'Playing' : 'Listen'}
-                                    </Text>
-                                  </Pressable>
-                                )}
-                              </View>
-
-                              {/* Message Bubble */}
-                              <View
-                                style={[
-                                  styles.turnBubble,
-                                  isUser
-                                    ? styles.userTurnBubble
-                                    : styles.aiTurnBubble,
-                                  playingTurnId === turn.id && styles.turnBubblePlaying,
-                                ]}
-                              >
-                                <Text style={styles.turnBubbleText}>{turn.message}</Text>
-                              </View>
-
-                              {turn.correction && (
-                                <View style={styles.correctionCard}>
-                                  <Pressable
-                                    style={styles.correctionHeaderRow}
-                                    onPress={() =>
-                                      toggleCorrectionCollapse(turn.correction!.id)
-                                    }
-                                  >
-                                    <View style={styles.correctionTitleLeft}>
-                                      <View style={styles.redCrossCircle}>
-                                        <Text style={styles.redCrossMark}>✕</Text>
-                                      </View>
-                                      <Text style={styles.correctionCountText}>
-                                        {turn.correction.countText}
-                                      </Text>
-                                      <Text style={styles.correctionChevron}>
-                                        {collapsedCorrections[turn.correction.id]
-                                          ? '∨'
-                                          : '∧'}
-                                      </Text>
-                                    </View>
-
-                                    <View style={styles.correctionHeaderRight}>
-                                      {Boolean(hasActiveRecording && (turn.audioUrl || activeSession.fullConversationAudioUrl)) && (
-                                        <Pressable
-                                          style={styles.audioSpeakerButton}
-                                          onPress={() => {
-                                            if (turn.audioUrl) {
-                                              togglePlayTurn(turn, activeSession);
-                                            } else {
-                                              togglePlay(activeSession);
-                                            }
-                                          }}
-                                          hitSlop={6}
-                                        >
-                                          <VolumeSpeakerIcon color="#94A3B8" size={16} />
-                                        </Pressable>
-                                      )}
-                                      <Image
-                                        source={require('@/assets/images/maya-avatar.png')}
-                                        style={styles.miniMayaAvatar}
-                                      />
-                                    </View>
-                                  </Pressable>
-
-                                  {!collapsedCorrections[turn.correction.id] && (
-                                    <View style={styles.correctionBody}>
-                                      <View style={styles.comparisonBoxesRow}>
-                                        <View style={styles.originalPhraseBox}>
-                                          <View style={styles.phraseLine}>
-                                            <Text style={styles.phraseCross}>✕ </Text>
-                                            <Text style={styles.originalStrikethroughText}>
-                                              {turn.correction.originalText}
-                                            </Text>
-                                          </View>
-                                          <Text style={styles.phraseLabel}>Original</Text>
-                                        </View>
-
-                                        <Text style={styles.comparisonArrow}>→</Text>
-
-                                        <View style={styles.correctedPhraseBox}>
-                                          <View style={styles.phraseLine}>
-                                            <Text style={styles.phraseCheck}>✓ </Text>
-                                            <Text style={styles.correctedGreenText}>
-                                              {turn.correction.correctedText}
-                                            </Text>
-                                          </View>
-                                          <Text style={styles.phraseLabel}>Corrected</Text>
-                                        </View>
-                                      </View>
-
-                                      <View style={styles.whyExplanationRow}>
-                                        <Text style={styles.whyPrefix}>Why: </Text>
-                                        <Text style={styles.whyExplanationText}>
-                                          {turn.correction.whyExplanation}
-                                        </Text>
-                                      </View>
-                                    </View>
-                                  )}
-                                </View>
-                              )}
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </View>
-                </ScrollView>
-              </View>
-            ) : (
-              // ── MOBILE LIST VIEW ──
+            // ─── MOBILE VIEW: LIST VIEW WITH DETAIL OVERLAY ─────────────────
+            <View style={{ flex: 1, position: 'relative' }}>
+              {/* ── MOBILE LIST VIEW (Kept mounted to preserve scroll position & eliminate back-lag) ── */}
               <ScrollView
-                style={styles.mobileListScroll}
+                style={[
+                  styles.mobileListScroll,
+                  selectedSessionId ? { display: 'none' } : undefined,
+                ]}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.mobileListScrollContent}
               >
@@ -2463,77 +1773,380 @@ export default function HistoryScreen() {
 
                 {/* Filters Row: Search input + All Modes Button */}
                 <View style={styles.mobileFiltersRow}>
-                  <View style={styles.mobileSearchContainer}>
-                    <SearchIcon color="#94A3B8" size={18} />
-                    <TextInput
-                      style={styles.mobileSearchInput}
-                      placeholder="Search conversations..."
-                      placeholderTextColor="#94A3B8"
-                      value={searchQuery}
-                      onChangeText={setSearchQuery}
-                    />
-                    {searchQuery.length > 0 && (
-                      <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
-                        <CloseCrossIcon size={14} color="#94A3B8" />
-                      </Pressable>
-                    )}
-                  </View>
+                  <AnimatedSearchBar
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    placeholder="Search conversations..."
+                    containerStyle={styles.mobileSearchContainer}
+                    inputStyle={styles.mobileSearchInput}
+                    leading={<SearchIcon color="#94A3B8" size={18} />}
+                    clearIcon={<CloseCrossIcon size={14} color="#94A3B8" />}
+                  />
 
-                  <Pressable
+                  <PressableScale
                     style={styles.mobileFilterButton}
+                    haptic="selection"
                     onPress={() => setIsFilterModalOpen(true)}
                   >
                     <FilterLinesIcon color="#0F172A" size={16} />
                     <Text style={styles.mobileFilterButtonText}>
                       {MODES_LIST.find((m) => m.id === selectedMode)?.label || 'All Modes'}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 </View>
 
                 {/* Grouped Sessions */}
                 {isLoading ? (
                   <View style={styles.skeletonContainer}>
                     {[1, 2, 3, 4].map((idx) => (
-                      <View key={idx} style={styles.skeletonCard}>
+                      <PulseView key={idx} style={styles.skeletonCard}>
                         <View style={styles.skeletonIconBox} />
                         <View style={styles.skeletonInfoCol}>
                           <View style={styles.skeletonTitleBar} />
                           <View style={styles.skeletonMetaBar} />
                         </View>
                         <View style={styles.skeletonPlayCircle} />
-                      </View>
+                      </PulseView>
                     ))}
                   </View>
                 ) : Object.keys(groupedSessions).length === 0 ? (
-                  <View style={styles.emptyResultsBox}>
+                  <Reveal variant="fade" style={styles.emptyResultsBox}>
+                    <Ionicons name="search-outline" size={28} color="#CBD5E1" style={{ marginBottom: 10 }} />
                     <Text style={styles.emptyResultsText}>
                       No conversations found matching your search.
                     </Text>
-                  </View>
+                  </Reveal>
                 ) : (
                   Object.entries(groupedSessions).map(([groupTitle, sessions]) => (
                     <View key={groupTitle} style={styles.groupContainer}>
                       <Text style={styles.groupHeaderTitle}>{groupTitle}</Text>
-                      {sessions.map((item) => (
-                        <MobileSessionCard
-                          key={item.id}
-                          item={item}
-                          isSelected={item.id === selectedSessionId}
-                          onSelect={handleSelectSession}
-                          onTogglePlay={handleCardTogglePlay}
-                          isPlayingThisSession={item.id === activeAudioSessionIdRef.current && isPlaying}
-                          isAudioUnreachable={Boolean(
-                            (item.fullConversationAudioUrl && unreachableAudioUrls.has(item.fullConversationAudioUrl)) ||
-                            (item.userAudioUrl && unreachableAudioUrls.has(item.userAudioUrl)) ||
-                            (item.modelAudioUrl && unreachableAudioUrls.has(item.modelAudioUrl))
-                          )}
-                        />
+                      {sessions.map((item, i) => (
+                        <Reveal key={item.id} index={i}>
+                          <MobileSessionCard
+                            item={item}
+                            isSelected={item.id === selectedSessionId}
+                            onSelect={handleSelectSession}
+                            onTogglePlay={handleCardTogglePlay}
+                            isPlayingThisSession={item.id === activeAudioSessionIdRef.current && isPlaying}
+                            isAudioUnreachable={Boolean(
+                              (item.fullConversationAudioUrl && unreachableAudioUrls.has(item.fullConversationAudioUrl)) ||
+                              (item.userAudioUrl && unreachableAudioUrls.has(item.userAudioUrl)) ||
+                              (item.modelAudioUrl && unreachableAudioUrls.has(item.modelAudioUrl))
+                            )}
+                          />
+                        </Reveal>
                       ))}
                     </View>
                   ))
                 )}
               </ScrollView>
-            )
+
+              {/* ── MOBILE DETAIL VIEW (Slide-in overlay) ── */}
+              {selectedSessionId && activeSession ? (
+                <Reveal
+                  key={activeSession.id}
+                  variant="slide"
+                  style={[styles.mobileDetailContainer, StyleSheet.absoluteFill, { zIndex: 10 }]}
+                >
+                  {/* Mobile Sub-Header: Back Button, Mode Icon & Title */}
+                  <View style={styles.mobileDetailTopNav}>
+                    <PressableScale
+                      style={styles.mobileBackButton}
+                      haptic="selection"
+                      onPress={() => handleSelectSession(null)}
+                      hitSlop={10}
+                    >
+                      <ChevronLeftIcon size={20} color="#0F172A" />
+                    </PressableScale>
+
+                    <View
+                      style={[
+                        styles.mobileDetailModeSquare,
+                        { backgroundColor: getModeBadgeBg(activeSession.mode) },
+                      ]}
+                    >
+                      {renderModeIcon(activeSession.mode, 20)}
+                    </View>
+
+                    <Text style={styles.mobileDetailTitle} numberOfLines={1}>
+                      {activeSession.title}
+                    </Text>
+
+                    <Pressable style={styles.mobileMoreButton} hitSlop={10}>
+                      <MoreVerticalIcon color="#94A3B8" size={18} />
+                    </Pressable>
+                  </View>
+
+                  {/* Sub-meta line */}
+                  <View style={styles.mobileDetailMetaRow}>
+                    <View style={styles.metaItem}>
+                      <CalendarSmallIcon color="#94A3B8" size={12} />
+                      <Text style={styles.metaText}>{activeSession.dateString}</Text>
+                    </View>
+                    <Text style={styles.metaDot}>•</Text>
+                    <View style={styles.metaItem}>
+                      <ClockSmallIcon color="#94A3B8" size={12} />
+                      <Text style={styles.metaText}>{activeSession.timeString}</Text>
+                    </View>
+                    <Text style={styles.metaDot}>•</Text>
+                    <View style={styles.metaItem}>
+                      <TimerSmallIcon color="#94A3B8" size={12} />
+                      <Text style={styles.metaText}>{activeSession.durationString}</Text>
+                    </View>
+                    <Text style={styles.metaDot}>•</Text>
+                    <View style={styles.metaItem}>
+                      <RefreshCorrectionsIcon color="#94A3B8" size={12} />
+                      <Text style={styles.metaText}>
+                        {activeSession.correctionsCount} corrections
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Scrollable Detail Body */}
+                  <ScrollView
+                    ref={transcriptScrollRef}
+                    style={styles.mobileDetailScroll}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={styles.mobileDetailScrollContent}
+                  >
+                    {/* Voice Recording */}
+                    <View style={styles.sectionContainer}>
+                      <Text style={styles.sectionHeaderTitle}>Voice Recording</Text>
+                      <View style={styles.voiceRecordingCard}>
+                        {hasActiveRecording ? (
+                          <View style={styles.voicePlayerRow}>
+                            <PlayToggle playing={isPlaying} size={42} onPress={() => togglePlay()} />
+
+                            <View style={styles.waveformContainer}>
+                              {waveformBars.slice(0, 32).map((barHeight, idx) => {
+                                const fraction = idx / 32;
+                                const isPlayed = fraction <= playbackProgress;
+                                return (
+                                  <Pressable
+                                    key={idx}
+                                    onPress={() => handleSeek(fraction)}
+                                    hitSlop={{ top: 8, bottom: 8, left: 1, right: 1 }}
+                                    style={styles.waveformBarTouch}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Seek to ${Math.round(fraction * 100)}%`}
+                                  >
+                                    <View
+                                      style={[
+                                        styles.waveformBar,
+                                        {
+                                          height: barHeight,
+                                          backgroundColor: isPlayed ? '#2B5BFF' : '#CBD5E1',
+                                        },
+                                      ]}
+                                    />
+                                  </Pressable>
+                                );
+                              })}
+                            </View>
+
+                            <Text style={styles.voiceDurationText}>
+                              {isPlaying || currentTimeSeconds > 0
+                                ? `${formatAudioTime(currentTimeSeconds)} / ${formatAudioTime(totalDurationSeconds || activeSession.durationSeconds || 17)}`
+                                : (activeSession.durationSeconds ? formatAudioTime(activeSession.durationSeconds) : (activeSession.recordingLengthString && activeSession.recordingLengthString !== '0:00' ? activeSession.recordingLengthString : formatAudioTime(totalDurationSeconds || 17)))}
+                            </Text>
+                            <SpeedPill speed={playbackSpeed} onPress={cyclePlaybackSpeed} />
+                          </View>
+                        ) : (
+                          /* Recording Not Available State */
+                          <View style={styles.noRecordingRow}>
+                            <View style={styles.noRecordingIconCircle}>
+                              <Ionicons name="mic-off-outline" size={20} color="#94A3B8" />
+                            </View>
+                            <View style={styles.noRecordingTextCol}>
+                              <Text style={styles.noRecordingTitle}>Recording Not Available</Text>
+                              <Text style={styles.noRecordingSubtitle}>
+                                Voice recording is not stored for this session or was removed after the 7-day retention period. Text transcript is saved below.
+                              </Text>
+                            </View>
+                            <View style={styles.noRecordingBadge}>
+                              <Text style={styles.noRecordingBadgeText}>{activeSession.durationString}</Text>
+                            </View>
+                          </View>
+                        )}
+
+                        <View style={styles.recordingNoticeRow}>
+                          <Text style={styles.noticeIconCircle}>ⓘ</Text>
+                          <Text style={styles.noticeText}>
+                            {hasActiveRecording
+                              ? 'This recording will be automatically removed within 7 days in accordance with privacy rules.'
+                              : 'Audio recordings expire after 7 days. Text transcripts and AI suggestions are saved permanently.'}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Session Transcript */}
+                    <View style={styles.sectionContainer}>
+                      <View style={styles.transcriptSectionHeader}>
+                        <Text style={styles.sectionHeaderTitle}>Session Transcript</Text>
+                        {Boolean(activeSession.correctionsCount > 0 || (activeSession.transcript && activeSession.transcript.some((t) => Boolean(t.correction)))) && (
+                          <Pressable
+                            style={styles.jumpCorrectionButton}
+                            onPress={handleJumpToNextCorrection}
+                            accessibilityRole="button"
+                            accessibilityLabel="Jump to next grammar correction"
+                          >
+                            <NextCorrectionIcon color="#0057FF" size={13} />
+                            <Text style={styles.jumpCorrectionText}>
+                              Jump to Next Correction
+                            </Text>
+                          </Pressable>
+                        )}
+                      </View>
+
+                      {/* Messages */}
+                      <View style={styles.transcriptList}>
+                        {activeSession.transcript.map((turn, idx) => {
+                          const isUser = turn.speaker === 'user';
+                          return (
+                            <Reveal
+                              key={turn.id}
+                              index={idx}
+                              style={styles.turnRow}
+                              onLayout={(e) => {
+                                correctionPositions.current[turn.id] =
+                                  e.nativeEvent.layout.y;
+                              }}
+                            >
+                              <View
+                                style={[
+                                  styles.turnAvatarCircle,
+                                  isUser
+                                    ? styles.userAvatarCircle
+                                    : styles.aiAvatarCircle,
+                                ]}
+                              >
+                                {isUser ? (
+                                  <ModeUserAvatarIcon size={16} color="#64748B" />
+                                ) : (
+                                  renderModeIcon(activeSession.mode, 16)
+                                )}
+                              </View>
+
+                              <View style={styles.turnContentCol}>
+                                {/* Speaker Name, Time & Audio Play Button */}
+                                <View style={styles.speakerHeaderRow}>
+                                  <View style={styles.speakerHeaderLeft}>
+                                    <Text style={styles.speakerNameText}>
+                                      {isUser ? 'You' : 'AI'}
+                                    </Text>
+                                    <Text style={styles.speakerTimeText}>{turn.time}</Text>
+                                  </View>
+                                  {Boolean(hasActiveRecording && turn.audioUrl && !unreachableAudioUrls.has(turn.audioUrl)) && (
+                                    <ListenPill
+                                      playing={playingTurnId === turn.id}
+                                      isUser={isUser}
+                                      onPress={() => togglePlayTurn(turn, activeSession)}
+                                    />
+                                  )}
+                                </View>
+
+                                {/* Message Bubble */}
+                                <View
+                                  style={[
+                                    styles.turnBubble,
+                                    isUser
+                                      ? styles.userTurnBubble
+                                      : styles.aiTurnBubble,
+                                    playingTurnId === turn.id && styles.turnBubblePlaying,
+                                  ]}
+                                >
+                                  <Text style={styles.turnBubbleText}>{turn.message}</Text>
+                                </View>
+
+                                {turn.correction && (
+                                  <AnimatedCard style={styles.correctionCard}>
+                                    <Pressable
+                                      style={styles.correctionHeaderRow}
+                                      onPress={() => {
+                                        haptic.selection();
+                                        toggleCorrectionCollapse(turn.correction!.id);
+                                      }}
+                                    >
+                                      <View style={styles.correctionTitleLeft}>
+                                        <View style={styles.redCrossCircle}>
+                                          <Text style={styles.redCrossMark}>✕</Text>
+                                        </View>
+                                        <Text style={styles.correctionCountText}>
+                                          {turn.correction.countText}
+                                        </Text>
+                                        <CorrectionChevron open={!collapsedCorrections[turn.correction.id]} />
+                                      </View>
+
+                                      <View style={styles.correctionHeaderRight}>
+                                        {Boolean(hasActiveRecording && (turn.audioUrl || activeSession.fullConversationAudioUrl)) && (
+                                          <Pressable
+                                            style={styles.audioSpeakerButton}
+                                            onPress={() => {
+                                              if (turn.audioUrl) {
+                                                togglePlayTurn(turn, activeSession);
+                                              } else {
+                                                togglePlay(activeSession);
+                                              }
+                                            }}
+                                            hitSlop={6}
+                                          >
+                                            <VolumeSpeakerIcon color="#94A3B8" size={16} />
+                                          </Pressable>
+                                        )}
+                                        <Image
+                                          source={require('@/assets/images/maya-avatar.png')}
+                                          style={styles.miniMayaAvatar}
+                                        />
+                                      </View>
+                                    </Pressable>
+
+                                    <AnimatedCollapse open={!collapsedCorrections[turn.correction.id]}>
+                                      <View style={styles.correctionBody}>
+                                        <View style={styles.comparisonBoxesRow}>
+                                          <View style={styles.originalPhraseBox}>
+                                            <View style={styles.phraseLine}>
+                                              <Text style={styles.phraseCross}>✕ </Text>
+                                              <Text style={styles.originalStrikethroughText}>
+                                                {turn.correction.originalText}
+                                              </Text>
+                                            </View>
+                                            <Text style={styles.phraseLabel}>Original</Text>
+                                          </View>
+
+                                          <Text style={styles.comparisonArrow}>→</Text>
+
+                                          <View style={styles.correctedPhraseBox}>
+                                            <View style={styles.phraseLine}>
+                                              <Text style={styles.phraseCheck}>✓ </Text>
+                                              <Text style={styles.correctedGreenText}>
+                                                {turn.correction.correctedText}
+                                              </Text>
+                                            </View>
+                                            <Text style={styles.phraseLabel}>Corrected</Text>
+                                          </View>
+                                        </View>
+
+                                        <View style={styles.whyExplanationRow}>
+                                          <Text style={styles.whyPrefix}>Why: </Text>
+                                          <Text style={styles.whyExplanationText}>
+                                            {turn.correction.whyExplanation}
+                                          </Text>
+                                        </View>
+                                      </View>
+                                    </AnimatedCollapse>
+                                  </AnimatedCard>
+                                )}
+                              </View>
+                            </Reveal>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  </ScrollView>
+                </Reveal>
+              ) : null}
+            </View>
           )}
 
 
@@ -2557,8 +2170,10 @@ export default function HistoryScreen() {
               {MODES_LIST.map((modeItem) => {
                 const isSelected = selectedMode === modeItem.id;
                 return (
-                  <Pressable
+                  <PressableScale
                     key={modeItem.id}
+                    haptic="selection"
+                    scaleTo={0.98}
                     style={[
                       styles.modalOptionRow,
                       isSelected && styles.modalOptionRowSelected,
@@ -2577,7 +2192,7 @@ export default function HistoryScreen() {
                       {modeItem.label}
                     </Text>
                     {isSelected && <Text style={styles.modalOptionCheck}>✓</Text>}
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </View>
@@ -2761,8 +2376,10 @@ const styles = StyleSheet.create({
   },
   groupHeaderTitle: {
     ...fontStyle('outfit', 'semiBold'),
-    fontSize: 13,
-    color: '#0F172A',
+    fontSize: 12,
+    color: '#64748B',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     marginBottom: 10,
   },
   sessionCard: {
@@ -2803,23 +2420,11 @@ const styles = StyleSheet.create({
     opacity: 0.96,
   },
   sessionCardSelected: {
-    borderColor: '#3B82F6',
-    borderWidth: 1.5,
-    backgroundColor: '#F8FAFC',
+    borderColor: '#BFD2FF',
+    backgroundColor: '#F5F8FF',
     ...(Platform.OS === 'web'
-      ? {
-          boxShadow: '0 2px 10px rgba(59, 130, 246, 0.12), 0 1px 2px rgba(0,0,0,0.02)',
-        }
-      : {
-          shadowColor: '#3B82F6',
-          shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 2,
-        }),
-  },
-  modeIconSquareSelected: {
-    transform: [{ scale: 1.05 }],
+      ? { boxShadow: '0 4px 14px rgba(43, 91, 255, 0.10)' }
+      : { shadowColor: '#2B5BFF', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 2 }),
   },
   modeIconSquare: {
     width: 44,
@@ -2933,11 +2538,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   voiceRecordingCard: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#F5F8FF',
     borderRadius: Radii.xl,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#F1F5F9',
+    borderColor: '#E3EAFB',
   },
   voicePlayerRow: {
     flexDirection: 'row',
@@ -3102,16 +2707,21 @@ const styles = StyleSheet.create({
     borderColor: '#2B5BFF',
     borderWidth: 1.5,
     backgroundColor: '#F0F7FF',
+    ...(Platform.OS === 'web'
+      ? { boxShadow: '0 0 0 4px rgba(43, 91, 255, 0.08)' }
+      : { shadowColor: '#2B5BFF', shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 }),
   },
   userTurnBubble: {
     backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: '#F1F5F9',
+    borderColor: '#EEF2F6',
+    borderTopLeftRadius: 4,
   },
   aiTurnBubble: {
     backgroundColor: '#F0FDF4',
     borderWidth: 1,
     borderColor: '#DCFCE7',
+    borderTopLeftRadius: 4,
   },
   turnBubbleText: {
     ...fontStyle('inter', 'regular'),
@@ -3124,10 +2734,11 @@ const styles = StyleSheet.create({
   correctionCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#FECDD3',
+    borderColor: '#FFD9DF',
     borderRadius: 14,
     padding: 12,
     marginTop: 8,
+    overflow: 'hidden',
   },
   correctionHeaderRow: {
     flexDirection: 'row',
@@ -3260,7 +2871,7 @@ const styles = StyleSheet.create({
   mobileListScrollContent: {
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 80,
+    paddingBottom: 110,
   },
   mobileTitleSection: {
     marginBottom: 16,
@@ -3335,20 +2946,11 @@ const styles = StyleSheet.create({
     opacity: 0.96,
   },
   mobileSessionCardSelected: {
-    borderColor: '#3B82F6',
-    borderWidth: 1.5,
-    backgroundColor: '#F8FAFC',
+    borderColor: '#BFD2FF',
+    backgroundColor: '#F5F8FF',
     ...(Platform.OS === 'web'
-      ? {
-          boxShadow: '0 2px 10px rgba(59, 130, 246, 0.12), 0 1px 2px rgba(0,0,0,0.02)',
-        }
-      : {
-          shadowColor: '#3B82F6',
-          shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 2,
-        }),
+      ? { boxShadow: '0 4px 14px rgba(43, 91, 255, 0.10)' }
+      : { shadowColor: '#2B5BFF', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 2 }),
   },
   mobileCardMetaGrid: {
     flexDirection: 'row',
@@ -3405,7 +3007,7 @@ const styles = StyleSheet.create({
   mobileDetailScrollContent: {
     paddingHorizontal: 20,
     paddingTop: 10,
-    paddingBottom: 40,
+    paddingBottom: 100,
   },
 
 

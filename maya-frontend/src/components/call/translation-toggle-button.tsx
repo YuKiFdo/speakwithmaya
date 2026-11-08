@@ -10,17 +10,9 @@ import {
   StyleProp,
   ViewStyle,
   LayoutAnimation,
-  UIManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
-
-if (
-  Platform.OS === 'android' &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 interface TranslationToggleButtonProps {
   isExpanded: boolean;

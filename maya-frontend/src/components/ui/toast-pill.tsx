@@ -10,18 +10,10 @@ import {
   TextStyle,
   Pressable,
   LayoutAnimation,
-  UIManager,
 } from 'react-native';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { Radii } from '@/theme/tokens';
-
-if (
-  Platform.OS === 'android' &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 // ─── SVG ICONS FOR TOAST PILL ────────────────────────────────────────────────
 

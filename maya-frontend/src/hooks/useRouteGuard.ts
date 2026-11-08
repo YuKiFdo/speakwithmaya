@@ -144,15 +144,15 @@ export function useRouteGuard() {
       routePath === 'onboarding/otp' ||
       routePath === 'onboarding/name';
 
-    // Real-time check: If user claims to be authenticated, verify account is not deleted in DB
-    if (state.isAuthenticated) {
+    // Real-time check: ONLY when visiting a guest auth screen do we need to check if user should be redirected away
+    if (state.isAuthenticated && isGuestAuthScreen) {
       authService.fetchUserProfile().then((profile) => {
         const latestState = OnboardingStore.getState();
         if (!profile && !latestState.isAuthenticated) {
           router.replace('/onboarding/name');
           return;
         }
-        if (profile && isGuestAuthScreen) {
+        if (profile) {
           const target = latestState.isCompleted
             ? '/(tabs)/dashboard'
             : findEarliestAllowedStep(latestState);

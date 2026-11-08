@@ -336,6 +336,8 @@ export default function OtpScreen() {
                       onChangeText={(text) => handleOtpChange(text, idx)}
                       onKeyPress={(e) => handleKeyPress(e, idx)}
                       keyboardType="number-pad"
+                      textContentType="oneTimeCode"
+                      autoComplete={Platform.OS === 'android' ? 'sms-otp' : 'one-time-code'}
                       returnKeyType="done"
                       blurOnSubmit={true}
                       onSubmitEditing={() => {

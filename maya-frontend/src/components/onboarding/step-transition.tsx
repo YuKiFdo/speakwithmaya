@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Platform, StyleSheet, ViewStyle, Easing, StyleProp } from 'react-native';
+import { Animated, Platform, StyleSheet, ViewStyle, Easing, StyleProp, View } from 'react-native';
 
 interface StepTransitionProps {
   children: React.ReactNode;
@@ -30,8 +30,8 @@ export function StepTransition({ children, style }: StepTransitionProps) {
   }, []);
 
   if (Platform.OS !== 'web') {
-    // Native has hardware-accelerated slide_from_right configured in Stack.Screen options
-    return <>{children}</>;
+    // Native has hardware-accelerated slide_from_right in Stack, but still preserves the container View & style!
+    return <View style={style}>{children}</View>;
   }
 
   return (

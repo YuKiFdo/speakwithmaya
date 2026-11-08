@@ -8,7 +8,6 @@ import {
   Easing,
   Platform,
   LayoutAnimation,
-  UIManager,
 } from 'react-native';
 import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
@@ -17,13 +16,6 @@ import {
   playStepPop,
   playOtherButtonSound,
 } from '@/services/sound/sound-service';
-
-if (
-  Platform.OS === 'android' &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 export interface GuideStep {
   id: 'blue-glow' | 'purple-glow' | 'translation' | 'hint' | 'end-call';

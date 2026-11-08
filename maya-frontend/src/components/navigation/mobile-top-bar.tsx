@@ -1,12 +1,25 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
+  Platform,
   StyleProp,
   ViewStyle,
+  PressableProps,
 } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
@@ -24,16 +37,10 @@ export interface MobileTopBarProps {
    */
   showBackButton?: boolean;
 
-  /**
-   * Custom action when the back button is pressed.
-   * Defaults to router.back().
-   */
+  /** Custom action when the back button is pressed. Defaults to router.back(). */
   onBack?: () => void;
 
-  /**
-   * Custom action when clicking the brand title.
-   * Defaults to navigating to /(tabs)/dashboard.
-   */
+  /** Custom action when clicking the brand title. Defaults to navigating to /(tabs)/dashboard. */
   onBrandPress?: () => void;
 
   /**
@@ -66,8 +73,8 @@ export interface MobileTopBarProps {
 
   /**
    * Container layout mode:
-   * - true (default): Fixed / pinned styling at top of screen (white bg, horizontal padding 20, borderBottom, zIndex 10).
-   * - false: Clean inline styling for embedding inside an existing scrollview container (e.g. dashboard).
+   * - true (default): Fixed / pinned styling at top of screen.
+   * - false: Clean inline styling for embedding inside an existing scrollview container.
    */
   pinned?: boolean;
 
@@ -79,7 +86,126 @@ export interface MobileTopBarProps {
 
   /** Optional custom container style overrides. */
   style?: StyleProp<ViewStyle>;
+
+  /** Disable all micro-animations. Also auto-disabled when the OS "Reduce Motion" setting is on. */
+  disableAnimations?: boolean;
+
+  /** Disable haptic feedback. Default: false */
+  disableHaptics?: boolean;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Haptics helpers (no-op on web)                                             */
+/* -------------------------------------------------------------------------- */
+
+const canHaptic = Platform.OS !== 'web';
+
+const hapticSelection = () => {
+  if (canHaptic) Haptics.selectionAsync();
+};
+const hapticLight = () => {
+  if (canHaptic) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+};
+const hapticSuccess = () => {
+  if (canHaptic) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+};
+
+/* -------------------------------------------------------------------------- */
+/* Animated primitives                                                        */
+/* -------------------------------------------------------------------------- */
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+const PRESS_IN_SPRING = { damping: 18, stiffness: 420, mass: 0.6 };
+const PRESS_OUT_SPRING = { damping: 9, stiffness: 320, mass: 0.6 };
+
+interface PressableScaleProps extends Omit<PressableProps, 'style'> {
+  style?: StyleProp<ViewStyle>;
+  scaleTo?: number;
+  enabled?: boolean;
+  /** Lets children react to press state (e.g. arrow nudge). */
+  onPressedChange?: (pressed: boolean) => void;
+}
+
+/** Pressable that springs down on press-in and bounces back on release. */
+function PressableScale({
+  style,
+  scaleTo = 0.96,
+  enabled = true,
+  onPressedChange,
+  onPressIn,
+  onPressOut,
+  children,
+  ...rest
+}: PressableScaleProps) {
+  const scale = useSharedValue(1);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <AnimatedPressable
+      {...rest}
+      style={[style, animatedStyle]}
+      onPressIn={(e) => {
+        if (enabled) scale.value = withSpring(scaleTo, PRESS_IN_SPRING);
+        onPressedChange?.(true);
+        onPressIn?.(e);
+      }}
+      onPressOut={(e) => {
+        if (enabled) scale.value = withSpring(1, PRESS_OUT_SPRING);
+        onPressedChange?.(false);
+        onPressOut?.(e);
+      }}
+    >
+      {children}
+    </AnimatedPressable>
+  );
+}
+
+/** Back button; the arrow slides left slightly while pressed. */
+function AnimatedBackButton({
+  onPress,
+  enabled,
+}: {
+  onPress: () => void;
+  enabled: boolean;
+}) {
+  const nudge = useSharedValue(0);
+
+  const arrowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: nudge.value }],
+  }));
+
+  const handlePressedChange = (pressed: boolean) => {
+    if (!enabled) return;
+    nudge.value = pressed
+      ? withSpring(-3, PRESS_IN_SPRING)
+      : withSpring(0, { damping: 7, stiffness: 300, mass: 0.6 });
+  };
+
+  return (
+    <PressableScale
+      style={styles.backButton}
+      onPress={onPress}
+      onPressedChange={handlePressedChange}
+      scaleTo={0.9}
+      enabled={enabled}
+      accessibilityRole="button"
+      accessibilityLabel="Go back"
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+    >
+      <Animated.View style={arrowStyle}>
+        <Ionicons name="arrow-back" size={20} color="#0f172a" />
+      </Animated.View>
+    </PressableScale>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Component                                                                  */
+/* -------------------------------------------------------------------------- */
 
 /**
  * Universal Mobile Top Bar component for SpeakwithMaya.
@@ -102,25 +228,113 @@ export function MobileTopBar({
   pinned = true,
   phoneOnly = true,
   style,
+  disableAnimations = false,
+  disableHaptics = false,
 }: MobileTopBarProps) {
   const { isPhone } = useBreakpoint();
   const stats = useUserStats();
   const [internalPopupOpen, setInternalPopupOpen] = useState(false);
 
-  // Responsive guard: only render on mobile phone unless explicitly opted out
-  if (phoneOnly && !isPhone) {
-    return null;
-  }
+  const reduceMotion = useReducedMotion();
+  const animationsEnabled = !disableAnimations && !reduceMotion;
+  const hapticsEnabled = !disableHaptics;
+
+  // Shared values (all hooks live above the early return)
+  const containerOpacity = useSharedValue(0);
+  const containerTranslateY = useSharedValue(-8);
+  const taglineOpacity = useSharedValue(0);
+  const taglineTranslateY = useSharedValue(4);
+  const badgeOpacity = useSharedValue(0);
+  const badgeTranslateX = useSharedValue(12);
+  const badgeScale = useSharedValue(1);
+  const hasMounted = useRef(false);
 
   const resolvedLevelLabel = levelLabel ?? stats.levelLabel;
   const resolvedXpLabel = xpLabel ?? stats.xpLabel;
   const resolvedProgress = progress ?? stats.progress;
   const resolvedIsPro = isPro ?? stats.isPro;
   const resolvedPlanTier = planTier ?? stats.planTier;
-  const resolvedIsInactive = isInactive ?? (stats.isSubscriptionLocked || stats.isTelcoUnsubscribed);
+  const resolvedIsInactive =
+    isInactive ?? (stats.isSubscriptionLocked || stats.isTelcoUnsubscribed);
   const resolvedLevelNumber = stats.currentLevelNumber;
 
+  // Staggered entrance: bar slides/fades down, tagline follows, badge slides in from the right
+  useEffect(() => {
+    if (!animationsEnabled) {
+      containerOpacity.value = 1;
+      containerTranslateY.value = 0;
+      taglineOpacity.value = 1;
+      taglineTranslateY.value = 0;
+      badgeOpacity.value = 1;
+      badgeTranslateX.value = 0;
+      return;
+    }
+
+    const ease = Easing.out(Easing.cubic);
+
+    containerOpacity.value = withTiming(1, { duration: 350, easing: ease });
+    containerTranslateY.value = withTiming(0, { duration: 350, easing: ease });
+
+    taglineOpacity.value = withDelay(150, withTiming(1, { duration: 300, easing: ease }));
+    taglineTranslateY.value = withDelay(150, withTiming(0, { duration: 300, easing: ease }));
+
+    badgeOpacity.value = withDelay(100, withTiming(1, { duration: 350, easing: ease }));
+    badgeTranslateX.value = withDelay(
+      100,
+      withSpring(0, { damping: 12, stiffness: 140, mass: 0.8 })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [animationsEnabled]);
+
+  // Pulse the badge (and buzz) whenever XP / level changes (skips the first render)
+  useEffect(() => {
+    if (!hasMounted.current) {
+      hasMounted.current = true;
+      return;
+    }
+
+    // if (hapticsEnabled) hapticSuccess();
+
+    if (!animationsEnabled) return;
+
+    badgeScale.value = withSequence(
+      withTiming(1.12, { duration: 140, easing: Easing.out(Easing.quad) }),
+      withSpring(1, { damping: 7, stiffness: 240, mass: 0.7 })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedProgress, resolvedLevelNumber, resolvedXpLabel]);
+
+  const containerAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: containerOpacity.value,
+    transform: [{ translateY: containerTranslateY.value }],
+  }));
+
+  const taglineAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: taglineOpacity.value,
+    transform: [{ translateY: taglineTranslateY.value }],
+  }));
+
+  const badgeAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: badgeOpacity.value,
+    transform: [{ translateX: badgeTranslateX.value }, { scale: badgeScale.value }],
+  }));
+
+  // Responsive guard (after all hooks)
+  if (phoneOnly && !isPhone) {
+    return null;
+  }
+
+  const bumpBadge = () => {
+    if (!animationsEnabled) return;
+    badgeScale.value = withSequence(
+      withTiming(0.92, { duration: 90 }),
+      withSpring(1, { damping: 7, stiffness: 300, mass: 0.6 })
+    );
+  };
+
   const handleLevelBadgePress = () => {
+    bumpBadge();
+    if (hapticsEnabled) hapticLight();
     if (onLevelPress) {
       onLevelPress();
     } else {
@@ -129,63 +343,61 @@ export function MobileTopBar({
   };
 
   const handleBackPress = () => {
-    if (onBack) {
-      onBack();
-    } else {
-      router.back();
-    }
+    if (hapticsEnabled) hapticSelection();
+    if (onBack) onBack();
+    else router.back();
   };
 
   const handleBrandPress = () => {
-    if (onBrandPress) {
-      onBrandPress();
-    } else {
-      router.push('/(tabs)/dashboard');
-    }
+    if (hapticsEnabled) hapticSelection();
+    if (onBrandPress) onBrandPress();
+    else router.push('/(tabs)/dashboard');
   };
 
   return (
-    <View style={[pinned ? styles.pinnedContainer : styles.inlineContainer, style]}>
+    <Animated.View
+      style={[
+        pinned ? styles.pinnedContainer : styles.inlineContainer,
+        style,
+        containerAnimatedStyle,
+      ]}
+    >
       {/* Brand area */}
       <View style={styles.brandRow}>
         {showBackButton && (
-          <Pressable
-            style={styles.backButton}
-            onPress={handleBackPress}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="arrow-back" size={20} color="#0f172a" />
-          </Pressable>
+          <AnimatedBackButton onPress={handleBackPress} enabled={animationsEnabled} />
         )}
 
-        <Pressable
+        <PressableScale
           onPress={handleBrandPress}
           style={styles.brandTextCol}
+          scaleTo={0.97}
+          enabled={animationsEnabled}
           accessibilityRole="button"
           accessibilityLabel="SpeakwithMaya home"
         >
           <Text style={styles.brandTitleMobile}>
             Speakwith<Text style={styles.brandAccent}>Maya</Text>
           </Text>
-          <Text style={styles.brandTaglineMobile}>
+          <Animated.Text style={[styles.brandTaglineMobile, taglineAnimatedStyle]}>
             Practice · Improve · Be Confident
-          </Text>
-        </Pressable>
+          </Animated.Text>
+        </PressableScale>
       </View>
 
       {/* User Level Badge */}
-      <UserLevelBadge
-        levelLabel={resolvedLevelLabel}
-        xpLabel={resolvedXpLabel}
-        progress={resolvedProgress}
-        isPro={resolvedIsPro}
-        planTier={resolvedPlanTier}
-        isInactive={resolvedIsInactive}
-        avatarSource={avatarSource}
-        onPress={handleLevelBadgePress}
-      />
+      <Animated.View style={badgeAnimatedStyle}>
+        <UserLevelBadge
+          levelLabel={resolvedLevelLabel}
+          xpLabel={resolvedXpLabel}
+          progress={resolvedProgress}
+          isPro={resolvedIsPro}
+          planTier={resolvedPlanTier}
+          isInactive={resolvedIsInactive}
+          avatarSource={avatarSource}
+          onPress={handleLevelBadgePress}
+        />
+      </Animated.View>
 
       {/* Fallback Internal Level Progress Popup (used when onLevelPress is omitted) */}
       {!onLevelPress && (
@@ -209,7 +421,7 @@ export function MobileTopBar({
           }}
         />
       )}
-    </View>
+    </Animated.View>
   );
 }
 

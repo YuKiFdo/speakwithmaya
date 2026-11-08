@@ -1,4 +1,6 @@
 import { Platform } from 'react-native';
+import { createAudioPlayer } from 'expo-audio';
+import { getBackendBaseUrl } from '@/utils/backend-url';
 
 /**
  * Maya Gamified Sound Engine
@@ -245,32 +247,7 @@ export async function loadAudioBuffer(uri: string): Promise<AudioBuffer | null> 
  * 2. If not cached, fetches & decodes dynamically into Web Audio.
  * 3. Graceful fallback to HTMLAudioElement if Web Audio fails.
  */
-function resolveBackendBaseUrl(): string {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://127.0.0.1:3000';
-    }
-    if (hostname.endsWith('speakwithmaya.com')) {
-      return 'https://api.speakwithmaya.com';
-    }
-    if (
-      hostname.includes('azurecontainerapps.io') ||
-      hostname.includes('azurewebsites.net') ||
-      hostname.includes('southeastasia')
-    ) {
-      return 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io';
-    }
-    const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
-    if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
-      return envUrl;
-    }
-    return 'https://api.speakwithmaya.com';
-  }
-  return process.env.EXPO_PUBLIC_BACKEND_URL || 'http://127.0.0.1:3000';
-}
-
-let onboardingAudiosEnabled = false;
+let onboardingAudiosEnabled = Platform.OS !== 'web';
 
 if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
   try {
@@ -282,6 +259,9 @@ if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
 }
 
 export function areOnboardingAudiosEnabled(): boolean {
+  if (Platform.OS !== 'web') {
+    return true; // Always enabled by default on mobile apps (no browser autoplay restriction)
+  }
   return onboardingAudiosEnabled;
 }
 
@@ -300,7 +280,7 @@ export function syncAppConfigAudioSettings(): Promise<boolean> {
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
     try {
-      const baseUrl = resolveBackendBaseUrl();
+      const baseUrl = getBackendBaseUrl();
       const targetUrl = `${baseUrl.replace(/\/$/, '')}/v1/app-config`;
 
       const res = await fetch(targetUrl);
@@ -333,6 +313,57 @@ function playUniversalVoiceAsset(
     callbacks?.onEnd?.();
     return;
   }
+
+  // Native mobile playback (iOS / Android) via expo-audio from bundled APK assets
+  if (Platform.OS !== 'web') {
+    try {
+      let isStopped = false;
+      const player = createAudioPlayer(asset);
+      let hasStarted = false;
+
+      const sub = player.addListener('playbackStatusUpdate', (status) => {
+        if (isStopped) return;
+        if (status.playing && !hasStarted) {
+          hasStarted = true;
+          callbacks?.onStart?.();
+        }
+        if (status.didJustFinish) {
+          cleanup();
+          callbacks?.onEnd?.();
+        }
+      });
+
+      const cleanup = () => {
+        try {
+          sub.remove();
+        } catch {}
+        try {
+          player.pause();
+        } catch {}
+        try {
+          (player as any).remove?.();
+        } catch {}
+        onSetHandle?.(null);
+      };
+
+      const handle: VoicePlayerHandle = {
+        stop: () => {
+          isStopped = true;
+          cleanup();
+        },
+      };
+
+      onSetHandle?.(handle);
+      player.play();
+      return;
+    } catch (err) {
+      console.warn('[sound-service] Native expo-audio playback error:', err);
+      callbacks?.onError?.(err);
+      callbacks?.onEnd?.();
+      return;
+    }
+  }
+
   unlockAudioSession();
 
   const uri = getAssetUri(asset);
@@ -560,6 +591,39 @@ export function playSoundAsset(
       if (onEnded) onEnded();
     }
   };
+
+  // Native mobile audio SFX playback (iOS / Android)
+  if (Platform.OS !== 'web') {
+    try {
+      const player = createAudioPlayer(asset);
+      player.volume = Math.max(0, Math.min(1, volume));
+
+      const sub = player.addListener('playbackStatusUpdate', (status) => {
+        if (status.didJustFinish) {
+          try { sub.remove(); } catch {}
+          try { (player as any).remove?.(); } catch {}
+          notifyEnded();
+        }
+      });
+
+      if (maxDurationMs) {
+        setTimeout(() => {
+          try { sub.remove(); } catch {}
+          try { player.pause(); } catch {}
+          try { (player as any).remove?.(); } catch {}
+          notifyEnded();
+        }, maxDurationMs);
+      }
+
+      player.play();
+      return;
+    } catch (err) {
+      console.warn('[sound-service] Native playSoundAsset error:', err);
+      if (fallbackFn) fallbackFn();
+      notifyEnded();
+      return;
+    }
+  }
 
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {

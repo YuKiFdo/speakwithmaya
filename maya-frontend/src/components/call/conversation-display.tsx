@@ -14,6 +14,7 @@ import {
   Easing,
   Platform,
   ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
 import { TranslationToggleButton } from './translation-toggle-button';
@@ -82,6 +83,11 @@ const FLUSH_DELAY = 90; // after Maya stops talking, finish remaining words quic
 const SPEAKING_GRACE_MS = 800; // ignore short "speaking" -> "listening" flickers
 const NEWEST_WORD_COLOR = '#64748B'; // set to '#0F172A' to disable the "typing" shade
 const TEXT_COLOR = '#0F172A';
+const HIDDEN_TEXT_COLOR = 'rgba(15, 23, 42, 0.01)';
+
+// Phones can enlarge text in system settings (Android "Font size", iOS "Larger Text").
+// Cap it so the layout cannot grow past the box and clip.
+const MAX_FONT_SCALE = 1.15;
 
 /** Delay to wait AFTER word number `n` (1-based) has been revealed. */
 function delayAfter(words: string[], n: number, speaking: boolean): number {
@@ -93,7 +99,7 @@ function delayAfter(words: string[], n: number, speaking: boolean): number {
 
   let d = Math.max(MIN_DELAY, Math.min(MAX_DELAY, cleanLen * 52 + 210));
   if (/[.?!]["')\]]*$/.test(last)) d += 380;
-  else if (/[,;:\-\u2013\u2014]$/.test(last)) d += 200;
+  else if (/[,;:\-–—]$/.test(last)) d += 200;
 
   // Big backlog (text arrived much faster than we reveal): speed up a little
   const backlog = words.length - n;
@@ -136,6 +142,18 @@ function ConversationDisplayComponent({
   const viewportH = useRef(0);
   const contentH = useRef(0);
 
+  // Where the English sentence ends inside the scroll content (used to follow it while it reveals)
+  const wrapperY = useRef(0);
+  const promptY = useRef(0);
+  const promptH = useRef(0);
+
+  // Box height adapts to the screen instead of a fixed 280px, so long sentence +
+  // translation + button fit on phones instead of being clipped at the top.
+  const { height: windowH } = useWindowDimensions();
+  const boxMaxHeight = isWebOrDesktop
+    ? Math.min(Math.round(windowH * 0.6), 460)
+    : Math.min(Math.max(Math.round(windowH * 0.5), 300), 480);
+
   /* ----------------------------- Words + turns ----------------------------- */
 
   const fullRawText = (currentText || '').trim();
@@ -145,11 +163,6 @@ function ConversationDisplayComponent({
   );
   const wordsRef = useRef<string[]>(allWords);
   wordsRef.current = allWords;
-
-  const fallbackWords = useMemo(
-    () => (previousText || '').trim().split(/\s+/).filter(Boolean),
-    [previousText],
-  );
 
   // Turn tracking is derived during render so the very first frame of a new
   // turn already has the right key / font size (no flash of old state).
@@ -178,12 +191,13 @@ function ConversationDisplayComponent({
   const turnKey = turn.key;
 
   const showingFallback = allWords.length === 0;
-  const shownWords = showingFallback ? fallbackWords : allWords;
+  // No fallback to the previous sentence: until the new transcript arrives, nothing is shown
+  const shownWords = allWords;
 
   /* ------------------------------- Typography ------------------------------ */
 
   const lvl = levelFor(
-    (fullRawText || previousText?.trim() || '').length,
+    fullRawText.length,
     isWebOrDesktop,
   );
   if (!showingFallback) turn.level = Math.max(turn.level, lvl);
@@ -299,15 +313,31 @@ function ConversationDisplayComponent({
 
   /* -------------------------- Scroll (only if overflow) -------------------- */
 
+  // While the English sentence reveals, follow it using ONLY the sentence's own
+  // height (not the translation + button below it). The old code used the whole
+  // content, so when the sentence finished it was always scrolled to the very
+  // bottom and the first lines were cut off.
   useEffect(() => {
-    const overflow = contentH.current - viewportH.current;
-    if (!showingFallback && overflow > 4 && total > 0) {
-      scrollRef.current?.scrollTo({
-        y: overflow * (count / total),
-        animated: false,
-      });
-    }
-  }, [count, total, showingFallback]);
+    if (isTranslationVisible) return; // translation effect below takes over
+    if (showingFallback || total === 0) return;
+    const englishEnd = wrapperY.current + promptY.current + promptH.current + 6;
+    const overflow = englishEnd - viewportH.current;
+    scrollRef.current?.scrollTo({
+      y: overflow > 4 ? overflow * (count / total) : 0,
+      animated: false,
+    });
+  }, [count, total, showingFallback, isTranslationVisible]);
+
+  // When the user opens the translation, bring it (and the button) into view.
+  useEffect(() => {
+    if (!isTranslationVisible || !translationText) return;
+    const t = setTimeout(() => {
+      if (contentH.current - viewportH.current > 4) {
+        scrollRef.current?.scrollToEnd({ animated: true });
+      }
+    }, 80);
+    return () => clearTimeout(t);
+  }, [isTranslationVisible, translationText]);
 
   /* -------------------------------- Animations ----------------------------- */
 
@@ -406,19 +436,30 @@ function ConversationDisplayComponent({
 
   if (shownWords.length === 0) return null;
 
+  // The faded previous line is hidden while the translation is open: it frees
+  // vertical space so the sentence + translation fit without clipping.
   const hasPrevious = !!(
     previousText &&
     previousText.trim().length > 0 &&
-    previousText.trim() !== currentText?.trim()
+    previousText.trim() !== currentText?.trim() &&
+    !isTranslationVisible
   );
 
   return (
-    <View style={[styles.outerContainer, isWebOrDesktop && styles.outerContainerDesktop]}>
+    <View
+      style={[
+        styles.outerContainer,
+        isWebOrDesktop && styles.outerContainerDesktop,
+        { maxHeight: boxMaxHeight },
+      ]}
+    >
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         nestedScrollEnabled
+        bounces={false}
+        overScrollMode="never"
         keyboardShouldPersistTaps="handled"
         onLayout={(e) => {
           viewportH.current = e.nativeEvent.layout.height;
@@ -438,6 +479,7 @@ function ConversationDisplayComponent({
             <Text
               numberOfLines={2}
               ellipsizeMode="tail"
+              maxFontSizeMultiplier={MAX_FONT_SCALE}
               style={[styles.previousText, isWebOrDesktop && styles.previousTextDesktop]}
             >
               {previousText}
@@ -446,13 +488,23 @@ function ConversationDisplayComponent({
         )}
 
         {/* Current turn */}
-        <Animated.View style={[styles.currentWrapper, { opacity: turnFade }]}>
+        <Animated.View
+          style={[styles.currentWrapper, { opacity: turnFade }]}
+          onLayout={(e) => {
+            wrapperY.current = e.nativeEvent.layout.y;
+          }}
+        >
           <Text
+            maxFontSizeMultiplier={MAX_FONT_SCALE}
             style={[
               styles.promptText,
               { fontSize, lineHeight },
               isWebOrDesktop && styles.promptTextDesktop,
             ]}
+            onLayout={(e) => {
+              promptY.current = e.nativeEvent.layout.y;
+              promptH.current = e.nativeEvent.layout.height;
+            }}
           >
             {settled}
             <Text style={{ color: isRevealing ? NEWEST_WORD_COLOR : TEXT_COLOR }}>
@@ -463,6 +515,7 @@ function ConversationDisplayComponent({
 
           {isTranslationVisible && !!translationText && (
             <Animated.Text
+              maxFontSizeMultiplier={MAX_FONT_SCALE}
               style={[
                 styles.sinhalaTranslationText,
                 isWebOrDesktop && styles.sinhalaTranslationTextDesktop,
@@ -501,12 +554,13 @@ export const ConversationDisplay = React.memo(ConversationDisplayComponent);
 const styles = StyleSheet.create({
   outerContainer: {
     width: '100%',
-    maxHeight: 280,
+    // Height is set inline from the screen size (see boxMaxHeight). flexShrink lets
+    // it give way when the hint card / role header need room.
+    flexShrink: 1,
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
   outerContainerDesktop: {
-    maxHeight: 340,
     maxWidth: 680,
     alignSelf: 'center',
   },
@@ -543,8 +597,12 @@ const styles = StyleSheet.create({
   promptTextDesktop: {
     letterSpacing: -0.5,
   },
+  // NOT 'transparent': on the Android/iOS New Architecture (Fabric) a nested Text whose
+  // colour has alpha 0 is treated as "no colour set" and inherits the parent's dark
+  // colour, so the whole sentence appeared at once. A 1%-alpha colour is invisible
+  // but counts as a real colour on every platform.
   hiddenText: {
-    color: 'transparent',
+    color: HIDDEN_TEXT_COLOR,
   },
   sinhalaTranslationText: {
     ...fontStyle('inter', 'regular'),

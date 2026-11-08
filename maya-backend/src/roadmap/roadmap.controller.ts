@@ -40,7 +40,7 @@ export class RoadmapController {
 
   // 1. Student / Public endpoint - returns only published levels
   @Get('roadmap')
-  @Header('Cache-Control', 'no-cache, no-store, must-revalidate')
+  @Header('Cache-Control', 'no-cache, no-store, no-transform, must-revalidate')
   @Header('Pragma', 'no-cache')
   @Header('Expires', '0')
   async getStudentRoadmap() {
@@ -218,7 +218,7 @@ export class RoadmapController {
 
   // 9. User Roadmap Progress: Get completed levels for user
   @Get('roadmap/user-progress')
-  @Header('Cache-Control', 'no-cache, no-store, must-revalidate')
+  @Header('Cache-Control', 'no-cache, no-store, no-transform, must-revalidate')
   @Header('Pragma', 'no-cache')
   @Header('Expires', '0')
   async getUserProgress(
@@ -264,6 +264,7 @@ export class RoadmapController {
     @Headers('authorization') authHeader?: string,
     @Query('userId') queryUserId?: string,
     @Query('period') period?: 'weekly' | 'monthly' | 'all_time',
+    @Query('limit') queryLimit?: string,
   ) {
     let userId = queryUserId;
     if (authHeader) {
@@ -278,7 +279,8 @@ export class RoadmapController {
 
     const validPeriod =
       period === 'monthly' || period === 'all_time' ? period : 'weekly';
-    return this.authService.getPublicLeaderboard(userId, validPeriod);
+    const limitNum = queryLimit ? Math.max(1, Math.min(100, parseInt(queryLimit, 10) || 50)) : 50;
+    return this.authService.getPublicLeaderboard(userId, validPeriod, limitNum);
   }
 
   // 10. User Roadmap Progress: Record a completed level

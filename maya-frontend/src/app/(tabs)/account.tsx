@@ -11,22 +11,21 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
-  Alert,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Feather, FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { fontStyle } from '@/theme/fonts';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { DesktopTopBar } from '@/components/navigation/desktop-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
-import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CrownNavIcon } from '@/components/icons/nav-icons';
 import { LKFlag } from '@/components/icons/lk-flag';
 import { MayaPrimaryButton } from '@/components/ui/maya-primary-button';
-import { useOnboardingStore, OnboardingStore } from '@/services/store/onboarding-store';
+import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { authService } from '@/services/auth/auth-service';
 import { useUserStats } from '@/hooks/useUserStats';
 import { paymentApi } from '@/services/payment/payment-api';
@@ -89,7 +88,7 @@ function formatLocalPhoneDigits(rawPhone?: string | null): string {
   return withLeadingZero;
 }
 
-function formatBillingDate(dateStr: string | null | undefined, fallback: string = '25 Jun 2026'): string {
+function formatBillingDate(dateStr: string | null | undefined, fallback: string = '—'): string {
   if (!dateStr) return fallback;
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return fallback;
@@ -104,7 +103,7 @@ export default function AccountScreen() {
   const store = useOnboardingStore();
   const stats = useUserStats();
   const displayName = stats.displayName;
-  const phoneNumber = stats.phoneNumber || '+94 77 123 4567';
+  const phoneNumber = stats.phoneNumber || '';
   const minutesBalance = stats.minutesBalance;
   const isTimeExpired = stats.isTimeExpired;
   const currentPlanTier = stats.planTier;
@@ -249,6 +248,8 @@ export default function AccountScreen() {
       await stats.refreshStats();
       setIsEditProfileModalOpen(false);
       mayaAlert.toast('Profile updated successfully!', 'success');
+    } catch {
+      mayaAlert.toast('Could not save changes. Please try again.', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -652,9 +653,6 @@ export default function AccountScreen() {
       return;
     }
 
-    const planId = (stats.planTier === 'premium' ? 'premium' : 'pro') as 'pro' | 'premium';
-    const planName = planId === 'premium' ? 'Premium' : 'Pro';
-
     const confirmed = await mayaAlert.confirm({
       title: 'Update Payment Card',
       message:
@@ -689,6 +687,32 @@ export default function AccountScreen() {
     } finally {
       setIsUpdatingCard(false);
     }
+  };
+
+  // Shared props for the plan card (used by both desktop and mobile layouts)
+  const planCardProps = {
+    planTier: currentPlanTier,
+    planStatus: stats.planStatus,
+    isPastDue: stats.isPastDue,
+    minutesBalance,
+    monthlyAllowance: stats.monthlyMinutesAllowance,
+    isTimeExpired,
+    phone: phoneNumber,
+    registeredDate: user?.createdAt,
+    renewalDate: stats.resetsInText,
+    nextBillingDate: subscription?.next_billing_date || user?.minutesResetAt,
+    billingCycle: subscription?.billing_cycle,
+    cardMasked: subscription?.card_masked,
+    isUpdatingPayment: isUpdatingCard,
+    hasTelcoSubscription: stats.hasTelcoSubscription,
+    isTelcoUnsubscribed: stats.isTelcoUnsubscribed,
+    isSubscriptionLocked: stats.isSubscriptionLocked,
+    isGracePeriodActive: stats.isGracePeriodActive,
+    gracePeriodEndDate: stats.gracePeriodEndDate,
+    onUpgrade: () => router.push('/upgrade'),
+    onGetExtraTime: () => setActivePopup('get-extra-time'),
+    onChangePayment: handleChangePayment,
+    onReactivate: () => setActivePopup('reactivate-plan'),
   };
 
   return (
@@ -787,30 +811,7 @@ export default function AccountScreen() {
 
                 {/* RIGHT COLUMN */}
                 <View style={styles.desktopRightCol}>
-                  <CurrentPlanCard
-                    planTier={currentPlanTier}
-                    planStatus={stats.planStatus}
-                    isPastDue={stats.isPastDue}
-                    minutesBalance={minutesBalance}
-                    monthlyAllowance={stats.monthlyMinutesAllowance}
-                    isTimeExpired={isTimeExpired}
-                    phone={phoneNumber}
-                    registeredDate={user?.createdAt}
-                    renewalDate={stats.resetsInText}
-                    nextBillingDate={subscription?.next_billing_date || user?.minutesResetAt}
-                    billingCycle={subscription?.billing_cycle}
-                    cardMasked={subscription?.card_masked}
-                    isUpdatingPayment={isUpdatingCard}
-                    hasTelcoSubscription={stats.hasTelcoSubscription}
-                    isTelcoUnsubscribed={stats.isTelcoUnsubscribed}
-                    isSubscriptionLocked={stats.isSubscriptionLocked}
-                    isGracePeriodActive={stats.isGracePeriodActive}
-                    gracePeriodEndDate={stats.gracePeriodEndDate}
-                    onUpgrade={() => router.push('/upgrade')}
-                    onGetExtraTime={() => setActivePopup('get-extra-time')}
-                    onChangePayment={handleChangePayment}
-                    onReactivate={() => setActivePopup('reactivate-plan')}
-                  />
+                  <CurrentPlanCard {...planCardProps} />
 
                   <CustomerSupportCard onEmailPress={handleSupportEmail} />
 
@@ -832,6 +833,9 @@ export default function AccountScreen() {
                   onLogout={handleLogout}
                 />
 
+                {/* Plan card sits directly under the profile card on mobile */}
+                <CurrentPlanCard {...planCardProps} />
+
                 <StatsCard
                   xp={stats.totalXp}
                   levelNumber={stats.currentLevelNumber}
@@ -847,31 +851,6 @@ export default function AccountScreen() {
                   onComplaintPress={() => setIsComplaintModalOpen(true)}
                 />
 
-                <CurrentPlanCard
-                  planTier={currentPlanTier}
-                  planStatus={stats.planStatus}
-                  isPastDue={stats.isPastDue}
-                  minutesBalance={minutesBalance}
-                  monthlyAllowance={stats.monthlyMinutesAllowance}
-                  isTimeExpired={isTimeExpired}
-                  phone={phoneNumber}
-                  registeredDate={user?.createdAt}
-                  renewalDate={stats.resetsInText}
-                  nextBillingDate={subscription?.next_billing_date || user?.minutesResetAt}
-                  billingCycle={subscription?.billing_cycle}
-                  cardMasked={subscription?.card_masked}
-                  isUpdatingPayment={isUpdatingCard}
-                  hasTelcoSubscription={stats.hasTelcoSubscription}
-                  isTelcoUnsubscribed={stats.isTelcoUnsubscribed}
-                  isSubscriptionLocked={stats.isSubscriptionLocked}
-                  isGracePeriodActive={stats.isGracePeriodActive}
-                  gracePeriodEndDate={stats.gracePeriodEndDate}
-                  onUpgrade={() => router.push('/upgrade')}
-                  onGetExtraTime={() => setActivePopup('get-extra-time')}
-                  onChangePayment={handleChangePayment}
-                  onReactivate={() => setActivePopup('reactivate-plan')}
-                />
-
                 <CustomerSupportCard onEmailPress={handleSupportEmail} />
 
                 <AboutCard />
@@ -882,15 +861,21 @@ export default function AccountScreen() {
           </ScrollView>
         </View>
 
-        {/* EDIT PROFILE MODAL (Figma Spec) */}
+        {/* EDIT PROFILE MODAL (bottom sheet on phones) */}
         <Modal
           visible={isEditProfileModalOpen}
           transparent
-          animationType="fade"
+          animationType={isPhone ? 'slide' : 'fade'}
           onRequestClose={() => setIsEditProfileModalOpen(false)}
         >
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalCard, !isPhone && styles.modalCardDesktop]}>
+          <View style={[styles.modalOverlay, isPhone && styles.modalOverlaySheet]}>
+            <View
+              style={[
+                styles.modalCard,
+                !isPhone && styles.modalCardDesktop,
+                isPhone && styles.modalCardSheet,
+              ]}
+            >
               {/* Top Header */}
               <View style={styles.modalHeader}>
                 <View style={{ flex: 1, paddingRight: 16 }}>
@@ -914,6 +899,7 @@ export default function AccountScreen() {
                 style={styles.modalBody}
                 showsVerticalScrollIndicator={false}
                 bounces={false}
+                keyboardShouldPersistTaps="handled"
               >
                 {/* Avatar Upload Row */}
                 <View style={styles.photoUploadRow}>
@@ -1156,7 +1142,9 @@ export default function AccountScreen() {
               {/* Title & Subtitle */}
               <Text style={styles.otpModalTitle}>Verify Daily Subscription</Text>
               <Text style={styles.otpModalSubtitle}>
-                Enter the 6-digit verification PIN sent via SMS to your mobile phone ({phoneNumber}) to reactivate your subscription.
+                {phoneNumber
+                  ? `Enter the 6-digit verification PIN sent via SMS to ${phoneNumber} to reactivate your subscription.`
+                  : 'Enter the 6-digit verification PIN sent via SMS to your mobile phone to reactivate your subscription.'}
               </Text>
 
               {/* 6 OTP Input Boxes */}
@@ -1237,11 +1225,17 @@ export default function AccountScreen() {
         <Modal
           visible={isLanguageModalOpen}
           transparent
-          animationType="fade"
+          animationType={isPhone ? 'slide' : 'fade'}
           onRequestClose={() => setIsLanguageModalOpen(false)}
         >
-          <View style={styles.modalOverlay}>
-            <View style={[styles.selectionModalCard, { maxWidth: 420 }]}>
+          <View style={[styles.modalOverlay, isPhone && styles.modalOverlaySheet]}>
+            <View
+              style={[
+                styles.selectionModalCard,
+                { maxWidth: 420 },
+                isPhone && styles.selectionModalCardSheet,
+              ]}
+            >
               <View style={styles.modalHeader}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.selectionModalTitle}>Explanation Language</Text>
@@ -1305,63 +1299,74 @@ export default function AccountScreen() {
         <Modal
           visible={isComplaintModalOpen}
           transparent
-          animationType="fade"
+          animationType={isPhone ? 'slide' : 'fade'}
           onRequestClose={() => setIsComplaintModalOpen(false)}
         >
-          <View style={styles.modalOverlay}>
-            <View style={[styles.selectionModalCard, { maxWidth: 460 }]}>
-              <View style={styles.modalHeader}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.selectionModalTitle}>Submit Complaint</Text>
-                  <Text style={styles.selectionModalSubtitle}>
-                    Report an issue or share your feedback with our team.
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={() => setIsComplaintModalOpen(false)}
-                  hitSlop={8}
-                  style={({ pressed }) => [styles.modalCloseBtn, pressed && { opacity: 0.6 }]}
-                >
-                  <Feather name="x" size={20} color="#64748B" />
-                </Pressable>
-              </View>
-
-              <TextInput
+          <View style={[styles.modalOverlay, isPhone && styles.modalOverlaySheet]}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={{ width: '100%', alignItems: 'center' }}
+            >
+              <View
                 style={[
-                  styles.modalTextInput,
-                  { height: 110, textAlignVertical: 'top', paddingTop: 12, marginTop: 4, marginBottom: 16 },
+                  styles.selectionModalCard,
+                  { maxWidth: 460 },
+                  isPhone && styles.selectionModalCardSheet,
                 ]}
-                placeholder="Tell us what went wrong or how we can improve..."
-                placeholderTextColor="#94A3B8"
-                multiline
-                value={complaintText}
-                onChangeText={setComplaintText}
-              />
+              >
+                <View style={styles.modalHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.selectionModalTitle}>Submit Complaint</Text>
+                    <Text style={styles.selectionModalSubtitle}>
+                      Report an issue or share your feedback with our team.
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => setIsComplaintModalOpen(false)}
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.modalCloseBtn, pressed && { opacity: 0.6 }]}
+                  >
+                    <Feather name="x" size={20} color="#64748B" />
+                  </Pressable>
+                </View>
 
-              <View style={styles.modalFooter}>
-                <Pressable
-                  style={({ pressed }) => [styles.modalCancelBtn, pressed && styles.buttonPressed]}
-                  onPress={() => setIsComplaintModalOpen(false)}
-                >
-                  <Text style={styles.modalCancelBtnText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.modalSaveBtn,
-                    pressed && styles.buttonPressed,
-                    isSubmittingComplaint && { opacity: 0.7 },
+                <TextInput
+                  style={[
+                    styles.modalTextInput,
+                    { height: 110, textAlignVertical: 'top', paddingTop: 12, marginTop: 4, marginBottom: 16 },
                   ]}
-                  onPress={handleSubmitComplaint}
-                  disabled={isSubmittingComplaint}
-                >
-                  {isSubmittingComplaint ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.modalSaveBtnText}>Submit</Text>
-                  )}
-                </Pressable>
+                  placeholder="Tell us what went wrong or how we can improve..."
+                  placeholderTextColor="#94A3B8"
+                  multiline
+                  value={complaintText}
+                  onChangeText={setComplaintText}
+                />
+
+                <View style={styles.modalFooter}>
+                  <Pressable
+                    style={({ pressed }) => [styles.modalCancelBtn, pressed && styles.buttonPressed]}
+                    onPress={() => setIsComplaintModalOpen(false)}
+                  >
+                    <Text style={styles.modalCancelBtnText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.modalSaveBtn,
+                      pressed && styles.buttonPressed,
+                      isSubmittingComplaint && { opacity: 0.7 },
+                    ]}
+                    onPress={handleSubmitComplaint}
+                    disabled={isSubmittingComplaint}
+                  >
+                    {isSubmittingComplaint ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.modalSaveBtnText}>Submit</Text>
+                    )}
+                  </Pressable>
+                </View>
               </View>
-            </View>
+            </KeyboardAvoidingView>
           </View>
         </Modal>
 
@@ -1369,11 +1374,11 @@ export default function AccountScreen() {
         <Modal
           visible={isReactivateSelectionModalOpen}
           transparent
-          animationType="fade"
+          animationType={isPhone ? 'slide' : 'fade'}
           onRequestClose={() => setIsReactivateSelectionModalOpen(false)}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.selectionModalCard}>
+          <View style={[styles.modalOverlay, isPhone && styles.modalOverlaySheet]}>
+            <View style={[styles.selectionModalCard, isPhone && styles.selectionModalCardSheet]}>
               {/* Header */}
               <View style={styles.modalHeader}>
                 <View style={{ flex: 1 }}>
@@ -1507,13 +1512,13 @@ export default function AccountScreen() {
 }
 
 /**
- * 1. Profile Information Card (Matches Figma Image 3)
+ * 1. Profile Information Card
  */
 function ProfileCard({
   name,
   initials = 'TF',
   avatarUrl,
-  memberSince = 'Member since May 20, 2026',
+  memberSince = '',
   isPro,
   isLocked = false,
   onEdit,
@@ -1532,12 +1537,13 @@ function ProfileCard({
   onCancelSubscription: () => void;
   onLogout: () => void;
 }) {
+  const { isPhone } = useBreakpoint();
   const displayInitials = (initials || (name || 'U').trim().charAt(0)).toUpperCase();
   return (
     <View style={styles.cardContainer}>
-      <View style={styles.profileRow}>
+      <View style={[styles.profileRow, isPhone && styles.profileRowPhone]}>
         {/* Left Blue Circular Avatar */}
-        <View style={styles.avatarInitialsCircle}>
+        <View style={[styles.avatarInitialsCircle, isPhone && styles.avatarInitialsCirclePhone]}>
           {avatarUrl ? (
             <Image
               source={{ uri: avatarUrl }}
@@ -1549,7 +1555,7 @@ function ProfileCard({
           )}
         </View>
 
-        {/* Right Info Stack: Name + Edit inline + Top-Right Log Out, Member since, Plan Pill + Cancel Subscription */}
+        {/* Right Info Stack */}
         <View style={styles.profileInfoCol}>
           <View style={styles.profileTopHeaderRow}>
             <View style={styles.profileNameInlineRow}>
@@ -1583,7 +1589,7 @@ function ProfileCard({
             {memberSince}
           </Text>
 
-          <View style={styles.profileInlineActionsRow}>
+          <View style={[styles.profileInlineActionsRow, isPhone && styles.profileInlineActionsRowPhone]}>
             <Pressable
               onPress={onTogglePlan}
               hitSlop={6}
@@ -1621,7 +1627,7 @@ function ProfileCard({
 }
 
 /**
- * 2. Stats Row Card (3 Columns: XP, Level, Rank based on XP & Minutes Consumed)
+ * 2. Stats Row Card (XP, Level, Rank)
  */
 function StatsCard({
   xp = 0,
@@ -1636,25 +1642,25 @@ function StatsCard({
     <View style={[styles.cardContainer, styles.statsCardPadding]}>
       <View style={styles.statsRow}>
         <View style={styles.statCol}>
-          <Feather name="zap" size={24} color="#3B82F6" />
-          <Text style={styles.statNumberText}>{xp.toLocaleString()} XP</Text>
-          <Text style={styles.statLabelText}>Keep practicing!</Text>
+          <Feather name="zap" size={22} color="#3B82F6" />
+          <Text style={styles.statNumberText}>{xp.toLocaleString()}</Text>
+          <Text style={styles.statLabelText}>Total XP</Text>
         </View>
 
         <View style={styles.statDivider} />
 
         <View style={styles.statCol}>
-          <Feather name="bar-chart-2" size={24} color="#3B82F6" />
-          <Text style={styles.statNumberText}>Level {levelNumber}</Text>
-          <Text style={styles.statLabelText}>You're doing great</Text>
+          <Feather name="bar-chart-2" size={22} color="#3B82F6" />
+          <Text style={styles.statNumberText}>{levelNumber}</Text>
+          <Text style={styles.statLabelText}>Level</Text>
         </View>
 
         <View style={styles.statDivider} />
 
         <View style={styles.statCol}>
-          <Ionicons name="trophy-outline" size={24} color="#3B82F6" />
-          <Text style={styles.statNumberText}>{rank && rank > 0 ? `#${rank}` : 'N/A'}</Text>
-          <Text style={styles.statLabelText}>Your Rank</Text>
+          <Ionicons name="trophy-outline" size={22} color="#3B82F6" />
+          <Text style={styles.statNumberText}>{rank && rank > 0 ? `#${rank}` : '—'}</Text>
+          <Text style={styles.statLabelText}>Rank</Text>
         </View>
       </View>
     </View>
@@ -1678,12 +1684,12 @@ function TestAccountDemoCard() {
     <View style={styles.testAccountCard}>
       <View style={styles.testAccountHeader}>
         <View style={styles.testAccountBadge}>
-          <Text style={{ fontSize: 13 }}>🧪</Text>
-          <Text style={styles.testAccountBadgeText}>Demo Account Mode</Text>
+          <Feather name="tool" size={12} color="#475569" />
+          <Text style={styles.testAccountBadgeText}>Test account</Text>
         </View>
-        <Text style={styles.testAccountTitle}>Onboarding Screens Access</Text>
+        <Text style={styles.testAccountTitle}>Onboarding screens</Text>
         <Text style={styles.testAccountDesc}>
-          As a registered test account, you can access and preview all onboarding screens directly anytime without OTP or re-registration.
+          Preview every onboarding step without OTP or re-registration.
         </Text>
       </View>
 
@@ -1697,7 +1703,7 @@ function TestAccountDemoCard() {
               pressed && { opacity: 0.8 },
             ]}
           >
-            <Feather name={s.icon as any} size={13} color="#0d9488" />
+            <Feather name={s.icon as any} size={13} color="#64748B" />
             <Text style={styles.testScreenPillText}>{s.label}</Text>
           </Pressable>
         ))}
@@ -1707,7 +1713,7 @@ function TestAccountDemoCard() {
 }
 
 /**
- * 3. Separate Account Action Cards (Explanation Language, Leaderboard, Submit Complaint - Matches Image 3)
+ * 3. Account Action Cards (Explanation Language, Leaderboard, Submit Complaint)
  */
 function AccountActionCards({
   language = 'Sinhala',
@@ -1792,7 +1798,6 @@ function AccountActionCards({
 
 /**
  * 4. Your Current Plan Card
- * Matches Image 1 for Starter Plan (Daily) and Image 2 for Pro Plan (Monthly)
  */
 function CurrentPlanCard({
   planTier,
@@ -1852,14 +1857,17 @@ function CurrentPlanCard({
       : 'Monthly'
     : 'Daily';
 
-  const registeredDateText = formatBillingDate(registeredDate, '25 Jun 2026');
-  const nextBillingDateText = formatBillingDate(nextBillingDate, '25 Jun 2026');
-  const localMobileFormatted = formatLocalPhoneDigits(phone) || '077 1234567';
+  const registeredDateText = formatBillingDate(registeredDate);
+  const nextBillingDateText = formatBillingDate(nextBillingDate);
+  const localMobileFormatted = formatLocalPhoneDigits(phone) || '—';
 
-  // Format last 4 digits of card (matches user screenshot: "•••• 4582")
+  // Last 4 digits of the saved card
   const digitsOnly = (cardMasked || '').replace(/\D/g, '');
-  const last4 = digitsOnly.length >= 4 ? digitsOnly.slice(-4) : '4582';
-  const cardDisplayText = `•••• ${last4}`;
+  const last4 = digitsOnly.length >= 4 ? digitsOnly.slice(-4) : null;
+  const cardDisplayText = last4 ? `•••• ${last4}` : '—';
+
+  const rowStyle = [styles.planInfoCleanRow, isPhone && styles.planInfoCleanRowPhone];
+  const labelStyle = [styles.planInfoCleanLabel, isPhone && styles.planInfoCleanLabelPhone];
 
   return (
     <View style={[styles.currentPlanCardContainer, isPhone && styles.currentPlanCardContainerPhone]}>
@@ -1876,7 +1884,7 @@ function CurrentPlanCard({
           </Text>
         </View>
 
-        {/* Top-Right White Pill Badge */}
+        {/* Top-Right Pill Badge */}
         <View
           style={[
             styles.starterBadgePill,
@@ -1942,7 +1950,7 @@ function CurrentPlanCard({
       )}
 
       {/* Main Title & Subtitle */}
-      <Text style={styles.planMainTitle}>
+      <Text style={[styles.planMainTitle, isPhone && styles.planMainTitlePhone]}>
         {planDisplayName} ({cycleLabel})
       </Text>
       <Text style={styles.planMainSubtitle}>
@@ -1955,19 +1963,19 @@ function CurrentPlanCard({
           : 'Perfect for getting started with Maya.'}
       </Text>
 
-      {/* 3 Information Rows (Matches Image 1 for Starter & Image 2 for Pro) */}
-      <View style={styles.planInfoRowsWrap}>
+      {/* 3 Information Rows */}
+      <View style={[styles.planInfoRowsWrap, isPhone && styles.planInfoRowsWrapPhone]}>
         {/* Row 1: Current Plan */}
-        <View style={styles.planInfoCleanRow}>
-          <Text style={styles.planInfoCleanLabel}>Current Plan</Text>
+        <View style={rowStyle}>
+          <Text style={labelStyle}>Current Plan</Text>
           <Text style={styles.planInfoCleanValue}>{planDisplayName}</Text>
         </View>
 
         {isPro ? (
           <>
             {/* Row 2 (Pro): Next Billing Date */}
-            <View style={styles.planInfoCleanRow}>
-              <Text style={styles.planInfoCleanLabel}>
+            <View style={rowStyle}>
+              <Text style={labelStyle}>
                 {isGracePeriodActive
                   ? 'Access Expires'
                   : isSubscriptionLocked
@@ -1989,9 +1997,9 @@ function CurrentPlanCard({
             </View>
 
             {/* Row 3 (Pro): Payment Method */}
-            <View style={styles.planInfoCleanRow}>
-              <Text style={styles.planInfoCleanLabel}>Payment Method</Text>
-              <View style={styles.planPaymentRightWrap}>
+            <View style={rowStyle}>
+              <Text style={labelStyle}>Payment Method</Text>
+              <View style={[styles.planPaymentRightWrap, isPhone && styles.planPaymentRightWrapPhone]}>
                 <View style={styles.paymentCardInfo}>
                   <Ionicons
                     name={hasTelcoSubscription ? 'phone-portrait-outline' : 'card-outline'}
@@ -2026,25 +2034,25 @@ function CurrentPlanCard({
         ) : (
           <>
             {/* Row 2 (Starter): Registered Date */}
-            <View style={styles.planInfoCleanRow}>
-              <Text style={styles.planInfoCleanLabel}>Registered Date</Text>
+            <View style={rowStyle}>
+              <Text style={labelStyle}>Registered Date</Text>
               <Text style={styles.planInfoCleanValue}>{registeredDateText}</Text>
             </View>
 
             {/* Row 3 (Starter): Mobile Number */}
-            <View style={styles.planInfoCleanRow}>
-              <Text style={styles.planInfoCleanLabel}>Mobile Number</Text>
+            <View style={rowStyle}>
+              <Text style={labelStyle}>Mobile Number</Text>
               <Text style={styles.planInfoCleanValue}>{localMobileFormatted}</Text>
             </View>
           </>
         )}
       </View>
 
-      {/* Thin Horizontal Divider Line above button */}
-      <View style={styles.planCardDivider} />
+      {/* Divider above buttons (desktop only; phone rows already have their own lines) */}
+      {!isPhone && <View style={styles.planCardDivider} />}
 
       {/* Action Buttons */}
-      <View style={styles.planBottomBtnContainer}>
+      <View style={[styles.planBottomBtnContainer, isPhone && styles.planBottomBtnContainerPhone]}>
         {isSubscriptionLocked ? (
           <MayaPrimaryButton
             label="Reactivate Maya"
@@ -2141,7 +2149,7 @@ function AboutCard() {
         <View style={styles.aboutLeftCol}>
           <Text style={styles.aboutAppTitle}>About TalkWithMaya</Text>
           <Text style={styles.aboutDescriptionText}>
-            SpeakWithMaya is your AI English partner that helps you speak with confidence in real-life situations.
+            TalkWithMaya is your AI English partner that helps you speak with confidence in real-life situations.
           </Text>
           <Text style={styles.versionText}>Version 1.0.0</Text>
         </View>
@@ -2154,35 +2162,6 @@ function AboutCard() {
           </View>
         </View>
       </View>
-    </View>
-  );
-}
-
-/**
- * 7. Log Out Card
- */
-function LogoutCard({ onLogout }: { onLogout: () => void }) {
-  return (
-    <View style={styles.cardContainer}>
-      <Pressable
-        style={({ pressed }) => [styles.logoutRow, pressed && styles.cardPressed]}
-        onPress={onLogout}
-        accessibilityRole="button"
-        accessibilityLabel="Log Out"
-      >
-        <View style={styles.logoutIconCircle}>
-          <Feather name="log-out" size={20} color="#DC2626" />
-        </View>
-
-        <View style={styles.logoutTextCol}>
-          <Text style={styles.logoutTitle}>Log Out</Text>
-          <Text style={styles.logoutSubtitle}>
-            Sign out of your account on this device.
-          </Text>
-        </View>
-
-        <Feather name="chevron-right" size={18} color="#DC2626" />
-      </Pressable>
     </View>
   );
 }
@@ -2209,7 +2188,7 @@ const styles = StyleSheet.create({
     marginLeft: 0,
   },
   mainScrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 90,
   },
@@ -2223,54 +2202,9 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
 
-  /* Desktop Top Header */
-  desktopTopHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 26,
-  },
-  headingTitle: {
-    fontSize: 28,
-    color: '#10213D',
-    letterSpacing: -0.5,
-    ...fontStyle('inter', 'bold'),
-  },
-  headingSubtitle: {
-    fontSize: 14,
-    color: '#64748B',
-    marginTop: 4,
-    ...fontStyle('inter', 'regular'),
-  },
-
-  /* Mobile Fixed Top Bar */
-  mobileFixedTopBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    backgroundColor: '#FFFFFF',
-    zIndex: 10,
-  },
-  brandTitleMobile: {
-    fontSize: 18,
-    color: '#10213D',
-    ...fontStyle('inter', 'extraBold'),
-  },
-  brandAccent: {
-    color: '#2563EB',
-  },
-  brandTaglineMobile: {
-    fontSize: 10.5,
-    color: '#94A3B8',
-    ...fontStyle('inter', 'regular'),
-  },
+  /* Mobile heading */
   mobileHeadingSection: {
-    marginTop: 12,
+    marginTop: 8,
     marginBottom: 16,
   },
   headingTitleMobile: {
@@ -2305,7 +2239,7 @@ const styles = StyleSheet.create({
 
   /* Mobile 1 Column Stack */
   mobileStackContainer: {
-    gap: 14,
+    gap: 12,
   },
 
   /* Common Card Container */
@@ -2315,18 +2249,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E2E8F0',
     padding: 18,
-    ...Platform.select({
-      web: {
-        boxShadow: '0px 2px 8px rgba(15, 23, 42, 0.03)',
-      } as any,
-      default: {
-        elevation: 1,
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.03,
-        shadowRadius: 6,
-      },
-    }),
   },
   cardPressed: {
     opacity: 0.8,
@@ -2336,11 +2258,14 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.99 }],
   },
 
-  /* Profile Card (Matches Figma Image 3) */
+  /* Profile Card */
   profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 18,
+  },
+  profileRowPhone: {
+    gap: 14,
   },
   avatarInitialsCircle: {
     width: 68,
@@ -2351,6 +2276,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
     flexShrink: 0,
+  },
+  avatarInitialsCirclePhone: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
   },
   profileCardAvatarImg: {
     width: '100%',
@@ -2421,18 +2351,17 @@ const styles = StyleSheet.create({
     marginTop: 12,
     gap: 18,
   },
+  profileInlineActionsRowPhone: {
+    marginTop: 10,
+    gap: 12,
+  },
   proPlanPill: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#EFF6FF',
     borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 6.5,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 2px 8px rgba(13, 78, 253, 0.08)',
-      } as any,
-    }),
+    paddingHorizontal: 14,
+    paddingVertical: 6,
   },
   inactivePlanPill: {
     backgroundColor: '#FEF2F2',
@@ -2457,9 +2386,9 @@ const styles = StyleSheet.create({
     color: '#0D4EFD',
   },
 
-  /* Stats Card (Matches Figma Image 3) */
+  /* Stats Card */
   statsCardPadding: {
-    paddingVertical: 22,
+    paddingVertical: 20,
     paddingHorizontal: 12,
   },
   statsRow: {
@@ -2473,10 +2402,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   statNumberText: {
-    fontSize: 19,
+    fontSize: 20,
     color: '#0F172A',
     marginTop: 8,
-    marginBottom: 3,
+    marginBottom: 2,
     ...fontStyle('outfit', 'bold'),
   },
   statLabelText: {
@@ -2486,13 +2415,13 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
-    height: 60,
+    height: 56,
     backgroundColor: '#E2E8F0',
   },
 
-  /* 3 Separate Action Cards (Explanation Language, Leaderboard, Submit Complaint) */
+  /* Action Cards */
   actionCardsStack: {
-    gap: 14,
+    gap: 12,
   },
   actionItemCard: {
     flexDirection: 'row',
@@ -2501,20 +2430,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    ...Platform.select({
-      web: {
-        boxShadow: '0px 2px 8px rgba(15, 23, 42, 0.03)',
-      } as any,
-      default: {
-        elevation: 1,
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.03,
-        shadowRadius: 6,
-      },
-    }),
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   actionItemCardDisabled: {
     opacity: 0.62,
@@ -2531,7 +2448,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
+    marginRight: 14,
     flexShrink: 0,
   },
   prefTextCol: {
@@ -2560,7 +2477,7 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'regular'),
   },
 
-  /* Current Plan Card (Matches Image 1 & Image 2) */
+  /* Current Plan Card */
   currentPlanCardContainer: {
     backgroundColor: '#FFFFFF',
     borderRadius: 22,
@@ -2569,24 +2486,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingTop: 24,
     paddingBottom: 24,
-    ...Platform.select({
-      web: {
-        backgroundImage: 'linear-gradient(180deg, #F4F8FF 0%, #FFFFFF 42%)',
-        boxShadow: '0px 4px 16px rgba(15, 23, 42, 0.02)',
-      } as any,
-      default: {
-        elevation: 2,
-        shadowColor: '#1A3669',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.02,
-        shadowRadius: 12,
-      },
-    }),
   },
   currentPlanCardContainerPhone: {
     paddingHorizontal: 18,
-    paddingTop: 20,
-    paddingBottom: 20,
+    paddingTop: 18,
+    paddingBottom: 18,
     borderRadius: 18,
   },
   planCrownImg: {
@@ -2616,18 +2520,13 @@ const styles = StyleSheet.create({
   starterBadgePill: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#EEF2FF',
+    borderColor: '#E2E8F0',
     borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      web: {
-        boxShadow: '0 2px 8px rgba(15, 23, 42, 0.05)',
-      } as any,
-    }),
   },
   starterBadgeText: {
     fontSize: 12.5,
@@ -2642,11 +2541,15 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     ...fontStyle('outfit', 'bold'),
   },
+  planMainTitlePhone: {
+    fontSize: 21,
+    lineHeight: 28,
+  },
   planMainSubtitle: {
     fontSize: 14,
     lineHeight: 20,
     color: '#64748B',
-    marginBottom: 22,
+    marginBottom: 18,
     ...fontStyle('inter', 'regular'),
   },
   planInfoRowsWrap: {
@@ -2654,15 +2557,31 @@ const styles = StyleSheet.create({
     paddingRight: 8,
     gap: 15,
   },
+  planInfoRowsWrapPhone: {
+    paddingLeft: 0,
+    paddingRight: 0,
+    gap: 0,
+  },
   planInfoCleanRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  planInfoCleanRowPhone: {
+    justifyContent: 'space-between',
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
   },
   planInfoCleanLabel: {
     width: 155,
     fontSize: 14,
     color: '#64748B',
     ...fontStyle('inter', 'regular'),
+  },
+  planInfoCleanLabelPhone: {
+    width: undefined,
+    flexShrink: 0,
+    marginRight: 12,
   },
   planInfoCleanValue: {
     fontSize: 14,
@@ -2674,6 +2593,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  planPaymentRightWrapPhone: {
+    flex: 0,
+    justifyContent: 'flex-end',
+    gap: 14,
   },
   paymentCardInfo: {
     flexDirection: 'row',
@@ -2718,6 +2642,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     gap: 10,
   },
+  planBottomBtnContainerPhone: {
+    paddingHorizontal: 0,
+    marginTop: 18,
+  },
   planUpgradeBtn: {
     width: '100%',
     height: 52,
@@ -2726,18 +2654,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      web: {
-        boxShadow: '0 8px 22px rgba(13, 78, 253, 0.28)',
-      } as any,
-      default: {
-        elevation: 4,
-        shadowColor: '#0D4EFD',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 10,
-      },
-    }),
   },
   planUpgradeBtnText: {
     fontSize: 15.5,
@@ -2848,13 +2764,17 @@ const styles = StyleSheet.create({
     color: '#737E94',
   },
 
-  /* Edit Profile Modal Styles (Figma Spec — Balanced for Laptops & Mobile) */
+  /* Edit Profile Modal */
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
+  },
+  modalOverlaySheet: {
+    padding: 0,
+    justifyContent: 'flex-end',
   },
   modalCard: {
     width: '100%',
@@ -2885,6 +2805,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingTop: 24,
     paddingBottom: 22,
+  },
+  modalCardSheet: {
+    maxWidth: '100%',
+    maxHeight: '92%',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderRadius: 24,
+    paddingBottom: 28,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -2968,7 +2896,7 @@ const styles = StyleSheet.create({
   },
   changePhotoBtn: {
     paddingHorizontal: 16,
-    paddingVertical: 7,
+    paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#0D4EFD',
@@ -2996,8 +2924,8 @@ const styles = StyleSheet.create({
     borderColor: '#CBD5E1',
     borderRadius: 10,
     paddingHorizontal: 13,
-    height: 41,
-    fontSize: 13.5,
+    height: 46,
+    fontSize: 14,
     color: '#0F172A',
     ...fontStyle('inter', 'regular'),
     ...Platform.select({
@@ -3022,7 +2950,7 @@ const styles = StyleSheet.create({
   phoneInputComposite: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 41,
+    height: 46,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#CBD5E1',
@@ -3059,7 +2987,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: '100%',
     paddingHorizontal: 11,
-    fontSize: 13.5,
+    fontSize: 14,
     color: '#0F172A',
     ...fontStyle('inter', 'regular'),
     ...Platform.select({
@@ -3156,15 +3084,15 @@ const styles = StyleSheet.create({
     borderRadius: 3.5,
   },
   levelCardTitle: {
-    fontSize: 12,
+    fontSize: 12.5,
     color: '#0F172A',
     textAlign: 'center',
     marginBottom: 3,
     ...fontStyle('inter', 'bold'),
   },
   levelCardSubtitle: {
-    fontSize: 10.5,
-    lineHeight: 13.5,
+    fontSize: 11,
+    lineHeight: 14,
     color: '#64748B',
     textAlign: 'center',
     ...fontStyle('inter', 'regular'),
@@ -3178,8 +3106,8 @@ const styles = StyleSheet.create({
   },
   modalCancelBtn: {
     flex: 1,
-    height: 42,
-    borderRadius: 10,
+    height: 46,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#CBD5E1',
     backgroundColor: '#FFFFFF',
@@ -3187,32 +3115,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalCancelBtnText: {
-    fontSize: 13.5,
+    fontSize: 14,
     color: '#475569',
     ...fontStyle('inter', 'semiBold'),
   },
   modalSaveBtn: {
     flex: 1,
-    height: 42,
-    borderRadius: 10,
+    height: 46,
+    borderRadius: 12,
     backgroundColor: '#0D4EFD',
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      web: {
-        boxShadow: '0 6px 16px rgba(13, 78, 253, 0.25)',
-      } as any,
-      default: {
-        elevation: 3,
-        shadowColor: '#0D4EFD',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.25,
-        shadowRadius: 8,
-      },
-    }),
   },
   modalSaveBtnText: {
-    fontSize: 13.5,
+    fontSize: 14,
     color: '#FFFFFF',
     ...fontStyle('inter', 'bold'),
   },
@@ -3222,8 +3138,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#ccfbf1',
-    backgroundColor: '#f0fdfa',
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
     gap: 12,
   },
   testAccountHeader: {
@@ -3234,7 +3150,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    backgroundColor: '#ccfbf1',
+    backgroundColor: '#E2E8F0',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
@@ -3242,7 +3158,7 @@ const styles = StyleSheet.create({
   testAccountBadgeText: {
     ...fontStyle('inter', 'bold'),
     fontSize: 11,
-    color: '#0f766e',
+    color: '#475569',
   },
   testAccountTitle: {
     ...fontStyle('outfit', 'semiBold'),
@@ -3270,64 +3186,12 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#99f6e4',
+    borderColor: '#CBD5E1',
   },
   testScreenPillText: {
     ...fontStyle('inter', 'medium'),
     fontSize: 11.5,
-    color: '#0f766e',
-  },
-
-  /* Profile Header Actions (Edit & Logout) */
-  profileHeaderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  logoutHeaderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: '#FEF2F2',
-  },
-  logoutHeaderText: {
-    fontSize: 12,
-    color: '#DC2626',
-    ...fontStyle('inter', 'semiBold'),
-  },
-
-  /* Log Out Card */
-  logoutRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  logoutIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: '#FEF2F2',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  logoutTextCol: {
-    flex: 1,
-    marginRight: 10,
-  },
-  logoutTitle: {
-    fontSize: 14,
-    color: '#DC2626',
-    marginBottom: 2,
-    ...fontStyle('inter', 'bold'),
-  },
-  logoutSubtitle: {
-    fontSize: 11.5,
-    color: '#64748B',
-    marginBottom: 1,
-    ...fontStyle('inter', 'regular'),
+    color: '#475569',
   },
 
   /* Reactivate OTP Modal Styles */
@@ -3467,6 +3331,12 @@ const styles = StyleSheet.create({
         elevation: 10,
       },
     }),
+  },
+  selectionModalCardSheet: {
+    maxWidth: '100%',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingBottom: 28,
   },
   selectionModalTitle: {
     fontSize: 20,

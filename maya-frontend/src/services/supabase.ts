@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
+import { getBackendBaseUrl } from '@/utils/backend-url';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -59,26 +60,6 @@ export interface SessionHistoryRecord {
   hintsUsedCount?: number;
 }
 
-const getBackendBaseUrl = (): string => {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://127.0.0.1:3000';
-    }
-    if (hostname.endsWith('speakwithmaya.com')) {
-      return 'https://api.speakwithmaya.com';
-    }
-    if (hostname.includes('azurecontainerapps.io') || hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
-      return 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io';
-    }
-    const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
-    if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
-      return envUrl;
-    }
-    return 'https://api.speakwithmaya.com';
-  }
-  return process.env.EXPO_PUBLIC_BACKEND_URL || 'http://127.0.0.1:3000';
-};
 
 /**
  * Persists a completed session to Supabase.

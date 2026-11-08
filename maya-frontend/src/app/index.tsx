@@ -24,6 +24,7 @@ import {
   areOnboardingAudiosEnabled,
 } from '@/services/sound/sound-service';
 import { MayaPrimaryButton } from '@/components/ui';
+import { OfficialStoreBadges } from '@/components/ui/official-store-badges';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 
 export default function WelcomeScreen() {
@@ -392,6 +393,9 @@ export default function WelcomeScreen() {
               height={58}
               borderRadius={22}
             />
+
+            {/* Official Apple App Store & Google Play Badges */}
+            <OfficialStoreBadges />
           </Animated.View>
         </View>
       </ScrollView>

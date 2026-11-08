@@ -1492,7 +1492,7 @@ const styles = StyleSheet.create({
     color: '#0057FF',
   },
   brandTaglineMobile: {
-    fontFamily: Fonts.outfit.regular,
+    ...fontStyle('outfit', 'regular'),
     fontSize: 10.5,
     color: '#94a3b8',
     marginTop: 2,

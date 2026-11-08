@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   Platform,
+  RefreshControl,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -91,12 +92,6 @@ const SCENARIOS: ScenarioItem[] = [
   },
 ];
 
-const SOCIAL_AVATARS = [
-  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=100&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80',
-];
-
 function resolveScenarioFromTopic(topic?: string, scenarioId?: string): { id: string; title: string } | null {
   if (scenarioId) {
     const match = SCENARIOS.find((s) => s.id === scenarioId);
@@ -140,6 +135,125 @@ function getScenarioDetails(scenarioId?: string) {
   const match = SCENARIOS.find((s) => s.id === scenarioId);
   return match || SCENARIOS[0];
 }
+
+/** Deep links may carry ?popup=...; only open known, harmless popups. */
+const ALLOWED_DEEPLINK_POPUPS: PopupPreset[] = [
+  'unlock-premium',
+  'daily-limit',
+  'get-extra-time',
+  'reactivate-plan',
+  'practice-complete',
+  'level-up',
+];
+function resolveInitialPopup(raw?: string): PopupPreset | null {
+  return ALLOWED_DEEPLINK_POPUPS.find((p) => p === raw) ?? null;
+}
+
+/** Stored summaries are sent to the AI as "memory": strip quotes/newlines/control chars and cap length. */
+function cleanForPrompt(value?: string | null, max = 400): string {
+  return String(value ?? '')
+    .replace(/[\u0000-\u001f"]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+type ScenarioTileProps = {
+  item: ScenarioItem;
+  isLocked: boolean;
+  isDesktop: boolean;
+  desktopMinHeight: number;
+  desktopPaddingV: number;
+  onPress: (item: ScenarioItem, isLocked: boolean) => void;
+};
+
+/**
+ * One scenario. Memoised so the grid does not re-render on every stats/timer update.
+ * Desktop keeps the original row card. On phones it is a vertical tile (icon on top, then
+ * title and description) so the text gets the full tile width instead of ~80px.
+ */
+const ScenarioTile = React.memo(function ScenarioTile({
+  item,
+  isLocked,
+  isDesktop,
+  desktopMinHeight,
+  desktopPaddingV,
+  onPress,
+}: ScenarioTileProps) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.scenarioCard,
+        isDesktop
+          ? [styles.scenarioCardDesktop, { minHeight: desktopMinHeight, paddingVertical: desktopPaddingV }]
+          : styles.scenarioCardMobile,
+        pressed && styles.cardPressed,
+      ]}
+      onPress={() => onPress(item, isLocked)}
+      android_ripple={isDesktop ? undefined : { color: 'rgba(0, 82, 255, 0.06)' }}
+      accessibilityRole="button"
+      accessibilityLabel={
+        isLocked ? `${item.title} (Locked, upgrade to Pro to unlock)` : `Practice ${item.title}`
+      }
+    >
+      <View
+        style={[
+          styles.scenarioIconBadge,
+          isDesktop && styles.scenarioIconBadgeDesktop,
+          { backgroundColor: isLocked ? '#F3F4F6' : item.iconBg },
+        ]}
+      >
+        <Image
+          source={item.image}
+          style={[
+            styles.scenarioImage,
+            isDesktop && styles.scenarioImageDesktop,
+            isLocked && styles.scenarioImageLocked,
+          ]}
+          resizeMode="contain"
+          fadeDuration={0}
+        />
+      </View>
+
+      <View style={isDesktop ? styles.scenarioContent : styles.scenarioContentMobile}>
+        <Text
+          maxFontSizeMultiplier={1.2}
+          numberOfLines={2}
+          style={[
+            styles.scenarioTitle,
+            isDesktop ? styles.scenarioTitleDesktop : styles.scenarioTitleMobile,
+            isLocked && styles.scenarioTitleLocked,
+          ]}
+        >
+          {item.title}
+        </Text>
+        <Text
+          maxFontSizeMultiplier={1.2}
+          numberOfLines={3}
+          style={[
+            styles.scenarioSubtitle,
+            isDesktop ? styles.scenarioSubtitleDesktop : styles.scenarioSubtitleMobile,
+            isLocked && styles.scenarioSubtitleLocked,
+          ]}
+        >
+          {item.subtitle}
+        </Text>
+      </View>
+
+      {isLocked ? (
+        <View style={[styles.lockIconContainer, !isDesktop && styles.lockIconContainerMobile]}>
+          <LockIcon color="#94A3B8" size={16} />
+        </View>
+      ) : isDesktop ? (
+        <Text style={styles.scenarioArrow}>›</Text>
+      ) : (
+        <View style={styles.scenarioArrowMobile}>
+          <Feather name="arrow-up-right" size={16} color="#94A3B8" />
+        </View>
+      )}
+    </Pressable>
+  );
+});
 
 export default function DashboardScreen() {
   const params = useLocalSearchParams<{
@@ -216,9 +330,10 @@ export default function DashboardScreen() {
     : 16;
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('home');
-  const [activePopup, setActivePopup] = useState<PopupPreset | null>(
-    (params.popup as PopupPreset) || null
+  const [activePopup, setActivePopup] = useState<PopupPreset | null>(() =>
+    resolveInitialPopup(params.popup),
   );
+  const [refreshing, setRefreshing] = useState(false);
   const [createSessionVisible, setCreateSessionVisible] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<{ id: string; title: string } | null>(null);
   const [isResumingSession, setIsResumingSession] = useState(false);
@@ -315,32 +430,36 @@ export default function DashboardScreen() {
     };
   }, []);
 
-  const handleOpenCreateSession = (scenario?: { id: string; title: string }, resuming: boolean = false) => {
+  /** Returns false (and shows the right popup) when the user cannot start a call right now. UX only: the server must enforce it too. */
+  const ensureCanStart = (): boolean => {
     if (isSubscriptionLocked) {
       setActivePopup('reactivate-plan');
-      return;
+      return false;
     }
-    setIsResumingSession(resuming);
-    setSelectedScenario(scenario || null);
-    setCreateSessionVisible(true);
+    if (isTimeExpired) {
+      setActivePopup(isPro ? 'get-extra-time' : 'daily-limit');
+      return false;
+    }
+    return true;
   };
+
+  const handleOpenCreateSession = useCallback(
+    (scenario?: { id: string; title: string }, resuming: boolean = false) => {
+      if (isSubscriptionLocked) {
+        setActivePopup('reactivate-plan');
+        return;
+      }
+      setIsResumingSession(resuming);
+      setSelectedScenario(scenario || null);
+      setCreateSessionVisible(true);
+    },
+    [isSubscriptionLocked],
+  );
 
   const handleStartSession = (config: CreateSessionConfig) => {
     setCreateSessionVisible(false);
 
-    if (isSubscriptionLocked) {
-      setActivePopup('reactivate-plan');
-      return;
-    }
-
-    if (isTimeExpired) {
-      if (!isPro) {
-        setActivePopup('daily-limit');
-      } else {
-        setActivePopup('get-extra-time');
-      }
-      return;
-    }
+    if (!ensureCanStart()) return;
 
     const effectiveScenarioId = config.scenarioId || activeConversation?.scenarioId || 'casual-chat';
     const effectiveScenarioTitle = config.scenarioTitle || activeConversation?.scenarioTitle || 'Casual Chat';
@@ -350,12 +469,12 @@ export default function DashboardScreen() {
     if (isResumingSession && activeConversation) {
       const parts: string[] = [];
       if (activeConversation.summary) {
-        parts.push(`Previous ${activeConversation.scenarioTitle} session summary: "${activeConversation.summary}".`);
+        parts.push(`Previous ${cleanForPrompt(activeConversation.scenarioTitle, 60)} session summary: "${cleanForPrompt(activeConversation.summary)}".`);
       }
       if (activeConversation.nextFollowup) {
-        parts.push(`Suggested follow-up topic to continue with: "${activeConversation.nextFollowup}".`);
+        parts.push(`Suggested follow-up topic to continue with: "${cleanForPrompt(activeConversation.nextFollowup, 200)}".`);
       } else if (activeConversation.topic) {
-        parts.push(`Previous topic practiced: "${activeConversation.topic}".`);
+        parts.push(`Previous topic practiced: "${cleanForPrompt(activeConversation.topic, 200)}".`);
       }
       if (parts.length > 0) {
         resumeMemory = parts.join(' ');
@@ -379,8 +498,8 @@ export default function DashboardScreen() {
       aiCorrectionMode: config.aiCorrectionsMode === 'instant'
         ? 'correct_instantly'
         : config.aiCorrectionsMode === 'end_review'
-        ? 'let_me_speak'
-        : 'keep_on_track',
+          ? 'let_me_speak'
+          : 'keep_on_track',
       topic: effectiveTopic,
       scenarioId: effectiveScenarioId,
       scenarioTitle: effectiveScenarioTitle,
@@ -390,34 +509,12 @@ export default function DashboardScreen() {
   };
 
   const handleStartTalking = () => {
-    if (isSubscriptionLocked) {
-      setActivePopup('reactivate-plan');
-      return;
-    }
-    if (isTimeExpired) {
-      if (!isPro) {
-        setActivePopup('daily-limit');
-      } else {
-        setActivePopup('get-extra-time');
-      }
-      return;
-    }
+    if (!ensureCanStart()) return;
     handleOpenCreateSession({ id: 'casual-chat', title: 'Casual Chat' }, false);
   };
 
   const handleResumeTalking = () => {
-    if (isSubscriptionLocked) {
-      setActivePopup('reactivate-plan');
-      return;
-    }
-    if (isTimeExpired) {
-      if (!isPro) {
-        setActivePopup('daily-limit');
-      } else {
-        setActivePopup('get-extra-time');
-      }
-      return;
-    }
+    if (!ensureCanStart()) return;
     if (activeConversation) {
       handleOpenCreateSession(
         {
@@ -432,25 +529,46 @@ export default function DashboardScreen() {
   };
 
   const handleSelectTab = (tab: DashboardTab) => {
+    const navParams = params.name ? { name: params.name } : undefined;
     if (tab === 'roadmap') {
-      router.replace({
-        pathname: '/roadmap',
-        params,
-      });
+      router.navigate({ pathname: '/roadmap', params: navParams });
     } else if (tab === 'history') {
-      router.replace({
-        pathname: '/history',
-        params,
-      });
+      router.navigate({ pathname: '/history', params: navParams });
     } else if (tab === 'account') {
-      router.replace({
-        pathname: '/account',
-        params,
-      });
+      router.navigate({ pathname: '/account', params: navParams });
     } else {
       setActiveTab(tab);
     }
   };
+
+  const handleScenarioPress = useCallback(
+    (item: ScenarioItem, isLocked: boolean) => {
+      if (isLocked) {
+        setActivePopup('unlock-premium');
+        return;
+      }
+      ActiveConversationStore.setActive({
+        scenarioId: item.id,
+        scenarioTitle: item.title,
+        topic: item.title,
+      });
+      handleOpenCreateSession({ id: item.id, title: item.title });
+    },
+    [handleOpenCreateSession],
+  );
+
+  // Pull to refresh (phones): re-sync minutes, plan and profile without leaving the screen
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.allSettled([
+        Promise.resolve(stats.refreshStats?.()),
+        Promise.resolve(authService.fetchUserProfile()),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [stats]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -508,6 +626,16 @@ export default function DashboardScreen() {
             ]}
             showsVerticalScrollIndicator={false}
             scrollEnabled={!isDesktop || windowHeight < 520}
+            refreshControl={
+              !isDesktop ? (
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor="#0052FF"
+                  colors={['#0052FF']}
+                />
+              ) : undefined
+            }
           >
             {/* TOP SECTION: Header + Hero Banner paired together on desktop */}
             <View style={isDesktop ? styles.desktopTopGroup : undefined}>
@@ -545,7 +673,7 @@ export default function DashboardScreen() {
                       activeConversation.summary
                     ) ? (
                     <>
-                      <Text style={[
+                      <Text maxFontSizeMultiplier={1.2} style={[
                         styles.heroTitle,
                         isDesktop && styles.heroTitleDesktop,
                       ]}>
@@ -553,6 +681,7 @@ export default function DashboardScreen() {
                         <Text style={styles.heroTitleHighlight}>conversation</Text>
                       </Text>
                       <Text
+                        maxFontSizeMultiplier={1.2}
                         style={[
                           styles.heroSubtitle,
                           styles.resumeSummarySubtitle,
@@ -589,6 +718,7 @@ export default function DashboardScreen() {
                             styles.resumeStartNewButton,
                             pressed && { opacity: 0.7 },
                           ]}
+                          hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
                           onPress={handleStartTalking}
                           accessibilityRole="button"
                           accessibilityLabel="Start fresh conversation"
@@ -599,14 +729,14 @@ export default function DashboardScreen() {
                     </>
                   ) : (
                     <>
-                      <Text style={[
+                      <Text maxFontSizeMultiplier={1.2} style={[
                         styles.heroTitle,
                         isDesktop && styles.heroTitleDesktop,
                       ]}>
                         Start a{' '}
                         <Text style={styles.heroTitleHighlight}>conversation</Text>
                       </Text>
-                      <Text style={[
+                      <Text maxFontSizeMultiplier={1.2} style={[
                         styles.heroSubtitle,
                         isDesktop && styles.heroSubtitleDesktop,
                       ]}>
@@ -646,6 +776,7 @@ export default function DashboardScreen() {
                       ],
                     ]}
                     resizeMode="contain"
+                    fadeDuration={0}
                     accessibilityLabel="Maya waving"
                   />
                 </View>
@@ -670,91 +801,17 @@ export default function DashboardScreen() {
                     isDesktop ? styles.scenariosGridDesktop : styles.scenariosGridMobile,
                   ]}
                 >
-                  {SCENARIOS.map((item) => {
-                    const isLocked = !isPro && item.id !== 'casual-chat';
-
-                    return (
-                      <Pressable
-                        key={item.id}
-                        style={({ pressed }) => [
-                          styles.scenarioCard,
-                          isDesktop && [
-                            styles.scenarioCardDesktop,
-                            {
-                              minHeight: desktopCardMinHeight,
-                              paddingVertical: desktopCardPaddingV,
-                            },
-                          ],
-                          pressed && styles.cardPressed,
-                        ]}
-                        onPress={() => {
-                          if (isLocked) {
-                            setActivePopup('unlock-premium');
-                          } else {
-                            ActiveConversationStore.setActive({
-                              scenarioId: item.id,
-                              scenarioTitle: item.title,
-                              topic: item.title,
-                            });
-                            handleOpenCreateSession({ id: item.id, title: item.title });
-                          }
-                        }}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          isLocked
-                            ? `${item.title} (Locked, upgrade to Pro to unlock)`
-                            : `Practice ${item.title}`
-                        }
-                      >
-                        <View
-                          style={[
-                            styles.scenarioIconBadge,
-                            isDesktop && styles.scenarioIconBadgeDesktop,
-                            { backgroundColor: isLocked ? '#F3F4F6' : item.iconBg },
-                          ]}
-                        >
-                          <Image
-                            source={item.image}
-                            style={[
-                              styles.scenarioImage,
-                              isDesktop && styles.scenarioImageDesktop,
-                              isLocked && styles.scenarioImageLocked,
-                            ]}
-                            resizeMode="contain"
-                          />
-                        </View>
-
-                        <View style={styles.scenarioContent}>
-                          <Text
-                            style={[
-                              styles.scenarioTitle,
-                              isDesktop && styles.scenarioTitleDesktop,
-                              isLocked && styles.scenarioTitleLocked,
-                            ]}
-                          >
-                            {item.title}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.scenarioSubtitle,
-                              isDesktop && styles.scenarioSubtitleDesktop,
-                              isLocked && styles.scenarioSubtitleLocked,
-                            ]}
-                          >
-                            {item.subtitle}
-                          </Text>
-                        </View>
-
-                        {isLocked ? (
-                          <View style={styles.lockIconContainer}>
-                            <LockIcon color="#94A3B8" size={16} />
-                          </View>
-                        ) : (
-                          <Text style={styles.scenarioArrow}>›</Text>
-                        )}
-                      </Pressable>
-                    );
-                  })}
+                  {SCENARIOS.map((item) => (
+                    <ScenarioTile
+                      key={item.id}
+                      item={item}
+                      isLocked={!isPro && item.id !== 'casual-chat'}
+                      isDesktop={isDesktop}
+                      desktopMinHeight={desktopCardMinHeight}
+                      desktopPaddingV={desktopCardPaddingV}
+                      onPress={handleScenarioPress}
+                    />
+                  ))}
                 </View>
               </View>
 
@@ -801,11 +858,11 @@ export default function DashboardScreen() {
                           isInactiveMobile
                             ? { width: '0%', backgroundColor: '#CBD5E1' }
                             : {
-                                width: `${Math.min(
-                                  100,
-                                  Math.round((usedMinutes / Math.max(1, totalMinutes)) * 100)
-                                )}%`,
-                              },
+                              width: `${Math.min(
+                                100,
+                                Math.round((usedMinutes / Math.max(1, totalMinutes)) * 100)
+                              )}%`,
+                            },
                         ]}
                       />
                     </View>
@@ -829,8 +886,8 @@ export default function DashboardScreen() {
                         isInactiveMobile
                           ? 'Reactivate Maya'
                           : isPro
-                          ? 'Get Extra Talk Time'
-                          : 'Upgrade to premium'
+                            ? 'Get Extra Talk Time'
+                            : 'Upgrade to premium'
                       }
                     >
                       {isInactiveMobile ? (
@@ -907,7 +964,7 @@ export default function DashboardScreen() {
                   ]}
                   onPress={() => {
                     if (isPro) {
-                      router.push({ pathname: '/roadmap', params });
+                      router.navigate({ pathname: '/roadmap', params: params.name ? { name: params.name } : undefined });
                     } else {
                       router.push('/upgrade');
                     }
@@ -1346,7 +1403,7 @@ const styles = StyleSheet.create({
   startTalkingButton: {
     backgroundColor: '#0052FF',
     paddingHorizontal: 20,
-    height: 40,
+    height: 44,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1488,6 +1545,16 @@ const styles = StyleSheet.create({
         elevation: 1,
       }),
   },
+  // Phone tile: icon on top, text below (full tile width), arrow top-right
+  scenarioCardMobile: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    minHeight: 128,
+    borderRadius: 20,
+  },
   scenarioCardDesktop: {
     ...Platform.select({
       web: {
@@ -1530,6 +1597,23 @@ const styles = StyleSheet.create({
   scenarioContent: {
     flex: 1,
     minWidth: 0,
+  },
+  scenarioContentMobile: {
+    alignSelf: 'stretch',
+  },
+  scenarioTitleMobile: {
+    fontSize: 14.5,
+    lineHeight: 19,
+  },
+  scenarioSubtitleMobile: {
+    fontSize: 11.5,
+    lineHeight: 15.5,
+    marginTop: 3,
+  },
+  scenarioArrowMobile: {
+    position: 'absolute',
+    top: 14,
+    right: 12,
   },
   scenarioTitle: {
     ...fontStyle('inter', 'bold'),
@@ -1577,6 +1661,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     right: 8,
+  },
+  lockIconContainerMobile: {
+    top: 14,
+    right: 12,
   },
   /* Roadmap / Pro Banner */
   roadmapBanner: {
@@ -1736,7 +1824,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    height: 40,
+    height: 44,
     borderRadius: 12,
   },
   resumeStartNewButton: {

@@ -113,6 +113,7 @@ import {
   decryptData,
   CookieStorage,
 } from '@/utils/encrypted-storage';
+import { AppStorage, SecureTokenStorage } from '@/services/storage/storage-adapter';
 
 // Hydration tracking - resolves once encrypted storage has been fully loaded
 let hydrationResolve: (() => void) | null = null;
@@ -199,108 +200,107 @@ let persistVersion = 0;
 
 // Cross-platform persistence adapter with AES-GCM encryption & tamper detection
 function loadPersistedState(): OnboardingState {
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+  // Synchronous Web fast-path
+  const syncRaw = AppStorage.getSync(STORAGE_KEY);
+  if (syncRaw && syncRaw.startsWith('{')) {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        // If legacy cleartext JSON, parse immediately and queue encrypted migration
-        if (raw.startsWith('{')) {
-          const parsed = JSON.parse(raw);
-          const state = sanitizePersistedState(parsed);
-          // Migrate to encrypted payload in background
-          const currentVersion = ++persistVersion;
-          const { isHydrated, ...persistable } = state;
-          encryptData(JSON.stringify(persistable)).then((enc) => {
-            if (currentVersion === persistVersion) {
-              window.localStorage.setItem(STORAGE_KEY, enc);
-            }
-          });
-          // Resolve hydration immediately for legacy cleartext
-          setTimeout(() => { hydrationResolve?.(); hydrationResolve = null; }, 0);
-          return state;
+      const parsed = JSON.parse(syncRaw);
+      const state = sanitizePersistedState(parsed);
+      const currentVersion = ++persistVersion;
+      const { isHydrated, ...persistable } = state;
+      encryptData(JSON.stringify(persistable)).then((enc) => {
+        if (currentVersion === persistVersion) {
+          AppStorage.setItem(STORAGE_KEY, enc);
         }
-
-        // Decrypt asynchronously in background and notify listeners
-        decryptData(raw)
-          .then((decrypted) => {
-            if (decrypted) {
-              try {
-                const parsed = JSON.parse(decrypted);
-                const sanitized = sanitizePersistedState(parsed);
-                memoryState = sanitized;
-
-                // If legacy cache had polluted lastActiveRoute or unhealed completion state, persist cleaned state immediately
-                if (
-                  sanitized.lastActiveRoute !== parsed?.lastActiveRoute ||
-                  sanitized.isCompleted !== Boolean(parsed?.isCompleted)
-                ) {
-                  persistState(sanitized);
-                }
-              } catch {
-                memoryState = { ...defaultState, isHydrated: true };
-              }
-            } else {
-              // Tamper detected! Clear corrupted/tampered storage
-              console.warn('[OnboardingStore] ⚠️ Purging tampered client storage.');
-              window.localStorage.removeItem(STORAGE_KEY);
-              CookieStorage.delete('maya_auth_token');
-              memoryState = { ...defaultState, isHydrated: true };
-            }
-            markHydrated();
-          })
-          .catch((err) => {
-            console.warn('[OnboardingStore] Decryption error, proceeding with default state:', err);
-            memoryState = { ...defaultState, isHydrated: true };
-            markHydrated();
-          });
-
-        // Return default (not yet hydrated) state - guard will wait for hydration
-        return memoryState;
-      }
-
-      // Fallback: if localStorage entry was cleared but auth cookie still exists, recover token
-      const fallbackCookieToken = CookieStorage.get('maya_auth_token');
-      if (fallbackCookieToken) {
-        const recovered: OnboardingState = {
-          ...defaultState,
-          accessToken: fallbackCookieToken,
-          isAuthenticated: true,
-          isHydrated: true,
-        };
-        setTimeout(() => { hydrationResolve?.(); hydrationResolve = null; }, 0);
-        return recovered;
-      }
+      });
+      setTimeout(() => { hydrationResolve?.(); hydrationResolve = null; }, 0);
+      return state;
     } catch {}
   }
 
-  // No persisted data or not on web - hydrated immediately
-  const immediateState = { ...defaultState, isHydrated: true };
-  setTimeout(() => { hydrationResolve?.(); hydrationResolve = null; }, 0);
-  return immediateState;
+  // Universal Asynchronous loader (Web, iOS, Android)
+  AppStorage.getItem(STORAGE_KEY)
+    .then(async (raw) => {
+      if (raw) {
+        if (raw.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(raw);
+            const state = sanitizePersistedState(parsed);
+            memoryState = state;
+            markHydrated();
+            return;
+          } catch {}
+        }
+
+        const decrypted = await decryptData(raw);
+        if (decrypted) {
+          try {
+            const parsed = JSON.parse(decrypted);
+            const sanitized = sanitizePersistedState(parsed);
+            memoryState = sanitized;
+            if (
+              sanitized.lastActiveRoute !== parsed?.lastActiveRoute ||
+              sanitized.isCompleted !== Boolean(parsed?.isCompleted)
+            ) {
+              persistState(sanitized);
+            }
+          } catch {
+            memoryState = { ...defaultState, isHydrated: true };
+          }
+        } else {
+          console.warn('[OnboardingStore] ⚠️ Purging tampered client storage.');
+          await AppStorage.removeItem(STORAGE_KEY);
+          await SecureTokenStorage.removeToken('maya_auth_token');
+          memoryState = { ...defaultState, isHydrated: true };
+        }
+        markHydrated();
+        return;
+      }
+
+      // Fallback: recover token from SecureTokenStorage if present
+      const fallbackToken = await SecureTokenStorage.getToken('maya_auth_token');
+      if (fallbackToken) {
+        memoryState = {
+          ...defaultState,
+          accessToken: fallbackToken,
+          isAuthenticated: true,
+          isHydrated: true,
+        };
+      } else {
+        memoryState = { ...defaultState, isHydrated: true };
+      }
+      markHydrated();
+    })
+    .catch((err) => {
+      console.warn('[OnboardingStore] Storage load error:', err);
+      memoryState = { ...defaultState, isHydrated: true };
+      markHydrated();
+    });
+
+  // Return initial memoryState while async hydration completes
+  return memoryState;
 }
 
 function persistState(state: OnboardingState) {
   memoryState = state;
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-    try {
-      const currentVersion = ++persistVersion;
-      // Don't persist the isHydrated flag - it's runtime-only
-      const { isHydrated, ...persistable } = state;
-      const json = JSON.stringify(persistable);
-      // Save encrypted envelope into localStorage in strict version order
-      encryptData(json).then((encrypted) => {
-        if (currentVersion === persistVersion) {
-          window.localStorage.setItem(STORAGE_KEY, encrypted);
-        }
-      });
+  try {
+    const currentVersion = ++persistVersion;
+    const { isHydrated, ...persistable } = state;
+    const json = JSON.stringify(persistable);
 
-      // Also sync secure cookie for web
-      if (state.accessToken) {
-        CookieStorage.set('maya_auth_token', state.accessToken, 30);
-      } else {
-        CookieStorage.delete('maya_auth_token');
+    encryptData(json).then((encrypted) => {
+      if (currentVersion === persistVersion) {
+        AppStorage.setItem(STORAGE_KEY, encrypted);
       }
-    } catch {}
+    });
+
+    if (state.accessToken) {
+      SecureTokenStorage.setToken('maya_auth_token', state.accessToken);
+    } else {
+      SecureTokenStorage.removeToken('maya_auth_token');
+    }
+  } catch (err) {
+    console.warn('[OnboardingStore] Error persisting state:', err);
   }
   notify();
 }
@@ -497,26 +497,16 @@ export const OnboardingStore = {
    * Clears state for logout or testing reset.
    */
   clear() {
-    // Invalidate any in-flight async encryptData writes so they cannot re-populate localStorage after logout
+    // Invalidate any in-flight async encryptData writes so they cannot re-populate storage after logout
     ++persistVersion;
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-      try {
-        window.localStorage.removeItem(STORAGE_KEY);
-        window.localStorage.removeItem('maya_active_conversation_v1');
-        window.localStorage.removeItem('maya_user_stats_cache_v1');
-        for (let i = window.localStorage.length - 1; i >= 0; i--) {
-          const k = window.localStorage.key(i);
-          if (
-            k &&
-            (k.startsWith('maya_active_conversation_v1') ||
-              k.startsWith('maya_user_stats_cache_'))
-          ) {
-            window.localStorage.removeItem(k);
-          }
-        }
-        CookieStorage.delete('maya_auth_token');
-      } catch {}
-    }
+    try {
+      AppStorage.removeItem(STORAGE_KEY);
+      AppStorage.removeItem('maya_active_conversation_v1');
+      AppStorage.removeItem('maya_user_stats_cache_v1');
+      AppStorage.clearPrefix('maya_active_conversation_v1');
+      AppStorage.clearPrefix('maya_user_stats_cache_');
+      SecureTokenStorage.removeToken('maya_auth_token');
+    } catch {}
     // Keep isHydrated true - the store is already loaded, this is a runtime clear (logout)
     memoryState = { ...defaultState, isHydrated: true };
     notify();

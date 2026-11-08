@@ -287,6 +287,7 @@ export class AuthController {
   async getPublicLeaderboard(
     @Query('userId') queryUserId?: string,
     @Query('period') period?: 'weekly' | 'monthly' | 'all_time',
+    @Query('limit') queryLimit?: string,
     @Req() req?: any,
   ) {
     let userId = queryUserId;
@@ -298,7 +299,8 @@ export class AuthController {
     }
     const validPeriod =
       period === 'monthly' || period === 'all_time' ? period : 'weekly';
-    return this.authService.getPublicLeaderboard(userId, validPeriod);
+    const limitNum = queryLimit ? Math.max(1, Math.min(100, parseInt(queryLimit, 10) || 50)) : 50;
+    return this.authService.getPublicLeaderboard(userId, validPeriod, limitNum);
   }
 
   /**

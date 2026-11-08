@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer';
 import { getLogTimestamp } from '@/utils/time';
 import { OnboardingStore } from '@/services/store/onboarding-store';
+import { getBackendWsUrl } from '@/utils/backend-url';
 import type {
   ILiveTransport,
   LiveTransportCallbacks,
@@ -37,14 +38,7 @@ export class ServerLiveTransport implements ILiveTransport {
   private inboundAudioChunksCount: number = 0;
 
   constructor(backendWsUrl?: string) {
-    if (backendWsUrl) {
-      this.backendWsUrl = backendWsUrl;
-    } else {
-      const httpBase = process.env.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
-      const wsProto = httpBase.startsWith('https') ? 'wss' : 'ws';
-      const host = httpBase.replace(/^https?:\/\//, '').replace(/\/$/, '');
-      this.backendWsUrl = `${wsProto}://${host}/live-session`;
-    }
+    this.backendWsUrl = backendWsUrl ?? getBackendWsUrl('/live-session');
   }
 
   connect(

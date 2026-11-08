@@ -12,14 +12,17 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
+// import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import Svg, { Path, Circle, Line, SvgXml } from 'react-native-svg';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path, Circle, Line, SvgXml, Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { Feather } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
-import { getBackendBaseUrl } from '@/hooks/useLiveCall';
+import { getBackendBaseUrl } from '@/utils/backend-url';
+import { apiClient } from '@/utils/api-client';
 import { fetchAllPracticeSessions } from '@/services/supabase';
 import { adaptSvgColor } from '@/app/admin/roadmap';
 import {
@@ -43,11 +46,12 @@ import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { RoadmapTrackSkeleton } from '@/components/ui/skeleton';
 import { MissionCardModal } from '@/components/roadmap/mission-card-modal';
 import { ScenarioBriefingModal, resolveScenarioBriefingData } from '@/components/roadmap/scenario-briefing-modal';
-import { useOnboardingStore } from '@/services/store/onboarding-store';
+import { useOnboardingStore, OnboardingStore } from '@/services/store/onboarding-store';
 import { CallSessionStore } from '@/services/store/call-session-store';
 import { useUserStats } from '@/hooks/useUserStats';
 import { paymentApi } from '@/services/payment/payment-api';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import { authService } from '@/services/auth/auth-service';
 import {
   RoadmapGlowParticles,
   buildDesktopPathSegments,
@@ -92,10 +96,42 @@ export interface MilestoneItem {
 }
 
 
-let cachedRoadmapMilestones: MilestoneItem[] | null = null;
+/* -------------------------------------------------------------------------- */
+/*  Security / robustness helpers                                             */
+/* -------------------------------------------------------------------------- */
 
-function getInitialMilestones(): MilestoneItem[] {
-  return cachedRoadmapMilestones && cachedRoadmapMilestones.length > 0
+/** Backend colours go into styles (and a CSS box-shadow string on web): accept hex only. */
+const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+function safeColor(value: unknown, fallback: string): string {
+  return typeof value === 'string' && HEX_COLOR.test(value.trim()) ? value.trim() : fallback;
+}
+
+/**
+ * Level icons are admin-authored SVG strings from the backend. Treat them as untrusted:
+ * only plain shape SVG is allowed. Anything with scripts, event handlers, external
+ * references, embedded HTML or entity tricks is dropped (the default icon is used).
+ */
+const MAX_SVG_LENGTH = 20000;
+const UNSAFE_SVG =
+  /<\s*(script|foreignObject|iframe|object|embed|image|use|animate|set|style|a)\b|\son\w+\s*=|javascript:|data:|<!ENTITY|<!DOCTYPE|(?:xlink:)?href\s*=\s*["']\s*(?!#)/i;
+function sanitizeSvg(svg?: string | null): string {
+  if (typeof svg !== 'string') return '';
+  const s = svg.trim();
+  if (!s || s.length > MAX_SVG_LENGTH) return '';
+  if (!/^(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(s)) return '';
+  if (UNSAFE_SVG.test(s)) return '';
+  return s;
+}
+
+// In-memory cache, tied to the account that produced it so a second account on the
+// same device never sees the previous account's progress.
+let cachedRoadmapMilestones: MilestoneItem[] | null = null;
+let cachedRoadmapOwner: string | null = null;
+
+function getInitialMilestones(owner: string): MilestoneItem[] {
+  return cachedRoadmapOwner === owner &&
+    cachedRoadmapMilestones &&
+    cachedRoadmapMilestones.length > 0
     ? cachedRoadmapMilestones
     : [];
 }
@@ -106,6 +142,9 @@ export default function RoadmapScreen() {
   const displayName = stats.displayName || params.name || 'Learner';
   const { isPhone } = useBreakpoint();
   const onboardingState = useOnboardingStore();
+  const ownerKey = String(
+    (onboardingState.user as any)?.id ?? (onboardingState.user as any)?.email ?? 'anon',
+  );
   const isDesktop = !isPhone;
   const { width: windowWidth } = useWindowDimensions();
 
@@ -118,6 +157,44 @@ export default function RoadmapScreen() {
   const lastActivePopupRef = useRef<PopupPreset>('level-locked');
   const lastLockedTargetRef = useRef<MilestoneItem | null>(null);
 
+  const insets = useSafeAreaInsets();
+const scrollRef = useRef<ScrollView>(null);
+const scrollMetrics = useRef({ y: 0, viewH: 0, contentH: 0 });
+const [showScrollHint, setShowScrollHint] = useState(false);
+const [showScrollTop, setShowScrollTop] = useState(false);
+
+// The scroll content ends with ~170px of blank padding, so hide the hint
+// a bit before the true bottom
+const HIDE_WHEN_REMAINING_BELOW = 200;
+const SCROLL_TOP_THRESHOLD = 350;
+const MOBILE_TAB_BAR_HEIGHT = 62;
+
+const updateScrollHint = useCallback(() => {
+  const { y, viewH, contentH } = scrollMetrics.current;
+  if (!viewH || !contentH) return;
+  const remaining = contentH - (y + viewH);
+  setShowScrollHint(remaining > HIDE_WHEN_REMAINING_BELOW);
+  setShowScrollTop(y > SCROLL_TOP_THRESHOLD);
+}, []);
+
+const handleScrollHintPress = useCallback(() => {
+  const { y, viewH } = scrollMetrics.current;
+  scrollRef.current?.scrollTo({ y: y + viewH * 0.8, animated: true });
+}, []);
+
+const handleScrollTopPress = useCallback(() => {
+  scrollRef.current?.scrollTo({ y: 0, animated: true });
+}, []);
+
+// Sits above the mobile tab bar; flush with the bottom on desktop
+const hintBottomOffset = isDesktop
+  ? 0
+  : MOBILE_TAB_BAR_HEIGHT + Math.max(insets.bottom, 6) - insets.bottom;
+
+const scrollTopBottomOffset = isDesktop
+  ? 24
+  : MOBILE_TAB_BAR_HEIGHT + Math.max(insets.bottom, 12) + 12;
+
   if (activePopup) {
     lastActivePopupRef.current = activePopup;
   }
@@ -129,25 +206,57 @@ export default function RoadmapScreen() {
   const effectiveLockedLevel = lockedTargetLevel || lastLockedTargetRef.current;
   const isLevelLocked = effectivePopup === 'level-locked';
 
-  const [milestones, setMilestones] = useState<MilestoneItem[]>(getInitialMilestones);
-  const [isLoadingLevels, setIsLoadingLevels] = useState<boolean>(!cachedRoadmapMilestones);
+  const [milestones, setMilestones] = useState<MilestoneItem[]>(() => getInitialMilestones(ownerKey));
+  const [isLoadingLevels, setIsLoadingLevels] = useState<boolean>(
+    () => getInitialMilestones(ownerKey).length === 0,
+  );
+  const [loadError, setLoadError] = useState(false);
 
   // Fetch published levels from backend & sync student unlocked status
-  const fetchRoadmapData = useCallback(async () => {
+  const fetchRoadmapData = useCallback(async (isSilentBackground: boolean = false) => {
     try {
-      const baseUrl = getBackendBaseUrl();
-      const [roadmapRes, sessions, progressRes] = await Promise.all([
-        fetch(`${baseUrl}/v1/roadmap`).catch(() => null),
-        fetchAllPracticeSessions().catch(() => []),
-        fetch(`${baseUrl}/v1/roadmap/user-progress`).catch(() => null),
+      // Never show another account's cached progress
+      if (cachedRoadmapOwner !== ownerKey) {
+        cachedRoadmapMilestones = null;
+        cachedRoadmapOwner = null;
+        setMilestones([]);
+      }
+      if (!isSilentBackground && !cachedRoadmapMilestones) {
+        setIsLoadingLevels(true);
+      }
+      setLoadError(false);
+
+      // In parallel via Axios
+      const [roadmapRes, sessionsResult, progressRes] = await Promise.all([
+        apiClient.get('/v1/roadmap').catch((err) => {
+          if (__DEV__) console.warn('[Roadmap] get /v1/roadmap error:', err?.message || err);
+          return null;
+        }),
+        fetchAllPracticeSessions().catch((err) => {
+          if (__DEV__) console.warn('[Roadmap] fetchAllPracticeSessions caught:', err);
+          return [];
+        }),
+        apiClient.get('/v1/roadmap/user-progress').catch((err) => {
+          if (__DEV__) console.warn('[Roadmap] get /v1/roadmap/user-progress error:', err?.message || err);
+          return null;
+        }),
       ]);
 
+      const sessions: any = sessionsResult;
+
       let backendLevels: any[] = [];
-      if (roadmapRes && roadmapRes.ok) {
-        const json = await roadmapRes.json();
-        if (Array.isArray(json.levels) && json.levels.length > 0) {
-          backendLevels = json.levels;
+      const rawData = roadmapRes?.data;
+      if (Array.isArray(rawData?.levels) && rawData.levels.length > 0) {
+        backendLevels = rawData.levels;
+      } else if (Array.isArray(rawData) && rawData.length > 0) {
+        backendLevels = rawData;
+      }
+
+      if (backendLevels.length === 0) {
+        if (!cachedRoadmapMilestones || cachedRoadmapMilestones.length === 0) {
+          setLoadError(true);
         }
+        return;
       }
 
       const sourceLevels = backendLevels;
@@ -157,16 +266,14 @@ export default function RoadmapScreen() {
       const completedLevelNumbers = new Set<number>();
 
       // 1. Fetch real user level completions directly from user_roadmap_progress backend table (Supabase DB)
-      if (progressRes && progressRes.ok) {
-        try {
-          const progressData = await progressRes.json();
-          if (Array.isArray(progressData.completedLevelIds)) {
-            progressData.completedLevelIds.forEach((id: string) => completedLevelIds.add(id));
-          }
-          if (Array.isArray(progressData.completedLevelNumbers)) {
-            progressData.completedLevelNumbers.forEach((num: number) => completedLevelNumbers.add(num));
-          }
-        } catch {}
+      const progressData = progressRes?.data;
+      if (progressData) {
+        if (Array.isArray(progressData.completedLevelIds)) {
+          progressData.completedLevelIds.forEach((id: string) => completedLevelIds.add(id));
+        }
+        if (Array.isArray(progressData.completedLevelNumbers)) {
+          progressData.completedLevelNumbers.forEach((num: number) => completedLevelNumbers.add(num));
+        }
       }
 
       // 2. Cross-reference with completed sessions recorded in Supabase sessions table
@@ -233,16 +340,16 @@ export default function RoadmapScreen() {
           id: lvl.id || `lvl-${levelNum}`,
           levelNumber: levelNum,
           number: String(levelNum).padStart(2, '0'),
-          title: lvl.title,
+          title: String(lvl.title ?? '').slice(0, 120),
           description: lvl.description || lvl.scenario_briefing || '',
           sessionTime: `Session time · ${durationMins} min`,
           xpReward: lvl.xpReward || 50 + idx * 25,
           status,
           iconType: lvl.iconType || 'chat',
-          customSvg: lvl.customSvg,
-          numberColor: lvl.numberColor || '#0057FF',
-          haloColor: lvl.haloColor || '#EFF6FF',
-          haloBorderColor: lvl.haloBorderColor || '#BFDBFE',
+          customSvg: sanitizeSvg(lvl.customSvg),
+          numberColor: safeColor(lvl.numberColor, '#0057FF'),
+          haloColor: safeColor(lvl.haloColor, '#EFF6FF'),
+          haloBorderColor: safeColor(lvl.haloBorderColor, '#BFDBFE'),
           innerBg: '#FFFFFF',
           topic: lvl.topic,
           scenarioId: lvl.scenarioId,
@@ -267,13 +374,19 @@ export default function RoadmapScreen() {
       });
 
       cachedRoadmapMilestones = mappedMilestones;
+      cachedRoadmapOwner = ownerKey;
+      setLoadError(false);
       setMilestones(mappedMilestones);
-    } catch (e) {
-      console.warn('[Roadmap] Error fetching dynamic roadmap data:', e);
+    } catch (e: any) {
+      if (__DEV__) {
+        console.warn('[Roadmap] Error fetching dynamic roadmap data:', e);
+        console.warn('[Roadmap] Stack:', e?.stack);
+      }
+      if (!cachedRoadmapMilestones || cachedRoadmapMilestones.length === 0) setLoadError(true);
     } finally {
       setIsLoadingLevels(false);
     }
-  }, [stats.isTestAccount, stats.planTier]);
+  }, [stats.isTestAccount, stats.planTier, ownerKey]);
 
   useEffect(() => {
     // Clean up any old cached storage so Supabase DB is always the sole authority
@@ -282,9 +395,9 @@ export default function RoadmapScreen() {
         window.localStorage.removeItem('maya_cached_completed_levels');
       } catch {}
     }
-    // The roadmap request is asynchronous; state updates happen after the response arrives.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchRoadmapData();
+    // If we already have cached milestones in memory, fetch in the background silently
+    // without triggering skeleton flash or freezing user interactions
+    fetchRoadmapData(getInitialMilestones(ownerKey).length > 0);
   }, [fetchRoadmapData]);
 
 
@@ -503,12 +616,14 @@ export default function RoadmapScreen() {
   }, [targetCompletedProgressIdx, mobileIconLeftX, mobileIconRightX, mobileYTrack1, mobileTierHeight, mobileR]);
 
   const handleSelectTab = (tab: DashboardTab) => {
+    // Only forward what the next screen needs (not every URL param), and switch tabs instead of stacking screens
+    const navParams = params.name ? { name: params.name } : undefined;
     if (tab === 'home') {
-      router.push({ pathname: '/dashboard', params });
+      router.navigate({ pathname: '/dashboard', params: navParams });
     } else if (tab === 'history') {
-      router.push({ pathname: '/history', params });
+      router.navigate({ pathname: '/history', params: navParams });
     } else if (tab === 'account') {
-      router.push({ pathname: '/account', params });
+      router.navigate({ pathname: '/account', params: navParams });
     } else {
       setActiveTab(tab);
     }
@@ -622,14 +737,28 @@ export default function RoadmapScreen() {
           />
 
           {/* MAIN SCROLLABLE CONTENT */}
-          <ScrollView
-            style={[styles.mainScroll, isDesktop && styles.mainScrollDesktop]}
-            contentContainerStyle={[
-              styles.mainScrollContent,
-              isDesktop && styles.mainScrollContentDesktop,
-            ]}
-            showsVerticalScrollIndicator={false}
-          >
+       <ScrollView
+  ref={scrollRef}
+  style={[styles.mainScroll, isDesktop && styles.mainScrollDesktop]}
+  contentContainerStyle={[
+    styles.mainScrollContent,
+    isDesktop && styles.mainScrollContentDesktop,
+  ]}
+  showsVerticalScrollIndicator={false}
+  scrollEventThrottle={16}
+  onScroll={(e) => {
+    scrollMetrics.current.y = e.nativeEvent.contentOffset.y;
+    updateScrollHint();
+  }}
+  onLayout={(e) => {
+    scrollMetrics.current.viewH = e.nativeEvent.layout.height;
+    updateScrollHint();
+  }}
+  onContentSizeChange={(_, h) => {
+    scrollMetrics.current.contentH = h;
+    updateScrollHint();
+  }}
+>
             {/* MOBILE HEADING */}
           {!isDesktop && (
             <View style={styles.mobileHeadingSection}>
@@ -650,15 +779,7 @@ export default function RoadmapScreen() {
               mobileWidth={mobileWidth}
             />
           ) : milestones.length === 0 ? (
-            <View style={styles.roadmapStatusCard}>
-              <View style={styles.roadmapEmptyIconWrapper}>
-                <Feather name="message-square" size={36} color="#0057FF" />
-              </View>
-              <Text style={styles.roadmapEmptyTitle}>No Roleplay Scenarios Yet</Text>
-              <Text style={styles.roadmapEmptyText}>
-                No published roleplays available at the moment. Scenarios will appear here once created.
-              </Text>
-            </View>
+            <RoadmapEmptyState hasError={loadError} onRetry={() => fetchRoadmapData(false)} />
           ) : isDesktop ? (
             /* ================================================================ */
             /* DESKTOP ROADMAP (100% FULL WIDTH WITH ACCURATE CONNECTIONS)      */
@@ -1023,7 +1144,9 @@ export default function RoadmapScreen() {
                         ...(isLeft
                           ? { left: mobileIconLeftX - mobileIconSize / 2 }
                           : { right: mobileWidth - mobileIconRightX - mobileIconSize / 2 }),
-                        maxWidth: mobileWidth - 36,
+                        // Definite width: on native a shrink-wrapped absolute row gives the flex:1
+                        // text column 0px, so titles were squeezed or invisible
+                        width: Math.max(160, mobileWidth - (mobileIconLeftX - mobileIconSize / 2) - 8),
                       },
                     ]}
                   >
@@ -1040,7 +1163,19 @@ export default function RoadmapScreen() {
 
           {/* Bottom extra scroll clearance */}
           <View style={{ height: 80 }} />
-        </ScrollView>
+       </ScrollView>
+
+<ScrollDownHint
+  visible={showScrollHint && !isLoadingLevels && milestones.length > 0}
+  bottomOffset={hintBottomOffset}
+  onPress={handleScrollHintPress}
+/>
+
+<ScrollTopButton
+  visible={showScrollTop && !isLoadingLevels && milestones.length > 0}
+  bottomOffset={scrollTopBottomOffset}
+  onPress={handleScrollTopPress}
+/>
       </View>
 
 
@@ -1156,9 +1291,10 @@ function MilestoneIcon({
   customSvg?: string;
   color?: string;
 }) {
-  if (customSvg && customSvg.trim()) {
+  const cleanSvg = sanitizeSvg(customSvg);
+  if (cleanSvg) {
     try {
-      const adapted = adaptSvgColor(customSvg, color);
+      const adapted = sanitizeSvg(adaptSvgColor(cleanSvg, color));
       if (adapted) {
         return <SvgXml xml={adapted} width={size} height={size} />;
       }
@@ -1183,6 +1319,40 @@ function MilestoneIcon({
     default:
       return <LockIcon color={color || '#94A3B8'} size={Math.round(size * 0.7)} />;
   }
+}
+
+/**
+ * Open empty / error state: no bordered, shadowed card. Just a soft glow, text and one action.
+ */
+function RoadmapEmptyState({ hasError, onRetry }: { hasError: boolean; onRetry: () => void }) {
+  return (
+    <View style={styles.emptyState}>
+      <View style={styles.emptyGlowOuter}>
+        <View style={styles.emptyGlowInner}>
+          <Feather name={hasError ? 'wifi-off' : 'message-circle'} size={30} color="#0057FF" />
+        </View>
+      </View>
+      <Text style={styles.emptyTitle}>
+        {hasError ? "Couldn't load roleplays" : 'No roleplays yet'}
+      </Text>
+      <Text style={styles.emptyBody}>
+        {hasError
+          ? 'Check your connection and try again.'
+          : 'New speaking scenarios will show up here as soon as they are published.'}
+      </Text>
+      {hasError ? (
+        <Pressable
+          onPress={onRetry}
+          style={({ pressed }) => [styles.emptyButton, pressed && styles.emptyButtonPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Try again"
+        >
+          <Feather name="refresh-cw" size={15} color="#FFFFFF" />
+          <Text style={styles.emptyButtonText}>Try again</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
 }
 
 function getBorderColor(id: string) {
@@ -1434,6 +1604,148 @@ function ActiveBeaconHalo({
         {children}
       </Animated.View>
     </View>
+  );
+}
+
+/**
+ * Bottom fade + "Scroll down" pill with a bouncing arrow.
+ * Fades in/out with `visible`; tapping it scrolls the list down.
+ */
+function ScrollDownHint({
+  visible,
+  bottomOffset,
+  onPress,
+}: {
+  visible: boolean;
+  bottomOffset: number;
+  onPress: () => void;
+}) {
+  const fade = React.useRef(new Animated.Value(0)).current;
+  const bounce = React.useRef(new Animated.Value(0)).current;
+  const useNative = Platform.OS !== 'web';
+
+  React.useEffect(() => {
+    Animated.timing(fade, {
+      toValue: visible ? 1 : 0,
+      duration: 250,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: useNative,
+    }).start();
+  }, [visible]);
+
+  // Only run the bounce loop while the hint is visible
+  React.useEffect(() => {
+    if (!visible) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(bounce, {
+          toValue: 6,
+          duration: 700,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(bounce, {
+          toValue: 0,
+          duration: 700,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: useNative,
+        }),
+      ])
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      bounce.setValue(0);
+    };
+  }, [visible]);
+
+  return (
+    <Animated.View
+      pointerEvents={visible ? 'box-none' : 'none'}
+      style={[styles.scrollHintWrap, { bottom: bottomOffset, opacity: fade }]}
+    >
+      {/* White fade so content dissolves into the bottom */}
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <Svg width="100%" height="100%">
+          <Defs>
+            <LinearGradient id="roadmapBottomFade" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0" />
+              <Stop offset="0.65" stopColor="#FFFFFF" stopOpacity="0.88" />
+              <Stop offset="1" stopColor="#FFFFFF" stopOpacity="1" />
+            </LinearGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#roadmapBottomFade)" />
+        </Svg>
+      </View>
+
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [styles.scrollHintPill, pressed && { opacity: 0.8 }]}
+        accessibilityRole="button"
+        accessibilityLabel="Scroll down to see more levels"
+      >
+        <Text style={styles.scrollHintText}>Scroll down</Text>
+        <Animated.View style={{ transform: [{ translateY: bounce }] }}>
+          <Feather name="chevrons-down" size={16} color="#0057FF" />
+        </Animated.View>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/**
+ * Floating right circle chevron up button to scroll back to top.
+ * Smoothly scales and fades in when user has scrolled down into the roadmap.
+ */
+function ScrollTopButton({
+  visible,
+  bottomOffset,
+  onPress,
+}: {
+  visible: boolean;
+  bottomOffset: number;
+  onPress: () => void;
+}) {
+  const anim = React.useRef(new Animated.Value(0)).current;
+  const useNative = Platform.OS !== 'web';
+
+  React.useEffect(() => {
+    Animated.spring(anim, {
+      toValue: visible ? 1 : 0,
+      tension: 65,
+      friction: 9,
+      useNativeDriver: useNative,
+    }).start();
+  }, [visible]);
+
+  return (
+    <Animated.View
+      pointerEvents={visible ? 'auto' : 'none'}
+      style={[
+        styles.scrollTopCircleWrap,
+        {
+          bottom: bottomOffset,
+          opacity: anim,
+          transform: [
+            {
+              scale: anim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.6, 1],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [styles.scrollTopCircleBtn, pressed && styles.scrollTopCircleBtnPressed]}
+        accessibilityRole="button"
+        accessibilityLabel="Scroll to top"
+      >
+        <Feather name="chevron-up" size={22} color="#0057FF" />
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -2004,6 +2316,7 @@ const styles = StyleSheet.create({
   },
   mobileMilestoneNodeRight: {
     gap: 12,
+    justifyContent: 'flex-end',
   },
   haloCircleMobile: {
     width: 64,
@@ -2268,50 +2581,129 @@ const styles = StyleSheet.create({
   milestoneTitleHovered: {
     color: '#0057FF',
   },
-  /* Roadmap Status & Empty States */
-  roadmapStatusCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 36,
+  /* Roadmap empty / error state (open layout, no card) */
+  emptyState: {
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingTop: 56,
+    paddingBottom: 24,
+  },
+  emptyGlowOuter: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#F3F7FF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 20,
-    marginTop: 40,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 12,
-    elevation: 2,
+    marginBottom: 24,
   },
-  roadmapStatusText: {
-    ...fontStyle('outfit', 'medium'),
-    fontSize: 15,
-    color: '#64748B',
-    marginTop: 14,
-  },
-  roadmapEmptyIconWrapper: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: '#EFF6FF',
+  emptyGlowInner: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#E6EEFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
   },
-  roadmapEmptyTitle: {
+  emptyTitle: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 18,
+    fontSize: 20,
     color: '#0F172A',
+    textAlign: 'center',
     marginBottom: 8,
   },
-  roadmapEmptyText: {
+  emptyBody: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 14,
+    fontSize: 14.5,
     color: '#64748B',
     textAlign: 'center',
-    maxWidth: 380,
-    lineHeight: 20,
+    maxWidth: 320,
+    lineHeight: 21,
   },
+  emptyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 24,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: '#0057FF',
+  },
+  emptyButtonPressed: {
+    opacity: 0.85,
+  },
+  emptyButtonText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 14.5,
+    color: '#FFFFFF',
+  },
+  scrollHintWrap: {
+  position: 'absolute',
+  left: 0,
+  right: 0,
+  height: 120,
+  alignItems: 'center',
+  justifyContent: 'flex-end',
+  paddingBottom: 14,
+  zIndex: 5,
+},
+scrollHintPill: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 6,
+  paddingHorizontal: 16,
+  paddingVertical: 9,
+  borderRadius: 999,
+  backgroundColor: '#FFFFFF',
+  borderWidth: 1,
+  borderColor: '#DBEAFE',
+  ...(Platform.OS === 'web'
+    ? ({ boxShadow: '0px 4px 14px rgba(0, 87, 255, 0.16)', cursor: 'pointer' } as any)
+    : {
+        shadowColor: '#0057FF',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.16,
+        shadowRadius: 8,
+        elevation: 4,
+      }),
+},
+scrollHintText: {
+  ...fontStyle('outfit', 'bold'),
+  fontSize: 12.5,
+  color: '#0057FF',
+  letterSpacing: 0.2,
+},
+scrollTopCircleWrap: {
+  position: 'absolute',
+  right: 18,
+  zIndex: 10,
+},
+scrollTopCircleBtn: {
+  width: 46,
+  height: 46,
+  borderRadius: 23,
+  backgroundColor: '#FFFFFF',
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderWidth: 1.5,
+  borderColor: '#DBEAFE',
+  ...(Platform.OS === 'web'
+    ? ({
+        boxShadow: '0px 6px 18px rgba(0, 87, 255, 0.20), 0px 2px 6px rgba(15, 23, 42, 0.08)',
+        cursor: 'pointer',
+        transition: 'transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1)',
+      } as any)
+    : {
+        shadowColor: '#0057FF',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.24,
+        shadowRadius: 10,
+        elevation: 6,
+      }),
+},
+scrollTopCircleBtnPressed: {
+  opacity: 0.85,
+  transform: [{ scale: 0.94 }],
+},
 });

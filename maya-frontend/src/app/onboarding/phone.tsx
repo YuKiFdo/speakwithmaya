@@ -46,8 +46,31 @@ export default function PhoneScreen() {
 
   const [phone, setPhone] = useState(() => {
     const stored = OnboardingStore.getState().phone || '';
-    return stored.startsWith('+94') ? stored.slice(3) : stored;
+    let digits = stored.startsWith('+94') ? stored.slice(3) : stored;
+    digits = digits.replace(/[^0-9]/g, '');
+    if (digits.startsWith('0')) digits = digits.slice(1);
+    else if (digits.startsWith('94')) digits = digits.slice(2);
+    return digits.slice(0, 9);
   });
+
+  const handlePhoneChange = (text: string) => {
+    // Keep only digits
+    let cleaned = text.replace(/[^0-9]/g, '');
+
+    // Auto-strip leading 0 or 94 (e.g., 070 -> 70, 077 -> 77, 9477 -> 77)
+    if (cleaned.startsWith('0')) {
+      cleaned = cleaned.slice(1);
+    } else if (cleaned.startsWith('94')) {
+      cleaned = cleaned.slice(2);
+    }
+
+    // Limit to 9 digits (Sri Lanka local subscriber format)
+    if (cleaned.length > 9) {
+      cleaned = cleaned.slice(0, 9);
+    }
+
+    setPhone(cleaned);
+  };
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [showSubtitle, setShowSubtitle] = useState(isEditing || isLoginMode);
   const [showInput, setShowInput] = useState(isEditing || isLoginMode);
@@ -522,7 +545,8 @@ export default function PhoneScreen() {
                     placeholder="77 123 4567"
                     placeholderTextColor="#94A3B8"
                     value={phone}
-                    onChangeText={setPhone}
+                    onChangeText={handlePhoneChange}
+                    maxLength={9}
                     keyboardType="phone-pad"
                     returnKeyType="done"
                     blurOnSubmit={true}
@@ -637,7 +661,7 @@ const styles = StyleSheet.create({
   },
   body: {
     width: '100%',
-    gap: 16,
+    gap: 20,
   },
 
   /* Card 1: Prompt Card */

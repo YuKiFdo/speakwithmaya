@@ -8,7 +8,6 @@ import {
   Platform,
   ScrollView,
   LayoutAnimation,
-  UIManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -24,14 +23,6 @@ import {
 import { authService } from '@/services/auth/auth-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { trackOnboardingComplete } from '@/utils/analytics';
-
-// Enable smooth LayoutAnimation on Android for pagination dot morphing
-if (
-  Platform.OS === 'android' &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 // Strip out React Native Web's synthetic collapsable attribute before passing to SVG circle on Web only
 const BaseCircle =

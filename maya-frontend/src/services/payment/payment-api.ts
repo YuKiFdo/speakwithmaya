@@ -5,29 +5,10 @@ import {
   SubscriptionRecord,
   AdminSubscriptionsResponse,
 } from './payhere-types';
-
-const getBackendUrl = (): string => {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://127.0.0.1:3000';
-    }
-    if (hostname.endsWith('speakwithmaya.com')) {
-      return 'https://api.speakwithmaya.com';
-    }
-    if (
-      hostname.includes('azurecontainerapps.io') ||
-      hostname.includes('azurewebsites.net') ||
-      hostname.includes('southeastasia')
-    ) {
-      return 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io';
-    }
-  }
-  return process.env.EXPO_PUBLIC_BACKEND_URL || 'http://127.0.0.1:3000';
-};
+import { getBackendBaseUrl } from '@/utils/backend-url';
 
 class PaymentApiService {
-  private baseUrl = getBackendUrl();
+  private baseUrl = getBackendBaseUrl();
 
   private getAuthHeaders(): Record<string, string> {
     const token = OnboardingStore.getState().accessToken;

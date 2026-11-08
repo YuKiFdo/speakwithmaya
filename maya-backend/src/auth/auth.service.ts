@@ -3797,173 +3797,217 @@ export class AuthService {
   }
 
   /**
+   * In-memory cache for public leaderboard to make it blazing fast.
+   * Key format: `${period}:${limit}` -> caches top ranked entries.
+   * TTL: 30 seconds.
+   */
+  private readonly leaderboardCache = new Map<
+    string,
+    { timestamp: number; data: { rankedEntries: any[]; totalParticipants: number } }
+  >();
+
+  /**
    * Public / Student Leaderboard: Computes rankings across all real users in `public.profiles`
    * based on XP earned and practice minutes consumed. Users with 0 XP and 0 minutes get rank = null (N/A).
+   * Supports `limit` (default 50) and fast in-memory caching.
    */
   async getPublicLeaderboard(
     userId?: string,
     period: 'weekly' | 'monthly' | 'all_time' = 'weekly',
+    limit: number = 50,
   ) {
     if (!this.supabase) {
-      return { entries: [], myEntry: null };
+      return { entries: [], myEntry: null, totalParticipants: 0 };
     }
 
     try {
       const now = Date.now();
-      const cutoffMs =
-        period === 'weekly'
-          ? now - 7 * 24 * 60 * 60 * 1000
-          : period === 'monthly'
-          ? now - 30 * 24 * 60 * 60 * 1000
-          : 0;
+      const cacheKey = `${period}:${limit}`;
+      const cached = this.leaderboardCache.get(cacheKey);
 
-      const [
-        { data: profiles },
-        { data: progressRows },
-        { data: sessionRows },
-      ] = await Promise.all([
-        this.supabase
-          .from('profiles')
-          .select('*')
-          .order('created_at', { ascending: true }),
-        this.supabase
-          .from('user_roadmap_progress')
-          .select('*'),
-        this.supabase
-          .from('sessions')
-          .select('id, user_id, duration_seconds, created_at, status, roadmap_level_id'),
-      ]);
+      let rankedEntries: any[];
+      let totalParticipants: number;
 
-      const allProfiles = Array.isArray(profiles) ? profiles : [];
+      if (cached && now - cached.timestamp < 30_000) {
+        // Cache hit (under 30s)
+        rankedEntries = cached.data.rankedEntries;
+        totalParticipants = cached.data.totalParticipants;
+      } else {
+        const cutoffMs =
+          period === 'weekly'
+            ? now - 7 * 24 * 60 * 60 * 1000
+            : period === 'monthly'
+            ? now - 30 * 24 * 60 * 60 * 1000
+            : 0;
 
-      const xpByUser = new Map<string, number>();
-      const allTimeXpByUser = new Map<string, number>();
-      const completedLevelsByUser = new Map<string, Set<string>>();
-      const allTimeLevelsByUser = new Map<string, Set<string>>();
+        const [
+          { data: profiles },
+          { data: progressRows },
+          { data: sessionRows },
+        ] = await Promise.all([
+          this.supabase
+            .from('profiles')
+            .select('id, display_name, phone_number, avatar_url, created_at, monthly_minutes_allowance, add_on_minutes_balance, minutes_balance')
+            .order('created_at', { ascending: true }),
+          this.supabase
+            .from('user_roadmap_progress')
+            .select('id, user_id, roadmap_level_id, level_number, status, is_passed, xp_earned, completed_at, created_at'),
+          this.supabase
+            .from('sessions')
+            .select('id, user_id, duration_seconds, created_at, status, roadmap_level_id'),
+        ]);
 
-      if (Array.isArray(progressRows)) {
-        for (const row of progressRows) {
-          if (!row.user_id) continue;
-          if (row.status === 'completed' || row.is_passed) {
-            const key = String(row.roadmap_level_id || row.level_number || row.id || '');
-            const earned = typeof row.xp_earned === 'number' ? row.xp_earned : Number(row.xp_earned) || 0;
+        const allProfiles = Array.isArray(profiles) ? profiles : [];
 
-            let allSet = allTimeLevelsByUser.get(row.user_id);
-            if (!allSet) {
-              allSet = new Set<string>();
-              allTimeLevelsByUser.set(row.user_id, allSet);
-            }
-            if (!allSet.has(key)) {
-              allSet.add(key);
-              allTimeXpByUser.set(row.user_id, (allTimeXpByUser.get(row.user_id) || 0) + earned);
-            }
+        const xpByUser = new Map<string, number>();
+        const allTimeXpByUser = new Map<string, number>();
+        const completedLevelsByUser = new Map<string, Set<string>>();
+        const allTimeLevelsByUser = new Map<string, Set<string>>();
 
-            const ts = row.completed_at
-              ? new Date(row.completed_at).getTime()
-              : row.created_at
-              ? new Date(row.created_at).getTime()
-              : now;
-            if (cutoffMs === 0 || ts >= cutoffMs) {
-              let set = completedLevelsByUser.get(row.user_id);
-              if (!set) {
-                set = new Set<string>();
-                completedLevelsByUser.set(row.user_id, set);
+        if (Array.isArray(progressRows)) {
+          for (const row of progressRows) {
+            if (!row.user_id) continue;
+            if (row.status === 'completed' || row.is_passed) {
+              const key = String(row.roadmap_level_id || row.level_number || row.id || '');
+              const earned = typeof row.xp_earned === 'number' ? row.xp_earned : Number(row.xp_earned) || 0;
+
+              let allSet = allTimeLevelsByUser.get(row.user_id);
+              if (!allSet) {
+                allSet = new Set<string>();
+                allTimeLevelsByUser.set(row.user_id, allSet);
               }
-              if (!set.has(key)) {
-                set.add(key);
-                xpByUser.set(row.user_id, (xpByUser.get(row.user_id) || 0) + earned);
+              if (!allSet.has(key)) {
+                allSet.add(key);
+                allTimeXpByUser.set(row.user_id, (allTimeXpByUser.get(row.user_id) || 0) + earned);
+              }
+
+              const ts = row.completed_at
+                ? new Date(row.completed_at).getTime()
+                : row.created_at
+                ? new Date(row.created_at).getTime()
+                : now;
+              if (cutoffMs === 0 || ts >= cutoffMs) {
+                let set = completedLevelsByUser.get(row.user_id);
+                if (!set) {
+                  set = new Set<string>();
+                  completedLevelsByUser.set(row.user_id, set);
+                }
+                if (!set.has(key)) {
+                  set.add(key);
+                  xpByUser.set(row.user_id, (xpByUser.get(row.user_id) || 0) + earned);
+                }
               }
             }
           }
         }
-      }
 
-      const sessionSecondsByUser = new Map<string, number>();
-      const allTimeSessionSecondsByUser = new Map<string, number>();
-      if (Array.isArray(sessionRows)) {
-        for (const s of sessionRows) {
-          if (!s.user_id) continue;
-          const dur = Number(s.duration_seconds) || 0;
-          allTimeSessionSecondsByUser.set(
-            s.user_id,
-            (allTimeSessionSecondsByUser.get(s.user_id) || 0) + dur,
-          );
-          const ts = s.created_at ? new Date(s.created_at).getTime() : now;
-          if (cutoffMs === 0 || ts >= cutoffMs) {
-            sessionSecondsByUser.set(
+        const sessionSecondsByUser = new Map<string, number>();
+        const allTimeSessionSecondsByUser = new Map<string, number>();
+        if (Array.isArray(sessionRows)) {
+          for (const s of sessionRows) {
+            if (!s.user_id) continue;
+            const dur = Number(s.duration_seconds) || 0;
+            allTimeSessionSecondsByUser.set(
               s.user_id,
-              (sessionSecondsByUser.get(s.user_id) || 0) + dur,
+              (allTimeSessionSecondsByUser.get(s.user_id) || 0) + dur,
             );
-          }
-          if (!s.roadmap_level_id && dur >= 30) {
-            // Normal practice sessions (General chat, Workplace): 5 XP per 1 minute practiced
-            const normalMins = Math.max(1, Math.floor(dur / 60));
-            const normalXp = normalMins * 5;
-            allTimeXpByUser.set(s.user_id, (allTimeXpByUser.get(s.user_id) || 0) + normalXp);
+            const ts = s.created_at ? new Date(s.created_at).getTime() : now;
             if (cutoffMs === 0 || ts >= cutoffMs) {
-              xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + normalXp);
+              sessionSecondsByUser.set(
+                s.user_id,
+                (sessionSecondsByUser.get(s.user_id) || 0) + dur,
+              );
+            }
+            if (!s.roadmap_level_id && dur >= 30) {
+              // Normal practice sessions (General chat, Workplace): 5 XP per 1 minute practiced
+              const normalMins = Math.max(1, Math.floor(dur / 60));
+              const normalXp = normalMins * 5;
+              allTimeXpByUser.set(s.user_id, (allTimeXpByUser.get(s.user_id) || 0) + normalXp);
+              if (cutoffMs === 0 || ts >= cutoffMs) {
+                xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + normalXp);
+              }
             }
           }
         }
+
+        const entries = allProfiles.map((p: any) => {
+          // Strictly use database XP from user_roadmap_progress (never calculate fake XP from minutes)
+          const dbPeriodXp = xpByUser.get(p.id) || 0;
+          const dbAllTimeXp = allTimeXpByUser.get(p.id) || dbPeriodXp;
+          const sessionMinutes = Math.round((sessionSecondsByUser.get(p.id) || 0) / 60);
+          const allowance = Number(p.monthly_minutes_allowance ?? 5) + Number(p.add_on_minutes_balance ?? 0);
+          const balance = Number(p.minutes_balance ?? allowance);
+          const quotaMinutesUsed = Math.max(0, allowance - balance);
+          const minutesConsumed = Math.max(sessionMinutes, quotaMinutesUsed);
+
+          const levelNumber = Math.max(1, Math.floor(dbAllTimeXp / 500) + 1);
+
+          const avatarUrl = (p as any).avatar_url || null;
+          const rawName = (p.display_name || '').trim();
+          const fallbackPhone = p.phone_number
+            ? `Learner ••${String(p.phone_number).slice(-4)}`
+            : 'Learner';
+
+          return {
+            userId: p.id,
+            displayName: rawName || fallbackPhone,
+            avatarUrl,
+            levelNumber,
+            xp: dbPeriodXp,
+            minutesConsumed,
+            createdAt: p.created_at || '',
+          };
+        });
+
+        // Rank strictly by DB XP first, then DB minutesConsumed second
+        entries.sort((a, b) => {
+          if (b.xp !== a.xp) return b.xp - a.xp;
+          if (b.minutesConsumed !== a.minutesConsumed) return b.minutesConsumed - a.minutesConsumed;
+          return String(a.createdAt).localeCompare(String(b.createdAt));
+        });
+
+        let activeRankCounter = 0;
+        rankedEntries = entries.map((entry) => {
+          const hasActivity = entry.xp > 0 || entry.minutesConsumed > 0;
+          return {
+            rank: hasActivity ? ++activeRankCounter : null,
+            userId: entry.userId,
+            displayName: entry.displayName,
+            avatarUrl: entry.avatarUrl,
+            levelNumber: entry.levelNumber,
+            xp: entry.xp,
+            minutesConsumed: entry.minutesConsumed,
+          };
+        });
+
+        totalParticipants = rankedEntries.length;
+
+        // Store into memory cache
+        this.leaderboardCache.set(cacheKey, {
+          timestamp: now,
+          data: { rankedEntries, totalParticipants },
+        });
       }
 
-      const entries = allProfiles.map((p: any) => {
-        // Strictly use database XP from user_roadmap_progress (never calculate fake XP from minutes)
-        const dbPeriodXp = xpByUser.get(p.id) || 0;
-        const dbAllTimeXp = allTimeXpByUser.get(p.id) || dbPeriodXp;
-        const sessionMinutes = Math.round((sessionSecondsByUser.get(p.id) || 0) / 60);
-        const allowance = Number(p.monthly_minutes_allowance ?? 5) + Number(p.add_on_minutes_balance ?? 0);
-        const balance = Number(p.minutes_balance ?? allowance);
-        const quotaMinutesUsed = Math.max(0, allowance - balance);
-        const minutesConsumed = Math.max(sessionMinutes, quotaMinutesUsed);
+      // Find user entry across all ranked entries before slicing to top limit
+      let myEntry: any = null;
+      if (userId) {
+        const found = rankedEntries.find((r) => r.userId === userId);
+        if (found) {
+          myEntry = { ...found, isCurrentUser: true };
+        }
+      }
 
-        const levelNumber = Math.max(1, Math.floor(dbAllTimeXp / 500) + 1);
+      // Limit top entries (default 50)
+      const topEntries = rankedEntries.slice(0, limit).map((r) => ({
+        ...r,
+        isCurrentUser: userId ? r.userId === userId : false,
+      }));
 
-        const avatarUrl = (p as any).avatar_url || null;
-        const rawName = (p.display_name || '').trim();
-        const fallbackPhone = p.phone_number
-          ? `Learner ••${String(p.phone_number).slice(-4)}`
-          : 'Learner';
-
-        return {
-          userId: p.id,
-          displayName: rawName || fallbackPhone,
-          avatarUrl,
-          levelNumber,
-          xp: dbPeriodXp,
-          minutesConsumed,
-          createdAt: p.created_at || '',
-          isCurrentUser: p.id === userId,
-        };
-      });
-
-      // Rank strictly by DB XP first, then DB minutesConsumed second
-      entries.sort((a, b) => {
-        if (b.xp !== a.xp) return b.xp - a.xp;
-        if (b.minutesConsumed !== a.minutesConsumed) return b.minutesConsumed - a.minutesConsumed;
-        return String(a.createdAt).localeCompare(String(b.createdAt));
-      });
-
-      let activeRankCounter = 0;
-      const rankedEntries = entries.map((entry) => {
-        const hasActivity = entry.xp > 0 || entry.minutesConsumed > 0;
-        return {
-          rank: hasActivity ? ++activeRankCounter : null,
-          userId: entry.userId,
-          displayName: entry.displayName,
-          avatarUrl: entry.avatarUrl,
-          levelNumber: entry.levelNumber,
-          xp: entry.xp,
-          minutesConsumed: entry.minutesConsumed,
-          isCurrentUser: entry.isCurrentUser,
-        };
-      });
-
-      const myEntry = rankedEntries.find((r) => r.userId === userId) || null;
       return {
-        entries: rankedEntries,
+        entries: topEntries,
         myEntry,
-        totalParticipants: rankedEntries.length,
+        totalParticipants,
       };
     } catch (err: any) {
       this.logger.warn(`getPublicLeaderboard error: ${err?.message}`);

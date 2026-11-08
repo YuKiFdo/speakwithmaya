@@ -1,6 +1,8 @@
 import { Platform } from 'react-native';
 import { OnboardingStore } from '../store/onboarding-store';
 import { saveTrackingUserData } from '@/utils/analytics';
+import { AppStorage } from '../storage/storage-adapter';
+import { getBackendBaseUrl } from '@/utils/backend-url';
 
 export interface SendOtpResponse {
   success: boolean;
@@ -60,28 +62,8 @@ export interface PreferencesPayload {
   };
 }
 
-const getBackendUrl = (): string => {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://127.0.0.1:3000';
-    }
-    if (hostname.endsWith('speakwithmaya.com')) {
-      return 'https://api.speakwithmaya.com';
-    }
-    if (
-      hostname.includes('azurecontainerapps.io') ||
-      hostname.includes('azurewebsites.net') ||
-      hostname.includes('southeastasia')
-    ) {
-      return 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io';
-    }
-  }
-  return process.env.EXPO_PUBLIC_BACKEND_URL || 'http://127.0.0.1:3000';
-};
-
 class AuthService {
-  private baseUrl = getBackendUrl();
+  private baseUrl = getBackendBaseUrl();
 
   /**
    * Request OTP code to be sent to mobile number.
@@ -198,17 +180,17 @@ class AuthService {
     if (payload.level !== undefined) {
       OnboardingStore.updateField('level', payload.level);
     }
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && userId) {
+    if (userId) {
       try {
         const extraKey = `maya_user_profile_extra_${userId}`;
-        const existingRaw = window.localStorage.getItem(extraKey);
+        const existingRaw = AppStorage.getSync(extraKey);
         const existing = existingRaw ? JSON.parse(existingRaw) : {};
         const merged = {
           ...existing,
           ...(payload.email !== undefined ? { email: payload.email } : {}),
           ...(payload.avatarUrl !== undefined ? { avatarUrl: payload.avatarUrl } : {}),
         };
-        window.localStorage.setItem(extraKey, JSON.stringify(merged));
+        AppStorage.setItem(extraKey, JSON.stringify(merged));
       } catch {}
     }
 
@@ -320,9 +302,9 @@ class AuthService {
         if (data.profile) {
           let extraEmail: string | null = data.profile.email || null;
           let extraAvatar: string | null = data.profile.avatar_url || null;
-          if (Platform.OS === 'web' && typeof window !== 'undefined' && data.profile.id) {
+          if (data.profile.id) {
             try {
-              const rawExtra = window.localStorage.getItem(`maya_user_profile_extra_${data.profile.id}`);
+              const rawExtra = AppStorage.getSync(`maya_user_profile_extra_${data.profile.id}`) || await AppStorage.getItem(`maya_user_profile_extra_${data.profile.id}`);
               if (rawExtra) {
                 const parsedExtra = JSON.parse(rawExtra);
                 if (!extraEmail && parsedExtra.email) extraEmail = parsedExtra.email;

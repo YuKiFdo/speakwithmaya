@@ -1363,21 +1363,22 @@ const styles = StyleSheet.create({
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginTop: 8,
-    paddingTop: 8,
+    gap: 12,
+    marginTop: 12,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
   },
   footerRowMobile: {
-    marginTop: 8,
-    paddingTop: 8,
-    gap: 10,
+    marginTop: 14,
+    paddingTop: 12,
+    paddingBottom: 6,
+    gap: 12,
   },
   cancelBtn: {
     flex: 1,
-    height: 40,
-    borderRadius: 10,
+    height: 52,
+    borderRadius: 16,
     borderWidth: 1.2,
     borderColor: '#E2E8F0',
     backgroundColor: '#FFFFFF',
@@ -1387,18 +1388,18 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: {
     ...fontStyle('inter', 'semiBold'),
-    fontSize: 13,
+    fontSize: 15,
     color: '#0F172A',
   },
   startBtn: {
     flex: 2,
-    height: 40,
-    borderRadius: 10,
+    height: 52,
+    borderRadius: 16,
     backgroundColor: '#0D4EFD',
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     ...(Platform.OS === 'web'
       ? ({
           cursor: 'pointer',
@@ -1414,7 +1415,7 @@ const styles = StyleSheet.create({
   },
   startBtnText: {
     ...fontStyle('inter', 'bold'),
-    fontSize: 13,
+    fontSize: 15,
     color: '#FFFFFF',
   },
   startBtnPressed: {

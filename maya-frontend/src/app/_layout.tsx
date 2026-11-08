@@ -6,11 +6,13 @@ if (typeof window !== 'undefined' && !(window as any).Buffer) {
   (window as any).Buffer = Buffer;
 }
 
+import { Platform } from 'react-native';
+
 import { DarkTheme, DefaultTheme, ThemeProvider, Stack, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { useColorScheme, Platform, View } from 'react-native';
+import { useColorScheme, View } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
   Outfit_400Regular,
@@ -27,6 +29,7 @@ import {
   Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
 import { DesktopLoadingScreen } from '@/components/ui/desktop-loading-screen';
+import { NativeAnimatedSplash } from '@/components/ui/native-animated-splash';
 import { AlertHost } from '@/components/ui/alert-modal';
 import { Ionicons, Feather, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouteGuard } from '@/hooks/useRouteGuard';
@@ -96,6 +99,18 @@ export default function RootLayout() {
           ...Feather.font,
           ...MaterialIcons.font,
           ...MaterialCommunityIcons.font,
+          // Standard Expo Google Font keys used by fontStyle helper
+          Outfit_400Regular,
+          Outfit_500Medium,
+          Outfit_600SemiBold,
+          Outfit_700Bold,
+          Outfit_800ExtraBold,
+          Inter_400Regular,
+          Inter_500Medium,
+          Inter_600SemiBold,
+          Inter_700Bold,
+          Inter_800ExtraBold,
+          // Hyphenated aliases in case any component references them
           'Outfit-Regular': Outfit_400Regular,
           'Outfit-Medium': Outfit_500Medium,
           'Outfit-SemiBold': Outfit_600SemiBold,
@@ -187,21 +202,21 @@ export default function RootLayout() {
   }, [isAppFullyReady]);
 
   if (!isAppFullyReady) {
-    // On Web, +html.tsx already renders #app-initial-loader (z-index: 99999) above #root.
-    // Rendering an empty white container here prevents Expo Static SSR from baking a
-    // second, unhydrated loading layout into static HTML files.
     if (Platform.OS === 'web') {
-      return <View style={{ flex: 1, backgroundColor: '#FFFFFF' }} />;
+      return <DesktopLoadingScreen message="Loading SpeakwithMaya..." />;
     }
-    return <DesktopLoadingScreen message="Loading SpeakwithMaya..." />;
+    // On native apps (iOS / Android), keep the view clean behind the OS splash
+    // so it hands off directly to NativeAnimatedSplash without flashing an intermediate loader
+    return <View style={{ flex: 1, backgroundColor: '#FFFFFF' }} />;
   }
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <RouteGuard />
-      <WebDocumentTitle />
-      <StatusBar style="dark" />
-      <Stack
+      <NativeAnimatedSplash>
+        <RouteGuard />
+        <WebDocumentTitle />
+        <StatusBar style="dark" />
+        <Stack
         screenOptions={{
           headerShown: false,
           animation: 'slide_from_right',
@@ -293,7 +308,7 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="leaderboard"
-          options={{ animation: 'fade', animationDuration: 180 }}
+          options={{ animation: 'slide_from_right', animationDuration: 260 }}
         />
         <Stack.Screen
           name="upgrade"
@@ -337,6 +352,7 @@ export default function RootLayout() {
         />
       </Stack>
       <AlertHost />
+      </NativeAnimatedSplash>
     </ThemeProvider>
   );
 }

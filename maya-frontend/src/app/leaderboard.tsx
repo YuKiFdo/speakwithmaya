@@ -94,9 +94,9 @@ export default function LeaderboardScreen() {
         if (token) {
           headers['Authorization'] = `${authScheme} ${token}`;
         }
-        // 1. Try /v1/users/leaderboard (powered by AuthService.getPublicLeaderboard)
+        // 1. Try /v1/users/leaderboard (powered by AuthService.getPublicLeaderboard, top 50)
         const usersLeaderboardRes = await fetch(
-          `${baseUrl}/v1/users/leaderboard?period=${selectedPeriod}&userId=${encodeURIComponent(
+          `${baseUrl}/v1/users/leaderboard?period=${selectedPeriod}&limit=50&userId=${encodeURIComponent(
             currentUserId,
           )}`,
           { headers },
@@ -118,9 +118,9 @@ export default function LeaderboardScreen() {
           }
         }
 
-        // 2. Try /v1/roadmap/leaderboard
+        // 2. Try /v1/roadmap/leaderboard (top 50)
         const res = await fetch(
-          `${baseUrl}/v1/roadmap/leaderboard?period=${selectedPeriod}&userId=${encodeURIComponent(
+          `${baseUrl}/v1/roadmap/leaderboard?period=${selectedPeriod}&limit=50&userId=${encodeURIComponent(
             currentUserId,
           )}`,
           { headers },
@@ -786,11 +786,14 @@ export default function LeaderboardScreen() {
               )}
             </View>
 
-            <View style={{ height: 12 }} />
+            <View style={{ height: 80 }} />
           </ScrollView>
 
-          {/* STICKY BOTTOM MY RANK BAR */}
-          <View style={[styles.stickyBottomMyRankOuter, isDesktop && styles.stickyBottomMyRankOuterDesktop]}>
+          {/* FLOATING BOTTOM MY RANK BAR */}
+          <View
+            pointerEvents="box-none"
+            style={[styles.floatingBottomMyRankOuter, isDesktop && styles.floatingBottomMyRankOuterDesktop]}
+          >
             <View style={[styles.myRankCard, isDesktop && styles.myRankCardDesktop]}>
               {isLoading ? (
                 <>
@@ -1008,30 +1011,31 @@ function RosetteMedalSvg({ rank, size = 30 }: { rank: 1 | 2 | 3; size?: number }
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'transparent',
   },
   layoutRoot: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: 'transparent',
   },
   mainContainer: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: 'transparent',
+    position: 'relative',
   },
   mainScroll: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: 'transparent',
   },
   mainScrollContent: {
     paddingHorizontal: 18,
     paddingTop: 14,
-    paddingBottom: 40,
+    paddingBottom: 110,
   },
   mainScrollContentDesktop: {
     paddingHorizontal: 32,
     paddingTop: 24,
-    paddingBottom: 40,
+    paddingBottom: 110,
     maxWidth: 1600,
     alignSelf: 'center',
     width: '100%',
@@ -1451,41 +1455,44 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'bold'),
   },
 
-  /* Sticky Bottom My Rank Bar */
-  stickyBottomMyRankOuter: {
+  /* Floating Bottom My Rank Bar */
+  floatingBottomMyRankOuter: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: Platform.OS === 'ios' ? 8 : 12,
-    backgroundColor: '#F8FAFC',
-    borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-    ...Platform.select({
-      web: {
-        boxShadow: '0 -4px 16px rgba(15, 23, 42, 0.04)',
-      } as any,
-      default: {
-        elevation: 8,
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: -3 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-      },
-    }),
+    paddingBottom: Platform.OS === 'ios' ? 16 : 14,
+    backgroundColor: 'transparent',
+    zIndex: 99,
   },
-  stickyBottomMyRankOuterDesktop: {
+  floatingBottomMyRankOuterDesktop: {
     paddingHorizontal: 38,
     paddingTop: 10,
-    paddingBottom: 14,
+    paddingBottom: 20,
   },
   myRankCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#EAF2FF',
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#DBEAFE',
+    borderColor: '#BFDBFE',
     paddingHorizontal: 16,
-    paddingVertical: 11,
+    paddingVertical: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 8px 30px rgba(13, 78, 253, 0.16), 0 2px 8px rgba(15, 23, 42, 0.08)',
+      } as any,
+      default: {
+        elevation: 12,
+        shadowColor: '#0D4EFD',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.18,
+        shadowRadius: 14,
+      },
+    }),
   },
   myRankCardDesktop: {
     maxWidth: 1220,

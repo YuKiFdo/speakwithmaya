@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Platform } from 'react-native';
-import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { createAudioCapture } from '@/services/audio/AudioCapture';
 import { createAudioPlayer } from '@/services/audio/AudioPlayer';
@@ -26,48 +25,13 @@ import { createWavBlobUrlFromPcm } from '@/utils/audio-wav';
 import { registerMicSuppressor } from '@/services/sound/sound-service';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { trackSessionStart, trackSessionComplete } from '@/utils/analytics';
+import { getBackendBaseUrl } from '@/utils/backend-url';
+
+// Re-export so existing consumers that import from here keep working
+export { getBackendBaseUrl } from '@/utils/backend-url';
 
 // Default to true (Server-to-Server NestJS Gateway) unless explicitly set to 'false'
 const USE_SERVER_LIVE = process.env.EXPO_PUBLIC_USE_SERVER_LIVE !== 'false';
-
-export const getBackendBaseUrl = (): string => {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://127.0.0.1:3000';
-    }
-    if (hostname.endsWith('speakwithmaya.com')) {
-      return 'https://api.speakwithmaya.com';
-    }
-    if (hostname.includes('azurecontainerapps.io') || hostname.includes('azurewebsites.net') || hostname.includes('southeastasia')) {
-      return 'https://maya-backend.icyisland-5baf2c26.southeastasia.azurecontainerapps.io';
-    }
-    const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
-    if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
-      return envUrl;
-    }
-    return 'https://api.speakwithmaya.com';
-  }
-
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    if (Platform.OS !== 'web') {
-      const metroHost = Constants.expoConfig?.hostUri?.split(':')[0];
-      return metroHost ? `http://${metroHost}:3000` : 'http://10.0.2.2:3000';
-    }
-    return 'http://127.0.0.1:3000';
-  }
-
-  let url = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://127.0.0.1:3000';
-  if (Platform.OS !== 'web' && url.includes('localhost')) {
-    const metroHost = Constants.expoConfig?.hostUri?.split(':')[0];
-    if (metroHost) {
-      url = url.replace('localhost', metroHost);
-    } else {
-      url = url.replace('localhost', '10.0.2.2');
-    }
-  }
-  return url;
-};
 
 export type CallStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'reconnecting' | 'ended';
 
@@ -258,7 +222,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
       } catch {}
     }
 
-    if (typeof window === 'undefined') return;
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.addEventListener) return;
     const handleBeforeUnload = () => {
       if (!hasFinishedRef.current && statusRef.current !== 'ended') {
         disconnectReasonRef.current = 'browser_tab_closed';
