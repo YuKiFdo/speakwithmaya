@@ -683,13 +683,12 @@ export class SessionsService {
   private async executeSaveSessionTurns(sessionId: string, validSessionId: string, turns: any[], topic?: string): Promise<void> {
     if (!this.supabase) return;
 
-    // Defend against incomplete client turns: if server authoritative turns has more user turns, use it
+    // Server-authoritative turns from Gemini WebSocket gateway are the primary source of truth.
+    // Client turns are only used as fallback if server authoritative turns were not recorded (e.g. direct client-to-gemini transport).
     const serverTurns = this.getAuthoritativeTurns(validSessionId);
-    const serverUserCount = (serverTurns || []).filter((t) => t.role === 'user').length;
-    const inputUserCount = (turns || []).filter((t: any) => t.role === 'user').length;
-    const turnsToUse = (serverTurns && serverUserCount > inputUserCount)
+    const turnsToUse = (serverTurns && serverTurns.length > 0)
       ? serverTurns
-      : (turns && turns.length > 0 ? turns : serverTurns || []);
+      : (turns && turns.length > 0 ? turns : []);
 
     if (!turnsToUse || turnsToUse.length === 0) return;
 
@@ -2419,14 +2418,12 @@ ${memoryPart}`;
         }
 
         // 2. Persist full conversation turns in session_turns table & Supabase Storage conversation.json
+        // Server-authoritative turns from Gemini WebSocket gateway are the primary source of truth.
+        // Client turns are only used as fallback if server authoritative turns were not recorded (e.g. direct client-to-gemini transport).
         const serverTurns = this.getAuthoritativeTurns(validSessionId);
-        const serverUserCount = (serverTurns || []).filter((t) => t.role === 'user').length;
-        const clientUserCount = (turns || []).filter((t: any) => t.role === 'user').length;
-
-        // If server recorded more user turns than the client, use server authoritative turns as single source of truth
-        const turnsToUse = (serverTurns && serverUserCount > clientUserCount)
+        const turnsToUse = (serverTurns && serverTurns.length > 0)
           ? serverTurns
-          : (turns && turns.length > 0 ? turns : serverTurns || []);
+          : (turns && turns.length > 0 ? turns : []);
 
         if (turnsToUse && turnsToUse.length > 0) {
           await this.saveSessionTurns(validSessionId, turnsToUse, dto.topic);
@@ -3294,34 +3291,34 @@ ${memoryPart}`;
     let userTurnCounter = 0;
     let modelTurnCounter = 0;
     const mappedTurns = dedupedTurns
+      .map((t: any) => {
+        let turnAudioUrl: string | null = null;
+        if (hasTurnsFolder) {
+          if (t.role === 'user') {
+            turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/user_turn_${userTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
+          } else {
+            turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/model_turn_${modelTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
+          }
+        }
+        if (t.role === 'user') userTurnCounter++;
+        else modelTurnCounter++;
+
+        return {
+          role: t.role,
+          text: t.text_transcript,
+          audioUrl: turnAudioUrl,
+          timestamp: t.timestamp,
+        };
+      })
       .filter((t: any, idx: number, arr: any[]) => {
-        const txt = (t.text_transcript || '').trim();
-        if (!txt || txt === '...' || txt === '(untranscribed / audio speech)') return false;
+        const txt = (t.text || '').trim();
+        if (!txt || txt === '...') return false;
         // Suppress phantom opening user turn artifact if it preceded model opening greeting
         if (idx === 0 && t.role === 'user' && (txt === 'ඔව්.' || txt === 'ඔව්') && arr.length > 1 && arr[1]?.role === 'model') {
           return false;
         }
         return true;
-      })
-      .map((t: any) => {
-      let turnAudioUrl: string | null = null;
-      if (hasTurnsFolder) {
-        if (t.role === 'user') {
-          turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/user_turn_${userTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
-        } else {
-          turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/model_turn_${modelTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
-        }
-      }
-      if (t.role === 'user') userTurnCounter++;
-      else modelTurnCounter++;
-
-      return {
-        role: t.role,
-        text: t.text_transcript,
-        audioUrl: turnAudioUrl,
-        timestamp: t.timestamp,
-      };
-    });
+      });
 
     const mappedCorrections = (corrections || []).map((c: any) => {
       const isPost = c.source === 'post_analysis' || (c.explanation && c.explanation.includes('[Post-Analysis]'));
@@ -3494,15 +3491,6 @@ ${memoryPart}`;
         let userTurnCounter = 0;
         let modelTurnCounter = 0;
         const mappedTurns = dedupedTurns
-          .filter((t: any, idx: number, arr: any[]) => {
-            const txt = (t.text_transcript || '').trim();
-            if (!txt || txt === '...' || txt === '(untranscribed / audio speech)') return false;
-            // Suppress phantom opening user turn artifact if it preceded model opening greeting
-            if (idx === 0 && t.role === 'user' && (txt === 'ඔව්.' || txt === 'ඔව්') && arr.length > 1 && arr[1]?.role === 'model') {
-              return false;
-            }
-            return true;
-          })
           .map((t: any) => {
             let turnAudioUrl: string | null = null;
             if (hasTurnsFolder) {
@@ -3521,6 +3509,15 @@ ${memoryPart}`;
               audioUrl: turnAudioUrl,
               timestamp: t.timestamp || t.created_at,
             };
+          })
+          .filter((t: any, idx: number, arr: any[]) => {
+            const txt = (t.text || '').trim();
+            if (!txt || txt === '...') return false;
+            // Suppress phantom opening user turn artifact if it preceded model opening greeting
+            if (idx === 0 && t.role === 'user' && (txt === 'ඔව්.' || txt === 'ඔව්') && arr.length > 1 && arr[1]?.role === 'model') {
+              return false;
+            }
+            return true;
           });
 
         const mappedCorrections = (sess.grammar_corrections || []).map((c: any) => {

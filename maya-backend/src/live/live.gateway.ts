@@ -390,6 +390,25 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           });
       }
 
+      // If authoritative turns were empty due to experimental ASR drops, but real audio was exchanged, synthesize verified turns
+      if (!state.authoritativeTurns || state.authoritativeTurns.length === 0) {
+        if (state.modelAudioChunks.length > 0 || state.modelTurnAudioMap.size > 0 || state.modelTurnCount > 0) {
+          const fallbackGreeting = state.greetingTranscriptReceived.trim() || '(audio greeting)';
+          state.authoritativeTurns.push({
+            role: 'model',
+            text: fallbackGreeting,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        if (state.userAudioChunks.length > 0 || state.userTurnAudioMap.size > 0 || state.userTurnCount > 0) {
+          state.authoritativeTurns.push({
+            role: 'user',
+            text: '(spoken audio)',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
       // Persist server-authoritative conversation turns directly to DB and conversation.json
       if (state.authoritativeTurns && state.authoritativeTurns.length > 0) {
         this.sessionsService.setAuthoritativeTurns(state.sessionId, state.authoritativeTurns);
@@ -1661,17 +1680,22 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
 
         // Record authoritative server-verified conversation turns
-        if (userText && !isGreetingTurn) {
+        const effectiveUserText = userText || ((!isGreetingTurn && state.currentUserTurnAudioChunks.reduce((a, c) => a + c.length, 0) >= 8192) ? '(spoken audio)' : '');
+        if (effectiveUserText && !isGreetingTurn) {
           state.authoritativeTurns.push({
             role: 'user',
-            text: userText,
+            text: effectiveUserText,
             timestamp: new Date().toISOString(),
           });
         }
-        if (modelText) {
+        const effectiveModelText =
+          modelText ||
+          state.greetingTranscriptReceived.trim() ||
+          (isGreetingTurn ? '(audio greeting)' : (state.currentModelTurnAudioChunks.length > 0 ? '(audio response)' : ''));
+        if (effectiveModelText) {
           state.authoritativeTurns.push({
             role: 'model',
-            text: modelText,
+            text: effectiveModelText,
             timestamp: new Date().toISOString(),
           });
         }
