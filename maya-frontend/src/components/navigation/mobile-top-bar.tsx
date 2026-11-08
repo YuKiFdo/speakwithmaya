@@ -14,7 +14,6 @@ import Animated, {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withDelay,
   withSequence,
   withSpring,
   withTiming,
@@ -239,13 +238,7 @@ export function MobileTopBar({
   const animationsEnabled = !disableAnimations && !reduceMotion;
   const hapticsEnabled = !disableHaptics;
 
-  // Shared values (all hooks live above the early return)
-  const containerOpacity = useSharedValue(0);
-  const containerTranslateY = useSharedValue(-8);
-  const taglineOpacity = useSharedValue(0);
-  const taglineTranslateY = useSharedValue(4);
-  const badgeOpacity = useSharedValue(0);
-  const badgeTranslateX = useSharedValue(12);
+  // Interactive badge scale animation (for XP pop and press feedback)
   const badgeScale = useSharedValue(1);
   const hasMounted = useRef(false);
 
@@ -258,42 +251,12 @@ export function MobileTopBar({
     isInactive ?? (stats.isSubscriptionLocked || stats.isTelcoUnsubscribed);
   const resolvedLevelNumber = stats.currentLevelNumber;
 
-  // Staggered entrance: bar slides/fades down, tagline follows, badge slides in from the right
-  useEffect(() => {
-    if (!animationsEnabled) {
-      containerOpacity.value = 1;
-      containerTranslateY.value = 0;
-      taglineOpacity.value = 1;
-      taglineTranslateY.value = 0;
-      badgeOpacity.value = 1;
-      badgeTranslateX.value = 0;
-      return;
-    }
-
-    const ease = Easing.out(Easing.cubic);
-
-    containerOpacity.value = withTiming(1, { duration: 350, easing: ease });
-    containerTranslateY.value = withTiming(0, { duration: 350, easing: ease });
-
-    taglineOpacity.value = withDelay(150, withTiming(1, { duration: 300, easing: ease }));
-    taglineTranslateY.value = withDelay(150, withTiming(0, { duration: 300, easing: ease }));
-
-    badgeOpacity.value = withDelay(100, withTiming(1, { duration: 350, easing: ease }));
-    badgeTranslateX.value = withDelay(
-      100,
-      withSpring(0, { damping: 12, stiffness: 140, mass: 0.8 })
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animationsEnabled]);
-
-  // Pulse the badge (and buzz) whenever XP / level changes (skips the first render)
+  // Pulse the badge whenever XP / level changes (skips the first render)
   useEffect(() => {
     if (!hasMounted.current) {
       hasMounted.current = true;
       return;
     }
-
-    // if (hapticsEnabled) hapticSuccess();
 
     if (!animationsEnabled) return;
 
@@ -304,19 +267,8 @@ export function MobileTopBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedProgress, resolvedLevelNumber, resolvedXpLabel]);
 
-  const containerAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: containerOpacity.value,
-    transform: [{ translateY: containerTranslateY.value }],
-  }));
-
-  const taglineAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: taglineOpacity.value,
-    transform: [{ translateY: taglineTranslateY.value }],
-  }));
-
-  const badgeAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: badgeOpacity.value,
-    transform: [{ translateX: badgeTranslateX.value }, { scale: badgeScale.value }],
+  const badgeScaleAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: badgeScale.value }],
   }));
 
   // Responsive guard (after all hooks)
@@ -355,11 +307,10 @@ export function MobileTopBar({
   };
 
   return (
-    <Animated.View
+    <View
       style={[
         pinned ? styles.pinnedContainer : styles.inlineContainer,
         style,
-        containerAnimatedStyle,
       ]}
     >
       {/* Brand area */}
@@ -379,14 +330,14 @@ export function MobileTopBar({
           <Text style={styles.brandTitleMobile}>
             Speakwith<Text style={styles.brandAccent}>Maya</Text>
           </Text>
-          <Animated.Text style={[styles.brandTaglineMobile, taglineAnimatedStyle]}>
+          <Text style={styles.brandTaglineMobile}>
             Practice · Improve · Be Confident
-          </Animated.Text>
+          </Text>
         </PressableScale>
       </View>
 
       {/* User Level Badge */}
-      <Animated.View style={badgeAnimatedStyle}>
+      <Animated.View style={badgeScaleAnimatedStyle}>
         <UserLevelBadge
           levelLabel={resolvedLevelLabel}
           xpLabel={resolvedXpLabel}
@@ -421,7 +372,7 @@ export function MobileTopBar({
           }}
         />
       )}
-    </Animated.View>
+    </View>
   );
 }
 
