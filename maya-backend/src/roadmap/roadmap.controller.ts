@@ -246,6 +246,8 @@ export class RoadmapController {
       rank: leaderboardData.myEntry?.rank ?? null,
       totalParticipants: leaderboardData.totalParticipants || 1,
       minutesConsumed: leaderboardData.myEntry?.minutesConsumed ?? 0,
+      totalXp: leaderboardData.myEntry?.xp ?? 0,
+      xp: leaderboardData.myEntry?.xp ?? 0,
     };
   }
 

@@ -22,7 +22,7 @@ import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
-import { useUserStats } from '@/hooks/useUserStats';
+import { useUserStats, updateGlobalStats } from '@/hooks/useUserStats';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 
 type LeaderboardPeriod = 'weekly' | 'monthly' | 'all_time';
@@ -106,6 +106,14 @@ export default function LeaderboardScreen() {
           const data = await usersLeaderboardRes.json();
           if (Array.isArray(data.entries) && data.entries.length > 0) {
             setServerEntries(data.entries);
+            if (data.myEntry && typeof data.myEntry.xp === 'number' && selectedPeriod === 'all_time') {
+              updateGlobalStats({
+                completedLessonsCount: stats.completedLessonsCount,
+                earnedXp: data.myEntry.xp,
+                rank: data.myEntry.rank ?? stats.rank,
+                practicedMinutes: data.myEntry.minutesConsumed ?? stats.practicedMinutes,
+              }, currentUserId);
+            }
             return;
           }
         }

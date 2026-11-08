@@ -105,7 +105,7 @@ let globalStatsCache: CachedStats = loadInitialStatsCache();
 const statsListeners = new Set<(stats: CachedStats) => void>();
 let inFlightRefreshPromise: Promise<void> | null = null;
 
-function updateGlobalStats(newStats: CachedStats, userId?: string) {
+export function updateGlobalStats(newStats: CachedStats, userId?: string) {
   globalStatsCache = newStats;
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
     try {
@@ -286,6 +286,7 @@ export function useUserStats(): UserStats {
         let hasPracticeProgressFromDb = false;
         let serverRank: number | null = null;
         let serverMinutesConsumed: number = 0;
+        let serverTotalXp: number | null = null;
 
         if (progressRes && progressRes.ok) {
           try {
@@ -295,6 +296,11 @@ export function useUserStats(): UserStats {
             }
             if (typeof data.minutesConsumed === 'number') {
               serverMinutesConsumed = data.minutesConsumed;
+            }
+            if (typeof data.totalXp === 'number') {
+              serverTotalXp = data.totalXp;
+            } else if (typeof data.xp === 'number') {
+              serverTotalXp = data.xp;
             }
             if (Array.isArray(data.progress)) {
               data.progress.forEach((p: any) => {
@@ -330,6 +336,10 @@ export function useUserStats(): UserStats {
           totalXpAccumulated += normalSessionXp;
         }
 
+        // Authoritative server XP from leaderboard / roadmap progress takes precedence
+        // to prevent discrepancies between the top bar and leaderboard table
+        const finalEarnedXp = serverTotalXp !== null ? serverTotalXp : totalXpAccumulated;
+
         const practicedMinutes = Math.max(
           serverMinutesConsumed,
           Math.round(totalSessionSeconds / 60),
@@ -337,7 +347,7 @@ export function useUserStats(): UserStats {
         );
 
         // If the user has 0 XP and 0 practiced minutes, their rank is null (displayed as N/A)
-        const hasActivity = totalXpAccumulated > 0 || practicedMinutes > 0;
+        const hasActivity = finalEarnedXp > 0 || practicedMinutes > 0;
         const effectiveRank: number | null =
           !hasActivity
             ? null
@@ -348,7 +358,7 @@ export function useUserStats(): UserStats {
         updateGlobalStats(
           {
             completedLessonsCount: completedIds.size,
-            earnedXp: totalXpAccumulated,
+            earnedXp: finalEarnedXp,
             rank: effectiveRank,
             practicedMinutes,
           },
