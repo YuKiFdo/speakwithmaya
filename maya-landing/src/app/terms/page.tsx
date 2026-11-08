@@ -181,10 +181,10 @@ export default function TermsPage() {
               </p>
               <ul className="list-disc pl-6 space-y-2 text-[#475569]">
                 <li>
-                  <strong>Cancelling Starter Plan (Carrier Billing):</strong> You can cancel carrier billing at any time by tapping the <strong>Unsubscribe</strong> button in your app Profile / Settings, by following operator SMS cancellation instructions, or by emailing <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a> with your registered mobile phone number. Cancellation takes effect immediately, stopping future daily airtime deductions.
+                  <strong>Cancelling Starter Plan (Carrier Billing):</strong> You can cancel carrier billing at any time by tapping the <strong>Unsubscribe</strong> button in your app Profile / Settings, by following operator SMS cancellation instructions, or by emailing <a href="mailto:speakwithmaya.com@gmail.com" className="text-[#0D4EFD] underline font-medium">speakwithmaya.com@gmail.com</a> with your registered mobile phone number. Cancellation takes effect immediately, stopping future daily airtime deductions.
                 </li>
                 <li>
-                  <strong>Cancelling Online Card Subscriptions:</strong> Navigate to your Account / Subscription settings within the web app or email <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a>. Cancellation takes effect at the end of your current paid billing period with full feature retention until that date.
+                  <strong>Cancelling Online Card Subscriptions:</strong> Navigate to your Account / Subscription settings within the web app or email <a href="mailto:speakwithmaya.com@gmail.com" className="text-[#0D4EFD] underline font-medium">speakwithmaya.com@gmail.com</a>. Cancellation takes effect at the end of your current paid billing period with full feature retention until that date.
                 </li>
                 <li>
                   <strong>Refunds:</strong> Refund requests are governed strictly by our <Link href="/refund" className="text-[#0D4EFD] underline font-medium">Refund & Cancellation Policy</Link>.
@@ -257,7 +257,7 @@ export default function TermsPage() {
                 <p><strong>Entity Name:</strong> IDEACIPHER (PVT) LTD</p>
                 <p><strong>Trading Name:</strong> SpeakwithMaya</p>
                 <p><strong>Registered Country:</strong> Sri Lanka</p>
-                <p><strong>Support & Legal Inquiries:</strong> <a href="mailto:support@speakwithmaya.com" className="text-[#0D4EFD] underline font-medium">support@speakwithmaya.com</a></p>
+                <p><strong>Support & Legal Inquiries:</strong> <a href="mailto:speakwithmaya.com@gmail.com" className="text-[#0D4EFD] underline font-medium">speakwithmaya.com@gmail.com</a></p>
               </div>
             </section>
           </div>
