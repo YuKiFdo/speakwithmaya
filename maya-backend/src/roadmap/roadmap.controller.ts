@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Headers,
+  Header,
   Query,
   Req,
   Res,
@@ -39,6 +40,9 @@ export class RoadmapController {
 
   // 1. Student / Public endpoint - returns only published levels
   @Get('roadmap')
+  @Header('Cache-Control', 'no-cache, no-store, must-revalidate')
+  @Header('Pragma', 'no-cache')
+  @Header('Expires', '0')
   async getStudentRoadmap() {
     const levels = await this.roadmapService.getAllLevels(false);
     return {
@@ -214,6 +218,9 @@ export class RoadmapController {
 
   // 9. User Roadmap Progress: Get completed levels for user
   @Get('roadmap/user-progress')
+  @Header('Cache-Control', 'no-cache, no-store, must-revalidate')
+  @Header('Pragma', 'no-cache')
+  @Header('Expires', '0')
   async getUserProgress(
     @Headers('authorization') authHeader?: string,
     @Query('userId') queryUserId?: string,
