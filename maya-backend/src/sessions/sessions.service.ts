@@ -2522,19 +2522,7 @@ ${memoryPart}`;
           try {
             const practiceMinutes = Math.max(1, Math.floor(durationSeconds / 60));
             awardedXp = Math.max(5, practiceMinutes * 5);
-            const practiceKey = `practice-${validSessionId.replace(/-/g, '').slice(0, 12)}`;
-            if (this.roadmapService) {
-              await this.roadmapService.recordUserProgress(resolvedUserId, {
-                roadmapLevelId: practiceKey,
-                levelNumber: 0,
-                sessionId: validSessionId,
-                scorePercent: resolvedScores.overall ?? 80,
-                isPassed: true,
-                status: 'completed',
-                xpEarned: awardedXp,
-              });
-              this.logger.log(`[Practice XP] Awarded ${awardedXp} XP (${practiceMinutes} min practiced @ 5 XP/min) for user ${resolvedUserId}, session ${validSessionId}`);
-            }
+            this.logger.log(`[Practice XP] Awarded ${awardedXp} XP (${practiceMinutes} min practiced @ 5 XP/min) for user ${resolvedUserId}, session ${validSessionId}`);
           } catch (xpErr: any) {
             this.logger.warn(`Failed to record practice session XP: ${xpErr?.message}`);
           }

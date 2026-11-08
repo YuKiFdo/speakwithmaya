@@ -1074,7 +1074,24 @@ INSTRUCTIONS:
     };
 
     if (this.supabase) {
+      if (record.roadmapLevelId?.startsWith('practice-')) {
+        // Practice sessions (non-roadmap) are tracked via sessions table for XP calculation
+        return record;
+      }
+
       try {
+        // Check if level exists in roadmap_levels to prevent foreign key violation
+        const { data: levelExists } = await this.supabase
+          .from('roadmap_levels')
+          .select('id')
+          .eq('id', record.roadmapLevelId)
+          .maybeSingle();
+
+        if (!levelExists) {
+          this.logger.debug?.(`[RoadmapService] Level ${record.roadmapLevelId} not found in roadmap_levels table; skipping user_roadmap_progress DB upsert.`);
+          return record;
+        }
+
         const row = {
           id: record.id,
           user_id: record.userId,
