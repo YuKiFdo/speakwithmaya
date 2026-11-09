@@ -212,11 +212,13 @@ export default function OtpScreen() {
       });
 
       if (!isLoginMode) {
+        const realPhone = (storePhone && storePhone !== '+94 77 123 4567' ? storePhone : undefined) || res.user?.phoneNumber || params.phone || undefined;
         trackCompleteRegistration({
           userId: res.user?.id,
           firstName: params.name || res.user?.displayName || undefined,
           email: params.email || (res.user as any)?.email || undefined,
-          phone: displayPhone || res.user?.phoneNumber || undefined,
+          phone_number: realPhone,
+          phone: realPhone,
         });
       }
 

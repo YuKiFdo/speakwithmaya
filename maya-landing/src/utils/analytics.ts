@@ -53,6 +53,8 @@ export function trackLandingSelectPlan(planKey: 'Basic' | 'Pro' | 'Premium'): vo
   if (!plan) return;
   pushLandingDataLayerEvent('select_plan', {
     plan_name: plan.plan_name,
+    content_name: plan.plan_name,
+    content_type: 'product',
     billing_period: plan.billing_period,
     value: plan.value,
     currency: plan.currency,
