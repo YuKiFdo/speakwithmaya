@@ -395,7 +395,7 @@ export default function WelcomeScreen() {
             />
 
             {/* Official Apple App Store & Google Play Badges */}
-            <OfficialStoreBadges />
+            {/* <OfficialStoreBadges /> */}
           </Animated.View>
         </View>
       </ScrollView>
