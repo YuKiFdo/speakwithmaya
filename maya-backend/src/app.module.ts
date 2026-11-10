@@ -11,6 +11,7 @@ import { LiveModule } from './live/live.module.js';
 import { RoadmapModule } from './roadmap/roadmap.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { PayHereModule } from './payments/payhere.module.js';
+import { StatsModule } from './stats/stats.module.js';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -31,6 +32,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     HealthModule,
     AuthModule,
     PayHereModule,
+    StatsModule,
     SessionsModule,
     LiveModule,
     RoadmapModule,

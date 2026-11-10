@@ -47,6 +47,8 @@ async function bootstrap() {
       'Content-Type',
       'Authorization',
       'x-admin-token',
+      'x-dashboard-key',
+      'X-Dashboard-Key',
       'x-requested-with',
       'Accept',
       'Range',
