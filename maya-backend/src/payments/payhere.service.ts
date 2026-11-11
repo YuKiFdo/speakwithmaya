@@ -267,19 +267,12 @@ export class PayHereService {
       ? 'https://sandbox.payhere.lk/pay/preapprove'
       : 'https://www.payhere.lk/pay/preapprove';
 
-    const appendOrderId = (url?: string): string => {
-      if (!url) return '';
-      if (url.includes('order_id=')) return url;
-      const separator = url.includes('?') ? '&' : '?';
-      return `${url}${separator}order_id=${encodeURIComponent(orderId)}`;
-    };
-
     return {
       sandbox: this.isSandbox,
       action_url: isPreapproval ? preapprovalUrl : undefined,
       merchant_id: this.merchantId,
-      return_url: appendOrderId(dto.returnUrl),
-      cancel_url: appendOrderId(dto.cancelUrl),
+      return_url: dto.returnUrl || '',
+      cancel_url: dto.cancelUrl || '',
       notify_url: this.notifyUrl,
       order_id: orderId,
       items: isCardUpdate
@@ -2460,25 +2453,40 @@ export class PayHereService {
     order?: any;
     transaction?: ReturnType<PayHereService['buildAnalyticsTransaction']>;
   }> {
-    this.logger.log(`[PayHereRecovery] 🔄 Reconciling order status for ${orderId}...`);
+    const rawOrder = (orderId || '').toString().trim();
+    const cleanOrderId = (rawOrder.includes(',') ? rawOrder.split(',')[0] : rawOrder)
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '');
+
+    if (!cleanOrderId) {
+      this.logger.warn(`[PayHereRecovery] Invalid or empty order identifier received: "${orderId}"`);
+      return {
+        success: false,
+        verified: false,
+        status: 'INVALID_ORDER_ID',
+        message: 'Invalid or missing order identifier.',
+      };
+    }
+
+    this.logger.log(`[PayHereRecovery] 🔄 Reconciling order status for ${cleanOrderId}...`);
 
     // 1. Fetch order from local database
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanOrderId);
     let orderQuery = this.supabase.from('orders').select('*');
     if (isUuid) {
-      orderQuery = orderQuery.or(`id.eq.${orderId},gateway_payment_id.eq.${orderId},payhere_payment_id.eq.${orderId}`);
+      orderQuery = orderQuery.or(`id.eq.${cleanOrderId},gateway_payment_id.eq.${cleanOrderId},payhere_payment_id.eq.${cleanOrderId}`);
     } else {
-      orderQuery = orderQuery.or(`gateway_payment_id.eq.${orderId},payhere_payment_id.eq.${orderId}`);
+      orderQuery = orderQuery.or(`gateway_payment_id.eq.${cleanOrderId},payhere_payment_id.eq.${cleanOrderId}`);
     }
     const { data: order, error: orderErr } = await orderQuery.maybeSingle();
 
     if (orderErr) {
-      this.logger.error(`[PayHereRecovery] Database error looking up order ${orderId}: ${orderErr.message}`);
+      this.logger.error(`[PayHereRecovery] Database error looking up order ${cleanOrderId}: ${orderErr.message}`);
       return { success: false, verified: false, status: 'DB_ERROR', message: orderErr.message };
     }
 
     if (!order) {
-      this.logger.warn(`[PayHereRecovery] Order ${orderId} not found in database.`);
+      this.logger.warn(`[PayHereRecovery] Order ${cleanOrderId} not found in database.`);
       return { success: false, verified: false, status: 'NOT_FOUND', message: 'Order record not found in system.' };
     }
 
@@ -2506,7 +2514,7 @@ export class PayHereService {
           .eq('id', order.id);
       }
 
-      this.logger.log(`[PayHereRecovery] ⏩ Order ${orderId} is already completed (firstVerifiedForAnalytics=${firstVerifiedForAnalytics}).`);
+      this.logger.log(`[PayHereRecovery] ⏩ Order ${cleanOrderId} is already completed (firstVerifiedForAnalytics=${firstVerifiedForAnalytics}).`);
       return {
         success: true,
         verified: !transaction.isCardUpdate,
@@ -2520,7 +2528,7 @@ export class PayHereService {
 
     // If order was already marked failed by webhook
     if (order.status === 'failed') {
-      this.logger.warn(`[PayHereRecovery] ❌ Order ${orderId} is already marked failed in database.`);
+      this.logger.warn(`[PayHereRecovery] ❌ Order ${cleanOrderId} is already marked failed in database.`);
       return {
         success: false,
         verified: false,
@@ -2533,10 +2541,10 @@ export class PayHereService {
     }
 
     // 2. Query PayHere Retrieval API
-    const payhereData = await this.queryPaymentByOrderId(order.gateway_payment_id || orderId);
+    const payhereData = await this.queryPaymentByOrderId(order.gateway_payment_id || cleanOrderId);
 
     if (!payhereData) {
-      this.logger.log(`[PayHereRecovery] ⏳ Order ${orderId} has no confirmed payment record at PayHere yet.`);
+      this.logger.log(`[PayHereRecovery] ⏳ Order ${cleanOrderId} has no confirmed payment record at PayHere yet.`);
       return {
         success: false,
         verified: false,
@@ -2554,7 +2562,7 @@ export class PayHereService {
 
     // 3. Handle Gateway Declines/Cancellations
     if (isFailed) {
-      this.logger.warn(`[PayHereRecovery] ❌ Order ${orderId} failed at gateway with status ${rawStatus}.`);
+      this.logger.warn(`[PayHereRecovery] ❌ Order ${cleanOrderId} failed at gateway with status ${rawStatus}.`);
       await this.supabase
         .from('orders')
         .update({
@@ -2588,10 +2596,10 @@ export class PayHereService {
     }
 
     // 4. Gateway confirmed payment received! Activate plan/minutes in our database
-    this.logger.log(`[PayHereRecovery] 🎉 Gateway confirmed payment for order ${orderId} (Payment ID: ${payhereData.payment_id})! Executing activation...`);
+    this.logger.log(`[PayHereRecovery] 🎉 Gateway confirmed payment for order ${cleanOrderId} (Payment ID: ${payhereData.payment_id})! Executing activation...`);
 
     const userId = order.user_id;
-    const orderGatewayId = order.gateway_payment_id || orderId;
+    const orderGatewayId = order.gateway_payment_id || cleanOrderId;
     const isTopup = order.order_type === 'add_on_topup' || orderGatewayId.startsWith('MAYA-TOPUP');
     const isCardUpdate = orderGatewayId.startsWith('MAYA-CARD-UPDATE');
     const isPreauth = orderGatewayId.startsWith('MAYA-PREAUTH') || order.order_type === 'subscription_new';
@@ -2800,7 +2808,7 @@ export class PayHereService {
       })
       .eq('id', order.id);
 
-    this.logger.log(`[PayHereRecovery] 🚀 Order ${orderId} successfully reconciled and activated! User: ${userId}, Tier: ${planTier}`);
+    this.logger.log(`[PayHereRecovery] 🚀 Order ${cleanOrderId} successfully reconciled and activated! User: ${userId}, Tier: ${planTier}`);
     return {
       success: true,
       verified: true,

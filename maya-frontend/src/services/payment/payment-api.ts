@@ -358,7 +358,21 @@ class PaymentApiService {
     };
   }> {
     try {
-      const res = await fetch(`${this.baseUrl}/v1/payments/payhere/verify-order/${encodeURIComponent(orderId)}`, {
+      const rawOrder = (orderId || '').toString().trim();
+      const cleanOrderId = (rawOrder.includes(',') ? rawOrder.split(',')[0] : rawOrder)
+        .trim()
+        .replace(/[^a-zA-Z0-9_-]/g, '');
+
+      if (!cleanOrderId) {
+        return {
+          success: false,
+          verified: false,
+          status: 'INVALID_ORDER_ID',
+          message: 'Invalid order identifier provided.',
+        };
+      }
+
+      const res = await fetch(`${this.baseUrl}/v1/payments/payhere/verify-order/${encodeURIComponent(cleanOrderId)}`, {
         method: 'POST',
         headers: this.getAuthHeaders(),
       });

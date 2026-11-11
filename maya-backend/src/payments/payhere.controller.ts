@@ -230,7 +230,8 @@ export class PayHereController {
     if (authHeader) {
       this.authService.validateAuthToken(authHeader);
     }
-    return this.payHereService.reconcilePendingOrder(orderId);
+    const cleanOrderId = (orderId || '').toString().split(',')[0].trim().replace(/[^a-zA-Z0-9_-]/g, '');
+    return this.payHereService.reconcilePendingOrder(cleanOrderId);
   }
 
   /**
@@ -239,6 +240,7 @@ export class PayHereController {
   @Post('admin/orders/:id/verify')
   @UseGuards(AdminGuard)
   async adminVerifyOrder(@Param('id') orderId: string) {
-    return this.payHereService.reconcilePendingOrder(orderId);
+    const cleanOrderId = (orderId || '').toString().split(',')[0].trim().replace(/[^a-zA-Z0-9_-]/g, '');
+    return this.payHereService.reconcilePendingOrder(cleanOrderId);
   }
 }

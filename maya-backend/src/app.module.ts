@@ -13,7 +13,22 @@ import { AuthModule } from './auth/auth.module.js';
 import { PayHereModule } from './payments/payhere.module.js';
 import { StatsModule } from './stats/stats.module.js';
 
+const isObserveEnabled =
+  process.env.OBSERVE_ENABLED !== 'false' &&
+  process.env.NODE_ENV !== 'test';
+
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
+
+const observeImports = isObserveEnabled
+  ? [
+      ObserveModule.forRoot({
+        appKey: process.env.OBSERVE_APP_KEY || 'x5J8HLTDWVq6XfeS',
+        appSecret: process.env.OBSERVE_APP_SECRET || 'uO^nYCzd30LMNSf8gh7oDH15mdy5hj7FOQoVOQrSCS1SO',
+        serviceId: 'maya-backend',
+        tracesSampleRate: process.env.OBSERVE_SAMPLE_RATE ? parseFloat(process.env.OBSERVE_SAMPLE_RATE) : 0.2,
+      }),
+    ]
+  : [];
 
 @Module({
   imports: [
@@ -22,13 +37,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
       envFilePath: '.env',
     }),
     ScheduleModule.forRoot(),
-    // Distributed tracing, auto-correlated logs, request/job metrics, error
-    // telemetry, alarms, and more - out of the box. Sign up at https://observe.nestjs.com
-    ObserveModule.forRoot({
-      appKey: 'x5J8HLTDWVq6XfeS',
-      appSecret: 'uO^nYCzd30LMNSf8gh7oDH15mdy5hj7FOQoVOQrSCS1SO',
-      serviceId: 'maya-backend',
-    }),
+    ...observeImports,
     HealthModule,
     AuthModule,
     PayHereModule,

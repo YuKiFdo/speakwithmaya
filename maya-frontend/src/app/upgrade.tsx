@@ -368,14 +368,25 @@ export default function UpgradeScreen() {
 
   // Handle PayHere Preapproval redirect return
   useEffect(() => {
-    let paymentStatus = searchParams.payment;
-    let orderId = searchParams.order_id;
+    const rawPayment = searchParams.payment;
+    const rawOrderId = searchParams.order_id;
+
+    // Handle array or comma-separated query parameters safely
+    let paymentStatus = Array.isArray(rawPayment) ? rawPayment[0] : rawPayment;
+    let orderId = Array.isArray(rawOrderId)
+      ? rawOrderId[0]
+      : typeof rawOrderId === 'string'
+        ? rawOrderId.split(',')[0].trim()
+        : rawOrderId;
 
     // Web fallback: Read from window.location.search if external redirect didn't hydrate expo params yet
     if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search) {
       const q = new URLSearchParams(window.location.search);
       if (!paymentStatus) paymentStatus = q.get('payment') || undefined;
-      if (!orderId) orderId = q.get('order_id') || undefined;
+      if (!orderId) {
+        const qOrderId = q.get('order_id');
+        orderId = qOrderId ? (qOrderId.includes(',') ? qOrderId.split(',')[0].trim() : qOrderId) : undefined;
+      }
     }
 
     if (!paymentStatus) {
@@ -390,7 +401,10 @@ export default function UpgradeScreen() {
 
     const handleReturn = async () => {
       const pendingCtx = getPendingCheckoutContext();
-      const effectiveOrderId = orderId || pendingCtx?.transaction_id;
+      const rawEffectiveId = orderId || pendingCtx?.transaction_id;
+      const effectiveOrderId = typeof rawEffectiveId === 'string'
+        ? rawEffectiveId.split(',')[0].trim()
+        : rawEffectiveId;
 
       if (paymentStatus === 'success') {
         if (!effectiveOrderId) {

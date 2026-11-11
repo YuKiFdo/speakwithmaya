@@ -4,8 +4,12 @@ import express from 'express';
 import { AppModule, ObserveInstrument } from './app.module.js';
 
 async function bootstrap() {
+  const isObserveEnabled =
+    process.env.OBSERVE_ENABLED !== 'false' &&
+    process.env.NODE_ENV !== 'test';
+
   const app = await NestFactory.create(AppModule, {
-    instrument: ObserveInstrument,
+    ...(isObserveEnabled && ObserveInstrument ? { instrument: ObserveInstrument } : {}),
   });
 
   // PayHere notify_url sends application/x-www-form-urlencoded POST requests

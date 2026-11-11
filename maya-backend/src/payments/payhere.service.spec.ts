@@ -112,4 +112,42 @@ describe('PayHereService Signature & Telemetry', () => {
     });
     expect(cardUpdate.isCardUpdate).toBe(true);
   });
+
+  it('safely sanitizes duplicated or comma-separated order IDs during reconciliation lookup', async () => {
+    let capturedFilter = '';
+    (service as any).supabase = {
+      from: () => ({
+        select: () => ({
+          or: (filterStr: string) => {
+            capturedFilter = filterStr;
+            return {
+              maybeSingle: async () => ({
+                data: {
+                  id: 'order-uuid-1',
+                  user_id: 'user-1',
+                  status: 'completed',
+                  order_type: 'subscription_new',
+                  plan_tier: 'basic',
+                  amount_lkr: 3600,
+                  gateway_payment_id: 'MAYA-PREAUTH-BASIC-1794381441126-4899',
+                  raw_payload: { analytics_purchase_emitted: true },
+                },
+                error: null,
+              }),
+            };
+          },
+        }),
+      }),
+    };
+
+    const result = await service.reconcilePendingOrder(
+      'MAYA-PREAUTH-BASIC-1794381441126-4899,MAYA-PREAUTH-BASIC-1794381441126-4899'
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('ALREADY_COMPLETED');
+    expect(capturedFilter).toBe(
+      'gateway_payment_id.eq.MAYA-PREAUTH-BASIC-1794381441126-4899,payhere_payment_id.eq.MAYA-PREAUTH-BASIC-1794381441126-4899'
+    );
+  });
 });
