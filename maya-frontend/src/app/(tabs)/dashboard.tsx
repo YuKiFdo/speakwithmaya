@@ -38,6 +38,8 @@ import { useActiveConversation, ActiveConversationStore, isRoadmapOrIntroTopic, 
 import { fetchAllPracticeSessions } from '@/services/supabase';
 import { paymentApi } from '@/services/payment/payment-api';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import { OutageApologyBanner } from '@/components/ui/OutageApologyBanner';
+import { promotionsApi } from '@/services/promotions/promotions-api';
 
 interface ScenarioItem {
   id: string;
@@ -282,6 +284,7 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     authService.fetchUserProfile();
+    promotionsApi.recordComebackPing('outage_recovery');
     authService.logEvent(
       'arrive_dashboard',
       '/(tabs)/dashboard',
@@ -637,6 +640,12 @@ export default function DashboardScreen() {
               ) : undefined
             }
           >
+            {/* Outage Apology & Comeback Compensation Banner */}
+            <OutageApologyBanner
+              userTier={planTier}
+              isPaidUser={isPro}
+            />
+
             {/* TOP SECTION: Header + Hero Banner paired together on desktop */}
             <View style={isDesktop ? styles.desktopTopGroup : undefined}>
               {/* GREETING ON MOBILE */}

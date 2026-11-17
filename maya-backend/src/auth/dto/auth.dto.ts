@@ -455,5 +455,36 @@ export class UpdateComplaintStatusDto {
   status!: 'open' | 'resolved';
 }
 
+export class ClaimPromotionDto {
+  @IsString()
+  @IsNotEmpty()
+  promoCode!: string;
+
+  @IsOptional()
+  metadata?: any;
+}
+
+export class ComebackPingDto {
+  @IsOptional()
+  metadata?: any;
+}
+
+export class AdminPromotionClaimsQueryDto {
+  @IsOptional()
+  @IsString()
+  promoCode?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  page?: number;
+
+  @IsOptional()
+  limit?: number;
+}
+
+
 
 

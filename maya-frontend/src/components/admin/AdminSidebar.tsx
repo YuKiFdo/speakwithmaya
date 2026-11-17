@@ -23,6 +23,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     group: 'ANALYTICS & OVERVIEW',
     items: [
       { id: 'admin-dashboard', label: 'Analytics Dashboard', icon: 'pie-chart', route: '/admin/dashboard' },
+      { id: 'promotions-tracking', label: 'Promotions & Comebacks', icon: 'gift', route: '/admin/promotions' },
     ],
   },
   {

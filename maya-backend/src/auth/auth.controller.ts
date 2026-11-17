@@ -31,6 +31,9 @@ import {
   CreateTestAccountDto,
   SubmitComplaintDto,
   UpdateComplaintStatusDto,
+  ClaimPromotionDto,
+  ComebackPingDto,
+  AdminPromotionClaimsQueryDto,
 } from './dto/auth.dto.js';
 
 @Controller('v1')
@@ -350,5 +353,47 @@ export class AuthController {
   @UseGuards(AdminGuard)
   async deleteSessionReview(@Param('id') id: string) {
     return this.authService.deleteSessionReview(id);
+  }
+
+  /**
+   * Student: Ping when returning to the app after the outage
+   */
+  @Post('promotions/comeback-ping')
+  @UseGuards(AuthGuard)
+  async recordComebackPing(
+    @GetUser('id') userId: string,
+    @Body() dto: ComebackPingDto,
+  ) {
+    return this.authService.recordComebackPing(userId, dto?.metadata);
+  }
+
+  /**
+   * Student: Claim comeback/apology promotion
+   */
+  @Post('promotions/claim')
+  @UseGuards(AuthGuard)
+  async claimPromotion(
+    @GetUser('id') userId: string,
+    @Body() dto: ClaimPromotionDto,
+  ) {
+    return this.authService.claimPromotion(userId, dto.promoCode, dto.metadata);
+  }
+
+  /**
+   * Admin: Overview metrics for comebacks and campaign claims
+   */
+  @Get('admin/promotions/overview')
+  @UseGuards(AdminGuard)
+  async getAdminPromotionsOverview() {
+    return this.authService.getAdminPromotionsOverview();
+  }
+
+  /**
+   * Admin: Detailed paginated promotion claims list
+   */
+  @Get('admin/promotions/claims')
+  @UseGuards(AdminGuard)
+  async getAdminPromotionClaims(@Query() query: AdminPromotionClaimsQueryDto) {
+    return this.authService.getAdminPromotionClaims(query);
   }
 }

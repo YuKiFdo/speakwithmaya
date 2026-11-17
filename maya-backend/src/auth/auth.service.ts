@@ -23,6 +23,9 @@ import {
   AdminUpdateUserDto,
   CreateTestAccountDto,
   SubmitComplaintDto,
+  ClaimPromotionDto,
+  ComebackPingDto,
+  AdminPromotionClaimsQueryDto,
 } from './dto/auth.dto.js';
 import { SmsApiLkProvider } from './sms/smsapi-lk.provider.js';
 import { IdeamartSmsProvider } from './sms/ideamart-sms.provider.js';
@@ -4038,6 +4041,359 @@ export class AuthService {
     } catch (err: any) {
       this.logger.warn(`getPublicLeaderboard error: ${err?.message}`);
       return { entries: [], myEntry: null, totalParticipants: 0 };
+    }
+  }
+
+  /**
+   * Track returning students coming back after downtime/outage
+   */
+  async recordComebackPing(userId: string, metadata: any = {}) {
+    try {
+      const now = new Date().toISOString();
+
+      try {
+        await this.supabase
+          .from('profiles')
+          .update({ last_comeback_at: now })
+          .eq('id', userId);
+      } catch (err: any) {}
+
+      await this.supabase.from('onboarding_events').insert({
+        user_id: userId,
+        event_name: 'user_comeback',
+        step: metadata?.campaign || 'outage_recovery',
+        action: 'visit',
+        metadata: {
+          comeback_at: now,
+          client: metadata?.client || 'web',
+          user_agent: metadata?.userAgent || '',
+          ...metadata,
+        },
+      });
+
+      return { success: true, timestamp: now };
+    } catch (err: any) {
+      this.logger.warn(`recordComebackPing error for user ${userId}: ${err?.message}`);
+      return { success: false, error: err?.message };
+    }
+  }
+
+  /**
+   * Student: Claim apology or comeback promo (3-Day Pro Pass for starters, +100 bonus minutes for paid users)
+   * Extensible for future holiday/marketing promotions.
+   */
+  async claimPromotion(userId: string, promoCode: string, metadata: any = {}) {
+    const normalizedPromo = (promoCode || 'outage-comeback-nov26').trim().toLowerCase();
+
+    const profile = await this.getProfile(userId);
+    if (!profile) {
+      throw new NotFoundException('User profile not found');
+    }
+
+    let alreadyClaimed = false;
+
+    // Check promotion_claims table first
+    const { data: existingClaims, error: claimsErr } = await this.supabase
+      .from('promotion_claims')
+      .select('id, promo_code, reward_type, reward_value, claimed_at, status')
+      .eq('user_id', userId)
+      .eq('promo_code', normalizedPromo);
+
+    if (!claimsErr && existingClaims && existingClaims.length > 0) {
+      alreadyClaimed = true;
+    }
+
+    if (!alreadyClaimed) {
+      const { data: eventClaims } = await this.supabase
+        .from('onboarding_events')
+        .select('id, metadata')
+        .eq('user_id', userId)
+        .eq('event_name', 'promo_claim')
+        .eq('step', normalizedPromo);
+
+      if (eventClaims && eventClaims.length > 0) {
+        alreadyClaimed = true;
+      }
+    }
+
+    if (alreadyClaimed) {
+      return {
+        success: true,
+        alreadyClaimed: true,
+        message: 'You have already claimed this promotion.',
+        profile: await this.getProfile(userId),
+      };
+    }
+
+    const isStarter = profile.plan_tier === 'starter';
+    let rewardType: 'pro_pass' | 'bonus_minutes' | 'discount_pass' = 'pro_pass';
+    let rewardValue = 120;
+    let expiresAt: string | null = null;
+    let message = '';
+
+    const now = new Date();
+
+    if (isStarter) {
+      rewardType = 'pro_pass';
+      rewardValue = 120;
+      const expiry = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+      expiresAt = expiry.toISOString();
+
+      await this.supabase
+        .from('profiles')
+        .update({
+          plan_tier: 'pro',
+          plan_status: 'trialing',
+          monthly_minutes_allowance: 120,
+          minutes_balance: 120,
+          minutes_reset_at: expiresAt,
+          active_promo_code: normalizedPromo,
+          last_comeback_at: now.toISOString(),
+        })
+        .eq('id', userId);
+
+      message = '3-Day Pro Pass (120 Minutes) activated successfully! Enjoy unlimited English practice.';
+    } else {
+      rewardType = 'bonus_minutes';
+      rewardValue = 100;
+      const newAddonBalance = (profile.add_on_minutes_balance || 0) + 100;
+      const newMinutesBalance = (profile.minutes_balance || 0) + 100;
+
+      await this.supabase
+        .from('profiles')
+        .update({
+          add_on_minutes_balance: newAddonBalance,
+          minutes_balance: newMinutesBalance,
+          active_promo_code: normalizedPromo,
+          last_comeback_at: now.toISOString(),
+        })
+        .eq('id', userId);
+
+      message = '100 Free Non-Expiring Bonus Minutes added directly to your account!';
+    }
+
+    const claimRecord = {
+      user_id: userId,
+      promo_code: normalizedPromo,
+      campaign_name: 'Outage Recovery & Apology Campaign',
+      reward_type: rewardType,
+      reward_value: rewardValue,
+      original_tier: profile.plan_tier,
+      claimed_at: now.toISOString(),
+      expires_at: expiresAt,
+      status: 'active',
+      metadata: {
+        phone_number: profile.phone_number,
+        display_name: profile.display_name,
+        ...metadata,
+      },
+    };
+
+    try {
+      await this.supabase.from('promotion_claims').insert(claimRecord);
+    } catch (insertErr: any) {
+      this.logger.warn(`Could not insert into promotion_claims: ${insertErr?.message}`);
+    }
+
+    try {
+      await this.supabase.from('onboarding_events').insert({
+        user_id: userId,
+        event_name: 'promo_claim',
+        step: normalizedPromo,
+        action: 'claim',
+        metadata: claimRecord,
+      });
+    } catch {}
+
+    const updatedProfile = await this.getProfile(userId);
+
+    return {
+      success: true,
+      alreadyClaimed: false,
+      rewardType,
+      rewardValue,
+      expiresAt,
+      message,
+      profile: updatedProfile,
+    };
+  }
+
+  /**
+   * Admin: Overview metrics for comeback and promotions tracking
+   */
+  async getAdminPromotionsOverview() {
+    try {
+      const { data: comebackEvents } = await this.supabase
+        .from('onboarding_events')
+        .select('user_id, created_at')
+        .eq('event_name', 'user_comeback');
+
+      const uniqueComebackUsers = new Set(comebackEvents?.map((e: any) => e.user_id) || []);
+      const totalComebacks = uniqueComebackUsers.size;
+
+      let claimsList: any[] = [];
+      const { data: dbClaims, error: claimsErr } = await this.supabase
+        .from('promotion_claims')
+        .select('*')
+        .order('claimed_at', { ascending: false });
+
+      if (!claimsErr && dbClaims && dbClaims.length > 0) {
+        claimsList = dbClaims;
+      } else {
+        const { data: eventClaims } = await this.supabase
+          .from('onboarding_events')
+          .select('id, user_id, metadata, created_at')
+          .eq('event_name', 'promo_claim')
+          .order('created_at', { ascending: false });
+
+        claimsList = (eventClaims || []).map((e: any) => ({
+          id: e.id,
+          user_id: e.user_id,
+          promo_code: e.metadata?.promo_code || 'outage-comeback-nov26',
+          campaign_name: e.metadata?.campaign_name || 'Outage Recovery Campaign',
+          reward_type: e.metadata?.reward_type || 'pro_pass',
+          reward_value: e.metadata?.reward_value || 120,
+          original_tier: e.metadata?.original_tier || 'starter',
+          claimed_at: e.metadata?.claimed_at || e.created_at,
+          expires_at: e.metadata?.expires_at,
+          status: e.metadata?.status || 'active',
+          metadata: e.metadata || {},
+        }));
+      }
+
+      const totalClaims = claimsList.length;
+      const starterProPassClaims = claimsList.filter((c) => c.reward_type === 'pro_pass').length;
+      const paidBonusClaims = claimsList.filter((c) => c.reward_type === 'bonus_minutes').length;
+
+      const campaigns = [
+        {
+          id: 'outage-comeback-nov26',
+          name: 'Outage Recovery & Apology Campaign (3-Day Pro Pass / 100 Bonus Mins)',
+          status: 'active',
+          totalClaims,
+          starterProPassClaims,
+          paidBonusClaims,
+        },
+      ];
+
+      return {
+        totalComebacks,
+        totalClaims,
+        starterProPassClaims,
+        paidBonusClaims,
+        campaigns,
+      };
+    } catch (err: any) {
+      this.logger.error(`getAdminPromotionsOverview error: ${err?.message}`);
+      return {
+        totalComebacks: 0,
+        totalClaims: 0,
+        starterProPassClaims: 0,
+        paidBonusClaims: 0,
+        campaigns: [],
+      };
+    }
+  }
+
+  /**
+   * Admin: List paginated promotion claims with user details
+   */
+  async getAdminPromotionClaims(query: AdminPromotionClaimsQueryDto = {}) {
+    try {
+      const page = Math.max(1, Number(query.page || 1));
+      const limit = Math.min(100, Math.max(1, Number(query.limit || 25)));
+      const offset = (page - 1) * limit;
+
+      let claims: any[] = [];
+      let total = 0;
+
+      let req = this.supabase
+        .from('promotion_claims')
+        .select('*', { count: 'exact' });
+
+      if (query.promoCode) {
+        req = req.eq('promo_code', query.promoCode.trim().toLowerCase());
+      }
+
+      req = req.order('claimed_at', { ascending: false }).range(offset, offset + limit - 1);
+
+      const { data: dbClaims, count, error } = await req;
+
+      if (!error && dbClaims) {
+        claims = dbClaims;
+        total = count || claims.length;
+      } else {
+        let evReq = this.supabase
+          .from('onboarding_events')
+          .select('id, user_id, metadata, created_at', { count: 'exact' })
+          .eq('event_name', 'promo_claim');
+
+        if (query.promoCode) {
+          evReq = evReq.eq('step', query.promoCode.trim().toLowerCase());
+        }
+
+        const { data: evClaims, count: evCount } = await evReq
+          .order('created_at', { ascending: false })
+          .range(offset, offset + limit - 1);
+
+        claims = (evClaims || []).map((e: any) => ({
+          id: e.id,
+          user_id: e.user_id,
+          promo_code: e.metadata?.promo_code || 'outage-comeback-nov26',
+          campaign_name: e.metadata?.campaign_name || 'Outage Recovery Campaign',
+          reward_type: e.metadata?.reward_type || 'pro_pass',
+          reward_value: e.metadata?.reward_value || 120,
+          original_tier: e.metadata?.original_tier || 'starter',
+          claimed_at: e.metadata?.claimed_at || e.created_at,
+          expires_at: e.metadata?.expires_at,
+          status: e.metadata?.status || 'active',
+          metadata: e.metadata || {},
+        }));
+        total = evCount || claims.length;
+      }
+
+      const userIds = Array.from(new Set(claims.map((c) => c.user_id).filter(Boolean)));
+      let userMap: Record<string, any> = {};
+
+      if (userIds.length > 0) {
+        const { data: users } = await this.supabase
+          .from('profiles')
+          .select('id, phone_number, display_name, email, avatar_url, level, plan_tier, plan_status, minutes_balance')
+          .in('id', userIds);
+
+        if (users) {
+          userMap = Object.fromEntries(users.map((u) => [u.id, u]));
+        }
+      }
+
+      const enriched = claims.map((c) => {
+        const u = userMap[c.user_id] || {};
+        return {
+          ...c,
+          user: {
+            id: c.user_id,
+            phoneNumber: u.phone_number || c.metadata?.phone_number || 'N/A',
+            displayName: u.display_name || c.metadata?.display_name || 'Anonymous',
+            email: u.email || null,
+            avatarUrl: u.avatar_url || null,
+            level: u.level || 'Beginner',
+            currentTier: u.plan_tier || 'starter',
+            planStatus: u.plan_status || 'active',
+            minutesBalance: u.minutes_balance || 0,
+          },
+        };
+      });
+
+      return {
+        data: enriched,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      };
+    } catch (err: any) {
+      this.logger.error(`getAdminPromotionClaims error: ${err?.message}`);
+      return { data: [], total: 0, page: 1, limit: 25, totalPages: 0 };
     }
   }
 }

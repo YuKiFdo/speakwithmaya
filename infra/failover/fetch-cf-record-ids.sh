@@ -42,12 +42,14 @@ ROOT_ID=$(echo "$RECORDS_RESP" | jq -r '.result[] | select(.name=="speakwithmaya
 WWW_ID=$(echo "$RECORDS_RESP" | jq -r '.result[] | select(.name=="www.speakwithmaya.com") | .id' | head -n1)
 APP_ID=$(echo "$RECORDS_RESP" | jq -r '.result[] | select(.name=="app.speakwithmaya.com") | .id' | head -n1)
 API_ID=$(echo "$RECORDS_RESP" | jq -r '.result[] | select(.name=="api.speakwithmaya.com") | .id' | head -n1)
+ADMIN_ID=$(echo "$RECORDS_RESP" | jq -r '.result[] | select(.name=="admin.speakwithmaya.com") | .id' | head -n1)
 
 echo "--------------------------------------------------------"
 echo "Root Record (speakwithmaya.com):     ${ROOT_ID:-NOT FOUND}"
 echo "WWW Record (www.speakwithmaya.com):  ${WWW_ID:-NOT FOUND}"
 echo "App Record (app.speakwithmaya.com):  ${APP_ID:-NOT FOUND}"
 echo "API Record (api.speakwithmaya.com):  ${API_ID:-NOT FOUND}"
+echo "Admin Record (admin.speakwithmaya.com): ${ADMIN_ID:-NOT FOUND}"
 echo "--------------------------------------------------------"
 
 cat <<EOF > "$OUTPUT_FILE"
@@ -59,6 +61,7 @@ RECORD_ID_ROOT="${ROOT_ID}"
 RECORD_ID_WWW="${WWW_ID}"
 RECORD_ID_APP="${APP_ID}"
 RECORD_ID_API="${API_ID}"
+RECORD_ID_ADMIN="${ADMIN_ID}"
 
 PRIMARY_IP="20.198.240.185"
 BACKUP_IP="139.99.192.179"

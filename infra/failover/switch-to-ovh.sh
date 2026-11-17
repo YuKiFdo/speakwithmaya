@@ -50,6 +50,7 @@ update_record "${RECORD_ID_ROOT:-}" "speakwithmaya.com"
 update_record "${RECORD_ID_WWW:-}" "www.speakwithmaya.com"
 update_record "${RECORD_ID_APP:-}" "app.speakwithmaya.com"
 update_record "${RECORD_ID_API:-}" "api.speakwithmaya.com"
+update_record "${RECORD_ID_ADMIN:-}" "admin.speakwithmaya.com"
 
 echo "========================================================"
 echo "🎉 Traffic successfully steered to OVHcloud Backup ($TARGET_IP)!"
