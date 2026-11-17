@@ -91,6 +91,10 @@ async function bootstrap() {
   const port = process.env.PORT ?? 3000;
   await app.listen(port, '0.0.0.0');
   console.log(`[NestJS] Backend running with CORS enabled on http://localhost:${port}`);
+
+  // Zero-downtime PM2 reloads: with `wait_ready: true` PM2 keeps the old process serving
+  // until this signal arrives, instead of killing it as soon as the new one is spawned.
+  process.send?.('ready');
 }
 
 await bootstrap();

@@ -153,13 +153,27 @@ jobs:
               sudo -n apt-get install -y --no-install-recommends espeak-ng
             fi
 
-            cd \"\$APP_DIR\"
-
-            rm -rf node_modules dist
-
-            tar -xzf /tmp/maya-backend-deploy.tar.gz
-
+            # Extract into a fresh directory and swap it in, instead of deleting
+            # node_modules/dist underneath the still-running process. The old process
+            # keeps serving from the moved directory until PM2 (wait_ready) sees the
+            # new one listening, so deploys no longer cause 502s / CORS errors.
+            NEW_DIR=\"\$APP_DIR.new\"
+            rm -rf \"\$NEW_DIR\"
+            mkdir -p \"\$NEW_DIR\"
+            tar -xzf /tmp/maya-backend-deploy.tar.gz -C \"\$NEW_DIR\"
             rm -f /tmp/maya-backend-deploy.tar.gz
+
+            # Carry over runtime state that is not part of the build
+            if [ -f \"\$APP_DIR/.env\" ]; then cp -a \"\$APP_DIR/.env\" \"\$NEW_DIR/.env\"; fi
+            if [ -d \"\$APP_DIR/assets/audio-cache\" ]; then
+              mkdir -p \"\$NEW_DIR/assets\"
+              cp -a \"\$APP_DIR/assets/audio-cache\" \"\$NEW_DIR/assets/\"
+            fi
+
+            rm -rf \"\$APP_DIR.prev\"
+            if [ -d \"\$APP_DIR\" ]; then mv \"\$APP_DIR\" \"\$APP_DIR.prev\"; fi
+            mv \"\$NEW_DIR\" \"\$APP_DIR\"
+            cd \"\$APP_DIR\"
 
             echo \"Deployment files extracted\"
 
