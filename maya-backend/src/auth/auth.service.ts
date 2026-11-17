@@ -4189,7 +4189,7 @@ export class AuthService {
     const claimRecord = {
       user_id: userId,
       promo_code: normalizedPromo,
-      campaign_name: 'Outage Recovery & Apology Campaign',
+      campaign_name: 'Global Infrastructure Outage Recovery & Apology Campaign',
       reward_type: rewardType,
       reward_value: rewardValue,
       original_tier: profile.plan_tier,
@@ -4414,8 +4414,8 @@ export class AuthService {
   private localCampaigns: any[] = [
     {
       id: 'outage-comeback-nov26',
-      title: '3-Day Outage Recovery & Apology Campaign',
-      description: 'Apology compensation for 3-day downtime. Starter users get 3-Day Pro Pass (120 mins); Paid subscribers receive 100 non-expiring bonus minutes.',
+      title: 'Global Infrastructure Outage Recovery & Apology Campaign',
+      description: 'Apology compensation for 3-day global infrastructure outage. Starter users get 3-Day Pro Pass (120 mins); Paid subscribers receive 100 non-expiring bonus minutes.',
       status: 'active',
       rewardType: 'pro_pass',
       rewardValue: 120,

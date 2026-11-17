@@ -66,8 +66,8 @@ INSERT INTO public.promotion_campaigns (
   end_date
 ) VALUES (
   'outage-comeback-nov26',
-  '3-Day Outage Recovery & Apology Campaign',
-  'Apology compensation for 3-day downtime. Starter users get 3-Day Pro Pass (120 mins); Paid subscribers receive 100 non-expiring bonus minutes.',
+  'Global Infrastructure Outage Recovery & Apology Campaign',
+  'Apology compensation for 3-day global infrastructure outage. Starter users get 3-Day Pro Pass (120 mins); Paid subscribers receive 100 non-expiring bonus minutes.',
   'active',
   'pro_pass',
   120,
