@@ -2022,11 +2022,14 @@ export class AuthService {
    */
   /** Cached unfiltered admin-users dataset (full-table aggregation is expensive). */
   private adminUsersCache: { at: number; promise: Promise<any> } | null = null;
-  private static readonly ADMIN_USERS_CACHE_TTL_MS = 20_000;
+  /** Last successfully computed dataset, served instantly while a refresh runs. */
+  private adminUsersLastGood: { at: number; dataset: any } | null = null;
+  private static readonly ADMIN_USERS_CACHE_TTL_MS = 60_000;
 
   /** Call after any admin mutation that changes what /admin/users shows. */
   invalidateAdminUsersCache() {
     this.adminUsersCache = null;
+    this.adminUsersLastGood = null; // force a fresh (blocking) rebuild after edits
   }
 
   /**
@@ -2037,15 +2040,30 @@ export class AuthService {
    * Banner `stats` are always computed over all users; `stats.filteredCount` is the filtered total.
    */
   async getAdminUsers(query?: AdminUsersQueryDto) {
+    // Stale-while-revalidate: the dataset aggregates whole tables (all profiles, sessions,
+    // ledger, subscriptions, progress), so after the TTL the previous result is served
+    // immediately while ONE background rebuild runs. Only the very first load (or the first
+    // after an admin edit) waits for the full computation.
     const now = Date.now();
-    if (!this.adminUsersCache || now - this.adminUsersCache.at > AuthService.ADMIN_USERS_CACHE_TTL_MS) {
+    const expired =
+      !this.adminUsersCache || now - this.adminUsersCache.at > AuthService.ADMIN_USERS_CACHE_TTL_MS;
+    if (expired) {
       const promise = this.computeAdminUsersDataset();
       this.adminUsersCache = { at: now, promise };
-      promise.catch(() => {
-        if (this.adminUsersCache?.promise === promise) this.adminUsersCache = null;
-      });
+      promise
+        .then((result) => {
+          if (this.adminUsersCache?.promise === promise) {
+            this.adminUsersLastGood = { at: Date.now(), dataset: result };
+          }
+        })
+        .catch(() => {
+          if (this.adminUsersCache?.promise === promise) this.adminUsersCache = null;
+        });
     }
-    const dataset = await this.adminUsersCache.promise;
+    const dataset =
+      expired && this.adminUsersLastGood
+        ? this.adminUsersLastGood.dataset
+        : await this.adminUsersCache!.promise;
 
     let users: any[] = dataset.users;
     if (query?.search) {
@@ -2086,51 +2104,46 @@ export class AuthService {
     };
   }
 
+  /**
+   * Only the profile columns the admin users list uses, instead of select('*') (which also
+   * downloads the ever-growing onboarding_flow JSON for every user). Some of these columns are
+   * optional in older databases, so on any error it falls back to select('*').
+   */
+  private async fetchAdminUsersProfiles() {
+    const cols =
+      'id, created_at, updated_at, display_name, phone_number, email, avatar_url, level, goal, challenge, ' +
+      'employment_status, daily_goal_minutes, native_language, plan_tier, plan_status, billing_cycle, ' +
+      'minutes_balance, monthly_minutes_allowance, add_on_minutes_balance, minutes_reset_at, ' +
+      'telco_provider, telco_subscriber_id, last_active_step, onboarding_completed_at, ' +
+      'onboarding_call_status, onboarding_call_duration_seconds, ' +
+      'baseline_fluency_score, baseline_grammar_score, baseline_pronunciation_score';
+    const narrow = await this.supabase.from('profiles').select(cols).order('created_at', { ascending: false });
+    if (!narrow.error) return narrow;
+    this.logger.warn(`[AdminUsers] Narrow profile select failed (${narrow.error.message}); using select('*')`);
+    return this.supabase.from('profiles').select('*').order('created_at', { ascending: false });
+  }
+
   private async computeAdminUsersDataset(query?: AdminUsersQueryDto) {
     if (!this.supabase) {
       throw new InternalServerErrorException('Supabase database client not configured.');
     }
 
     try {
-      // 1. Fetch profiles
-      const { data: profiles, error: profileErr } = await this.supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (profileErr) {
-        this.logger.error(`Failed to fetch profiles for admin users: ${profileErr.message}`);
-        throw new InternalServerErrorException('Database query failed for profiles.');
-      }
-
-      const allProfiles = (profiles || []) as UserProfileData[];
-      const [registeredTestAccounts, appConfig] = await Promise.all([
-        this.getTestAccounts().catch(() => [] as TestAccountItem[]),
-        this.getAppConfig(),
-      ]);
-
-      const testPhoneDigitsSet = new Set<string>(
-        (registeredTestAccounts || [])
-          .map((t) => (t.phoneNumber || '').replace(/\D/g, ''))
-          .filter(Boolean),
-      );
-
-      const isTestProfile = (p: UserProfileData): boolean => {
-        const digits = (p.phone_number || '').replace(/\D/g, '');
-        if (digits && testPhoneDigitsSet.has(digits)) return true;
-        if ((p.monthly_minutes_allowance || 0) >= 9000 || (p.minutes_balance || 0) >= 9000) return true;
-        return false;
-      };
-
-      // 2-5. Fetch sessions, ledger, subscriptions, telco verifications and roadmap progress
-      // in parallel (previously awaited one after another).
+      // All reads run in ONE parallel batch (previously: profiles, then test accounts/config,
+      // then the remaining tables, i.e. three sequential round trips to the database).
       const [
+        { data: profiles, error: profileErr },
+        registeredTestAccounts,
+        appConfig,
         { data: sessions },
         { data: ledgerEntries },
         { data: subs },
         { data: telcoVerifs },
         { data: progress },
       ] = await Promise.all([
+        this.fetchAdminUsersProfiles(),
+        this.getTestAccounts().catch(() => [] as TestAccountItem[]),
+        this.getAppConfig(),
         this.supabase
           .from('sessions')
           .select('id, user_id, topic, duration_seconds, overall_score, fluency_score, grammar_score, pronunciation_score, created_at, status')
@@ -2151,6 +2164,26 @@ export class AuthService {
           .from('user_roadmap_progress')
           .select('user_id, roadmap_level_id, status, is_passed, score_percent, completed_at'),
       ]);
+
+      if (profileErr) {
+        this.logger.error(`Failed to fetch profiles for admin users: ${profileErr.message}`);
+        throw new InternalServerErrorException('Database query failed for profiles.');
+      }
+
+      const allProfiles = (profiles || []) as UserProfileData[];
+
+      const testPhoneDigitsSet = new Set<string>(
+        (registeredTestAccounts || [])
+          .map((t) => (t.phoneNumber || '').replace(/\D/g, ''))
+          .filter(Boolean),
+      );
+
+      const isTestProfile = (p: UserProfileData): boolean => {
+        const digits = (p.phone_number || '').replace(/\D/g, '');
+        if (digits && testPhoneDigitsSet.has(digits)) return true;
+        if ((p.monthly_minutes_allowance || 0) >= 9000 || (p.minutes_balance || 0) >= 9000) return true;
+        return false;
+      };
 
       // Index verified TELCO OTP records by normalized digits
       const telcoVerifByDigits = new Map<string, { provider: 'ideamart' | 'mspace'; verifiedAt: string; referenceNo: string }>();

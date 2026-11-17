@@ -1275,6 +1275,17 @@ export default function AdminSubscriptionsScreen() {
                                       : 'STARTER DAILY'}
                                   </Text>
                                 </View>
+                                {/* 3-day Pro Pass on top of the daily telco plan: a trial, not an upgrade */}
+                                {tSub.pro_trial ? (
+                                  <View style={[styles.tierBadge, { backgroundColor: '#fffbeb', marginTop: 4 }]}>
+                                    <Text style={[styles.tierBadgeText, { color: '#b45309' }]}>
+                                      {`${(tSub.pro_trial_tier || 'PRO').toUpperCase()} TRIAL`}
+                                      {tSub.pro_trial_ends_at
+                                        ? ` · ends ${new Date(tSub.pro_trial_ends_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+                                        : ''}
+                                    </Text>
+                                  </View>
+                                ) : null}
                                 <Text style={styles.cycleText}>
                                   LKR {tSub.daily_rate_lkr}/day ({isActive ? `LKR ${tSub.monthly_equivalent_lkr}/mo` : 'Historical Rate'})
                                 </Text>

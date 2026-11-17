@@ -2043,7 +2043,7 @@ export class PayHereService {
       // the large onboarding_flow JSON for every user on each admin page load)
       this.supabase
         .from('profiles')
-        .select('id, created_at, updated_at, display_name, phone_number, level, plan_tier, plan_status, billing_cycle, minutes_balance, monthly_minutes_allowance, telco_subscriber_id, telco_provider')
+        .select('id, created_at, updated_at, display_name, phone_number, level, plan_tier, plan_status, billing_cycle, minutes_balance, monthly_minutes_allowance, minutes_reset_at, telco_subscriber_id, telco_provider')
         .order('created_at', { ascending: false }),
       this.supabase
         .from('phone_verifications')
@@ -2163,9 +2163,15 @@ export class PayHereService {
         new Date().toISOString();
 
       const userCardSub = cardSubByUser.get(prof.id);
+      const hasActiveCardSub = Boolean(
+        userCardSub && (userCardSub.status === 'ACTIVE' || userCardSub.status === 'PAST_DUE'),
+      );
+      // A 3-day Pro Pass sets plan_tier='pro' with plan_status='trialing'. That is a trial on
+      // top of the daily telco plan (telco billing continues), NOT an upgrade to a paid card plan.
+      const isProTrial =
+        !hasActiveCardSub && prof.plan_status === 'trialing' && Boolean(prof.plan_tier) && prof.plan_tier !== 'starter';
       const hasUpgradedToCard =
-        Boolean(userCardSub && (userCardSub.status === 'ACTIVE' || userCardSub.status === 'PAST_DUE')) ||
-        (prof.plan_tier && prof.plan_tier !== 'starter');
+        hasActiveCardSub || (!isProTrial && Boolean(prof.plan_tier) && prof.plan_tier !== 'starter');
 
       const isCancelled =
         !hasUpgradedToCard &&
@@ -2214,6 +2220,9 @@ export class PayHereService {
         monthly_equivalent_lkr: status === 'ACTIVE' ? Number((telcoDailyPriceLkr * 30).toFixed(2)) : 0,
         status,
         upgraded_to_tier: upgradedToTier,
+        pro_trial: isProTrial,
+        pro_trial_tier: isProTrial ? prof.plan_tier : null,
+        pro_trial_ends_at: isProTrial ? prof.minutes_reset_at || null : null,
         end_reason: endReason,
         subscribed_at: subscribedAt,
         ended_at: endedAt,
