@@ -4479,7 +4479,7 @@ export class AuthService {
 
       const { data: dbClaims, count, error } = await req;
 
-      if (!error && dbClaims) {
+      if (!error && dbClaims && dbClaims.length > 0) {
         claims = dbClaims;
         total = count || claims.length;
       } else {
