@@ -14,6 +14,7 @@ export interface UserStats {
   resetsInText: string;
   isTimeExpired: boolean;
   isPro: boolean;
+  isTrialing: boolean;
   planTier: 'starter' | 'basic' | 'pro' | 'premium';
   planStatus: string;
   isTestAccount: boolean;
@@ -429,6 +430,7 @@ export function useUserStats(): UserStats {
       resetsInText,
       isTimeExpired,
       isPro,
+      isTrialing: user?.planStatus === 'trialing',
       planTier,
       planStatus: user?.planStatus || 'active',
       isTestAccount: user?.isTestAccount === true,

@@ -55,6 +55,9 @@ export interface DesktopTopBarProps {
   /** Override isPro badge. Defaults to live stats.isPro. */
   isPro?: boolean;
 
+  /** Override isTrialing status. Defaults to live stats.isTrialing. */
+  isTrialing?: boolean;
+
   /** Override planTier ('starter' | 'basic' | 'pro' | 'premium'). Defaults to live stats.planTier. */
   planTier?: 'starter' | 'basic' | 'pro' | 'premium' | string;
 
@@ -103,6 +106,7 @@ export function DesktopTopBar({
   xpLabel,
   progress,
   isPro,
+  isTrialing,
   planTier,
   isInactive,
   maxWidth = 1600,
@@ -125,6 +129,7 @@ export function DesktopTopBar({
   const resolvedXpLabel = xpLabel ?? stats.xpLabel;
   const resolvedProgress = progress ?? stats.progress;
   const resolvedIsPro = isPro ?? stats.isPro;
+  const resolvedIsTrialing = isTrialing ?? stats.isTrialing;
   const resolvedPlanTier = planTier ?? stats.planTier;
   const resolvedIsInactive =
     isInactive ?? (stats.isSubscriptionLocked || stats.isTelcoUnsubscribed);
@@ -190,6 +195,7 @@ export function DesktopTopBar({
               xpLabel={resolvedXpLabel}
               progress={resolvedProgress}
               isPro={resolvedIsPro}
+              isTrialing={resolvedIsTrialing}
               planTier={resolvedPlanTier}
               isInactive={resolvedIsInactive}
               onPress={handleLevelBadgePress}

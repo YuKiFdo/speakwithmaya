@@ -1333,6 +1333,7 @@ export default function HistoryScreen() {
             activeTab="history"
             onSelectTab={handleSelectTab}
             isPro={isPro}
+            isTrialing={stats.isTrialing}
             planTier={stats.planTier}
             isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             usedMinutes={stats.usedMinutes}
@@ -1353,6 +1354,7 @@ export default function HistoryScreen() {
           {/* ============================================================== */}
           <MobileTopBar
             pinned
+            isTrialing={stats.isTrialing}
             onLevelPress={() => setActivePopup('level-up')}
           />
           <DesktopTopBar
@@ -1362,6 +1364,7 @@ export default function HistoryScreen() {
             xpLabel={stats.xpLabel}
             progress={stats.progress}
             isPro={isPro}
+            isTrialing={stats.isTrialing}
             planTier={stats.planTier}
             isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             onLevelPress={() => setActivePopup('level-up')}

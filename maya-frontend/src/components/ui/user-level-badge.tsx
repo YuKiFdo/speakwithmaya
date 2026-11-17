@@ -20,6 +20,8 @@ export interface UserLevelBadgeProps {
   planTier?: 'starter' | 'basic' | 'pro' | 'premium' | string;
   /** Whether the user subscription is currently inactive / locked */
   isInactive?: boolean;
+  /** Whether the user is currently on a free Pro Pass / trial */
+  isTrialing?: boolean;
   /** Avatar image source */
   avatarSource?: any;
   /** Called when the badge is pressed */
@@ -39,6 +41,7 @@ export function UserLevelBadge({
   xpLabel = '0 / 500 XP',
   progress = 0,
   isPro = false,
+  isTrialing = false,
   planTier,
   isInactive = false,
   avatarSource,
@@ -50,6 +53,14 @@ export function UserLevelBadge({
   const resolvedTier = (planTier || (isPro ? 'pro' : 'starter')).toLowerCase();
 
   const getTierBadgeConfig = () => {
+    if (isTrialing) {
+      return {
+        show: true,
+        label: 'PRO TRIAL',
+        bgColor: '#7C3AED',
+        icon: <CrownSolidIcon color="#ffffff" size={9.5} />,
+      };
+    }
     switch (resolvedTier) {
       case 'premium':
         return {
@@ -210,7 +221,7 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
   },
   xpText: {
-    fontFamily: Fonts.inter.medium,
+    ...fontStyle('inter', 'medium'),
     fontSize: 10.5,
     color: '#64748b',
     marginTop: 1,

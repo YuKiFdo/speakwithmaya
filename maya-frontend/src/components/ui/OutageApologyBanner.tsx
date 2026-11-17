@@ -38,7 +38,11 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
   const [isVisible, setIsVisible] = useState<boolean>(() => Boolean(initialEligibility?.available));
   const [isClaiming, setIsClaiming] = useState<boolean>(false);
 
-  const isProOrPaid = isPaidUser || (userTier !== 'starter' && userTier !== 'trial');
+  // Freeze the tier / layout on initial mount so claiming never flickers between Starter and Paid themes
+  const [frozenIsPaid] = useState<boolean>(
+    () => Boolean(isPaidUser || (userTier !== 'starter' && userTier !== 'trial'))
+  );
+  const isProOrPaid = frozenIsPaid;
 
   useEffect(() => {
     let isMounted = true;
@@ -90,16 +94,18 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
     try {
       setIsClaiming(true);
       const res = await promotionsApi.claimPromotion('outage-comeback-nov26');
+      // Dismiss modal immediately with 0 delay so no flickering can occur
       setIsVisible(false);
 
-      // Refresh balance so header shows updated minutes immediately
-      await authService.fetchUserProfile();
+      // Background profile refresh to hydrate balances and tiers without blocking popup alert
+      authService.fetchUserProfile().catch(() => {});
+
+      const alertTitle = res?.rewardType === 'bonus_minutes' || isProOrPaid
+        ? '🎉 100 Bonus Minutes Added!'
+        : '👑 3-Day Pro Pass Unlocked!';
 
       if (res?.message) {
-        await mayaAlert.success(
-          res.message,
-          isProOrPaid ? '🎉 100 Bonus Minutes Added!' : '👑 3-Day Pro Pass Unlocked!'
-        );
+        await mayaAlert.success(res.message, alertTitle);
       }
       router.push('/(tabs)/roadmap');
     } catch (err: any) {

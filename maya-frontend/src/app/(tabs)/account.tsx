@@ -22,7 +22,7 @@ import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-si
 import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { DesktopTopBar } from '@/components/navigation/desktop-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
-import { CrownNavIcon } from '@/components/icons/nav-icons';
+import { CrownNavIcon, CrownSolidIcon } from '@/components/icons/nav-icons';
 import { LKFlag } from '@/components/icons/lk-flag';
 import { MayaPrimaryButton } from '@/components/ui/maya-primary-button';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
@@ -693,6 +693,7 @@ export default function AccountScreen() {
   const planCardProps = {
     planTier: currentPlanTier,
     planStatus: stats.planStatus,
+    isTrialing: stats.isTrialing,
     isPastDue: stats.isPastDue,
     minutesBalance,
     monthlyAllowance: stats.monthlyMinutesAllowance,
@@ -724,6 +725,7 @@ export default function AccountScreen() {
             activeTab="account"
             onSelectTab={handleSelectTab}
             isPro={isPro}
+            isTrialing={stats.isTrialing}
             planTier={stats.planTier}
             isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             usedMinutes={usedMinutes}
@@ -740,6 +742,7 @@ export default function AccountScreen() {
           {/* MOBILE FIXED TOP BAR */}
           <MobileTopBar
             pinned
+            isTrialing={stats.isTrialing}
             onLevelPress={() => setActivePopup('level-up')}
           />
 
@@ -751,6 +754,7 @@ export default function AccountScreen() {
             xpLabel={stats.xpLabel}
             progress={stats.progress}
             isPro={isPro}
+            isTrialing={stats.isTrialing}
             planTier={stats.planTier}
             isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             onLevelPress={() => setActivePopup('level-up')}
@@ -786,9 +790,12 @@ export default function AccountScreen() {
                     avatarUrl={currentAvatarUrl}
                     memberSince={stats.memberSinceText}
                     isPro={isPro}
+                    isTrialing={stats.isTrialing}
+                    resetsInText={resetsInText}
                     isLocked={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
                     onEdit={handleOpenEditModal}
                     onTogglePlan={() => {}}
+                    onUpgrade={() => router.push('/upgrade')}
                     onCancelSubscription={handleCancelSubscription}
                     onLogout={handleLogout}
                   />
@@ -826,9 +833,12 @@ export default function AccountScreen() {
                   avatarUrl={currentAvatarUrl}
                   memberSince={stats.memberSinceText}
                   isPro={isPro}
+                  isTrialing={stats.isTrialing}
+                  resetsInText={resetsInText}
                   isLocked={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
                   onEdit={handleOpenEditModal}
                   onTogglePlan={() => {}}
+                  onUpgrade={() => router.push('/upgrade')}
                   onCancelSubscription={handleCancelSubscription}
                   onLogout={handleLogout}
                 />
@@ -1520,9 +1530,12 @@ function ProfileCard({
   avatarUrl,
   memberSince = '',
   isPro,
+  isTrialing = false,
+  resetsInText = '',
   isLocked = false,
   onEdit,
   onTogglePlan,
+  onUpgrade,
   onCancelSubscription,
   onLogout,
 }: {
@@ -1531,9 +1544,12 @@ function ProfileCard({
   avatarUrl?: string | null;
   memberSince?: string;
   isPro: boolean;
+  isTrialing?: boolean;
+  resetsInText?: string;
   isLocked?: boolean;
   onEdit: () => void;
   onTogglePlan?: () => void;
+  onUpgrade?: () => void;
   onCancelSubscription: () => void;
   onLogout: () => void;
 }) {
@@ -1590,35 +1606,67 @@ function ProfileCard({
           </Text>
 
           <View style={[styles.profileInlineActionsRow, isPhone && styles.profileInlineActionsRowPhone]}>
-            <Pressable
-              onPress={onTogglePlan}
-              hitSlop={6}
-              style={({ pressed }) => [
-                styles.proPlanPill,
-                isLocked && styles.inactivePlanPill,
-                pressed && styles.cardPressed,
-              ]}
-            >
-              <Text style={[styles.proPlanPillText, isLocked && styles.inactivePlanPillText]}>
-                {isPro
-                  ? isLocked
-                    ? 'Pro Plan · Inactive'
-                    : 'Pro Plan'
-                  : isLocked
-                  ? 'Starter Plan · Inactive'
-                  : 'Starter Plan'}
-              </Text>
-            </Pressable>
+            {isTrialing ? (
+              <>
+                <Pressable
+                  onPress={onUpgrade}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.proPlanPill,
+                    styles.proTrialPill,
+                    pressed && styles.cardPressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="3-Day Pro Trial"
+                >
+                  <CrownSolidIcon color="#7C3AED" size={11} />
+                  <Text style={styles.proTrialPillText}>3-Day Pro Trial</Text>
+                </Pressable>
 
-            <Pressable
-              onPress={onCancelSubscription}
-              hitSlop={8}
-              style={({ pressed }) => [styles.profileActionLinkBtn, pressed && styles.cardPressed]}
-            >
-              <Text style={[styles.cancelSubText, isLocked && styles.reactivateSubText]}>
-                {isLocked ? 'Reactivate Subscription' : 'Cancel Subscription'}
-              </Text>
-            </Pressable>
+                <View style={styles.trialCountdownWrap}>
+                  <Feather name="clock" size={13} color="#7C3AED" />
+                  <Text style={styles.trialCountdownText}>
+                    {resetsInText
+                      ? resetsInText.toLowerCase().includes('resets')
+                        ? resetsInText.replace(/resets in /i, 'Trial ends in ')
+                        : resetsInText
+                      : 'Trial ends in 3 days'}
+                  </Text>
+                </View>
+              </>
+            ) : (
+              <>
+                <Pressable
+                  onPress={onTogglePlan}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.proPlanPill,
+                    isLocked && styles.inactivePlanPill,
+                    pressed && styles.cardPressed,
+                  ]}
+                >
+                  <Text style={[styles.proPlanPillText, isLocked && styles.inactivePlanPillText]}>
+                    {isPro
+                      ? isLocked
+                        ? 'Pro Plan · Inactive'
+                        : 'Pro Plan'
+                      : isLocked
+                      ? 'Starter Plan · Inactive'
+                      : 'Starter Plan'}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={onCancelSubscription}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.profileActionLinkBtn, pressed && styles.cardPressed]}
+                >
+                  <Text style={[styles.cancelSubText, isLocked && styles.reactivateSubText]}>
+                    {isLocked ? 'Reactivate Subscription' : 'Cancel Subscription'}
+                  </Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
       </View>
@@ -1802,6 +1850,7 @@ function AccountActionCards({
 function CurrentPlanCard({
   planTier,
   planStatus,
+  isTrialing = false,
   isPastDue = false,
   minutesBalance,
   monthlyAllowance,
@@ -1825,6 +1874,7 @@ function CurrentPlanCard({
 }: {
   planTier: string;
   planStatus?: string;
+  isTrialing?: boolean;
   isPastDue?: boolean;
   minutesBalance: number;
   monthlyAllowance: number;
@@ -1848,7 +1898,11 @@ function CurrentPlanCard({
 }) {
   const { isPhone } = useBreakpoint();
   const isPro = planTier === 'pro' || planTier === 'premium' || planTier === 'basic';
-  const planDisplayName = isPro ? 'Pro Plan' : 'Starter Plan';
+  const planDisplayName = isTrialing
+    ? '3-Day Pro Pass (Trial)'
+    : isPro
+    ? 'Pro Plan'
+    : 'Starter Plan';
   const cycleLabel = isPro
     ? billingCycle === 'quarterly'
       ? '3 Months'
@@ -1894,6 +1948,8 @@ function CurrentPlanCard({
               ? { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }
               : isPastDue
               ? { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }
+              : isTrialing
+              ? { backgroundColor: '#EDE9FE', borderColor: '#DDD6FE' }
               : null,
           ]}
         >
@@ -1909,6 +1965,8 @@ function CurrentPlanCard({
                 ? { color: '#B45309' }
                 : isPastDue
                 ? { color: '#B45309' }
+                : isTrialing
+                ? { color: '#7C3AED' }
                 : null,
             ]}
           >
@@ -1918,6 +1976,8 @@ function CurrentPlanCard({
               ? `Cancels on ${formatBillingDate(gracePeriodEndDate)}`
               : isPastDue
               ? 'Past Due'
+              : isTrialing
+              ? '3-Day Pro Trial'
               : planDisplayName}
           </Text>
         </View>
@@ -1951,7 +2011,7 @@ function CurrentPlanCard({
 
       {/* Main Title & Subtitle */}
       <Text style={[styles.planMainTitle, isPhone && styles.planMainTitlePhone]}>
-        {planDisplayName} ({cycleLabel})
+        {isTrialing ? '3-Day Pro Pass (Trial)' : `${planDisplayName} (${cycleLabel})`}
       </Text>
       <Text style={styles.planMainSubtitle}>
         {isSubscriptionLocked
@@ -1960,6 +2020,8 @@ function CurrentPlanCard({
           ? `Your plan remains active until ${formatBillingDate(gracePeriodEndDate)}.`
           : isPastDue
           ? 'Payment retry in progress. Paid features are frozen until payment settles.'
+          : isTrialing
+          ? 'Enjoy full Pro access with 120 minutes during your 3-day trial period.'
           : 'Perfect for getting started with Maya.'}
       </Text>
 
@@ -1971,7 +2033,35 @@ function CurrentPlanCard({
           <Text style={styles.planInfoCleanValue}>{planDisplayName}</Text>
         </View>
 
-        {isPro ? (
+        {isTrialing ? (
+          <>
+            {/* Row 2 (Trial): Trial Access Ends */}
+            <View style={rowStyle}>
+              <Text style={labelStyle}>Trial Access Ends</Text>
+              <Text style={styles.planInfoCleanValue}>
+                {nextBillingDateText}{renewalDate ? ` (${renewalDate.toLowerCase()})` : ''}
+              </Text>
+            </View>
+
+            {/* Row 3 (Trial): Payment Method */}
+            <View style={rowStyle}>
+              <Text style={labelStyle}>Payment Method</Text>
+              <View style={[styles.planPaymentRightWrap, isPhone && styles.planPaymentRightWrapPhone]}>
+                <View style={styles.paymentCardInfo}>
+                  <Ionicons
+                    name="gift-outline"
+                    size={17}
+                    color="#7C3AED"
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={[styles.planInfoCleanValue, { color: '#7C3AED' }]}>
+                    🎁 Promotional Pass (Free)
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </>
+        ) : isPro ? (
           <>
             {/* Row 2 (Pro): Next Billing Date */}
             <View style={rowStyle}>
@@ -2100,7 +2190,7 @@ function CurrentPlanCard({
             >
               <CrownNavIcon color="#FFFFFF" size={19} />
               <Text style={[styles.planUpgradeBtnText, { marginLeft: 10 }]}>
-                Upgrade to Pro
+                {isTrialing ? 'Upgrade to 3 Months Pro (20% OFF)' : 'Upgrade to Pro'}
               </Text>
               <Feather name="chevron-right" size={18} color="#FFFFFF" style={{ marginLeft: 8 }} />
             </Pressable>
@@ -2363,6 +2453,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 6,
   },
+  proTrialPill: {
+    backgroundColor: '#EDE9FE',
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+    gap: 6,
+  },
   inactivePlanPill: {
     backgroundColor: '#FEF2F2',
   },
@@ -2371,8 +2467,24 @@ const styles = StyleSheet.create({
     color: '#0D4EFD',
     ...fontStyle('inter', 'bold'),
   },
+  proTrialPillText: {
+    fontSize: 12.5,
+    color: '#7C3AED',
+    ...fontStyle('inter', 'bold'),
+  },
   inactivePlanPillText: {
     color: '#DC2626',
+  },
+  trialCountdownWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 4,
+  },
+  trialCountdownText: {
+    fontSize: 12.5,
+    color: '#7C3AED',
+    ...fontStyle('inter', 'medium'),
   },
   profileActionLinkBtn: {
     paddingVertical: 4,

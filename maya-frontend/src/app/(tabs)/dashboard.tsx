@@ -623,6 +623,7 @@ export default function DashboardScreen() {
             activeTab={activeTab}
             onSelectTab={handleSelectTab}
             isPro={isPro}
+            isTrialing={stats.isTrialing}
             planTier={stats.planTier}
             isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             usedMinutes={usedMinutes}
@@ -641,6 +642,7 @@ export default function DashboardScreen() {
           {/* MOBILE FIXED TOP BAR (PINNED) */}
           <MobileTopBar
             pinned
+            isTrialing={stats.isTrialing}
             onLevelPress={() => setActivePopup('level-up')}
           />
 
@@ -652,6 +654,7 @@ export default function DashboardScreen() {
             xpLabel={stats.xpLabel}
             progress={stats.progress}
             isPro={isPro}
+            isTrialing={stats.isTrialing}
             planTier={stats.planTier}
             isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             onLevelPress={() => setActivePopup('level-up')}

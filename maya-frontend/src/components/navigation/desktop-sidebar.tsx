@@ -18,6 +18,7 @@ export interface DesktopSidebarProps {
   activeTab: DashboardTab;
   onSelectTab: (tab: DashboardTab) => void;
   isPro?: boolean;
+  isTrialing?: boolean;
   planTier?: string;
   isInactive?: boolean;
   usedMinutes?: number;
@@ -90,6 +91,7 @@ export function DesktopSidebar({
   activeTab,
   onSelectTab,
   isPro = false,
+  isTrialing = false,
   planTier,
   isInactive = false,
   usedMinutes,
@@ -110,7 +112,9 @@ export function DesktopSidebar({
 
   const currentUsed = usedMinutes ?? (isPaid ? 320 : 0);
   const currentTotal = totalMinutes ?? (resolvedTier === 'premium' ? 1200 : resolvedTier === 'pro' ? 600 : resolvedTier === 'basic' ? 450 : 5);
-  const currentResetsIn = resetsInText ?? (isPaid ? 'Resets in 30 days' : 'Resets daily');
+  const currentResetsIn = isTrialing
+    ? (resetsInText ? (resetsInText.toLowerCase().includes('resets') ? resetsInText.replace(/resets in /i, 'Trial: ') : resetsInText) : 'Trial: 3 days')
+    : (resetsInText ?? (isPaid ? 'Resets in 30 days' : 'Resets daily'));
   const percentFilled = Math.min(100, Math.round((currentUsed / currentTotal) * 100));
   const displayMinutes = isPaid ? String(currentUsed) : String(currentUsed).padStart(2, '0');
 
@@ -210,10 +214,10 @@ export function DesktopSidebar({
               <View style={[styles.sidebarDivider, isCompact && styles.sidebarDividerCompact]} />
 
               <SidebarNavItem
-                label={isProTier ? 'Upgrade to Premium' : 'Upgrade to Pro'}
+                label={isTrialing ? 'Upgrade to Pro' : isProTier ? 'Upgrade to Premium' : 'Upgrade to Pro'}
                 icon={(active, hovered) => (
                   <CrownNavIcon
-                    color={active ? '#2B5BFF' : isProTier ? '#7C3AED' : hovered ? '#F59E0B' : '#D97706'}
+                    color={active ? '#2B5BFF' : isTrialing ? '#7C3AED' : isProTier ? '#7C3AED' : hovered ? '#F59E0B' : '#D97706'}
                     width={isCompact ? 18 : 20}
                     height={isCompact ? 18 : 20}
                   />
