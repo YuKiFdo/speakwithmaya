@@ -103,6 +103,10 @@ export interface TelcoSubscriptionRecord {
   monthly_equivalent_lkr: number;
   status: 'ACTIVE' | 'UPGRADED' | 'CANCELLED';
   upgraded_to_tier?: string | null;
+  /** On a 3-day Pro Pass trial (plan_status 'trialing'); still a daily telco subscriber */
+  pro_trial?: boolean;
+  pro_trial_tier?: string | null;
+  pro_trial_ends_at?: string | null;
   end_reason?: string | null;
   subscribed_at: string;
   ended_at?: string | null;
