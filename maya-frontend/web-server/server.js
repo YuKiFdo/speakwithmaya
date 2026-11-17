@@ -440,30 +440,50 @@ function serveFile(filePath, requestPath, stats, req, res) {
  * Proactively pre-loads/pre-compresses critical boot assets (JS bundles, TTF/OTF fonts, CSS, and HTML shells)
  * into memory on server startup so the very first user after a deploy receives instant Gzip/Brotli.
  */
-function prewarmCriticalAssets(dir) {
-  fs.readdir(dir, { withFileTypes: true }, (err, entries) => {
-    if (err || !entries) return;
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        prewarmCriticalAssets(fullPath);
-      } else if (entry.isFile()) {
-        const ext = path.extname(entry.name).toLowerCase();
-        if (ext === '.js' || ext === '.mjs' || ext === '.css' || ext === '.ttf' || ext === '.otf' || ext === '.html') {
-          fs.stat(fullPath, (stErr, stats) => {
-            if (stErr || !stats || stats.size <= 512) return;
-            const mtimeKey = stats.mtimeMs ? Math.floor(stats.mtimeMs) : 0;
-            resolveCompressedAsset(fullPath, mtimeKey, 'gzip', null, () => {});
-            resolveCompressedAsset(fullPath, mtimeKey, 'br', null, () => {});
-          });
-        }
-      }
+//
+// Only the assets the CURRENT index.html references are warmed, one at a time, and only from
+// build-time .br/.gz sidecars (never compressed at runtime here). The previous version walked
+// the whole dist folder (≈250 MB incl. every old 13 MB entry bundle kept for 7 days) and
+// compressed everything concurrently, pinning all libuv threads (~120% CPU) for minutes after
+// each deploy and starving the backend's own startup on the shared 2-vCPU VM.
+function prewarmCriticalAssets(root) {
+  const indexPath = path.join(root, 'index.html');
+  fs.readFile(indexPath, 'utf8', (err, html) => {
+    if (err || !html) return;
+    const refs = new Set([indexPath]);
+    const re = /(?:src|href)="(\/[^"?#]+\.(?:js|mjs|css|ttf|otf))"/g;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      const resolved = path.join(root, m[1]);
+      if (resolved.startsWith(root)) refs.add(resolved);
     }
+    const queue = [];
+    for (const filePath of refs) {
+      queue.push([filePath, 'br'], [filePath, 'gzip']);
+    }
+    const next = () => {
+      const job = queue.shift();
+      if (!job) return;
+      const [filePath, encoding] = job;
+      fs.stat(filePath, (stErr, stats) => {
+        if (stErr || !stats || stats.size <= 512) return setImmediate(next);
+        const mtimeKey = stats.mtimeMs ? Math.floor(stats.mtimeMs) : 0;
+        const sidecar = filePath + (encoding === 'br' ? '.br' : '.gz');
+        fs.readFile(sidecar, (scErr, data) => {
+          if (!scErr && data && data.length > 0) {
+            setCachedBuffer(`${filePath}:${mtimeKey}:${encoding}`, data);
+          }
+          setImmediate(next);
+        });
+      });
+    };
+    next();
   });
 }
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[Maya Web] Server running on port ${PORT} serving ${STATIC_ROOT}`);
-  prewarmCriticalAssets(STATIC_ROOT);
+  // Zero-downtime PM2 reloads (wait_ready): old process serves until this signal
+  if (typeof process.send === 'function') process.send('ready');
+  prewarmCriticalAssets(path.resolve(STATIC_ROOT));
 });

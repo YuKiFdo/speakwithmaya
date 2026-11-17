@@ -102,7 +102,7 @@ jobs:
           # Start or reload PM2 process
           run_ssh "bash -l -c '
             cd /home/$VM_USER/apps/maya-frontend
-            pm2 delete maya-frontend 2>/dev/null || true
-            pm2 start ecosystem.config.cjs --update-env
+            # Graceful reload (wait_ready): old process serves until the new one is listening
+            pm2 startOrReload ecosystem.config.cjs --update-env || pm2 start ecosystem.config.cjs --update-env
             pm2 save
           '"
