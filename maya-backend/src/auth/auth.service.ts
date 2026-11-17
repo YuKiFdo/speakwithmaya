@@ -4135,18 +4135,6 @@ export class AuthService {
       return { available: false, alreadyClaimed: true, reason: 'already_claimed' };
     }
 
-    // Check onboarding_events backup
-    const { data: eventClaims } = await this.supabase
-      .from('onboarding_events')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('event_name', 'promo_claim')
-      .eq('step', normalizedPromo);
-
-    if (eventClaims && eventClaims.length > 0) {
-      return { available: false, alreadyClaimed: true, reason: 'already_claimed' };
-    }
-
     // Check campaign validity window from DB or local seed
     let campaign: any = null;
     try {
@@ -4204,7 +4192,7 @@ export class AuthService {
 
     let alreadyClaimed = false;
 
-    // Check promotion_claims table first
+    // Check promotion_claims table ONLY
     const { data: existingClaims, error: claimsErr } = await this.supabase
       .from('promotion_claims')
       .select('id, promo_code, reward_type, reward_value, claimed_at, status')
@@ -4213,19 +4201,6 @@ export class AuthService {
 
     if (!claimsErr && existingClaims && existingClaims.length > 0) {
       alreadyClaimed = true;
-    }
-
-    if (!alreadyClaimed) {
-      const { data: eventClaims } = await this.supabase
-        .from('onboarding_events')
-        .select('id, metadata')
-        .eq('user_id', userId)
-        .eq('event_name', 'promo_claim')
-        .eq('step', normalizedPromo);
-
-      if (eventClaims && eventClaims.length > 0) {
-        alreadyClaimed = true;
-      }
     }
 
     if (alreadyClaimed) {
@@ -4355,16 +4330,6 @@ export class AuthService {
       this.logger.warn(`Could not insert into promotion_claims: ${insertErr?.message}`);
     }
 
-    try {
-      await this.supabase.from('onboarding_events').insert({
-        user_id: userId,
-        event_name: 'promo_claim',
-        step: normalizedPromo,
-        action: 'claim',
-        metadata: claimRecord,
-      });
-    } catch { }
-
     const updatedProfile = await this.getProfile(userId);
 
     return {
@@ -4397,28 +4362,8 @@ export class AuthService {
         .select('*')
         .order('claimed_at', { ascending: false });
 
-      if (!claimsErr && dbClaims && dbClaims.length > 0) {
+      if (!claimsErr && dbClaims) {
         claimsList = dbClaims;
-      } else {
-        const { data: eventClaims } = await this.supabase
-          .from('onboarding_events')
-          .select('id, user_id, metadata, created_at')
-          .eq('event_name', 'promo_claim')
-          .order('created_at', { ascending: false });
-
-        claimsList = (eventClaims || []).map((e: any) => ({
-          id: e.id,
-          user_id: e.user_id,
-          promo_code: e.metadata?.promo_code || 'outage-comeback-nov26',
-          campaign_name: e.metadata?.campaign_name || 'Outage Recovery Campaign',
-          reward_type: e.metadata?.reward_type || 'pro_pass',
-          reward_value: e.metadata?.reward_value || 120,
-          original_tier: e.metadata?.original_tier || 'starter',
-          claimed_at: e.metadata?.claimed_at || e.created_at,
-          expires_at: e.metadata?.expires_at,
-          status: e.metadata?.status || 'active',
-          metadata: e.metadata || {},
-        }));
       }
 
       const totalClaims = claimsList.length;
@@ -4479,37 +4424,9 @@ export class AuthService {
 
       const { data: dbClaims, count, error } = await req;
 
-      if (!error && dbClaims && dbClaims.length > 0) {
+      if (!error && dbClaims) {
         claims = dbClaims;
         total = count || claims.length;
-      } else {
-        let evReq = this.supabase
-          .from('onboarding_events')
-          .select('id, user_id, metadata, created_at', { count: 'exact' })
-          .eq('event_name', 'promo_claim');
-
-        if (query.promoCode) {
-          evReq = evReq.eq('step', query.promoCode.trim().toLowerCase());
-        }
-
-        const { data: evClaims, count: evCount } = await evReq
-          .order('created_at', { ascending: false })
-          .range(offset, offset + limit - 1);
-
-        claims = (evClaims || []).map((e: any) => ({
-          id: e.id,
-          user_id: e.user_id,
-          promo_code: e.metadata?.promo_code || 'outage-comeback-nov26',
-          campaign_name: e.metadata?.campaign_name || 'Outage Recovery Campaign',
-          reward_type: e.metadata?.reward_type || 'pro_pass',
-          reward_value: e.metadata?.reward_value || 120,
-          original_tier: e.metadata?.original_tier || 'starter',
-          claimed_at: e.metadata?.claimed_at || e.created_at,
-          expires_at: e.metadata?.expires_at,
-          status: e.metadata?.status || 'active',
-          metadata: e.metadata || {},
-        }));
-        total = evCount || claims.length;
       }
 
       const userIds = Array.from(new Set(claims.map((c) => c.user_id).filter(Boolean)));
