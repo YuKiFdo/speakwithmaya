@@ -118,7 +118,7 @@ export const MaintenanceOverlay: React.FC = () => {
 
 const styles = StyleSheet.create({
   fullscreenOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 99999,
     backgroundColor: 'rgba(15, 23, 42, 0.85)',
     justifyContent: 'center',
@@ -245,3 +245,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
