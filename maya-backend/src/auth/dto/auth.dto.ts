@@ -417,6 +417,14 @@ export class UpdateAppConfigDto {
 
   @IsOptional()
   testAccounts?: any[];
+
+  @IsOptional()
+  maintenanceMode?: {
+    enabled: boolean;
+    title?: string;
+    message?: string;
+    estimatedEndTime?: string;
+  };
 }
 
 export class CreateTestAccountDto {
@@ -484,6 +492,62 @@ export class AdminPromotionClaimsQueryDto {
   @IsOptional()
   limit?: number;
 }
+
+export class CreatePromotionCampaignDto {
+  @IsString()
+  @IsNotEmpty()
+  id!: string; // e.g. 'new-year-pass'
+
+  @IsString()
+  @IsNotEmpty()
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsString()
+  @IsIn(['pro_pass', 'bonus_minutes', 'discount_pass'])
+  rewardType!: 'pro_pass' | 'bonus_minutes' | 'discount_pass';
+
+  @IsNumber()
+  @Min(1)
+  rewardValue!: number; // e.g. 120 or 100
+
+  @IsOptional()
+  @IsNumber()
+  trialDays?: number; // e.g. 3 or 7 days
+
+  @IsString()
+  @IsIn(['all', 'old_only', 'new_only'])
+  targetAudience!: 'all' | 'old_only' | 'new_only';
+
+  @IsOptional()
+  targetTiers?: string[]; // e.g. ['starter', 'basic', 'pro', 'premium']
+
+  @IsOptional()
+  @IsString()
+  userCreatedBefore?: string; // Cutoff timestamp for old users
+
+  @IsOptional()
+  @IsString()
+  userCreatedAfter?: string; // Cutoff timestamp for new users
+
+  @IsOptional()
+  @IsNumber()
+  validDays?: number; // e.g. 7
+
+  @IsOptional()
+  @IsNumber()
+  maxClaims?: number;
+}
+
+export class UpdateCampaignStatusDto {
+  @IsString()
+  @IsIn(['active', 'scheduled', 'ended', 'draft'])
+  status!: 'active' | 'scheduled' | 'ended' | 'draft';
+}
+
 
 
 

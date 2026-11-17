@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
+  Modal,
   View,
   Text,
   Image,
   StyleSheet,
   Pressable,
+  ActivityIndicator,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +14,7 @@ import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { AppStorage } from '@/services/storage/storage-adapter';
 import { promotionsApi } from '@/services/promotions/promotions-api';
+import { authService } from '@/services/auth/auth-service';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { router } from 'expo-router';
 
@@ -19,19 +22,18 @@ export interface OutageApologyBannerProps {
   userTier?: 'starter' | 'basic' | 'pro' | 'premium' | string;
   isPaidUser?: boolean;
   onPressAction?: () => void;
-  style?: any;
 }
 
-const STORAGE_DISMISSED_KEY = 'maya_outage_apology_banner_dismissed_v1';
+const STORAGE_DISMISSED_KEY = 'maya_outage_apology_modal_claimed_v2';
 
 export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
   userTier = 'starter',
   isPaidUser = false,
   onPressAction,
-  style,
 }) => {
-  const { isPhone, isDesktop } = useBreakpoint();
-  const [isVisible, setIsVisible] = useState<boolean | null>(null);
+  const { isPhone } = useBreakpoint();
+  const [isVisible, setIsVisible] = useState<boolean>(false);
+  const [isClaiming, setIsClaiming] = useState<boolean>(false);
 
   const isProOrPaid = isPaidUser || (userTier !== 'starter' && userTier !== 'trial');
 
@@ -39,9 +41,9 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
     let isMounted = true;
     (async () => {
       try {
-        const dismissed = await AppStorage.getItem(STORAGE_DISMISSED_KEY);
+        const claimed = await AppStorage.getItem(STORAGE_DISMISSED_KEY);
         if (isMounted) {
-          setIsVisible(dismissed !== 'true');
+          setIsVisible(claimed !== 'true');
         }
       } catch {
         if (isMounted) setIsVisible(true);
@@ -52,15 +54,6 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
     };
   }, []);
 
-  const [isClaiming, setIsClaiming] = useState(false);
-
-  const handleDismiss = async () => {
-    setIsVisible(false);
-    try {
-      await AppStorage.setItem(STORAGE_DISMISSED_KEY, 'true');
-    } catch {}
-  };
-
   const handleAction = async () => {
     if (onPressAction) {
       onPressAction();
@@ -70,7 +63,12 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
     try {
       setIsClaiming(true);
       const res = await promotionsApi.claimPromotion('outage-comeback-nov26');
-      await handleDismiss();
+      await AppStorage.setItem(STORAGE_DISMISSED_KEY, 'true');
+      setIsVisible(false);
+
+      // Refresh balance so header shows updated minutes immediately
+      await authService.fetchUserProfile();
+
       if (res?.message) {
         await mayaAlert.success(
           res.message,
@@ -79,7 +77,8 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
       }
       router.push('/(tabs)/roadmap');
     } catch (err: any) {
-      await handleDismiss();
+      await AppStorage.setItem(STORAGE_DISMISSED_KEY, 'true');
+      setIsVisible(false);
       router.push('/(tabs)/roadmap');
     } finally {
       setIsClaiming(false);
@@ -93,7 +92,6 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
   // Theme palettes based on user type (Purple for Free Pro Pass, Blue for Paid Subscribers)
   const theme = isProOrPaid
     ? {
-        cardBg: '#F0F9FF',
         cardBorder: '#BAE6FD',
         badgeBg: '#E0F2FE',
         badgeText: '#0284C7',
@@ -101,12 +99,12 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
         badgeIcon: 'star',
         title: "We're Back! 100 Free Bonus Minutes Added",
         body: "Thank you so much for your patience during our 3-day cloud downtime. As an apology, we've credited 100 Non-Expiring Bonus Minutes directly to your balance. Your practice will never be interrupted again!",
+        perkLabel: '⭐ 100 Non-Expiring Bonus Minutes Credited',
         btnBg: '#0284C7',
         btnText: 'Start Speaking Now →',
         avatarSource: require('@/assets/images/banner-maya-paid.png'),
       }
     : {
-        cardBg: '#FAF5FF',
         cardBorder: '#DDD6FE',
         badgeBg: '#EDE9FE',
         badgeText: '#7C3AED',
@@ -114,162 +112,169 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
         badgeIcon: 'ribbon',
         title: "We're Back Online! Enjoy a 3-Day Pro Pass on Us",
         body: "Over the past 3 days, our hosting infrastructure had an unexpected outage. We are deeply sorry for interrupting your English practice! As an apology, we've unlocked 3 Days of Free Pro Access (120 Minutes) on your account.",
+        perkLabel: '👑 3 Days of Free Pro Access (120 Minutes)',
         btnBg: '#7C3AED',
         btnText: 'Start Speaking Now →',
         avatarSource: require('@/assets/images/banner-maya-pro.png'),
       };
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }, style]}>
-      {/* Close button top-right */}
-      <Pressable
-        style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.6 }]}
-        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        onPress={handleDismiss}
-        accessibilityRole="button"
-        accessibilityLabel="Dismiss apology notice"
-      >
-        <Ionicons name="close" size={20} color="#64748B" />
-      </Pressable>
+    <Modal
+      visible={isVisible}
+      transparent
+      animationType="fade"
+      // User CANNOT close with back button or backdrop tap
+      onRequestClose={() => {}}
+    >
+      <View style={styles.backdrop}>
+        <View style={[styles.modalCard, isPhone && styles.modalCardMobile, { borderColor: theme.cardBorder }]}>
+          {/* Avatar Graphic */}
+          <View style={styles.avatarContainer}>
+            <Image
+              source={theme.avatarSource}
+              style={styles.avatarImg}
+              resizeMode="contain"
+            />
+          </View>
 
-      <View style={[styles.innerRow, isPhone && styles.innerRowMobile]}>
-        {/* Left: Avatar Column */}
-        <View style={styles.avatarCol}>
-          <Image
-            source={theme.avatarSource}
-            style={styles.avatarImg}
-            resizeMode="contain"
-          />
-        </View>
-
-        {/* Center: Content Column */}
-        <View style={styles.contentCol}>
-          {/* Pill Badge */}
+          {/* Badge */}
           <View style={[styles.badge, { backgroundColor: theme.badgeBg }]}>
-            <Ionicons name={theme.badgeIcon as any} size={13} color={theme.badgeText} style={{ marginRight: 4 }} />
+            <Ionicons name={theme.badgeIcon as any} size={14} color={theme.badgeText} style={{ marginRight: 5 }} />
             <Text style={[styles.badgeText, { color: theme.badgeText }]}>{theme.badgeLabel}</Text>
           </View>
 
-          {/* Title with Emoji */}
+          {/* Headline */}
           <Text style={styles.titleText}>{theme.title}</Text>
 
-          {/* Body Text */}
+          {/* Apology Body */}
           <Text style={styles.bodyText}>{theme.body}</Text>
-        </View>
 
-        {/* Right / Bottom: Action CTA Button */}
-        <View style={[styles.actionCol, isPhone && styles.actionColMobile]}>
+          {/* Perk Highlight Box */}
+          <View style={[styles.perkBox, { backgroundColor: theme.badgeBg }]}>
+            <Text style={[styles.perkText, { color: theme.badgeText }]}>{theme.perkLabel}</Text>
+          </View>
+
+          {/* Mandatory Action Button - Must press Start Speaking Now */}
           <Pressable
             style={({ pressed }) => [
               styles.ctaBtn,
               { backgroundColor: theme.btnBg },
               pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
-              isPhone && styles.ctaBtnMobile,
+              isClaiming && { opacity: 0.7 },
             ]}
             onPress={handleAction}
+            disabled={isClaiming}
             accessibilityRole="button"
           >
-            <Text style={styles.ctaBtnText}>{theme.btnText}</Text>
+            {isClaiming ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <Text style={styles.ctaBtnText}>{theme.btnText}</Text>
+            )}
           </Pressable>
         </View>
       </View>
-    </View>
+    </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    borderRadius: 20,
-    borderWidth: 1.5,
-    padding: 16,
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 8,
-    position: 'relative',
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
     ...Platform.select({
       web: {
-        boxShadow: '0 4px 14px rgba(0, 0, 0, 0.04)',
-      },
-      default: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
+        backdropFilter: 'blur(4px)',
       },
     }),
   },
-  closeBtn: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    zIndex: 10,
-    padding: 4,
-    borderRadius: 999,
-  },
-  innerRow: {
-    flexDirection: 'row',
+  modalCard: {
+    width: '100%',
+    maxWidth: 480,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 28,
+    borderWidth: 2,
+    padding: 28,
     alignItems: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.2,
+        shadowRadius: 20,
+        elevation: 10,
+      },
+    }),
   },
-  innerRowMobile: {
-    flexWrap: 'wrap',
+  modalCardMobile: {
+    padding: 20,
+    borderRadius: 24,
   },
-  avatarCol: {
-    width: 90,
-    height: 90,
+  avatarContainer: {
+    width: 140,
+    height: 140,
+    marginBottom: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
   },
   avatarImg: {
     width: '100%',
     height: '100%',
   },
-  contentCol: {
-    flex: 1,
-    minWidth: 200,
-    paddingRight: 24, // Space from close button
-  },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     borderRadius: 999,
-    marginBottom: 6,
+    marginBottom: 12,
   },
   badgeText: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 11,
-    letterSpacing: 0.2,
+    fontSize: 12,
+    letterSpacing: 0.3,
   },
   titleText: {
     ...fontStyle('outfit', 'bold'),
-    fontSize: 16,
+    fontSize: 20,
     color: '#0F172A',
-    lineHeight: 22,
-    marginBottom: 4,
+    textAlign: 'center',
+    lineHeight: 26,
+    marginBottom: 10,
+    paddingHorizontal: 8,
   },
   bodyText: {
     ...fontStyle('inter', 'regular'),
-    fontSize: 13,
+    fontSize: 14,
     color: '#475569',
-    lineHeight: 18,
+    textAlign: 'center',
+    lineHeight: 21,
+    marginBottom: 16,
+    paddingHorizontal: 6,
   },
-  actionCol: {
-    marginLeft: 12,
+  perkBox: {
+    width: '100%',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 20,
   },
-  actionColMobile: {
-    width: '100%',
-    marginLeft: 0,
-    marginTop: 12,
+  perkText: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 13,
+    textAlign: 'center',
   },
   ctaBtn: {
-    paddingHorizontal: 20,
-    height: 42,
+    width: '100%',
+    height: 50,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
@@ -279,14 +284,9 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  ctaBtnMobile: {
-    width: '100%',
-    height: 44,
-  },
   ctaBtnText: {
-    ...fontStyle('outfit', 'semiBold'),
-    fontSize: 14,
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 16,
     color: '#FFFFFF',
   },
 });
-

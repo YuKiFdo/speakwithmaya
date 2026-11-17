@@ -26,6 +26,8 @@ import {
   ClaimPromotionDto,
   ComebackPingDto,
   AdminPromotionClaimsQueryDto,
+  CreatePromotionCampaignDto,
+  UpdateCampaignStatusDto,
 } from './dto/auth.dto.js';
 import { SmsApiLkProvider } from './sms/smsapi-lk.provider.js';
 import { IdeamartSmsProvider } from './sms/ideamart-sms.provider.js';
@@ -108,6 +110,12 @@ export interface AppConfigData {
   telcoDailyPriceLkr?: number;
   telcoRateHistory?: Array<{ rateLkr: number; effectiveFrom: string }>;
   testAccounts?: TestAccountItem[];
+  maintenanceMode?: {
+    enabled: boolean;
+    title?: string;
+    message?: string;
+    estimatedEndTime?: string;
+  };
 }
 
 const DEFAULT_APP_CONFIG: AppConfigData = {
@@ -135,6 +143,12 @@ const DEFAULT_APP_CONFIG: AppConfigData = {
   telcoDailyPriceLkr: 12,
   telcoRateHistory: [{ rateLkr: 12, effectiveFrom: '2026-01-01T00:00:00.000Z' }],
   testAccounts: [],
+  maintenanceMode: {
+    enabled: false,
+    title: 'Maya is Tuning Up!',
+    message: 'We are currently conducting scheduled improvements to ensure your English speaking coach is smoother, faster, and always reliable. We will be back online shortly!',
+    estimatedEndTime: '',
+  },
 };
 
 @Injectable()
@@ -4395,5 +4409,173 @@ export class AuthService {
       this.logger.error(`getAdminPromotionClaims error: ${err?.message}`);
       return { data: [], total: 0, page: 1, limit: 25, totalPages: 0 };
     }
+  }
+
+  private localCampaigns: any[] = [
+    {
+      id: 'outage-comeback-nov26',
+      title: '3-Day Outage Recovery & Apology Campaign',
+      description: 'Apology compensation for 3-day downtime. Starter users get 3-Day Pro Pass (120 mins); Paid subscribers receive 100 non-expiring bonus minutes.',
+      status: 'active',
+      rewardType: 'pro_pass',
+      rewardValue: 120,
+      trialDays: 3,
+      targetAudience: 'old_only',
+      targetTiers: ['starter', 'basic', 'pro', 'premium'],
+      userCreatedBefore: '2026-11-17T23:59:59.000Z',
+      validDays: 7,
+      startDate: '2026-11-17T00:00:00.000Z',
+      endDate: '2026-11-24T23:59:59.000Z',
+      createdAt: '2026-11-17T00:00:00.000Z',
+    },
+  ];
+
+  /**
+   * Admin: List all campaigns with claim metrics
+   */
+  async getPromotionCampaigns() {
+    try {
+      let campaigns: any[] = [];
+      const { data: dbCampaigns, error } = await this.supabase
+        .from('promotion_campaigns')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && dbCampaigns && dbCampaigns.length > 0) {
+        campaigns = dbCampaigns.map((c) => ({
+          id: c.id,
+          title: c.title,
+          description: c.description,
+          status: c.status,
+          rewardType: c.reward_type,
+          rewardValue: Number(c.reward_value),
+          trialDays: c.trial_days || 3,
+          targetAudience: c.target_audience || 'all',
+          targetTiers: c.target_tiers || ['starter', 'basic', 'pro', 'premium'],
+          userCreatedBefore: c.user_created_before,
+          userCreatedAfter: c.user_created_after,
+          validDays: c.valid_days || 7,
+          startDate: c.start_date,
+          endDate: c.end_date,
+          createdAt: c.created_at,
+        }));
+      } else {
+        campaigns = [...this.localCampaigns];
+      }
+
+      const { data: allClaims } = await this.supabase
+        .from('promotion_claims')
+        .select('promo_code, reward_type');
+
+      const claimsByCode: Record<string, { total: number; starter: number; paid: number }> = {};
+      (allClaims || []).forEach((cl: any) => {
+        const code = cl.promo_code?.toLowerCase();
+        if (!claimsByCode[code]) {
+          claimsByCode[code] = { total: 0, starter: 0, paid: 0 };
+        }
+        claimsByCode[code].total++;
+        if (cl.reward_type === 'pro_pass') claimsByCode[code].starter++;
+        else claimsByCode[code].paid++;
+      });
+
+      return campaigns.map((camp) => {
+        const stats = claimsByCode[camp.id.toLowerCase()] || { total: 0, starter: 0, paid: 0 };
+        return {
+          ...camp,
+          totalClaims: stats.total,
+          starterProPassClaims: stats.starter,
+          paidBonusClaims: stats.paid,
+        };
+      });
+    } catch (err: any) {
+      this.logger.error(`getPromotionCampaigns error: ${err?.message}`);
+      return this.localCampaigns;
+    }
+  }
+
+  /**
+   * Admin: Create a new promotion / comeback campaign
+   */
+  async createPromotionCampaign(dto: CreatePromotionCampaignDto) {
+    const id = dto.id.trim().toLowerCase();
+    const now = new Date();
+    const validDays = Number(dto.validDays || 7);
+    const endDate = new Date(now.getTime() + validDays * 24 * 60 * 60 * 1000).toISOString();
+
+    const newCampaign = {
+      id,
+      title: dto.title.trim(),
+      description: dto.description?.trim() || '',
+      status: 'active',
+      reward_type: dto.rewardType,
+      reward_value: Number(dto.rewardValue),
+      trial_days: Number(dto.trialDays || 3),
+      target_audience: dto.targetAudience || 'all',
+      target_tiers: dto.targetTiers || ['starter', 'basic', 'pro', 'premium'],
+      user_created_before: dto.userCreatedBefore || null,
+      user_created_after: dto.userCreatedAfter || null,
+      valid_days: validDays,
+      start_date: now.toISOString(),
+      end_date: endDate,
+      max_claims: dto.maxClaims || null,
+      created_at: now.toISOString(),
+    };
+
+    try {
+      await this.supabase.from('promotion_campaigns').upsert(newCampaign);
+    } catch (err: any) {
+      this.logger.warn(`Could not persist to promotion_campaigns table: ${err?.message}`);
+    }
+
+    const existingIdx = this.localCampaigns.findIndex((c) => c.id === id);
+    const mappedObj = {
+      id: newCampaign.id,
+      title: newCampaign.title,
+      description: newCampaign.description,
+      status: newCampaign.status,
+      rewardType: newCampaign.reward_type,
+      rewardValue: newCampaign.reward_value,
+      trialDays: newCampaign.trial_days,
+      targetAudience: newCampaign.target_audience,
+      targetTiers: newCampaign.target_tiers,
+      userCreatedBefore: newCampaign.user_created_before,
+      userCreatedAfter: newCampaign.user_created_after,
+      validDays: newCampaign.valid_days,
+      startDate: newCampaign.start_date,
+      endDate: newCampaign.end_date,
+      createdAt: newCampaign.created_at,
+    };
+
+    if (existingIdx >= 0) {
+      this.localCampaigns[existingIdx] = mappedObj;
+    } else {
+      this.localCampaigns.unshift(mappedObj);
+    }
+
+    return {
+      success: true,
+      campaign: mappedObj,
+      message: `Campaign "${newCampaign.title}" created successfully!`,
+    };
+  }
+
+  /**
+   * Admin: Update campaign status (active, scheduled, ended, draft)
+   */
+  async updateCampaignStatus(id: string, status: string) {
+    const normalizedId = id.trim().toLowerCase();
+    try {
+      await this.supabase
+        .from('promotion_campaigns')
+        .update({ status })
+        .eq('id', normalizedId);
+    } catch {}
+
+    const found = this.localCampaigns.find((c) => c.id === normalizedId);
+    if (found) {
+      found.status = status;
+    }
+
+    return { success: true, id: normalizedId, status };
   }
 }

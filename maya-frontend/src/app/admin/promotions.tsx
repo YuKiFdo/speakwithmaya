@@ -9,6 +9,7 @@ import {
   Image,
   ActivityIndicator,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -18,9 +19,12 @@ import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import { getBackendBaseUrl } from '@/utils/backend-url';
+import { AdminAuthStore } from '@/services/store/admin-auth-store';
 import {
   promotionsApi,
   PromotionClaim,
+  PromotionCampaign,
   PromotionsOverviewData,
 } from '@/services/promotions/promotions-api';
 
@@ -42,6 +46,11 @@ const C = {
   greenLight: '#f0fdf4',
   greenBorder: '#bbf7d0',
   amber: '#d97706',
+  amberLight: '#fef3c7',
+  amberBorder: '#fde68a',
+  red: '#ef4444',
+  redLight: '#fef2f2',
+  redBorder: '#fecaca',
 };
 
 const PAGE_SIZE = 15;
@@ -50,8 +59,11 @@ export default function AdminPromotionsScreen() {
   const { isPhone } = useBreakpoint();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  const [activeTab, setActiveTab] = useState<'claims' | 'campaigns'>('claims');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Overview metrics
   const [overview, setOverview] = useState<PromotionsOverviewData>({
     totalComebacks: 0,
     totalClaims: 0,
@@ -60,27 +72,59 @@ export default function AdminPromotionsScreen() {
     campaigns: [],
   });
 
+  // Claims state
   const [claims, setClaims] = useState<PromotionClaim[]>([]);
   const [totalClaims, setTotalClaims] = useState(0);
   const [page, setPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCampaign, setSelectedCampaign] = useState<string>('ALL');
 
+  // Campaigns state
+  const [campaignsList, setCampaignsList] = useState<PromotionCampaign[]>([]);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  // Maintenance mode state
+  const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
+  const [togglingMaintenance, setTogglingMaintenance] = useState(false);
+
+  // New Campaign Form State
+  const [formCode, setFormCode] = useState('');
+  const [formTitle, setFormTitle] = useState('');
+  const [formDesc, setFormDesc] = useState('');
+  const [formRewardType, setFormRewardType] = useState<'pro_pass' | 'bonus_minutes' | 'discount_pass'>('pro_pass');
+  const [formRewardValue, setFormRewardValue] = useState('120');
+  const [formTrialDays, setFormTrialDays] = useState('3');
+  const [formAudience, setFormAudience] = useState<'all' | 'old_only' | 'new_only'>('old_only');
+  const [formValidDays, setFormValidDays] = useState('7');
+  const [formCutoffDate, setFormCutoffDate] = useState('2026-11-17');
+
   const fetchData = useCallback(async () => {
     try {
       setRefreshing(true);
-      const [ovData, claimsData] = await Promise.all([
+      const [ovData, claimsData, campsData] = await Promise.all([
         promotionsApi.getAdminPromotionsOverview(),
         promotionsApi.getAdminPromotionClaims({
           promoCode: selectedCampaign === 'ALL' ? undefined : selectedCampaign,
           page,
           limit: PAGE_SIZE,
         }),
+        promotionsApi.getCampaigns().catch(() => []),
       ]);
 
       setOverview(ovData);
       setClaims(claimsData.data || []);
       setTotalClaims(claimsData.total || 0);
+      setCampaignsList(campsData || []);
+
+      // Check current maintenance mode
+      try {
+        const cfgRes = await fetch(`${getBackendBaseUrl()}/v1/app-config`);
+        if (cfgRes.ok) {
+          const cfg = await cfgRes.json();
+          setMaintenanceEnabled(!!cfg?.maintenanceMode?.enabled);
+        }
+      } catch {}
     } catch (err: any) {
       console.warn('Failed to fetch promotions data:', err);
     } finally {
@@ -92,6 +136,95 @@ export default function AdminPromotionsScreen() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Toggle Maintenance Mode
+  const handleToggleMaintenance = async () => {
+    try {
+      setTogglingMaintenance(true);
+      const nextState = !maintenanceEnabled;
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/app-config`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': AdminAuthStore.getToken() || '',
+        },
+        body: JSON.stringify({
+          maintenanceMode: {
+            enabled: nextState,
+            title: 'Maya is Tuning Up!',
+            message:
+              'We are currently conducting scheduled improvements to ensure your English speaking coach is smoother, faster, and always reliable. We will be back online shortly!',
+          },
+        }),
+      });
+
+      if (!res.ok) throw new Error('Failed to update maintenance mode');
+      setMaintenanceEnabled(nextState);
+      await mayaAlert.success(
+        nextState
+          ? '🛠️ Application is now under Maintenance Mode. Users will see the Maya maintenance screen.'
+          : '🟢 Application is now LIVE and accessible to all users.',
+        nextState ? 'Maintenance Mode Enabled' : 'App is Live!'
+      );
+    } catch (err: any) {
+      await mayaAlert.error(err?.message || 'Could not toggle maintenance mode', 'Error');
+    } finally {
+      setTogglingMaintenance(false);
+    }
+  };
+
+  // Submit New Campaign
+  const handleCreateCampaign = async () => {
+    if (!formCode.trim()) {
+      await mayaAlert.error('Please provide a unique Promo Code (e.g. holiday-2026)', 'Missing Field');
+      return;
+    }
+    if (!formTitle.trim()) {
+      await mayaAlert.error('Please provide a Campaign Title', 'Missing Field');
+      return;
+    }
+
+    try {
+      setCreating(true);
+      await promotionsApi.createCampaign({
+        id: formCode.trim().toLowerCase(),
+        title: formTitle.trim(),
+        description: formDesc.trim(),
+        rewardType: formRewardType,
+        rewardValue: Number(formRewardValue) || 120,
+        trialDays: formRewardType === 'pro_pass' ? Number(formTrialDays) || 3 : undefined,
+        targetAudience: formAudience,
+        targetTiers: ['starter', 'basic', 'pro', 'premium'],
+        userCreatedBefore: formAudience === 'old_only' ? `${formCutoffDate}T23:59:59Z` : undefined,
+        validDays: Number(formValidDays) || 7,
+      });
+
+      setCreateModalOpen(false);
+      // Reset form
+      setFormCode('');
+      setFormTitle('');
+      setFormDesc('');
+      await mayaAlert.success('Campaign launched and ready for student claims!', '🎉 Campaign Created');
+      fetchData();
+    } catch (err: any) {
+      await mayaAlert.error(err?.message || 'Failed to create campaign', 'Error');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // Toggle Campaign Active / Ended
+  const handleToggleCampaignStatus = async (camp: PromotionCampaign) => {
+    const nextStatus = camp.status === 'active' ? 'ended' : 'active';
+    try {
+      await promotionsApi.updateCampaignStatus(camp.id, nextStatus);
+      setCampaignsList((list) =>
+        list.map((c) => (c.id === camp.id ? { ...c, status: nextStatus } : c))
+      );
+    } catch (err: any) {
+      await mayaAlert.error(err?.message || 'Could not update status', 'Error');
+    }
+  };
 
   // Filtered claims based on search query
   const filteredClaims = useMemo(() => {
@@ -145,27 +278,64 @@ export default function AdminPromotionsScreen() {
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {/* Header info */}
+            {/* Header info & Maintenance Mode Quick Control */}
             <View style={styles.pageHeader}>
               <View>
-                <Text style={styles.pageTitle}>Promotions & Comebacks Tracker</Text>
+                <Text style={styles.pageTitle}>Promotions, Comebacks & Maintenance</Text>
                 <Text style={styles.pageSubtitle}>
-                  Monitor students returning after downtime, track 3-Day Pro Pass claims, 100 bonus minutes, and future promotional campaigns.
+                  Monitor students returning after downtime, create custom comeback promotions, and manage scheduled maintenance.
                 </Text>
               </View>
 
-              <Pressable
-                style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.7 }]}
-                onPress={() => fetchData()}
-              >
-                <Feather name="refresh-cw" size={15} color="#0284c7" style={{ marginRight: 6 }} />
-                <Text style={styles.refreshBtnText}>Refresh Data</Text>
-              </Pressable>
+              <View style={styles.headerActions}>
+                {/* Maintenance Mode Toggle Card */}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.maintenancePill,
+                    maintenanceEnabled ? styles.maintenancePillActive : styles.maintenancePillInactive,
+                    pressed && { opacity: 0.8 },
+                    togglingMaintenance && { opacity: 0.6 },
+                  ]}
+                  onPress={handleToggleMaintenance}
+                  disabled={togglingMaintenance}
+                >
+                  <Text style={styles.maintenancePillIcon}>
+                    {maintenanceEnabled ? '🛠️' : '🟢'}
+                  </Text>
+                  <View style={{ marginLeft: 6 }}>
+                    <Text
+                      style={[
+                        styles.maintenancePillTitle,
+                        { color: maintenanceEnabled ? '#D97706' : '#16A34A' },
+                      ]}
+                    >
+                      {maintenanceEnabled ? 'App: Maintenance Mode' : 'App: Live Online'}
+                    </Text>
+                    <Text style={styles.maintenancePillHint}>
+                      {maintenanceEnabled ? 'Tap to Bring Live' : 'Tap for Maintenance'}
+                    </Text>
+                  </View>
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [styles.createBtn, pressed && { opacity: 0.85 }]}
+                  onPress={() => setCreateModalOpen(true)}
+                >
+                  <Feather name="plus-circle" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.createBtnText}>+ Create Promotion</Text>
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.7 }]}
+                  onPress={() => fetchData()}
+                >
+                  <Feather name="refresh-cw" size={15} color="#0284c7" />
+                </Pressable>
+              </View>
             </View>
 
             {/* KPI Metric Cards */}
             <View style={styles.kpiRow}>
-              {/* Total Comebacks */}
               <View style={[styles.kpiCard, { borderColor: '#e2e8f0' }]}>
                 <View style={[styles.kpiIconBox, { backgroundColor: '#e0f2fe' }]}>
                   <Feather name="log-in" size={20} color="#0284c7" />
@@ -175,200 +345,515 @@ export default function AdminPromotionsScreen() {
                 <Text style={styles.kpiHint}>Logged in post-downtime</Text>
               </View>
 
-              {/* Total Claims */}
               <View style={[styles.kpiCard, { borderColor: '#ddd6fe' }]}>
                 <View style={[styles.kpiIconBox, { backgroundColor: '#f3e8ff' }]}>
                   <Feather name="gift" size={20} color="#7c3aed" />
                 </View>
                 <Text style={styles.kpiValue}>{overview.totalClaims}</Text>
-                <Text style={styles.kpiLabel}>Total Promo Claims</Text>
+                <Text style={styles.kpiLabel}>Total Claims</Text>
                 <Text style={styles.kpiHint}>Across all campaigns</Text>
               </View>
 
-              {/* Starter Pro Passes */}
               <View style={[styles.kpiCard, { borderColor: '#ddd6fe' }]}>
                 <View style={[styles.kpiIconBox, { backgroundColor: '#f5f3ff' }]}>
                   <Ionicons name="ribbon" size={20} color="#7c3aed" />
                 </View>
                 <Text style={styles.kpiValue}>{overview.starterProPassClaims}</Text>
                 <Text style={styles.kpiLabel}>3-Day Pro Passes</Text>
-                <Text style={styles.kpiHint}>120 mins for Free Starters</Text>
+                <Text style={styles.kpiHint}>120m for Free Starters</Text>
               </View>
 
-              {/* Paid Bonus Minutes */}
               <View style={[styles.kpiCard, { borderColor: '#bbf7d0' }]}>
                 <View style={[styles.kpiIconBox, { backgroundColor: '#f0fdf4' }]}>
                   <Feather name="award" size={20} color="#16a34a" />
                 </View>
                 <Text style={styles.kpiValue}>{overview.paidBonusClaims}</Text>
                 <Text style={styles.kpiLabel}>Bonus Minutes Claims</Text>
-                <Text style={styles.kpiHint}>+100 mins for Paid users</Text>
+                <Text style={styles.kpiHint}>+100m for Paid users</Text>
               </View>
             </View>
 
-            {/* Filter & Search Bar */}
-            <View style={styles.filterSection}>
-              <View style={styles.searchBox}>
-                <Feather name="search" size={16} color="#94a3b8" style={{ marginRight: 8 }} />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Search by phone, student name, or tier..."
-                  placeholderTextColor="#94a3b8"
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
+            {/* Navigation Tabs: Claims vs Campaigns */}
+            <View style={styles.tabNavRow}>
+              <Pressable
+                style={[styles.tabNavBtn, activeTab === 'claims' && styles.tabNavBtnActive]}
+                onPress={() => setActiveTab('claims')}
+              >
+                <Feather
+                  name="users"
+                  size={15}
+                  color={activeTab === 'claims' ? '#0052FF' : '#64748B'}
+                  style={{ marginRight: 6 }}
                 />
-                {searchQuery.length > 0 && (
-                  <Pressable onPress={() => setSearchQuery('')}>
-                    <Feather name="x" size={16} color="#94a3b8" />
-                  </Pressable>
-                )}
-              </View>
+                <Text style={[styles.tabNavText, activeTab === 'claims' && styles.tabNavTextActive]}>
+                  Student Claims & Comebacks ({totalClaims})
+                </Text>
+              </Pressable>
 
-              <View style={styles.campaignPills}>
-                <Pressable
-                  style={[styles.pill, selectedCampaign === 'ALL' && styles.pillActive]}
-                  onPress={() => setSelectedCampaign('ALL')}
-                >
-                  <Text style={[styles.pillText, selectedCampaign === 'ALL' && styles.pillTextActive]}>
-                    All Campaigns
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  style={[styles.pill, selectedCampaign === 'outage-comeback-nov26' && styles.pillActive]}
-                  onPress={() => setSelectedCampaign('outage-comeback-nov26')}
-                >
-                  <Text style={[styles.pillText, selectedCampaign === 'outage-comeback-nov26' && styles.pillTextActive]}>
-                    Outage Recovery (Nov 2026)
-                  </Text>
-                </Pressable>
-              </View>
+              <Pressable
+                style={[styles.tabNavBtn, activeTab === 'campaigns' && styles.tabNavBtnActive]}
+                onPress={() => setActiveTab('campaigns')}
+              >
+                <Feather
+                  name="layers"
+                  size={15}
+                  color={activeTab === 'campaigns' ? '#0052FF' : '#64748B'}
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[styles.tabNavText, activeTab === 'campaigns' && styles.tabNavTextActive]}>
+                  Campaigns & Promotion Studio ({campaignsList.length})
+                </Text>
+              </Pressable>
             </View>
 
-            {/* Claims Table */}
-            <View style={styles.tableCard}>
-              <View style={styles.tableHeaderRow}>
-                <Text style={[styles.thCell, { flex: 2 }]}>Student</Text>
-                <Text style={[styles.thCell, { flex: 1.2 }]}>Initial Tier</Text>
-                <Text style={[styles.thCell, { flex: 2 }]}>Reward Granted</Text>
-                <Text style={[styles.thCell, { flex: 1.5 }]}>Claimed At</Text>
-                <Text style={[styles.thCell, { flex: 1 }]}>Status</Text>
-              </View>
+            {activeTab === 'claims' ? (
+              <>
+                {/* Filter & Search Bar */}
+                <View style={styles.filterSection}>
+                  <View style={styles.searchBox}>
+                    <Feather name="search" size={16} color="#94a3b8" style={{ marginRight: 8 }} />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Search by phone, student name, or tier..."
+                      placeholderTextColor="#94a3b8"
+                      value={searchQuery}
+                      onChangeText={setSearchQuery}
+                    />
+                    {searchQuery.length > 0 && (
+                      <Pressable onPress={() => setSearchQuery('')}>
+                        <Feather name="x" size={16} color="#94a3b8" />
+                      </Pressable>
+                    )}
+                  </View>
 
-              {loading ? (
-                <AdminTableSkeleton rows={6} />
-              ) : filteredClaims.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Feather name="inbox" size={36} color="#94a3b8" style={{ marginBottom: 8 }} />
-                  <Text style={styles.emptyTitle}>No Promotion Claims Found</Text>
-                  <Text style={styles.emptySubtitle}>
-                    {searchQuery
-                      ? 'No students matched your search criteria.'
-                      : 'Students will appear here as they claim their 3-Day Pro Pass or bonus minutes.'}
-                  </Text>
-                </View>
-              ) : (
-                filteredClaims.map((claim, idx) => {
-                  const isProPass = claim.reward_type === 'pro_pass';
-                  return (
-                    <View
-                      key={claim.id || idx}
-                      style={[styles.tableRow, idx % 2 === 1 && { backgroundColor: '#f8fafc' }]}
+                  <View style={styles.campaignPills}>
+                    <Pressable
+                      style={[styles.pill, selectedCampaign === 'ALL' && styles.pillActive]}
+                      onPress={() => setSelectedCampaign('ALL')}
                     >
-                      {/* Student info */}
-                      <View style={[styles.tdCell, { flex: 2, flexDirection: 'row', alignItems: 'center' }]}>
-                        <View style={styles.avatarCircle}>
-                          <Text style={styles.avatarInitials}>
-                            {(claim.user?.displayName || 'S').charAt(0).toUpperCase()}
-                          </Text>
-                        </View>
-                        <View style={{ marginLeft: 10, flex: 1 }}>
-                          <Text style={styles.studentName} numberOfLines={1}>
-                            {claim.user?.displayName || 'Student'}
-                          </Text>
-                          <Text style={styles.studentPhone}>
-                            {claim.user?.phoneNumber || claim.metadata?.phone_number || 'N/A'}
-                          </Text>
-                        </View>
-                      </View>
+                      <Text style={[styles.pillText, selectedCampaign === 'ALL' && styles.pillTextActive]}>
+                        All Campaigns
+                      </Text>
+                    </Pressable>
 
-                      {/* Initial Tier */}
-                      <View style={[styles.tdCell, { flex: 1.2 }]}>
-                        <View style={styles.tierBadge}>
-                          <Text style={styles.tierBadgeText}>
-                            {(claim.original_tier || 'starter').toUpperCase()}
-                          </Text>
-                        </View>
-                      </View>
+                    {campaignsList.map((c) => (
+                      <Pressable
+                        key={c.id}
+                        style={[styles.pill, selectedCampaign === c.id && styles.pillActive]}
+                        onPress={() => setSelectedCampaign(c.id)}
+                      >
+                        <Text style={[styles.pillText, selectedCampaign === c.id && styles.pillTextActive]}>
+                          {c.title}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
 
-                      {/* Reward */}
-                      <View style={[styles.tdCell, { flex: 2 }]}>
+                {/* Claims Table */}
+                <View style={styles.tableCard}>
+                  <View style={styles.tableHeaderRow}>
+                    <Text style={[styles.thCell, { flex: 2 }]}>Student</Text>
+                    <Text style={[styles.thCell, { flex: 1.2 }]}>Initial Tier</Text>
+                    <Text style={[styles.thCell, { flex: 2 }]}>Reward Granted</Text>
+                    <Text style={[styles.thCell, { flex: 1.5 }]}>Claimed At</Text>
+                    <Text style={[styles.thCell, { flex: 1 }]}>Status</Text>
+                  </View>
+
+                  {loading ? (
+                    <AdminTableSkeleton rows={6} />
+                  ) : filteredClaims.length === 0 ? (
+                    <View style={styles.emptyState}>
+                      <Feather name="inbox" size={36} color="#94a3b8" style={{ marginBottom: 8 }} />
+                      <Text style={styles.emptyTitle}>No Promotion Claims Found</Text>
+                      <Text style={styles.emptySubtitle}>
+                        {searchQuery
+                          ? 'No students matched your search criteria.'
+                          : 'Students will appear here as they claim their 3-Day Pro Pass or bonus minutes.'}
+                      </Text>
+                    </View>
+                  ) : (
+                    filteredClaims.map((claim, idx) => {
+                      const isProPass = claim.reward_type === 'pro_pass';
+                      return (
                         <View
-                          style={[
-                            styles.rewardBadge,
-                            isProPass
-                              ? { backgroundColor: C.purpleLight, borderColor: C.purpleBorder }
-                              : { backgroundColor: C.blueLight, borderColor: C.blueBorder },
-                          ]}
+                          key={claim.id || idx}
+                          style={[styles.tableRow, idx % 2 === 1 && { backgroundColor: '#f8fafc' }]}
                         >
-                          <Text
+                          {/* Student info */}
+                          <View style={[styles.tdCell, { flex: 2, flexDirection: 'row', alignItems: 'center' }]}>
+                            <View style={styles.avatarCircle}>
+                              <Text style={styles.avatarInitials}>
+                                {(claim.user?.displayName || 'S').charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                            <View style={{ marginLeft: 10, flex: 1 }}>
+                              <Text style={styles.studentName} numberOfLines={1}>
+                                {claim.user?.displayName || 'Student'}
+                              </Text>
+                              <Text style={styles.studentPhone}>
+                                {claim.user?.phoneNumber || claim.metadata?.phone_number || 'N/A'}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Initial Tier */}
+                          <View style={[styles.tdCell, { flex: 1.2 }]}>
+                            <View style={styles.tierBadge}>
+                              <Text style={styles.tierBadgeText}>
+                                {(claim.original_tier || 'starter').toUpperCase()}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Reward */}
+                          <View style={[styles.tdCell, { flex: 2 }]}>
+                            <View
+                              style={[
+                                styles.rewardBadge,
+                                isProPass
+                                  ? { backgroundColor: C.purpleLight, borderColor: C.purpleBorder }
+                                  : { backgroundColor: C.blueLight, borderColor: C.blueBorder },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.rewardBadgeText,
+                                  { color: isProPass ? C.purple : C.blue },
+                                ]}
+                              >
+                                {isProPass ? '👑 3-Day Pro Pass (120m)' : '⭐ +100 Bonus Minutes'}
+                              </Text>
+                            </View>
+                            <Text style={styles.promoCodeText}>{claim.promo_code}</Text>
+                          </View>
+
+                          {/* Claimed Date */}
+                          <View style={[styles.tdCell, { flex: 1.5 }]}>
+                            <Text style={styles.dateText}>{formatDate(claim.claimed_at)}</Text>
+                          </View>
+
+                          {/* Status */}
+                          <View style={[styles.tdCell, { flex: 1 }]}>
+                            <View style={[styles.statusBadge, { backgroundColor: C.greenLight, borderColor: C.greenBorder }]}>
+                              <Text style={[styles.statusText, { color: C.green }]}>
+                                {claim.status || 'Active'}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })
+                  )}
+
+                  {/* Pagination controls */}
+                  <View style={styles.paginationRow}>
+                    <Text style={styles.paginationInfo}>
+                      Showing {filteredClaims.length} of {totalClaims} total claims (Page {page} of {totalPages})
+                    </Text>
+
+                    <View style={styles.pageButtons}>
+                      <Pressable
+                        disabled={page <= 1}
+                        style={[styles.pageBtn, page <= 1 && styles.pageBtnDisabled]}
+                        onPress={() => setPage((p) => Math.max(1, p - 1))}
+                      >
+                        <Feather name="chevron-left" size={16} color={page <= 1 ? '#cbd5e1' : '#0f172a'} />
+                      </Pressable>
+
+                      <Pressable
+                        disabled={page >= totalPages}
+                        style={[styles.pageBtn, page >= totalPages && styles.pageBtnDisabled]}
+                        onPress={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      >
+                        <Feather name="chevron-right" size={16} color={page >= totalPages ? '#cbd5e1' : '#0f172a'} />
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              </>
+            ) : (
+              /* Campaigns Studio View */
+              <View style={styles.campaignsContainer}>
+                {campaignsList.map((camp) => (
+                  <View key={camp.id} style={styles.campaignCard}>
+                    <View style={styles.campaignHeaderRow}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <Text style={styles.campaignTitle}>{camp.title}</Text>
+                          <View
                             style={[
-                              styles.rewardBadgeText,
-                              { color: isProPass ? C.purple : C.blue },
+                              styles.statusBadge,
+                              camp.status === 'active'
+                                ? { backgroundColor: C.greenLight, borderColor: C.greenBorder }
+                                : { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' },
                             ]}
                           >
-                            {isProPass ? '👑 3-Day Pro Pass (120m)' : '⭐ +100 Bonus Minutes'}
-                          </Text>
+                            <Text
+                              style={[
+                                styles.statusText,
+                                { color: camp.status === 'active' ? C.green : '#64748b' },
+                              ]}
+                            >
+                              {(camp.status || 'active').toUpperCase()}
+                            </Text>
+                          </View>
                         </View>
-                        <Text style={styles.promoCodeText}>{claim.promo_code}</Text>
+                        <Text style={styles.campaignCodePill}>Code: {camp.id}</Text>
                       </View>
 
-                      {/* Claimed Date */}
-                      <View style={[styles.tdCell, { flex: 1.5 }]}>
-                        <Text style={styles.dateText}>{formatDate(claim.claimed_at)}</Text>
+                      {/* Action buttons */}
+                      <Pressable
+                        style={[
+                          styles.toggleCampBtn,
+                          camp.status === 'active' ? styles.btnDanger : styles.btnSuccess,
+                        ]}
+                        onPress={() => handleToggleCampaignStatus(camp)}
+                      >
+                        <Text
+                          style={[
+                            styles.toggleCampBtnText,
+                            { color: camp.status === 'active' ? '#ef4444' : '#16a34a' },
+                          ]}
+                        >
+                          {camp.status === 'active' ? 'End Campaign' : 'Reactivate'}
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    <Text style={styles.campaignDesc}>{camp.description}</Text>
+
+                    {/* Campaign Configuration Grid */}
+                    <View style={styles.campConfigGrid}>
+                      <View style={styles.campConfigItem}>
+                        <Text style={styles.campConfigLabel}>Reward Granted</Text>
+                        <Text style={styles.campConfigValue}>
+                          {camp.rewardType === 'pro_pass'
+                            ? `👑 Pro Trial (${camp.trialDays || 3} Days, ${camp.rewardValue}m)`
+                            : `⭐ +${camp.rewardValue} Bonus Mins`}
+                        </Text>
                       </View>
 
-                      {/* Status */}
-                      <View style={[styles.tdCell, { flex: 1 }]}>
-                        <View style={[styles.statusBadge, { backgroundColor: C.greenLight, borderColor: C.greenBorder }]}>
-                          <Text style={[styles.statusText, { color: C.green }]}>
-                            {claim.status || 'Active'}
-                          </Text>
-                        </View>
+                      <View style={styles.campConfigItem}>
+                        <Text style={styles.campConfigLabel}>Target Audience</Text>
+                        <Text style={styles.campConfigValue}>
+                          {camp.targetAudience === 'old_only'
+                            ? '⏳ Existing Users Only'
+                            : camp.targetAudience === 'new_only'
+                            ? '✨ New Users Only'
+                            : '👥 All Students'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.campConfigItem}>
+                        <Text style={styles.campConfigLabel}>Validity Window</Text>
+                        <Text style={styles.campConfigValue}>
+                          {camp.validDays ? `Active for ${camp.validDays} Days` : 'Open'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.campConfigItem}>
+                        <Text style={styles.campConfigLabel}>Total Claims Recorded</Text>
+                        <Text style={[styles.campConfigValue, { color: '#0052FF' }]}>
+                          {camp.totalClaims || 0} claims
+                        </Text>
                       </View>
                     </View>
-                  );
-                })
-              )}
-
-              {/* Pagination controls */}
-              <View style={styles.paginationRow}>
-                <Text style={styles.paginationInfo}>
-                  Showing {filteredClaims.length} of {totalClaims} total claims (Page {page} of {totalPages})
-                </Text>
-
-                <View style={styles.pageButtons}>
-                  <Pressable
-                    disabled={page <= 1}
-                    style={[styles.pageBtn, page <= 1 && styles.pageBtnDisabled]}
-                    onPress={() => setPage((p) => Math.max(1, p - 1))}
-                  >
-                    <Feather name="chevron-left" size={16} color={page <= 1 ? '#cbd5e1' : '#0f172a'} />
-                  </Pressable>
-
-                  <Pressable
-                    disabled={page >= totalPages}
-                    style={[styles.pageBtn, page >= totalPages && styles.pageBtnDisabled]}
-                    onPress={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  >
-                    <Feather name="chevron-right" size={16} color={page >= totalPages ? '#cbd5e1' : '#0f172a'} />
-                  </Pressable>
-                </View>
+                  </View>
+                ))}
               </View>
-            </View>
+            )}
           </ScrollView>
         </View>
       </View>
+
+      {/* CREATE CAMPAIGN MODAL */}
+      <Modal visible={createModalOpen} transparent animationType="fade" onRequestClose={() => setCreateModalOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalBox, isPhone && styles.modalBoxMobile]}>
+            <View style={styles.modalHeaderRow}>
+              <View>
+                <Text style={styles.modalTitle}>Create Promotion / Comeback Campaign</Text>
+                <Text style={styles.modalSub}>Configure rewards, duration, and audience eligibility.</Text>
+              </View>
+              <Pressable onPress={() => setCreateModalOpen(false)}>
+                <Feather name="x" size={20} color="#64748B" />
+              </Pressable>
+            </View>
+
+            <ScrollView style={{ maxHeight: 520 }} showsVerticalScrollIndicator={false}>
+              {/* Promo Code & Title */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Unique Promo Code *</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="e.g. easter-2026, outage-recovery-v2"
+                  value={formCode}
+                  onChangeText={setFormCode}
+                  autoCapitalize="none"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Campaign Title *</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="e.g. 3-Day Pro Pass Comeback Bonus"
+                  value={formTitle}
+                  onChangeText={setFormTitle}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Description / Notes</Text>
+                <TextInput
+                  style={[styles.textInput, { height: 60 }]}
+                  placeholder="Explain why this promo is offered..."
+                  multiline
+                  value={formDesc}
+                  onChangeText={setFormDesc}
+                />
+              </View>
+
+              {/* Reward Selector */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Benefit / Reward Type</Text>
+                <View style={styles.radioRow}>
+                  <Pressable
+                    style={[styles.radioBtn, formRewardType === 'pro_pass' && styles.radioBtnActive]}
+                    onPress={() => setFormRewardType('pro_pass')}
+                  >
+                    <Text style={[styles.radioText, formRewardType === 'pro_pass' && styles.radioTextActive]}>
+                      👑 Pro Trial Pass
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[styles.radioBtn, formRewardType === 'bonus_minutes' && styles.radioBtnActive]}
+                    onPress={() => setFormRewardType('bonus_minutes')}
+                  >
+                    <Text style={[styles.radioText, formRewardType === 'bonus_minutes' && styles.radioTextActive]}>
+                      ⭐ Bonus Free Minutes
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={styles.inputRow}>
+                {formRewardType === 'pro_pass' ? (
+                  <>
+                    <View style={[styles.inputGroup, { flex: 1 }]}>
+                      <Text style={styles.inputLabel}>Trial Duration (Days)</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        keyboardType="numeric"
+                        value={formTrialDays}
+                        onChangeText={setFormTrialDays}
+                      />
+                    </View>
+
+                    <View style={[styles.inputGroup, { flex: 1, marginLeft: 12 }]}>
+                      <Text style={styles.inputLabel}>Minutes Allowance</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        keyboardType="numeric"
+                        value={formRewardValue}
+                        onChangeText={setFormRewardValue}
+                      />
+                    </View>
+                  </>
+                ) : (
+                  <View style={[styles.inputGroup, { flex: 1 }]}>
+                    <Text style={styles.inputLabel}>Free Minutes to Add</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      keyboardType="numeric"
+                      value={formRewardValue}
+                      onChangeText={setFormRewardValue}
+                    />
+                  </View>
+                )}
+              </View>
+
+              {/* Target Audience */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Target Audience Eligibility</Text>
+                <View style={styles.radioRow}>
+                  <Pressable
+                    style={[styles.radioBtn, formAudience === 'old_only' && styles.radioBtnActive]}
+                    onPress={() => setFormAudience('old_only')}
+                  >
+                    <Text style={[styles.radioText, formAudience === 'old_only' && styles.radioTextActive]}>
+                      ⏳ Existing Only
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[styles.radioBtn, formAudience === 'all' && styles.radioBtnActive]}
+                    onPress={() => setFormAudience('all')}
+                  >
+                    <Text style={[styles.radioText, formAudience === 'all' && styles.radioTextActive]}>
+                      👥 All Users
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[styles.radioBtn, formAudience === 'new_only' && styles.radioBtnActive]}
+                    onPress={() => setFormAudience('new_only')}
+                  >
+                    <Text style={[styles.radioText, formAudience === 'new_only' && styles.radioTextActive]}>
+                      ✨ New Only
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Campaign Duration */}
+              <View style={styles.inputRow}>
+                <View style={[styles.inputGroup, { flex: 1 }]}>
+                  <Text style={styles.inputLabel}>Valid For (Days)</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    keyboardType="numeric"
+                    value={formValidDays}
+                    onChangeText={setFormValidDays}
+                  />
+                </View>
+
+                {formAudience === 'old_only' && (
+                  <View style={[styles.inputGroup, { flex: 1, marginLeft: 12 }]}>
+                    <Text style={styles.inputLabel}>Old User Cutoff Date</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="YYYY-MM-DD"
+                      value={formCutoffDate}
+                      onChangeText={setFormCutoffDate}
+                    />
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <Pressable style={styles.cancelBtn} onPress={() => setCreateModalOpen(false)}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.submitBtn, creating && { opacity: 0.7 }]}
+                onPress={handleCreateCampaign}
+                disabled={creating}
+              >
+                {creating ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.submitBtnText}>Launch Campaign →</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -399,7 +884,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 20,
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 16,
   },
   pageTitle: {
     ...fontStyle('outfit', 'bold'),
@@ -411,24 +896,65 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'regular'),
     fontSize: 14,
     color: C.muted,
-    maxWidth: 700,
+    maxWidth: 680,
     lineHeight: 20,
   },
-  refreshBtn: {
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  maintenancePill: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 8,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    ...Platform.select({ web: { cursor: 'pointer' } }),
+  },
+  maintenancePillActive: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#F59E0B',
+  },
+  maintenancePillInactive: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+  },
+  maintenancePillIcon: {
+    fontSize: 18,
+  },
+  maintenancePillTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 12,
+  },
+  maintenancePillHint: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 10,
+    color: '#64748B',
+  },
+  createBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#0052FF',
+    ...Platform.select({ web: { cursor: 'pointer' } }),
+  },
+  createBtnText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 13,
+    color: '#FFFFFF',
+  },
+  refreshBtn: {
+    padding: 10,
+    borderRadius: 10,
     backgroundColor: '#e0f2fe',
     borderWidth: 1,
     borderColor: '#bae6fd',
     ...Platform.select({ web: { cursor: 'pointer' } }),
-  },
-  refreshBtnText: {
-    ...fontStyle('outfit', 'semiBold'),
-    fontSize: 13,
-    color: '#0284c7',
   },
   kpiRow: {
     flexDirection: 'row',
@@ -474,6 +1000,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: C.faint,
   },
+  tabNavRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    marginBottom: 16,
+    gap: 8,
+  },
+  tabNavBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+    ...Platform.select({ web: { cursor: 'pointer' } }),
+  },
+  tabNavBtnActive: {
+    borderBottomColor: '#0052FF',
+  },
+  tabNavText: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 14,
+    color: '#64748B',
+  },
+  tabNavTextActive: {
+    color: '#0052FF',
+  },
   filterSection: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -503,6 +1056,7 @@ const styles = StyleSheet.create({
   campaignPills: {
     flexDirection: 'row',
     gap: 8,
+    flexWrap: 'wrap',
   },
   pill: {
     paddingHorizontal: 14,
@@ -683,5 +1237,205 @@ const styles = StyleSheet.create({
     opacity: 0.5,
     borderColor: '#f1f5f9',
   },
+  campaignsContainer: {
+    gap: 16,
+  },
+  campaignCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 20,
+  },
+  campaignHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  campaignTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 18,
+    color: '#0F172A',
+  },
+  campaignCodePill: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 12,
+    color: '#0052FF',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  toggleCampBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    ...Platform.select({ web: { cursor: 'pointer' } }),
+  },
+  btnDanger: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  btnSuccess: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+  },
+  toggleCampBtnText: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 12,
+  },
+  campaignDesc: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#475569',
+    marginBottom: 16,
+    lineHeight: 19,
+  },
+  campConfigGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 14,
+    gap: 16,
+  },
+  campConfigItem: {
+    flex: 1,
+    minWidth: 150,
+  },
+  campConfigLabel: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+    color: '#94A3B8',
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  campConfigValue: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 14,
+    color: '#0F172A',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    ...Platform.select({
+      web: { backdropFilter: 'blur(4px)' },
+    }),
+  },
+  modalBox: {
+    width: '100%',
+    maxWidth: 540,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 24,
+  },
+  modalBoxMobile: {
+    padding: 18,
+    borderRadius: 20,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 18,
+    color: '#0F172A',
+  },
+  modalSub: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  inputGroup: {
+    marginBottom: 14,
+  },
+  inputRow: {
+    flexDirection: 'row',
+  },
+  inputLabel: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 12,
+    color: '#334155',
+    marginBottom: 6,
+  },
+  textInput: {
+    height: 42,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#F8FAFC',
+    ...fontStyle('inter', 'regular'),
+    fontSize: 13,
+    color: '#0F172A',
+  },
+  radioRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  radioBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#F8FAFC',
+    ...Platform.select({ web: { cursor: 'pointer' } }),
+  },
+  radioBtnActive: {
+    borderColor: '#0052FF',
+    backgroundColor: '#EFF6FF',
+  },
+  radioText: {
+    ...fontStyle('outfit', 'medium'),
+    fontSize: 12,
+    color: '#475569',
+  },
+  radioTextActive: {
+    color: '#0052FF',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    paddingTop: 14,
+  },
+  cancelBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  cancelBtnText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 13,
+    color: '#64748B',
+  },
+  submitBtn: {
+    backgroundColor: '#0052FF',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    ...Platform.select({ web: { cursor: 'pointer' } }),
+  },
+  submitBtnText: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 13,
+    color: '#FFFFFF',
+  },
 });
-

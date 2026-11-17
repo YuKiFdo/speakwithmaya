@@ -27,6 +27,26 @@ export interface PromotionClaim {
   };
 }
 
+export interface PromotionCampaign {
+  id: string;
+  title: string;
+  description?: string;
+  status: 'active' | 'scheduled' | 'ended' | 'draft';
+  rewardType: 'pro_pass' | 'bonus_minutes' | 'discount_pass';
+  rewardValue: number;
+  trialDays?: number;
+  targetAudience: 'all' | 'old_only' | 'new_only';
+  targetTiers?: string[];
+  userCreatedBefore?: string | null;
+  userCreatedAfter?: string | null;
+  validDays?: number;
+  startDate?: string;
+  endDate?: string;
+  totalClaims?: number;
+  starterProPassClaims?: number;
+  paidBonusClaims?: number;
+}
+
 export interface PromotionsOverviewData {
   totalComebacks: number;
   totalClaims: number;
@@ -139,6 +159,54 @@ class PromotionsApi {
     if (!res.ok) {
       throw new Error('Failed to fetch promotion claims');
     }
+    return res.json();
+  }
+
+  /**
+   * Admin: List all promotion / comeback campaigns
+   */
+  async getCampaigns(): Promise<PromotionCampaign[]> {
+    const res = await fetch(`${this.baseUrl}/v1/admin/promotions/campaigns`, {
+      headers: this.getAdminHeaders(),
+    });
+    if (!res.ok) throw new Error('Failed to fetch campaigns');
+    return res.json();
+  }
+
+  /**
+   * Admin: Create a new promotion campaign
+   */
+  async createCampaign(campaign: {
+    id: string;
+    title: string;
+    description?: string;
+    rewardType: 'pro_pass' | 'bonus_minutes' | 'discount_pass';
+    rewardValue: number;
+    trialDays?: number;
+    targetAudience: 'all' | 'old_only' | 'new_only';
+    targetTiers?: string[];
+    userCreatedBefore?: string;
+    validDays?: number;
+  }): Promise<{ success: boolean; campaign: PromotionCampaign; message: string }> {
+    const res = await fetch(`${this.baseUrl}/v1/admin/promotions/campaigns`, {
+      method: 'POST',
+      headers: this.getAdminHeaders(),
+      body: JSON.stringify(campaign),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to create campaign');
+    return data;
+  }
+
+  /**
+   * Admin: Toggle or update campaign status
+   */
+  async updateCampaignStatus(id: string, status: string): Promise<any> {
+    const res = await fetch(`${this.baseUrl}/v1/admin/promotions/campaigns/${id}/status`, {
+      method: 'PUT',
+      headers: this.getAdminHeaders(),
+      body: JSON.stringify({ status }),
+    });
     return res.json();
   }
 }

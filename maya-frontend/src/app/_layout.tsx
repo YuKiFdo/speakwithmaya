@@ -31,6 +31,7 @@ import {
 import { DesktopLoadingScreen } from '@/components/ui/desktop-loading-screen';
 import { NativeAnimatedSplash } from '@/components/ui/native-animated-splash';
 import { AlertHost } from '@/components/ui/alert-modal';
+import { MaintenanceOverlay } from '@/components/ui/MaintenanceOverlay';
 import { Ionicons, Feather, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouteGuard } from '@/hooks/useRouteGuard';
 import { OnboardingStore } from '@/services/store/onboarding-store';
@@ -350,7 +351,12 @@ export default function RootLayout() {
           name="admin/settings"
           options={{ animation: 'fade', animationDuration: 200 }}
         />
+        <Stack.Screen
+          name="admin/promotions"
+          options={{ animation: 'fade', animationDuration: 200 }}
+        />
       </Stack>
+      <MaintenanceOverlay />
       <AlertHost />
       </NativeAnimatedSplash>
     </ThemeProvider>

@@ -28,3 +28,56 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS last_comeback_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS active_promo_code TEXT;
 
+-- Campaign Management (extensible for all future comeback & marketing promotions)
+CREATE TABLE IF NOT EXISTS public.promotion_campaigns (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT DEFAULT 'active', -- 'active' | 'scheduled' | 'ended' | 'draft'
+  reward_type TEXT NOT NULL, -- 'pro_pass' | 'bonus_minutes' | 'discount_pass'
+  reward_value NUMERIC NOT NULL,
+  trial_days INTEGER DEFAULT 3,
+  target_audience TEXT DEFAULT 'all', -- 'all' | 'old_only' | 'new_only'
+  target_tiers JSONB DEFAULT '["starter", "basic", "pro", "premium"]'::jsonb,
+  user_created_before TIMESTAMPTZ,
+  user_created_after TIMESTAMPTZ,
+  valid_days INTEGER DEFAULT 7,
+  start_date TIMESTAMPTZ DEFAULT NOW(),
+  end_date TIMESTAMPTZ DEFAULT NOW() + INTERVAL '7 days',
+  max_claims INTEGER,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed outage recovery campaign
+INSERT INTO public.promotion_campaigns (
+  id,
+  title,
+  description,
+  status,
+  reward_type,
+  reward_value,
+  trial_days,
+  target_audience,
+  target_tiers,
+  user_created_before,
+  valid_days,
+  start_date,
+  end_date
+) VALUES (
+  'outage-comeback-nov26',
+  '3-Day Outage Recovery & Apology Campaign',
+  'Apology compensation for 3-day downtime. Starter users get 3-Day Pro Pass (120 mins); Paid subscribers receive 100 non-expiring bonus minutes.',
+  'active',
+  'pro_pass',
+  120,
+  3,
+  'old_only',
+  '["starter", "basic", "pro", "premium"]'::jsonb,
+  NOW(),
+  7,
+  NOW(),
+  NOW() + INTERVAL '7 days'
+) ON CONFLICT (id) DO NOTHING;
+
+
