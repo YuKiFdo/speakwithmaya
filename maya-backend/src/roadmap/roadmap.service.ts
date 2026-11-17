@@ -692,7 +692,7 @@ INSTRUCTIONS:
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
       try {
-        const ai = new GoogleGenAI({ apiKey });
+        const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 30000 } });
         const res = await ai.models.generateContent({
           model: 'gemini-3.5-flash-lite',
           contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
@@ -1139,7 +1139,7 @@ INSTRUCTIONS:
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
       try {
-        const ai = new GoogleGenAI({ apiKey });
+        const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 30000 } });
         const systemPrompt = `You are an expert AI roleplay prompt engineer and voice director for Maya AI, an English speaking coach app.
 An admin is creating a real-world scenario practice level for students learning English.
 Given the scenario details below, generate:
@@ -1364,7 +1364,7 @@ Core Conversation Rules:
 
     const keySource = process.env.GEMINI_TTS_API_KEY?.trim() ? 'GEMINI_TTS_API_KEY' : 'GEMINI_API_KEY';
     this.logger.log(`[TTS Synthesis] Requesting Gemini TTS (${keySource}) for voice=${voice}, lang=${language} (text len=${cleanText.length})...`);
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 60000 } });
     const interaction: any = await (ai as any).interactions.create({
       model: 'gemini-3.8-flash-lite-tts',
       input: [

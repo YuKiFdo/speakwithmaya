@@ -12,6 +12,7 @@ import {
   UseGuards,
   ValidationPipe,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { AuthService, type UserProfileData } from './auth.service.js';
 import { AuthGuard } from './guards/auth.guard.js';
@@ -472,5 +473,18 @@ export class AuthController {
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async broadcastSms(@Body() dto: BroadcastSmsDto) {
     return this.authService.broadcastSms(dto);
+  }
+
+  /**
+   * Admin: Get progress of background broadcast SMS job
+   */
+  @Get('admin/broadcast-sms/:jobId')
+  @UseGuards(AdminGuard)
+  async getBroadcastSmsJob(@Param('jobId') jobId: string) {
+    const job = this.authService.getBroadcastSmsJob(jobId);
+    if (!job) {
+      throw new NotFoundException(`SMS Broadcast job with ID ${jobId} not found.`);
+    }
+    return job;
   }
 }
