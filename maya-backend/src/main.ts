@@ -16,7 +16,8 @@ globalThis.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
 async function bootstrap() {
   const isObserveEnabled =
     process.env.OBSERVE_ENABLED !== 'false' &&
-    process.env.NODE_ENV !== 'test';
+    process.env.NODE_ENV !== 'test' &&
+    Boolean(process.env.OBSERVE_APP_KEY && process.env.OBSERVE_APP_SECRET);
 
   const app = await NestFactory.create(AppModule, {
     ...(isObserveEnabled && ObserveInstrument ? { instrument: ObserveInstrument } : {}),

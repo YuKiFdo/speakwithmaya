@@ -3204,7 +3204,37 @@ export class AuthService {
   /**
    * Get application configuration (SMS Gateway, Pricing notices, Terms disclaimer, SMS templates)
    */
-  async getAppConfig(): Promise<AppConfigData> {
+  async getAppConfig(options: { fresh?: boolean } = {}): Promise<AppConfigData> {
+    // Hot path: /v1/auth/me (via isTestAccount) and /v1/app-config call this on every
+    // request. Serve from a short-lived in-process cache with single-flight so a burst
+    // of requests costs one DB round-trip + JSON.parse instead of one per request.
+    // Every write goes through updateAppConfig(), which reads fresh and invalidates.
+    const now = Date.now();
+    if (!options.fresh) {
+      if (this.appConfigCache && this.appConfigCache.expiresAt > now) {
+        return { ...this.appConfigCache.value };
+      }
+      if (this.appConfigInFlight) {
+        return { ...(await this.appConfigInFlight) };
+      }
+    }
+
+    const load = this.loadAppConfigFromDb();
+    if (!options.fresh) this.appConfigInFlight = load;
+    try {
+      const value = await load;
+      this.appConfigCache = { value, expiresAt: Date.now() + AuthService.APP_CONFIG_TTL_MS };
+      return { ...value };
+    } finally {
+      if (this.appConfigInFlight === load) this.appConfigInFlight = null;
+    }
+  }
+
+  private static readonly APP_CONFIG_TTL_MS = 30_000;
+  private appConfigCache: { value: AppConfigData; expiresAt: number } | null = null;
+  private appConfigInFlight: Promise<AppConfigData> | null = null;
+
+  private async loadAppConfigFromDb(): Promise<AppConfigData> {
     try {
       const { data, error } = await this.supabase
         .from('roadmap_levels')
@@ -3230,7 +3260,7 @@ export class AuthService {
    * Update application configuration in database
    */
   async updateAppConfig(dto: UpdateAppConfigDto): Promise<{ success: boolean; config: AppConfigData }> {
-    const currentConfig = await this.getAppConfig();
+    const currentConfig = await this.getAppConfig({ fresh: true });
 
     // Strip undefined keys so partial updates from settings page do NOT overwrite existing config fields
     const cleanedDto: Partial<UpdateAppConfigDto> = {};
@@ -3288,6 +3318,7 @@ export class AuthService {
       throw new InternalServerErrorException('Failed to persist app configuration in database.');
     }
 
+    this.appConfigCache = { value: newConfig, expiresAt: Date.now() + AuthService.APP_CONFIG_TTL_MS };
     this.logger.log(`[AppConfig] Updated successfully. Active SMS gateway: ${newConfig.smsGateway}`);
     return {
       success: true,

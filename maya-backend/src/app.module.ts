@@ -13,19 +13,22 @@ import { AuthModule } from './auth/auth.module.js';
 import { PayHereModule } from './payments/payhere.module.js';
 import { StatsModule } from './stats/stats.module.js';
 
+// Telemetry requires credentials from the environment (no hardcoded fallback secret).
 const isObserveEnabled =
   process.env.OBSERVE_ENABLED !== 'false' &&
-  process.env.NODE_ENV !== 'test';
+  process.env.NODE_ENV !== 'test' &&
+  Boolean(process.env.OBSERVE_APP_KEY && process.env.OBSERVE_APP_SECRET);
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
 const observeImports = isObserveEnabled
   ? [
       ObserveModule.forRoot({
-        appKey: process.env.OBSERVE_APP_KEY || 'x5J8HLTDWVq6XfeS',
-        appSecret: process.env.OBSERVE_APP_SECRET || 'uO^nYCzd30LMNSf8gh7oDH15mdy5hj7FOQoVOQrSCS1SO',
+        appKey: process.env.OBSERVE_APP_KEY as string,
+        appSecret: process.env.OBSERVE_APP_SECRET as string,
         serviceId: 'maya-backend',
-        tracesSampleRate: process.env.OBSERVE_SAMPLE_RATE ? parseFloat(process.env.OBSERVE_SAMPLE_RATE) : 0.2,
+        // Default lowered from 0.2: the account hit 600k of 300k included events (429s).
+        tracesSampleRate: process.env.OBSERVE_SAMPLE_RATE ? parseFloat(process.env.OBSERVE_SAMPLE_RATE) : 0.02,
       }),
     ]
   : [];
