@@ -1,4 +1,5 @@
 import { Injectable, Logger, UnauthorizedException, HttpException, HttpStatus, Optional } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { attachAzureStorageIfConfigured } from '../storage/azure-blob-storage.js';
 import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto, AnalyzeSessionDto, SessionTtsDto, SessionReviewDto } from './dto/session.dto.js';
@@ -245,6 +246,8 @@ export class SessionsService {
   private readonly finalizingSessionIds = new Set<string>();
   private lastOrphanReconcileAt = 0;
   private lastSavedSessionId: string | null = null;
+  private isReconcilingOrphans = false;
+  private readonly completedSessionFilesCache = new BoundedMap<string, Set<string>>(2000);
 
   async registerActiveSession(
     sessionId: string,
@@ -2725,6 +2728,29 @@ ${memoryPart}`;
   }
 
   /**
+   * Cron job running every 5 minutes to reconcile orphaned sessions in the background.
+   * Guarantees runs cannot overlap using the isReconcilingOrphans flag.
+   */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async handleCronReconcileOrphans(): Promise<void> {
+    if (this.isReconcilingOrphans) {
+      this.logger.debug('[Cron] Orphan session reconciliation already running, skipping overlapping execution.');
+      return;
+    }
+    this.isReconcilingOrphans = true;
+    try {
+      const count = await this.reconcileOrphanedSessions(true);
+      if (count > 0) {
+        this.logger.log(`[Cron] Reconciled ${count} orphaned session(s).`);
+      }
+    } catch (err: any) {
+      this.logger.warn(`[Cron] Orphan reconciliation encountered an error: ${err?.message}`);
+    } finally {
+      this.isReconcilingOrphans = false;
+    }
+  }
+
+  /**
    * Self-healing reconciliation for sessions that ended abruptly (e.g. phone battery died,
    * network dropped, or heartbeat timeout) where `session_turns` / `session_diagnostics` were saved
    * on disconnect, but the client never called `POST /v1/sessions/:id/finish`.
@@ -3462,7 +3488,10 @@ ${memoryPart}`;
       return [];
     }
 
-    await this.reconcileOrphanedSessions();
+    // Fire-and-forget: do not block the HTTP request on orphan reconciliation
+    this.reconcileOrphanedSessions().catch((err) => {
+      this.logger.debug?.(`[getUserSessions] Background orphan reconcile: ${err?.message}`);
+    });
 
     try {
       let query = this.supabase
@@ -3477,7 +3506,8 @@ ${memoryPart}`;
         query = query.eq('user_id', userId);
       }
 
-      const { data: rawSessions, error } = await query.order('created_at', { ascending: false });
+      // Bound to latest 50 sessions for high responsiveness
+      const { data: rawSessions, error } = await query.order('created_at', { ascending: false }).limit(50);
 
       if (error) {
         this.logger.error(`Error querying user sessions from Supabase: ${error.message}`);
@@ -3498,23 +3528,39 @@ ${memoryPart}`;
       };
       const sessions = (rawSessions || []).filter((s: any) => !isIntroSession(s));
 
-      // Inspect storage files directly for the queried sessions in parallel
+      // Inspect storage files with BoundedMap cache to eliminate repetitive storage.list() calls
       const sessionFilesMap = new Map<string, Set<string>>();
       const sbClient = this.supabase;
       if (sbClient && sessions && sessions.length > 0) {
-        await Promise.all(
-          sessions.map(async (sess: any) => {
-            const validSessionId = toValidUuid(sess.id);
-            try {
-              const { data: files } = await sbClient.storage.from('session-recordings').list(validSessionId);
-              if (files && files.length > 0) {
-                const fSet = new Set(files.map((f) => f.name));
+        const uncachedSessions = sessions.filter((sess: any) => {
+          const validId = toValidUuid(sess.id);
+          const cached = this.completedSessionFilesCache.get(validId) || this.completedSessionFilesCache.get(sess.id);
+          if (cached) {
+            sessionFilesMap.set(validId, cached);
+            sessionFilesMap.set(sess.id, cached);
+            return false;
+          }
+          return true;
+        });
+
+        if (uncachedSessions.length > 0) {
+          await Promise.all(
+            uncachedSessions.map(async (sess: any) => {
+              const validSessionId = toValidUuid(sess.id);
+              try {
+                const { data: files } = await sbClient.storage.from('session-recordings').list(validSessionId);
+                const fSet = files && files.length > 0 ? new Set(files.map((f) => f.name)) : new Set<string>();
                 sessionFilesMap.set(validSessionId, fSet);
                 sessionFilesMap.set(sess.id, fSet);
-              }
-            } catch {}
-          }),
-        );
+                // Cache permanently for completed sessions to prevent future storage.list roundtrips
+                if (sess.status === 'completed' || sess.end_time) {
+                  this.completedSessionFilesCache.set(validSessionId, fSet);
+                  this.completedSessionFilesCache.set(sess.id, fSet);
+                }
+              } catch {}
+            }),
+          );
+        }
       }
 
       // Tag roadmap sessions by checking roadmap levels
