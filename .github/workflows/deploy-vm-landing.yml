@@ -41,20 +41,20 @@ jobs:
         env:
           TARGET_ID: ${{ matrix.target.id }}
           VM_IP: ${{ matrix.target.id == 'azure' && (secrets.VM_IP || '20.198.240.185') || (secrets.BACKUP_VM_IP || '139.99.192.179') }}
-          VM_USER: ${{ matrix.target.id == 'azure' && (secrets.VM_USER || 'speakwithmaya') || (secrets.BACKUP_VM_USER || secrets.VM_USER || 'speakwithmaya') }}
-          SSH_KEY: ${{ matrix.target.id == 'azure' && secrets.VM_SSH_KEY || (secrets.BACKUP_VM_SSH_KEY || secrets.VM_SSH_KEY) }}
+          VM_USER: ${{ matrix.target.id == 'azure' && (secrets.VM_USER || 'speakwithmaya') || (secrets.BACKUP_VM_USER || 'ubuntu') }}
+          SSH_KEY: ${{ matrix.target.id == 'azure' && secrets.VM_SSH_KEY || (secrets.BACKUP_VM_SSH_KEY || '') }}
           VM_PASSWORD: ${{ matrix.target.id == 'ovh' && secrets.BACKUP_VM_PASSWORD || '' }}
         run: |
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
 
           USE_SSHPASS=false
-          if [ -n "$SSH_KEY" ]; then
-            echo "$SSH_KEY" > ~/.ssh/id_rsa
-            chmod 600 ~/.ssh/id_rsa
-          elif [ -n "$VM_PASSWORD" ]; then
+          if [ -n "$VM_PASSWORD" ]; then
             sudo apt-get update && sudo apt-get install -y sshpass
             USE_SSHPASS=true
+          elif [ -n "$SSH_KEY" ]; then
+            echo "$SSH_KEY" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
           else
             echo "ERROR: Neither SSH_KEY nor VM_PASSWORD provided for $TARGET_ID"
             exit 1
@@ -64,7 +64,7 @@ jobs:
 
           run_ssh() {
             if [ "$USE_SSHPASS" = true ]; then
-              sshpass -p "$VM_PASSWORD" ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
+              sshpass -p "$VM_PASSWORD" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$VM_USER@$VM_IP" "$@"
             else
               ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
             fi
@@ -72,7 +72,7 @@ jobs:
 
           run_rsync() {
             if [ "$USE_SSHPASS" = true ]; then
-              rsync -avz --delete -e "sshpass -p '$VM_PASSWORD' ssh -o StrictHostKeyChecking=no" "$@"
+              rsync -avz --delete -e "sshpass -p '$VM_PASSWORD' ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
             else
               rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" "$@"
             fi
@@ -92,6 +92,6 @@ jobs:
           run_ssh "bash -l -c '
             cd /home/$VM_USER/apps/maya-landing
             npm ci --omit=dev
-            pm2 startOrReload ecosystem.config.cjs --update-env
+            pm2 startOrReload ecosystem.config.cjs --update-env || pm2 start ecosystem.config.cjs --update-env
             pm2 save
           '"
