@@ -14,6 +14,7 @@ import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { promotionsApi } from '@/services/promotions/promotions-api';
 import { authService } from '@/services/auth/auth-service';
+import { OnboardingStore } from '@/services/store/onboarding-store';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { router } from 'expo-router';
 import { getBackendBaseUrl } from '@/utils/backend-url';
@@ -47,7 +48,7 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
           return;
         }
 
-        const user = await authService.getUserProfile();
+        const user = ((await authService.fetchUserProfile()) || OnboardingStore.getState().user) as any;
         if (
           user &&
           (user.plan_status === 'canceled' ||

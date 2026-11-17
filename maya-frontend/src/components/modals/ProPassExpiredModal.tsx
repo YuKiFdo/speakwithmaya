@@ -39,14 +39,14 @@ export const ProPassExpiredModal: React.FC<ProPassExpiredModalProps> = ({
       const params = await paymentApi.getCheckoutParams('3-months-pro', '3-months');
       const result = await payHereGateway.startPayment(params);
 
-      if (result.status === 'success') {
+      if (result.status === 'completed') {
         onClose();
         await mayaAlert.success(
           'Your 3-Month Pro Plan is now active! You have 360 monthly minutes.',
           '👑 Welcome to Maya Pro!'
         );
       } else if (result.status === 'error') {
-        await mayaAlert.error(result.message || 'Payment was unsuccessful', 'Checkout Error');
+        await mayaAlert.error(result.error || 'Payment was unsuccessful', 'Checkout Error');
       }
     } catch (err: any) {
       await mayaAlert.error(err?.message || 'Could not initiate card payment', 'Payment Error');

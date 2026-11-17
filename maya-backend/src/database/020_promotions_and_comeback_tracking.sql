@@ -33,10 +33,16 @@ CREATE TABLE IF NOT EXISTS public.promotion_campaigns (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT,
+  promo_type TEXT DEFAULT 'comeback', -- 'comeback' | 'holiday' | 'referral' | 'marketing'
   status TEXT DEFAULT 'active', -- 'active' | 'scheduled' | 'ended' | 'draft'
   reward_type TEXT NOT NULL, -- 'pro_pass' | 'bonus_minutes' | 'discount_pass'
   reward_value NUMERIC NOT NULL,
   trial_days INTEGER DEFAULT 3,
+  starter_reward_type TEXT DEFAULT 'pro_pass', -- 'pro_pass' | 'minutes'
+  starter_reward_value NUMERIC DEFAULT 120,
+  starter_trial_days INTEGER DEFAULT 3,
+  paid_reward_type TEXT DEFAULT 'bonus_minutes', -- 'bonus_minutes'
+  paid_reward_value NUMERIC DEFAULT 100,
   target_audience TEXT DEFAULT 'all', -- 'all' | 'old_only' | 'new_only'
   target_tiers JSONB DEFAULT '["starter", "basic", "pro", "premium"]'::jsonb,
   user_created_before TIMESTAMPTZ,
@@ -48,6 +54,14 @@ CREATE TABLE IF NOT EXISTS public.promotion_campaigns (
   metadata JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.promotion_campaigns
+  ADD COLUMN IF NOT EXISTS promo_type TEXT DEFAULT 'comeback',
+  ADD COLUMN IF NOT EXISTS starter_reward_type TEXT DEFAULT 'pro_pass',
+  ADD COLUMN IF NOT EXISTS starter_reward_value NUMERIC DEFAULT 120,
+  ADD COLUMN IF NOT EXISTS starter_trial_days INTEGER DEFAULT 3,
+  ADD COLUMN IF NOT EXISTS paid_reward_type TEXT DEFAULT 'bonus_minutes',
+  ADD COLUMN IF NOT EXISTS paid_reward_value NUMERIC DEFAULT 100;
 
 -- Seed outage recovery campaign
 INSERT INTO public.promotion_campaigns (

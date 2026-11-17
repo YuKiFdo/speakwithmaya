@@ -35,6 +35,7 @@ import {
   ComebackPingDto,
   AdminPromotionClaimsQueryDto,
   CreatePromotionCampaignDto,
+  UpdatePromotionCampaignDto,
   UpdateCampaignStatusDto,
 } from './dto/auth.dto.js';
 
@@ -427,6 +428,18 @@ export class AuthController {
   @UseGuards(AdminGuard)
   async createPromotionCampaign(@Body() dto: CreatePromotionCampaignDto) {
     return this.authService.createPromotionCampaign(dto);
+  }
+
+  /**
+   * Admin: Update / Edit campaign details (rewards, audience, validity, status)
+   */
+  @Put('admin/promotions/campaigns/:id')
+  @UseGuards(AdminGuard)
+  async updatePromotionCampaign(
+    @Param('id') id: string,
+    @Body() dto: UpdatePromotionCampaignDto,
+  ) {
+    return this.authService.updatePromotionCampaign(id, dto);
   }
 
   /**

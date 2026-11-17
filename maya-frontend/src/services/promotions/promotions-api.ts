@@ -31,10 +31,16 @@ export interface PromotionCampaign {
   id: string;
   title: string;
   description?: string;
+  promoType?: 'comeback' | 'holiday' | 'referral' | 'marketing';
   status: 'active' | 'scheduled' | 'ended' | 'draft';
-  rewardType: 'pro_pass' | 'bonus_minutes' | 'discount_pass';
-  rewardValue: number;
+  rewardType?: 'pro_pass' | 'bonus_minutes' | 'discount_pass';
+  rewardValue?: number;
   trialDays?: number;
+  starterRewardType?: 'pro_pass' | 'bonus_minutes';
+  starterRewardValue?: number;
+  starterTrialDays?: number;
+  paidRewardType?: 'bonus_minutes';
+  paidRewardValue?: number;
   targetAudience: 'all' | 'old_only' | 'new_only';
   targetTiers?: string[];
   userCreatedBefore?: string | null;
@@ -134,8 +140,8 @@ class PromotionsApi {
       throw new Error(data.message || 'Failed to claim promotion');
     }
 
-    if (data.profile) {
-      OnboardingStore.updateUser(data.profile);
+    if (data.profile?.minutes_balance !== undefined) {
+      OnboardingStore.updateMinutesBalance(data.profile.minutes_balance);
     }
 
     return data;
@@ -202,13 +208,22 @@ class PromotionsApi {
     id: string;
     title: string;
     description?: string;
-    rewardType: 'pro_pass' | 'bonus_minutes' | 'discount_pass';
-    rewardValue: number;
+    promoType?: 'comeback' | 'holiday' | 'referral' | 'marketing';
+    status?: 'active' | 'scheduled' | 'ended' | 'draft';
+    rewardType?: 'pro_pass' | 'bonus_minutes' | 'discount_pass';
+    rewardValue?: number;
     trialDays?: number;
+    starterRewardType?: 'pro_pass' | 'bonus_minutes';
+    starterRewardValue?: number;
+    starterTrialDays?: number;
+    paidRewardType?: 'bonus_minutes';
+    paidRewardValue?: number;
     targetAudience: 'all' | 'old_only' | 'new_only';
     targetTiers?: string[];
     userCreatedBefore?: string;
     validDays?: number;
+    startDate?: string;
+    endDate?: string;
   }): Promise<{ success: boolean; campaign: PromotionCampaign; message: string }> {
     const res = await fetch(`${this.baseUrl}/v1/admin/promotions/campaigns`, {
       method: 'POST',
@@ -217,6 +232,38 @@ class PromotionsApi {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.message || 'Failed to create campaign');
+    return data;
+  }
+
+  /**
+   * Admin: Update / Edit an existing promotion campaign
+   */
+  async updateCampaign(
+    id: string,
+    updates: {
+      title?: string;
+      description?: string;
+      promoType?: 'comeback' | 'holiday' | 'referral' | 'marketing';
+      status?: 'active' | 'scheduled' | 'ended' | 'draft';
+      starterRewardType?: 'pro_pass' | 'bonus_minutes';
+      starterRewardValue?: number;
+      starterTrialDays?: number;
+      paidRewardType?: 'bonus_minutes';
+      paidRewardValue?: number;
+      targetAudience?: 'all' | 'old_only' | 'new_only';
+      targetTiers?: string[];
+      validDays?: number;
+      startDate?: string;
+      endDate?: string;
+    }
+  ): Promise<{ success: boolean; campaign: PromotionCampaign; message: string }> {
+    const res = await fetch(`${this.baseUrl}/v1/admin/promotions/campaigns/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: this.getAdminHeaders(),
+      body: JSON.stringify(updates),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to update campaign');
     return data;
   }
 

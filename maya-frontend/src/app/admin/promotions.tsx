@@ -53,6 +53,40 @@ const C = {
   redBorder: '#fecaca',
 };
 
+const PROMO_TYPE_CONFIG: Record<
+  string,
+  { label: string; icon: keyof typeof Feather.glyphMap; bg: string; color: string; border: string }
+> = {
+  comeback: {
+    label: 'Comeback / Outage',
+    icon: 'rotate-ccw',
+    bg: '#FEF3C7',
+    color: '#B45309',
+    border: '#FDE68A',
+  },
+  holiday: {
+    label: 'Holiday / Seasonal',
+    icon: 'gift',
+    bg: '#FDF2F8',
+    color: '#BE185D',
+    border: '#FBCFE8',
+  },
+  referral: {
+    label: 'Referral / Milestone',
+    icon: 'users',
+    bg: '#F0FDF4',
+    color: '#15803D',
+    border: '#BBF7D0',
+  },
+  marketing: {
+    label: 'General Marketing',
+    icon: 'tag',
+    bg: '#EFF6FF',
+    color: '#1D4ED8',
+    border: '#BFDBFE',
+  },
+};
+
 const PAGE_SIZE = 15;
 
 export default function AdminPromotionsScreen() {
@@ -81,23 +115,60 @@ export default function AdminPromotionsScreen() {
 
   // Campaigns state
   const [campaignsList, setCampaignsList] = useState<PromotionCampaign[]>([]);
-  const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [campaignModalOpen, setCampaignModalOpen] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState<PromotionCampaign | null>(null);
+  const [submittingCampaign, setSubmittingCampaign] = useState(false);
 
   // Maintenance mode state
   const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
   const [togglingMaintenance, setTogglingMaintenance] = useState(false);
 
-  // New Campaign Form State
+  // Campaign Form State
   const [formCode, setFormCode] = useState('');
   const [formTitle, setFormTitle] = useState('');
   const [formDesc, setFormDesc] = useState('');
-  const [formRewardType, setFormRewardType] = useState<'pro_pass' | 'bonus_minutes' | 'discount_pass'>('pro_pass');
-  const [formRewardValue, setFormRewardValue] = useState('120');
-  const [formTrialDays, setFormTrialDays] = useState('3');
+  const [formPromoType, setFormPromoType] = useState<'comeback' | 'holiday' | 'referral' | 'marketing'>('comeback');
+  const [formStarterRewardType, setFormStarterRewardType] = useState<'pro_pass' | 'bonus_minutes'>('pro_pass');
+  const [formStarterRewardValue, setFormStarterRewardValue] = useState('120');
+  const [formStarterTrialDays, setFormStarterTrialDays] = useState('3');
+  const [formPaidRewardValue, setFormPaidRewardValue] = useState('100');
   const [formAudience, setFormAudience] = useState<'all' | 'old_only' | 'new_only'>('old_only');
   const [formValidDays, setFormValidDays] = useState('7');
   const [formCutoffDate, setFormCutoffDate] = useState('2026-11-17');
+
+  const handleOpenCreateModal = () => {
+    setEditingCampaign(null);
+    setFormCode('');
+    setFormTitle('');
+    setFormDesc('');
+    setFormPromoType('comeback');
+    setFormStarterRewardType('pro_pass');
+    setFormStarterRewardValue('120');
+    setFormStarterTrialDays('3');
+    setFormPaidRewardValue('100');
+    setFormAudience('old_only');
+    setFormValidDays('7');
+    setFormCutoffDate(new Date().toISOString().split('T')[0]);
+    setCampaignModalOpen(true);
+  };
+
+  const handleOpenEditModal = (camp: PromotionCampaign) => {
+    setEditingCampaign(camp);
+    setFormCode(camp.id);
+    setFormTitle(camp.title || '');
+    setFormDesc(camp.description || '');
+    setFormPromoType(camp.promoType || 'comeback');
+    setFormStarterRewardType(
+      camp.starterRewardType || (camp.rewardType === 'bonus_minutes' ? 'bonus_minutes' : 'pro_pass')
+    );
+    setFormStarterRewardValue(String(camp.starterRewardValue || camp.rewardValue || 120));
+    setFormStarterTrialDays(String(camp.starterTrialDays || camp.trialDays || 3));
+    setFormPaidRewardValue(String(camp.paidRewardValue || 100));
+    setFormAudience(camp.targetAudience || 'all');
+    setFormValidDays(String(camp.validDays || 7));
+    setFormCutoffDate(camp.userCreatedBefore ? camp.userCreatedBefore.split('T')[0] : '2026-11-17');
+    setCampaignModalOpen(true);
+  };
 
   const fetchData = useCallback(async () => {
     try {
@@ -173,9 +244,9 @@ export default function AdminPromotionsScreen() {
     }
   };
 
-  // Submit New Campaign
-  const handleCreateCampaign = async () => {
-    if (!formCode.trim()) {
+  // Submit Create or Edit Campaign
+  const handleSaveCampaign = async () => {
+    if (!editingCampaign && !formCode.trim()) {
       await mayaAlert.error('Please provide a unique Promo Code (e.g. holiday-2026)', 'Missing Field');
       return;
     }
@@ -185,31 +256,57 @@ export default function AdminPromotionsScreen() {
     }
 
     try {
-      setCreating(true);
-      await promotionsApi.createCampaign({
-        id: formCode.trim().toLowerCase(),
-        title: formTitle.trim(),
-        description: formDesc.trim(),
-        rewardType: formRewardType,
-        rewardValue: Number(formRewardValue) || 120,
-        trialDays: formRewardType === 'pro_pass' ? Number(formTrialDays) || 3 : undefined,
-        targetAudience: formAudience,
-        targetTiers: ['starter', 'basic', 'pro', 'premium'],
-        userCreatedBefore: formAudience === 'old_only' ? `${formCutoffDate}T23:59:59Z` : undefined,
-        validDays: Number(formValidDays) || 7,
-      });
+      setSubmittingCampaign(true);
+      const starterVal = Number(formStarterRewardValue) || (formStarterRewardType === 'pro_pass' ? 120 : 30);
+      const starterDays = formStarterRewardType === 'pro_pass' ? Number(formStarterTrialDays) || 3 : undefined;
+      const paidVal = Number(formPaidRewardValue) || 100;
+      const validDaysNum = Number(formValidDays) || 7;
 
-      setCreateModalOpen(false);
-      // Reset form
-      setFormCode('');
-      setFormTitle('');
-      setFormDesc('');
-      await mayaAlert.success('Campaign launched and ready for student claims!', '🎉 Campaign Created');
+      if (editingCampaign) {
+        await promotionsApi.updateCampaign(editingCampaign.id, {
+          title: formTitle.trim(),
+          description: formDesc.trim(),
+          promoType: formPromoType,
+          starterRewardType: formStarterRewardType,
+          starterRewardValue: starterVal,
+          starterTrialDays: starterDays,
+          paidRewardType: 'bonus_minutes',
+          paidRewardValue: paidVal,
+          targetAudience: formAudience,
+          targetTiers: ['starter', 'basic', 'pro', 'premium'],
+          validDays: validDaysNum,
+        });
+
+        await mayaAlert.success(`Campaign "${formTitle.trim()}" has been updated successfully!`, 'Campaign Updated');
+      } else {
+        await promotionsApi.createCampaign({
+          id: formCode.trim().toLowerCase(),
+          title: formTitle.trim(),
+          description: formDesc.trim(),
+          promoType: formPromoType,
+          rewardType: formStarterRewardType,
+          rewardValue: starterVal,
+          trialDays: starterDays,
+          starterRewardType: formStarterRewardType,
+          starterRewardValue: starterVal,
+          starterTrialDays: starterDays,
+          paidRewardType: 'bonus_minutes',
+          paidRewardValue: paidVal,
+          targetAudience: formAudience,
+          targetTiers: ['starter', 'basic', 'pro', 'premium'],
+          userCreatedBefore: formAudience === 'old_only' ? `${formCutoffDate}T23:59:59Z` : undefined,
+          validDays: validDaysNum,
+        });
+
+        await mayaAlert.success('Campaign launched and ready for student claims!', '🎉 Campaign Created');
+      }
+
+      setCampaignModalOpen(false);
       fetchData();
     } catch (err: any) {
-      await mayaAlert.error(err?.message || 'Failed to create campaign', 'Error');
+      await mayaAlert.error(err?.message || 'Failed to save campaign', 'Error');
     } finally {
-      setCreating(false);
+      setSubmittingCampaign(false);
     }
   };
 
@@ -270,7 +367,8 @@ export default function AdminPromotionsScreen() {
         <View style={styles.contentCol}>
           <AdminTopBar
             title="Promotions & Comebacks"
-            onMenuPress={() => setSidebarOpen(true)}
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           />
 
           <ScrollView
@@ -319,7 +417,7 @@ export default function AdminPromotionsScreen() {
 
                 <Pressable
                   style={({ pressed }) => [styles.createBtn, pressed && { opacity: 0.85 }]}
-                  onPress={() => setCreateModalOpen(true)}
+                  onPress={handleOpenCreateModal}
                 >
                   <Feather name="plus-circle" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
                   <Text style={styles.createBtnText}>+ Create Promotion</Text>
@@ -575,122 +673,195 @@ export default function AdminPromotionsScreen() {
             ) : (
               /* Campaigns Studio View */
               <View style={styles.campaignsContainer}>
-                {campaignsList.map((camp) => (
-                  <View key={camp.id} style={styles.campaignCard}>
-                    <View style={styles.campaignHeaderRow}>
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <Text style={styles.campaignTitle}>{camp.title}</Text>
-                          <View
+                {campaignsList.map((camp) => {
+                  const typeCfg = PROMO_TYPE_CONFIG[camp.promoType || 'comeback'] || PROMO_TYPE_CONFIG.comeback;
+                  const isStarterProPass =
+                    (camp.starterRewardType || camp.rewardType) === 'pro_pass';
+                  const starterVal = camp.starterRewardValue || camp.rewardValue || (isStarterProPass ? 120 : 30);
+                  const starterDays = camp.starterTrialDays || camp.trialDays || 3;
+                  const paidVal = camp.paidRewardValue || 100;
+
+                  return (
+                    <View key={camp.id} style={styles.campaignCard}>
+                      <View style={styles.campaignHeaderRow}>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                            <Text style={styles.campaignTitle}>{camp.title}</Text>
+                            <View
+                              style={[
+                                styles.statusBadge,
+                                camp.status === 'active'
+                                  ? { backgroundColor: C.greenLight, borderColor: C.greenBorder }
+                                  : { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.statusText,
+                                  { color: camp.status === 'active' ? C.green : '#64748b' },
+                                ]}
+                              >
+                                {(camp.status || 'active').toUpperCase()}
+                              </Text>
+                            </View>
+
+                            <View
+                              style={[
+                                styles.typeBadge,
+                                { backgroundColor: typeCfg.bg, borderColor: typeCfg.border },
+                              ]}
+                            >
+                              <Feather name={typeCfg.icon} size={11} color={typeCfg.color} style={{ marginRight: 4 }} />
+                              <Text style={[styles.typeBadgeText, { color: typeCfg.color }]}>
+                                {typeCfg.label}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <Text style={styles.campaignCodePill}>Code: {camp.id}</Text>
+                        </View>
+
+                        {/* Action buttons */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Pressable
+                            style={styles.editCampBtn}
+                            onPress={() => handleOpenEditModal(camp)}
+                          >
+                            <Feather name="edit-2" size={13} color="#0052FF" style={{ marginRight: 4 }} />
+                            <Text style={styles.editCampBtnText}>Edit</Text>
+                          </Pressable>
+
+                          <Pressable
                             style={[
-                              styles.statusBadge,
-                              camp.status === 'active'
-                                ? { backgroundColor: C.greenLight, borderColor: C.greenBorder }
-                                : { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' },
+                              styles.toggleCampBtn,
+                              camp.status === 'active' ? styles.btnDanger : styles.btnSuccess,
                             ]}
+                            onPress={() => handleToggleCampaignStatus(camp)}
                           >
                             <Text
                               style={[
-                                styles.statusText,
-                                { color: camp.status === 'active' ? C.green : '#64748b' },
+                                styles.toggleCampBtnText,
+                                { color: camp.status === 'active' ? '#ef4444' : '#16a34a' },
                               ]}
                             >
-                              {(camp.status || 'active').toUpperCase()}
+                              {camp.status === 'active' ? 'End Campaign' : 'Reactivate'}
                             </Text>
-                          </View>
+                          </Pressable>
                         </View>
-                        <Text style={styles.campaignCodePill}>Code: {camp.id}</Text>
                       </View>
 
-                      {/* Action buttons */}
-                      <Pressable
-                        style={[
-                          styles.toggleCampBtn,
-                          camp.status === 'active' ? styles.btnDanger : styles.btnSuccess,
-                        ]}
-                        onPress={() => handleToggleCampaignStatus(camp)}
-                      >
-                        <Text
-                          style={[
-                            styles.toggleCampBtnText,
-                            { color: camp.status === 'active' ? '#ef4444' : '#16a34a' },
-                          ]}
-                        >
-                          {camp.status === 'active' ? 'End Campaign' : 'Reactivate'}
-                        </Text>
-                      </Pressable>
-                    </View>
+                      {camp.description ? (
+                        <Text style={styles.campaignDesc}>{camp.description}</Text>
+                      ) : null}
 
-                    <Text style={styles.campaignDesc}>{camp.description}</Text>
+                      {/* Campaign Configuration Grid */}
+                      <View style={styles.campConfigGrid}>
+                        <View style={styles.campConfigItem}>
+                          <Text style={styles.campConfigLabel}>Starter Students (Free)</Text>
+                          <Text style={styles.campConfigValue}>
+                            {isStarterProPass
+                              ? `👑 Pro Pass (${starterDays}d, ${starterVal}m)`
+                              : `⭐ +${starterVal} Free Mins`}
+                          </Text>
+                        </View>
 
-                    {/* Campaign Configuration Grid */}
-                    <View style={styles.campConfigGrid}>
-                      <View style={styles.campConfigItem}>
-                        <Text style={styles.campConfigLabel}>Reward Granted</Text>
-                        <Text style={styles.campConfigValue}>
-                          {camp.rewardType === 'pro_pass'
-                            ? `👑 Pro Trial (${camp.trialDays || 3} Days, ${camp.rewardValue}m)`
-                            : `⭐ +${camp.rewardValue} Bonus Mins`}
-                        </Text>
-                      </View>
+                        <View style={styles.campConfigItem}>
+                          <Text style={styles.campConfigLabel}>Paid Subscribers</Text>
+                          <Text style={styles.campConfigValue}>
+                            🎁 +{paidVal} Bonus Mins
+                          </Text>
+                        </View>
 
-                      <View style={styles.campConfigItem}>
-                        <Text style={styles.campConfigLabel}>Target Audience</Text>
-                        <Text style={styles.campConfigValue}>
-                          {camp.targetAudience === 'old_only'
-                            ? '⏳ Existing Users Only'
-                            : camp.targetAudience === 'new_only'
-                            ? '✨ New Users Only'
-                            : '👥 All Students'}
-                        </Text>
-                      </View>
+                        <View style={styles.campConfigItem}>
+                          <Text style={styles.campConfigLabel}>Target Audience</Text>
+                          <Text style={styles.campConfigValue}>
+                            {camp.targetAudience === 'old_only'
+                              ? '⏳ Existing Only'
+                              : camp.targetAudience === 'new_only'
+                              ? '✨ New Only'
+                              : '👥 All Students'}
+                          </Text>
+                        </View>
 
-                      <View style={styles.campConfigItem}>
-                        <Text style={styles.campConfigLabel}>Validity Window</Text>
-                        <Text style={styles.campConfigValue}>
-                          {camp.validDays ? `Active for ${camp.validDays} Days` : 'Open'}
-                        </Text>
-                      </View>
+                        <View style={styles.campConfigItem}>
+                          <Text style={styles.campConfigLabel}>Validity Window</Text>
+                          <Text style={styles.campConfigValue}>
+                            {camp.validDays ? `Active for ${camp.validDays} Days` : 'Open'}
+                          </Text>
+                        </View>
 
-                      <View style={styles.campConfigItem}>
-                        <Text style={styles.campConfigLabel}>Total Claims Recorded</Text>
-                        <Text style={[styles.campConfigValue, { color: '#0052FF' }]}>
-                          {camp.totalClaims || 0} claims
-                        </Text>
+                        <View style={styles.campConfigItem}>
+                          <Text style={styles.campConfigLabel}>Claims Breakdown</Text>
+                          <Text style={[styles.campConfigValue, { color: '#0052FF' }]}>
+                            {camp.totalClaims || 0} claims ({camp.starterProPassClaims || 0} Starter, {camp.paidBonusClaims || 0} Paid)
+                          </Text>
+                        </View>
                       </View>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </ScrollView>
         </View>
       </View>
 
-      {/* CREATE CAMPAIGN MODAL */}
-      <Modal visible={createModalOpen} transparent animationType="fade" onRequestClose={() => setCreateModalOpen(false)}>
+      {/* CREATE / EDIT CAMPAIGN MODAL */}
+      <Modal visible={campaignModalOpen} transparent animationType="fade" onRequestClose={() => setCampaignModalOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalBox, isPhone && styles.modalBoxMobile]}>
             <View style={styles.modalHeaderRow}>
               <View>
-                <Text style={styles.modalTitle}>Create Promotion / Comeback Campaign</Text>
-                <Text style={styles.modalSub}>Configure rewards, duration, and audience eligibility.</Text>
+                <Text style={styles.modalTitle}>
+                  {editingCampaign ? `Edit Campaign: ${editingCampaign.title}` : 'Create Promotion Campaign'}
+                </Text>
+                <Text style={styles.modalSub}>
+                  {editingCampaign
+                    ? 'Modify reward tiers, target audience, and duration.'
+                    : 'Configure rewards, duration, and audience eligibility.'}
+                </Text>
               </View>
-              <Pressable onPress={() => setCreateModalOpen(false)}>
+              <Pressable onPress={() => setCampaignModalOpen(false)}>
                 <Feather name="x" size={20} color="#64748B" />
               </Pressable>
             </View>
 
-            <ScrollView style={{ maxHeight: 520 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ maxHeight: 540 }} showsVerticalScrollIndicator={false}>
+              {/* Promotion Type */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Promotion Type *</Text>
+                <View style={styles.radioRow}>
+                  {[
+                    { key: 'comeback', label: '🔄 Comeback / Outage' },
+                    { key: 'holiday', label: '🎄 Holiday / Seasonal' },
+                    { key: 'referral', label: '🤝 Referral / Milestone' },
+                    { key: 'marketing', label: '📣 Marketing' },
+                  ].map((t) => (
+                    <Pressable
+                      key={t.key}
+                      style={[styles.radioBtn, formPromoType === t.key && styles.radioBtnActive]}
+                      onPress={() => setFormPromoType(t.key as any)}
+                    >
+                      <Text style={[styles.radioText, formPromoType === t.key && styles.radioTextActive]}>
+                        {t.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
               {/* Promo Code & Title */}
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Unique Promo Code *</Text>
+                <Text style={styles.inputLabel}>
+                  Unique Promo Code * {editingCampaign ? '(Cannot be changed)' : ''}
+                </Text>
                 <TextInput
-                  style={styles.textInput}
-                  placeholder="e.g. easter-2026, outage-recovery-v2"
+                  style={[styles.textInput, editingCampaign && { backgroundColor: '#f1f5f9', color: '#64748b' }]}
+                  placeholder="e.g. easter-2026, outage-comeback-nov26"
                   value={formCode}
                   onChangeText={setFormCode}
                   autoCapitalize="none"
+                  editable={!editingCampaign}
                 />
               </View>
 
@@ -707,7 +878,7 @@ export default function AdminPromotionsScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Description / Notes</Text>
                 <TextInput
-                  style={[styles.textInput, { height: 60 }]}
+                  style={[styles.textInput, { height: 56 }]}
                   placeholder="Explain why this promo is offered..."
                   multiline
                   value={formDesc}
@@ -715,50 +886,60 @@ export default function AdminPromotionsScreen() {
                 />
               </View>
 
-              {/* Reward Selector */}
+              {/* Section: Starter Users Reward */}
+              <View style={styles.sectionDivider}>
+                <Text style={styles.sectionDividerTitle}>1. Starter Users (Free Students) Reward</Text>
+              </View>
+
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Benefit / Reward Type</Text>
+                <Text style={styles.inputLabel}>Reward for Starter Students</Text>
                 <View style={styles.radioRow}>
                   <Pressable
-                    style={[styles.radioBtn, formRewardType === 'pro_pass' && styles.radioBtnActive]}
-                    onPress={() => setFormRewardType('pro_pass')}
+                    style={[styles.radioBtn, formStarterRewardType === 'pro_pass' && styles.radioBtnActive]}
+                    onPress={() => {
+                      setFormStarterRewardType('pro_pass');
+                      if (formStarterRewardValue === '30') setFormStarterRewardValue('120');
+                    }}
                   >
-                    <Text style={[styles.radioText, formRewardType === 'pro_pass' && styles.radioTextActive]}>
+                    <Text style={[styles.radioText, formStarterRewardType === 'pro_pass' && styles.radioTextActive]}>
                       👑 Pro Trial Pass
                     </Text>
                   </Pressable>
 
                   <Pressable
-                    style={[styles.radioBtn, formRewardType === 'bonus_minutes' && styles.radioBtnActive]}
-                    onPress={() => setFormRewardType('bonus_minutes')}
+                    style={[styles.radioBtn, formStarterRewardType === 'bonus_minutes' && styles.radioBtnActive]}
+                    onPress={() => {
+                      setFormStarterRewardType('bonus_minutes');
+                      if (formStarterRewardValue === '120') setFormStarterRewardValue('30');
+                    }}
                   >
-                    <Text style={[styles.radioText, formRewardType === 'bonus_minutes' && styles.radioTextActive]}>
-                      ⭐ Bonus Free Minutes
+                    <Text style={[styles.radioText, formStarterRewardType === 'bonus_minutes' && styles.radioTextActive]}>
+                      ⭐ Free Bonus Minutes
                     </Text>
                   </Pressable>
                 </View>
               </View>
 
               <View style={styles.inputRow}>
-                {formRewardType === 'pro_pass' ? (
+                {formStarterRewardType === 'pro_pass' ? (
                   <>
                     <View style={[styles.inputGroup, { flex: 1 }]}>
                       <Text style={styles.inputLabel}>Trial Duration (Days)</Text>
                       <TextInput
                         style={styles.textInput}
                         keyboardType="numeric"
-                        value={formTrialDays}
-                        onChangeText={setFormTrialDays}
+                        value={formStarterTrialDays}
+                        onChangeText={setFormStarterTrialDays}
                       />
                     </View>
 
                     <View style={[styles.inputGroup, { flex: 1, marginLeft: 12 }]}>
-                      <Text style={styles.inputLabel}>Minutes Allowance</Text>
+                      <Text style={styles.inputLabel}>Starter Minutes Allowance</Text>
                       <TextInput
                         style={styles.textInput}
                         keyboardType="numeric"
-                        value={formRewardValue}
-                        onChangeText={setFormRewardValue}
+                        value={formStarterRewardValue}
+                        onChangeText={setFormStarterRewardValue}
                       />
                     </View>
                   </>
@@ -768,16 +949,36 @@ export default function AdminPromotionsScreen() {
                     <TextInput
                       style={styles.textInput}
                       keyboardType="numeric"
-                      value={formRewardValue}
-                      onChangeText={setFormRewardValue}
+                      value={formStarterRewardValue}
+                      onChangeText={setFormStarterRewardValue}
                     />
                   </View>
                 )}
               </View>
 
-              {/* Target Audience */}
+              {/* Section: Paid Subscribers Reward */}
+              <View style={styles.sectionDivider}>
+                <Text style={styles.sectionDividerTitle}>2. Paid Subscribers Reward (Basic / Pro / Premium)</Text>
+              </View>
+
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Target Audience Eligibility</Text>
+                <Text style={styles.inputLabel}>Non-Expiring Bonus Minutes to Credit</Text>
+                <TextInput
+                  style={styles.textInput}
+                  keyboardType="numeric"
+                  placeholder="e.g. 100"
+                  value={formPaidRewardValue}
+                  onChangeText={setFormPaidRewardValue}
+                />
+              </View>
+
+              {/* Section: Target Audience & Validity */}
+              <View style={styles.sectionDivider}>
+                <Text style={styles.sectionDividerTitle}>3. Audience Eligibility & Validity</Text>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Target Audience</Text>
                 <View style={styles.radioRow}>
                   <Pressable
                     style={[styles.radioBtn, formAudience === 'old_only' && styles.radioBtnActive]}
@@ -808,7 +1009,6 @@ export default function AdminPromotionsScreen() {
                 </View>
               </View>
 
-              {/* Campaign Duration */}
               <View style={styles.inputRow}>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
                   <Text style={styles.inputLabel}>Valid For (Days)</Text>
@@ -835,19 +1035,21 @@ export default function AdminPromotionsScreen() {
             </ScrollView>
 
             <View style={styles.modalFooter}>
-              <Pressable style={styles.cancelBtn} onPress={() => setCreateModalOpen(false)}>
+              <Pressable style={styles.cancelBtn} onPress={() => setCampaignModalOpen(false)}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </Pressable>
 
               <Pressable
-                style={[styles.submitBtn, creating && { opacity: 0.7 }]}
-                onPress={handleCreateCampaign}
-                disabled={creating}
+                style={[styles.submitBtn, submittingCampaign && { opacity: 0.7 }]}
+                onPress={handleSaveCampaign}
+                disabled={submittingCampaign}
               >
-                {creating ? (
+                {submittingCampaign ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
-                  <Text style={styles.submitBtnText}>Launch Campaign →</Text>
+                  <Text style={styles.submitBtnText}>
+                    {editingCampaign ? 'Save Changes →' : 'Launch Campaign →'}
+                  </Text>
                 )}
               </Pressable>
             </View>
@@ -1269,6 +1471,46 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 6,
     alignSelf: 'flex-start',
+  },
+  typeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  typeBadgeText: {
+    ...fontStyle('inter', 'medium'),
+    fontSize: 11,
+  },
+  editCampBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#0052FF',
+    backgroundColor: '#EFF6FF',
+    ...Platform.select({ web: { cursor: 'pointer' } }),
+  },
+  editCampBtnText: {
+    ...fontStyle('outfit', 'semiBold'),
+    fontSize: 12,
+    color: '#0052FF',
+  },
+  sectionDivider: {
+    marginTop: 10,
+    marginBottom: 10,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  sectionDividerTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 13,
+    color: '#1E293B',
   },
   toggleCampBtn: {
     paddingHorizontal: 12,

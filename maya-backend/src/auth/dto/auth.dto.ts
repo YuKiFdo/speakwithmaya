@@ -506,36 +506,150 @@ export class CreatePromotionCampaignDto {
   @IsString()
   description?: string;
 
+  @IsOptional()
+  @IsString()
+  @IsIn(['comeback', 'holiday', 'referral', 'marketing'])
+  promoType?: 'comeback' | 'holiday' | 'referral' | 'marketing';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['active', 'scheduled', 'ended', 'draft'])
+  status?: 'active' | 'scheduled' | 'ended' | 'draft';
+
+  @IsOptional()
   @IsString()
   @IsIn(['pro_pass', 'bonus_minutes', 'discount_pass'])
-  rewardType!: 'pro_pass' | 'bonus_minutes' | 'discount_pass';
-
-  @IsNumber()
-  @Min(1)
-  rewardValue!: number; // e.g. 120 or 100
+  rewardType?: 'pro_pass' | 'bonus_minutes' | 'discount_pass';
 
   @IsOptional()
   @IsNumber()
-  trialDays?: number; // e.g. 3 or 7 days
+  @Min(1)
+  rewardValue?: number;
+
+  @IsOptional()
+  @IsNumber()
+  trialDays?: number;
+
+  // Starter users configuration: Pro Pass or Free Minutes
+  @IsOptional()
+  @IsString()
+  @IsIn(['pro_pass', 'bonus_minutes'])
+  starterRewardType?: 'pro_pass' | 'bonus_minutes';
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  starterRewardValue?: number; // e.g. 120 mins (for Pro Pass) or 30 mins
+
+  @IsOptional()
+  @IsNumber()
+  starterTrialDays?: number; // e.g. 3 days
+
+  // Paid subscribers configuration: Bonus Minutes
+  @IsOptional()
+  @IsString()
+  @IsIn(['bonus_minutes'])
+  paidRewardType?: 'bonus_minutes';
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  paidRewardValue?: number; // e.g. 100 bonus minutes
 
   @IsString()
   @IsIn(['all', 'old_only', 'new_only'])
   targetAudience!: 'all' | 'old_only' | 'new_only';
 
   @IsOptional()
-  targetTiers?: string[]; // e.g. ['starter', 'basic', 'pro', 'premium']
+  targetTiers?: string[];
 
   @IsOptional()
   @IsString()
-  userCreatedBefore?: string; // Cutoff timestamp for old users
+  userCreatedBefore?: string;
 
   @IsOptional()
   @IsString()
-  userCreatedAfter?: string; // Cutoff timestamp for new users
+  userCreatedAfter?: string;
 
   @IsOptional()
   @IsNumber()
-  validDays?: number; // e.g. 7
+  validDays?: number;
+
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsString()
+  endDate?: string;
+
+  @IsOptional()
+  @IsNumber()
+  maxClaims?: number;
+}
+
+export class UpdatePromotionCampaignDto {
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['comeback', 'holiday', 'referral', 'marketing'])
+  promoType?: 'comeback' | 'holiday' | 'referral' | 'marketing';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['active', 'scheduled', 'ended', 'draft'])
+  status?: 'active' | 'scheduled' | 'ended' | 'draft';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['pro_pass', 'bonus_minutes'])
+  starterRewardType?: 'pro_pass' | 'bonus_minutes';
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  starterRewardValue?: number;
+
+  @IsOptional()
+  @IsNumber()
+  starterTrialDays?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['bonus_minutes'])
+  paidRewardType?: 'bonus_minutes';
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  paidRewardValue?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['all', 'old_only', 'new_only'])
+  targetAudience?: 'all' | 'old_only' | 'new_only';
+
+  @IsOptional()
+  targetTiers?: string[];
+
+  @IsOptional()
+  @IsNumber()
+  validDays?: number;
+
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsString()
+  endDate?: string;
 
   @IsOptional()
   @IsNumber()

@@ -27,6 +27,7 @@ import {
   ComebackPingDto,
   AdminPromotionClaimsQueryDto,
   CreatePromotionCampaignDto,
+  UpdatePromotionCampaignDto,
   UpdateCampaignStatusDto,
 } from './dto/auth.dto.js';
 import { SmsApiLkProvider } from './sms/smsapi-lk.provider.js';
@@ -4244,31 +4245,79 @@ export class AuthService {
 
     const now = new Date();
 
+    // Fetch dynamic campaign definition from DB or local seeds
+    let campaign: any = null;
+    try {
+      const { data: dbCamp } = await this.supabase
+        .from('promotion_campaigns')
+        .select('*')
+        .eq('id', normalizedPromo)
+        .maybeSingle();
+      if (dbCamp) campaign = dbCamp;
+    } catch {}
+
+    if (!campaign) {
+      campaign = this.localCampaigns.find((c) => c.id === normalizedPromo);
+    }
+
+    const starterType =
+      campaign?.starter_reward_type ||
+      campaign?.starterRewardType ||
+      (campaign?.reward_type === 'bonus_minutes' ? 'bonus_minutes' : 'pro_pass');
+    const starterVal = Number(
+      campaign?.starter_reward_value || campaign?.starterRewardValue || campaign?.reward_value || 120,
+    );
+    const starterDays = Number(
+      campaign?.starter_trial_days || campaign?.starterTrialDays || campaign?.trial_days || 3,
+    );
+    const paidVal = Number(
+      campaign?.paid_reward_value || campaign?.paidRewardValue || 100,
+    );
+
     if (isStarter) {
-      rewardType = 'pro_pass';
-      rewardValue = 120;
-      const expiry = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-      expiresAt = expiry.toISOString();
+      if (starterType === 'pro_pass') {
+        rewardType = 'pro_pass';
+        rewardValue = starterVal;
+        const expiry = new Date(now.getTime() + starterDays * 24 * 60 * 60 * 1000);
+        expiresAt = expiry.toISOString();
 
-      await this.supabase
-        .from('profiles')
-        .update({
-          plan_tier: 'pro',
-          plan_status: 'trialing',
-          monthly_minutes_allowance: 120,
-          minutes_balance: 120,
-          minutes_reset_at: expiresAt,
-          active_promo_code: normalizedPromo,
-          last_comeback_at: now.toISOString(),
-        })
-        .eq('id', userId);
+        await this.supabase
+          .from('profiles')
+          .update({
+            plan_tier: 'pro',
+            plan_status: 'trialing',
+            monthly_minutes_allowance: starterVal,
+            minutes_balance: starterVal,
+            minutes_reset_at: expiresAt,
+            active_promo_code: normalizedPromo,
+            last_comeback_at: now.toISOString(),
+          })
+          .eq('id', userId);
 
-      message = '3-Day Pro Pass (120 Minutes) activated successfully! Enjoy unlimited English practice.';
+        message = `${starterDays}-Day Pro Pass (${starterVal} Minutes) activated successfully! Enjoy your English practice.`;
+      } else {
+        rewardType = 'bonus_minutes';
+        rewardValue = starterVal;
+        const newAddon = (profile.add_on_minutes_balance || 0) + starterVal;
+        const newBalance = (profile.minutes_balance || 0) + starterVal;
+
+        await this.supabase
+          .from('profiles')
+          .update({
+            add_on_minutes_balance: newAddon,
+            minutes_balance: newBalance,
+            active_promo_code: normalizedPromo,
+            last_comeback_at: now.toISOString(),
+          })
+          .eq('id', userId);
+
+        message = `${starterVal} Free Minutes added directly to your account!`;
+      }
     } else {
       rewardType = 'bonus_minutes';
-      rewardValue = 100;
-      const newAddonBalance = (profile.add_on_minutes_balance || 0) + 100;
-      const newMinutesBalance = (profile.minutes_balance || 0) + 100;
+      rewardValue = paidVal;
+      const newAddonBalance = (profile.add_on_minutes_balance || 0) + paidVal;
+      const newMinutesBalance = (profile.minutes_balance || 0) + paidVal;
 
       await this.supabase
         .from('profiles')
@@ -4280,7 +4329,7 @@ export class AuthService {
         })
         .eq('id', userId);
 
-      message = '100 Free Non-Expiring Bonus Minutes added directly to your account!';
+      message = `${paidVal} Free Non-Expiring Bonus Minutes added directly to your account!`;
     }
 
     const claimRecord = {
@@ -4543,10 +4592,16 @@ export class AuthService {
           id: c.id,
           title: c.title,
           description: c.description,
+          promoType: c.promo_type || 'comeback',
           status: c.status,
           rewardType: c.reward_type,
           rewardValue: Number(c.reward_value),
           trialDays: c.trial_days || 3,
+          starterRewardType: c.starter_reward_type || (c.reward_type === 'bonus_minutes' ? 'bonus_minutes' : 'pro_pass'),
+          starterRewardValue: Number(c.starter_reward_value || c.reward_value || 120),
+          starterTrialDays: Number(c.starter_trial_days || c.trial_days || 3),
+          paidRewardType: c.paid_reward_type || 'bonus_minutes',
+          paidRewardValue: Number(c.paid_reward_value || 100),
           targetAudience: c.target_audience || 'all',
           targetTiers: c.target_tiers || ['starter', 'basic', 'pro', 'premium'],
           userCreatedBefore: c.user_created_before,
@@ -4597,22 +4652,39 @@ export class AuthService {
     const id = dto.id.trim().toLowerCase();
     const now = new Date();
     const validDays = Number(dto.validDays || 7);
-    const endDate = new Date(now.getTime() + validDays * 24 * 60 * 60 * 1000).toISOString();
+    const endDate = dto.endDate || new Date(now.getTime() + validDays * 24 * 60 * 60 * 1000).toISOString();
+
+    const starterRewardType =
+      dto.starterRewardType ||
+      (dto.rewardType === 'bonus_minutes' ? 'bonus_minutes' : 'pro_pass');
+    const starterRewardValue = Number(
+      dto.starterRewardValue || dto.rewardValue || (starterRewardType === 'pro_pass' ? 120 : 30),
+    );
+    const starterTrialDays = Number(dto.starterTrialDays || dto.trialDays || 3);
+    const paidRewardType = dto.paidRewardType || 'bonus_minutes';
+    const paidRewardValue = Number(dto.paidRewardValue || 100);
+    const promoType = dto.promoType || 'comeback';
 
     const newCampaign = {
       id,
       title: dto.title.trim(),
       description: dto.description?.trim() || '',
-      status: 'active',
-      reward_type: dto.rewardType,
-      reward_value: Number(dto.rewardValue),
-      trial_days: Number(dto.trialDays || 3),
+      promo_type: promoType,
+      status: dto.status || 'active',
+      reward_type: starterRewardType,
+      reward_value: starterRewardValue,
+      trial_days: starterTrialDays,
+      starter_reward_type: starterRewardType,
+      starter_reward_value: starterRewardValue,
+      starter_trial_days: starterTrialDays,
+      paid_reward_type: paidRewardType,
+      paid_reward_value: paidRewardValue,
       target_audience: dto.targetAudience || 'all',
       target_tiers: dto.targetTiers || ['starter', 'basic', 'pro', 'premium'],
       user_created_before: dto.userCreatedBefore || null,
       user_created_after: dto.userCreatedAfter || null,
       valid_days: validDays,
-      start_date: now.toISOString(),
+      start_date: dto.startDate || now.toISOString(),
       end_date: endDate,
       max_claims: dto.maxClaims || null,
       created_at: now.toISOString(),
@@ -4629,10 +4701,16 @@ export class AuthService {
       id: newCampaign.id,
       title: newCampaign.title,
       description: newCampaign.description,
+      promoType: newCampaign.promo_type,
       status: newCampaign.status,
       rewardType: newCampaign.reward_type,
       rewardValue: newCampaign.reward_value,
       trialDays: newCampaign.trial_days,
+      starterRewardType: newCampaign.starter_reward_type,
+      starterRewardValue: newCampaign.starter_reward_value,
+      starterTrialDays: newCampaign.starter_trial_days,
+      paidRewardType: newCampaign.paid_reward_type,
+      paidRewardValue: newCampaign.paid_reward_value,
       targetAudience: newCampaign.target_audience,
       targetTiers: newCampaign.target_tiers,
       userCreatedBefore: newCampaign.user_created_before,
@@ -4653,6 +4731,79 @@ export class AuthService {
       success: true,
       campaign: mappedObj,
       message: `Campaign "${newCampaign.title}" created successfully!`,
+    };
+  }
+
+  /**
+   * Admin: Update / Edit an existing promotion campaign
+   */
+  async updatePromotionCampaign(id: string, dto: UpdatePromotionCampaignDto) {
+    const normalizedId = id.trim().toLowerCase();
+    const updateData: any = {};
+    if (dto.title) updateData.title = dto.title.trim();
+    if (dto.description !== undefined) updateData.description = dto.description.trim();
+    if (dto.promoType) updateData.promo_type = dto.promoType;
+    if (dto.status) updateData.status = dto.status;
+    if (dto.starterRewardType) {
+      updateData.starter_reward_type = dto.starterRewardType;
+      updateData.reward_type = dto.starterRewardType;
+    }
+    if (dto.starterRewardValue !== undefined) {
+      updateData.starter_reward_value = Number(dto.starterRewardValue);
+      updateData.reward_value = Number(dto.starterRewardValue);
+    }
+    if (dto.starterTrialDays !== undefined) {
+      updateData.starter_trial_days = Number(dto.starterTrialDays);
+      updateData.trial_days = Number(dto.starterTrialDays);
+    }
+    if (dto.paidRewardType) updateData.paid_reward_type = dto.paidRewardType;
+    if (dto.paidRewardValue !== undefined) updateData.paid_reward_value = Number(dto.paidRewardValue);
+    if (dto.targetAudience) updateData.target_audience = dto.targetAudience;
+    if (dto.targetTiers) updateData.target_tiers = dto.targetTiers;
+    if (dto.validDays !== undefined) {
+      updateData.valid_days = Number(dto.validDays);
+      updateData.end_date = new Date(Date.now() + Number(dto.validDays) * 24 * 60 * 60 * 1000).toISOString();
+    }
+    if (dto.startDate) updateData.start_date = dto.startDate;
+    if (dto.endDate) updateData.end_date = dto.endDate;
+    if (dto.maxClaims !== undefined) updateData.max_claims = dto.maxClaims;
+
+    try {
+      await this.supabase
+        .from('promotion_campaigns')
+        .update(updateData)
+        .eq('id', normalizedId);
+    } catch (err: any) {
+      this.logger.warn(`Could not update promotion_campaigns table: ${err?.message}`);
+    }
+
+    const found = this.localCampaigns.find((c) => c.id === normalizedId);
+    if (found) {
+      Object.assign(found, {
+        title: updateData.title || found.title,
+        description: updateData.description !== undefined ? updateData.description : found.description,
+        promoType: updateData.promo_type || found.promoType,
+        status: updateData.status || found.status,
+        starterRewardType: updateData.starter_reward_type || found.starterRewardType,
+        starterRewardValue:
+          updateData.starter_reward_value !== undefined ? updateData.starter_reward_value : found.starterRewardValue,
+        starterTrialDays:
+          updateData.starter_trial_days !== undefined ? updateData.starter_trial_days : found.starterTrialDays,
+        paidRewardType: updateData.paid_reward_type || found.paidRewardType,
+        paidRewardValue:
+          updateData.paid_reward_value !== undefined ? updateData.paid_reward_value : found.paidRewardValue,
+        targetAudience: updateData.target_audience || found.targetAudience,
+        validDays: updateData.valid_days !== undefined ? updateData.valid_days : found.validDays,
+        startDate: updateData.start_date || found.startDate,
+        endDate: updateData.end_date || found.endDate,
+      });
+    }
+
+    return {
+      success: true,
+      id: normalizedId,
+      campaign: found || updateData,
+      message: `Campaign updated successfully!`,
     };
   }
 

@@ -41,6 +41,7 @@ import { mayaAlert } from '@/components/ui/alert-modal';
 import { OutageApologyBanner } from '@/components/ui/OutageApologyBanner';
 import { ProPassExpiredModal } from '@/components/modals/ProPassExpiredModal';
 import { promotionsApi } from '@/services/promotions/promotions-api';
+import { AppStorage } from '@/services/storage/storage-adapter';
 
 interface ScenarioItem {
   id: string;
@@ -346,7 +347,12 @@ export default function DashboardScreen() {
   // Check if 3-day Pro Pass has ended for trialing students
   useEffect(() => {
     (async () => {
-      if (params.test_pro_pass_expired === '1' || params.pro_pass_expired === '1') {
+      const anyParams = params as any;
+      if (
+        anyParams?.test_pro_pass_expired === '1' ||
+        anyParams?.pro_pass_expired === '1' ||
+        params?.popup === ('pro-pass-expired' as any)
+      ) {
         setShowProPassExpired(true);
         return;
       }
@@ -354,7 +360,7 @@ export default function DashboardScreen() {
       const dismissed = await AppStorage.getItem('maya_pro_pass_expired_dismissed');
       if (dismissed === 'true') return;
 
-      const profile = await authService.getUserProfile();
+      const profile = ((await authService.fetchUserProfile()) || OnboardingStore.getState().user) as any;
       if (profile) {
         const isTrialEnded =
           profile.plan_status === 'expired' ||
