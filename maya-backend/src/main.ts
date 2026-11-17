@@ -1,7 +1,19 @@
 import { NestFactory } from '@nestjs/core';
 import { WsAdapter } from '@nestjs/platform-ws';
 import express from 'express';
+import { Agent, setGlobalDispatcher } from 'undici';
 import { AppModule, ObserveInstrument } from './app.module.js';
+
+// Keep outbound HTTPS connections (Supabase, Gemini, etc.) alive between requests.
+// Node's default fetch closes idle sockets after ~4 s, so at low traffic almost every
+// Supabase call paid a fresh TCP+TLS handshake (measured 0.3–0.8 s from the VPS).
+setGlobalDispatcher(
+  new Agent({
+    keepAliveTimeout: Number(process.env.OUTBOUND_KEEPALIVE_MS) || 60_000,
+    keepAliveMaxTimeout: 10 * 60_000,
+    connections: 32, // per origin; bounds sockets if a burst hits
+  }),
+);
 
 // Global outbound fetch timeout safeguard: prevent unbounded hangs if caller omitted AbortSignal
 const _origFetch = globalThis.fetch;

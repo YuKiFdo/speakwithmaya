@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Platform } from 'react-native';
 import { useOnboardingStore, OnboardingStore } from '@/services/store/onboarding-store';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
-import { fetchAllPracticeSessions } from '@/services/supabase';
+import { fetchPracticeSessionSummaries } from '@/services/supabase';
 import { authService } from '@/services/auth/auth-service';
 
 export interface UserStats {
@@ -279,7 +279,7 @@ export function useUserStats(): UserStats {
 
         const [progressRes, sessions] = await Promise.all([
           fetch(`${baseUrl}/v1/roadmap/user-progress`, { headers }).catch(() => null),
-          fetchAllPracticeSessions().catch(() => []),
+          fetchPracticeSessionSummaries().catch(() => []),
         ]);
 
         const completedIds = new Set<string>();

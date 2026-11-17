@@ -98,12 +98,18 @@ export class RoadmapService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureStorageBucket();
-    // Eagerly prewarm roadmap audio in background on server start
+    // Prewarm roadmap audio in background after boot. Disabled with AUDIO_WARMUP=0.
+    // Delayed 60 s so it never competes with startup and the first wave of requests
+    // after a deploy/restart (each restart previously re-synthesized every level).
+    if (process.env.AUDIO_WARMUP === '0') {
+      this.logger.log('[Audio Warmup] Disabled via AUDIO_WARMUP=0');
+      return;
+    }
     setTimeout(() => {
       this.warmupAllLevelsAudio().catch((err) => {
         this.logger.warn(`[Audio Warmup] Failed during initial warmup: ${err?.message}`);
       });
-    }, 2500);
+    }, Number(process.env.AUDIO_WARMUP_DELAY_MS) || 60_000).unref();
   }
 
   private async ensureStorageBucket(): Promise<void> {
@@ -200,6 +206,7 @@ export class RoadmapService implements OnModuleInit {
         .from('roadmap_levels')
         .update(updatePayload)
         .eq('id', levelId);
+      this.invalidateLevelsCache();
 
       return publicUrl;
     } catch (err: any) {
@@ -242,9 +249,17 @@ export class RoadmapService implements OnModuleInit {
           // 3. Otherwise synthesize fresh
           if (!this.inFlightSyntheses.has(cacheKey)) {
             this.logger.log(`[Audio Warmup] Pre-synthesizing ${lvl.title} (${lang})...`);
+            let rateLimited = false;
             await this.getBriefingAudio(lvl.id, lang).catch((e) => {
               this.logger.warn(`[Audio Warmup] Error pre-synthesizing ${lvl.id} (${lang}): ${e?.message}`);
+              rateLimited = /rate limit|429|quota/i.test(String(e?.message || ''));
             });
+            if (rateLimited) {
+              // Stop instead of hammering the TTS quota for every remaining level;
+              // remaining levels are synthesized on demand when first requested.
+              this.logger.warn('[Audio Warmup] TTS rate-limited, stopping warmup for this boot.');
+              return;
+            }
           }
         }
       }
@@ -375,12 +390,59 @@ export class RoadmapService implements OnModuleInit {
   }
 
 
+  /**
+   * Roadmap levels change only when an admin edits them, but getAllLevels() is called on
+   * many hot paths (≈30k full-content reads in the billing cycle). Cache the raw rows per
+   * view for 5 min with single-flight; every write in this service calls invalidateLevelsCache().
+   * Callers get freshly mapped + cloned entities so mutations never leak into the cache.
+   */
+  private static readonly LEVELS_CACHE_TTL_MS = 5 * 60_000;
+  private levelsCache = new Map<string, { rows: any[]; expiresAt: number }>();
+  private levelsInFlight = new Map<string, Promise<any[] | null>>();
+
+  invalidateLevelsCache(): void {
+    this.levelsCache.clear();
+    this.levelsInFlight.clear();
+  }
+
   async getAllLevels(adminView: boolean = true): Promise<RoadmapLevelEntity[]> {
     if (!this.supabase) {
       this.logger.warn('Supabase client not initialized in getAllLevels');
       return [];
     }
 
+    const key = adminView ? 'admin' : 'published';
+    const hit = this.levelsCache.get(key);
+    let rows: any[] | null = hit && hit.expiresAt > Date.now() ? hit.rows : null;
+
+    if (!rows) {
+      let flight = this.levelsInFlight.get(key);
+      if (!flight) {
+        flight = this.fetchLevelRows(adminView);
+        this.levelsInFlight.set(key, flight);
+        flight
+          .then((fetched) => {
+            if (fetched && this.levelsInFlight.get(key) === flight) {
+              this.levelsCache.set(key, {
+                rows: fetched,
+                expiresAt: Date.now() + RoadmapService.LEVELS_CACHE_TTL_MS,
+              });
+            }
+          })
+          .finally(() => {
+            if (this.levelsInFlight.get(key) === flight) this.levelsInFlight.delete(key);
+          })
+          .catch(() => {});
+      }
+      rows = await flight;
+    }
+
+    return (rows || []).map((d: any) => this.mapDbRowToEntity(structuredClone(d)));
+  }
+
+  /** Returns raw rows, or null on error (errors are never cached). */
+  private async fetchLevelRows(adminView: boolean): Promise<any[] | null> {
+    if (!this.supabase) return null;
     try {
       let query = this.supabase
         .from('roadmap_levels')
@@ -395,13 +457,13 @@ export class RoadmapService implements OnModuleInit {
       const { data, error } = await query;
       if (error) {
         this.logger.error(`Supabase DB query error in getAllLevels: ${error.message} (code: ${error.code})`);
-        return [];
+        return null;
       }
 
-      return (data || []).map((d: any) => this.mapDbRowToEntity(d));
+      return data || [];
     } catch (err: any) {
       this.logger.error(`getAllLevels query failed: ${err?.message}`);
-      return [];
+      return null;
     }
   }
 
@@ -498,6 +560,7 @@ export class RoadmapService implements OnModuleInit {
 
     const dbRow = this.mapEntityToDbRow(newLevel);
     const { error } = await this.supabase.from('roadmap_levels').insert(dbRow);
+    this.invalidateLevelsCache();
     if (error) {
       if (error.code === '23505') {
         throw new ConflictException(`Level number ${newLevel.levelNumber} already exists in the roadmap. Please choose a different level number.`);
@@ -569,6 +632,7 @@ export class RoadmapService implements OnModuleInit {
       .from('roadmap_levels')
       .update(dbRow)
       .eq('id', existing.id);
+    this.invalidateLevelsCache();
 
     if (error) {
       if (error.code === '23505') {
@@ -611,6 +675,7 @@ export class RoadmapService implements OnModuleInit {
     }
 
     const { error } = await this.supabase.from('roadmap_levels').delete().eq('id', id);
+    this.invalidateLevelsCache();
     if (error) {
       this.logger.error(`Failed to delete level ${id} from Supabase DB: ${error.message}`);
       throw new Error(`Failed to delete level from Supabase: ${error.message}`);
@@ -632,6 +697,7 @@ export class RoadmapService implements OnModuleInit {
           this.logger.warn(`Failed to reorder level ${item.id}: ${err?.message}`);
         }
       }
+      this.invalidateLevelsCache();
     }
     return this.getAllLevels(true);
   }
@@ -1629,6 +1695,7 @@ Core Conversation Rules:
           .from('roadmap_levels')
           .update(updatePayload)
           .eq('id', cleanLevelId);
+        this.invalidateLevelsCache();
       }
     } else {
       publicUrl = `/v1/roadmap/levels/${cleanLevelId || 'custom'}/briefing-audio?lang=${lang}`;

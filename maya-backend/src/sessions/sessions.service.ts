@@ -2769,11 +2769,16 @@ ${memoryPart}`;
     try {
       // Find sessions that are still marked 'active' or have 0 duration, created at least 2 minutes ago
       const twoMinutesAgoIso = new Date(now - 2 * 60 * 1000).toISOString();
+      // Bounded look-back: rows that can never be resolved (e.g. non-active 0-turn sessions
+      // with duration 0) would otherwise match forever and be re-fetched, with their turns and
+      // diagnostics, on every run. Orphans are reconciled within minutes, so 24 h is ample.
+      const lookBackIso = new Date(now - 24 * 60 * 60 * 1000).toISOString();
       const { data: candidateSessions, error: candErr } = await this.supabase
         .from('sessions')
         .select('id, user_id, topic, status, duration_seconds, start_time, created_at, roadmap_level_id')
         .or('status.eq.active,duration_seconds.is.null,duration_seconds.eq.0')
         .lt('created_at', twoMinutesAgoIso)
+        .gt('created_at', lookBackIso)
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -3481,6 +3486,48 @@ ${memoryPart}`;
       summary: sess.summary || null,
       diagnostics: await this.getSessionDiagnostics(sessionId),
     };
+  }
+
+  /**
+   * Lightweight session list for stats (XP / practiced minutes). Same row set as
+   * getUserSessions (latest 50, intro calls excluded) but only scalar columns: no nested
+   * session_turns / grammar_corrections, no storage.list() calls, no roadmap lookups.
+   */
+  async getUserSessionSummaries(userId: string) {
+    if (!this.supabase) return [];
+    const { data, error } = await this.supabase
+      .from('sessions')
+      .select('id, user_id, topic, status, duration_seconds, start_time, created_at, roadmap_level_id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) {
+      this.logger.error(`Error querying session summaries from Supabase: ${error.message}`);
+      return [];
+    }
+    const isIntroTopic = (topic: string) => {
+      const t = (topic || '').toLowerCase();
+      return (
+        t.includes('intro') ||
+        t.includes('onboarding') ||
+        t.includes('assessment') ||
+        t.includes('placement') ||
+        t.includes('free trial')
+      );
+    };
+    return (data || [])
+      .filter((s: any) => !isIntroTopic(s.topic))
+      .map((s: any) => ({
+        id: s.id,
+        user_id: s.user_id,
+        topic: s.topic || 'General Practice',
+        status: s.status || 'completed',
+        duration_seconds: s.duration_seconds || 0,
+        start_time: s.start_time || s.created_at,
+        roadmap_level_id: s.roadmap_level_id || null,
+        roadmapLevelId: s.roadmap_level_id || null,
+        is_roadmap: Boolean(s.roadmap_level_id),
+      }));
   }
 
   async getUserSessions(userId?: string) {

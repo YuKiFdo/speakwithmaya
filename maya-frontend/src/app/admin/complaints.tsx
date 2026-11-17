@@ -402,6 +402,8 @@ export default function AdminComplaintsScreen() {
   const [starFilter, setStarFilter] = useState<StarFilter>('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('newest');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // "Show more" paging for complaints; resets automatically when filters/search/sort change
+  const [complaintsPaging, setComplaintsPaging] = useState({ key: '', count: PAGE_SIZE });
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   /* ------------------------------- Data layer ------------------------------ */
@@ -717,6 +719,12 @@ export default function AdminComplaintsScreen() {
     list.sort((a, b) => (complaintSort === 'newest' ? t(b) - t(a) : t(a) - t(b)));
     return list;
   }, [complaints, complaintFilter, complaintSearch, complaintSort]);
+
+  const complaintsFilterKey = `${complaintFilter}|${complaintSearch}|${complaintSort}`;
+  const complaintsVisibleCount =
+    complaintsPaging.key === complaintsFilterKey ? complaintsPaging.count : PAGE_SIZE;
+  const showMoreComplaints = () =>
+    setComplaintsPaging({ key: complaintsFilterKey, count: complaintsVisibleCount + PAGE_SIZE });
 
   /* --------------------------------- Renders ------------------------------- */
 
@@ -1079,7 +1087,8 @@ export default function AdminComplaintsScreen() {
             />
           )
         ) : (
-          filteredComplaints.map((c) => {
+          <>
+          {filteredComplaints.slice(0, complaintsVisibleCount).map((c) => {
             const isResolved = c.status === 'resolved';
             return (
               <View key={c.id} style={[s.reviewRow, { borderLeftColor: isResolved ? C.green : C.red }]}>
@@ -1147,7 +1156,17 @@ export default function AdminComplaintsScreen() {
                 </View>
               </View>
             );
-          })
+          })}
+
+          {complaintsVisibleCount < filteredComplaints.length ? (
+            <Pressable onPress={showMoreComplaints} style={s.moreBtn}>
+              <Text style={s.moreBtnText}>
+                Show {Math.min(PAGE_SIZE, filteredComplaints.length - complaintsVisibleCount)} more
+              </Text>
+              <Feather name="chevron-down" size={14} color={C.teal} />
+            </Pressable>
+          ) : null}
+          </>
         )}
       </View>
     </>
