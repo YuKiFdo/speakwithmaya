@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  Modal,
   View,
   Text,
   Image,
@@ -52,67 +53,77 @@ export const MaintenanceOverlay: React.FC = () => {
   }, []);
 
   // Do NOT block admin routes — admins must be able to log in and toggle maintenance off!
-  if (!isMaintenance || pathname?.startsWith('/admin')) {
+  const showModal = isMaintenance && !pathname?.startsWith('/admin');
+
+  if (!showModal) {
     return null;
   }
 
   return (
-    <View style={styles.fullscreenOverlay}>
-      <View style={[styles.card, isPhone && styles.cardMobile]}>
-        {/* Maya Maintenance Avatar */}
-        <View style={styles.avatarBox}>
-          <Image
-            source={require('@/assets/images/maya-maintenance.png')}
-            style={styles.avatarImg}
-            resizeMode="contain"
-          />
-        </View>
-
-        {/* Maintenance Badge */}
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>🛠️ SCHEDULED MAINTENANCE</Text>
-        </View>
-
-        {/* Title */}
-        <Text style={styles.title}>
-          {maintenanceInfo.title || 'Maya is Tuning Up!'}
-        </Text>
-
-        {/* Message */}
-        <Text style={styles.subtitle}>
-          {maintenanceInfo.message ||
-            "We are currently conducting scheduled improvements to ensure your English speaking coach is smoother, faster, and always reliable. We'll be back online in just a few minutes!"}
-        </Text>
-
-        {maintenanceInfo.estimatedEndTime ? (
-          <View style={styles.estimateBox}>
-            <Text style={styles.estimateLabel}>Estimated Completion:</Text>
-            <Text style={styles.estimateValue}>{maintenanceInfo.estimatedEndTime}</Text>
+    <Modal
+      visible={showModal}
+      transparent
+      animationType="fade"
+      onRequestClose={() => {}}
+      statusBarTranslucent
+    >
+      <View style={styles.fullscreenOverlay}>
+        <View style={[styles.card, isPhone && styles.cardMobile]}>
+          {/* Maya Maintenance Avatar */}
+          <View style={styles.avatarBox}>
+            <Image
+              source={require('@/assets/images/maya-maintenance.png')}
+              style={styles.avatarImg}
+              resizeMode="contain"
+            />
           </View>
-        ) : null}
 
-        {/* Refresh / Check Status Button */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.checkBtn,
-            pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
-            checking && { opacity: 0.7 },
-          ]}
-          onPress={checkStatus}
-          disabled={checking}
-        >
-          {checking ? (
-            <ActivityIndicator color="#FFFFFF" size="small" />
-          ) : (
-            <Text style={styles.checkBtnText}>Check Server Status ↻</Text>
-          )}
-        </Pressable>
+          {/* Maintenance Badge */}
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>🛠️ SCHEDULED MAINTENANCE</Text>
+          </View>
 
-        <Text style={styles.footerHint}>
-          Need urgent help? Reach us at support@speakwithmaya.com
-        </Text>
+          {/* Title */}
+          <Text style={styles.title}>
+            {maintenanceInfo.title || 'Maya is Tuning Up!'}
+          </Text>
+
+          {/* Message */}
+          <Text style={styles.subtitle}>
+            {maintenanceInfo.message ||
+              "We are currently conducting scheduled improvements to ensure your English speaking coach is smoother, faster, and always reliable. We'll be back online in just a few minutes!"}
+          </Text>
+
+          {maintenanceInfo.estimatedEndTime ? (
+            <View style={styles.estimateBox}>
+              <Text style={styles.estimateLabel}>Estimated Completion:</Text>
+              <Text style={styles.estimateValue}>{maintenanceInfo.estimatedEndTime}</Text>
+            </View>
+          ) : null}
+
+          {/* Refresh / Check Status Button */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.checkBtn,
+              pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
+              checking && { opacity: 0.7 },
+            ]}
+            onPress={checkStatus}
+            disabled={checking}
+          >
+            {checking ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <Text style={styles.checkBtnText}>Check Server Status ↻</Text>
+            )}
+          </Pressable>
+
+          <Text style={styles.footerHint}>
+            Need urgent help? Reach us at speakwithmaya.com@gmail.com
+          </Text>
+        </View>
       </View>
-    </View>
+    </Modal>
   );
 };
 

@@ -687,7 +687,7 @@ export class AuthService {
         .from('profiles')
         .update({ display_name: userProfile.display_name, updated_at: new Date().toISOString() })
         .eq('id', userProfile.id)
-        .then(() => {});
+        .then(() => { });
     }
 
     // Persist email if provided from registration step
@@ -697,7 +697,7 @@ export class AuthService {
         .from('profiles')
         .update({ email: userProfile.email, updated_at: new Date().toISOString() })
         .eq('id', userProfile.id)
-        .then(() => {});
+        .then(() => { });
     }
 
     const postIntroSteps = [
@@ -720,7 +720,7 @@ export class AuthService {
           updated_at: nowIso,
         })
         .eq('id', userProfile.id)
-        .then(() => {});
+        .then(() => { });
     }
 
     const isCompleted = !!userProfile.onboarding_completed_at;
@@ -742,7 +742,7 @@ export class AuthService {
           .from('profiles')
           .update({ last_active_step: '/(tabs)/dashboard', updated_at: new Date().toISOString() })
           .eq('id', userProfile.id)
-          .then(() => {});
+          .then(() => { });
       }
     }
 
@@ -979,8 +979,8 @@ export class AuthService {
       const intervalMs = isStarter
         ? 24 * 60 * 60 * 1000
         : isQuarterly
-        ? 90 * 24 * 60 * 60 * 1000
-        : 30 * 24 * 60 * 60 * 1000;
+          ? 90 * 24 * 60 * 60 * 1000
+          : 30 * 24 * 60 * 60 * 1000;
       const nextResetIso = new Date(now + intervalMs).toISOString();
 
       // If user's recurring subscription failed (past_due) or was canceled:
@@ -1533,7 +1533,7 @@ export class AuthService {
           updated_at: nowIso,
         })
         .eq('id', userId)
-        .then(() => {});
+        .then(() => { });
     }
 
     // Auto-heal missing add_on_minutes_balance: If balance exceeds monthly allowance and add_on is 0
@@ -1548,7 +1548,7 @@ export class AuthService {
         .from('profiles')
         .update({ add_on_minutes_balance: extraMinutes, updated_at: new Date().toISOString() })
         .eq('id', userId)
-        .then(() => {});
+        .then(() => { });
     }
 
     const profile = await this.checkAndResetMonthlyQuota(data as UserProfileData);
@@ -2117,7 +2117,7 @@ export class AuthService {
           !isTestAccount &&
           Boolean(
             (activeSub && (activeSub.status === 'ACTIVE' || activeSub.status === 'PAST_DUE')) ||
-              (p.plan_tier && p.plan_tier !== 'starter' && p.plan_status === 'active'),
+            (p.plan_tier && p.plan_tier !== 'starter' && p.plan_status === 'active'),
           );
         const payherePlanTier = hasActivePayhereSub
           ? activeSub?.plan_tier || (p.plan_tier !== 'starter' ? p.plan_tier : 'pro')
@@ -2130,8 +2130,8 @@ export class AuthService {
         const verif = digits ? telcoVerifByDigits.get(digits) : undefined;
         const hasExplicitTelco = Boolean(
           p.telco_subscriber_id ||
-            p.telco_provider ||
-            verif,
+          p.telco_provider ||
+          verif,
         );
         const isImplicitTelcoDailyStarter =
           isTelcoGatewayActive &&
@@ -2146,7 +2146,7 @@ export class AuthService {
           !isTestAccount &&
           Boolean(
             ((hasExplicitTelco || isImplicitTelcoDailyStarter) && !isTelcoCancelledOrUpgraded) ||
-              (p.telco_subscriber_id && p.plan_status !== 'canceled' && p.plan_status !== 'expired'),
+            (p.telco_subscriber_id && p.plan_status !== 'canceled' && p.plan_status !== 'expired'),
           );
 
         const detectedProvider: 'ideamart' | 'mspace' =
@@ -2160,8 +2160,8 @@ export class AuthService {
         const activeSubscriptionType: 'payhere' | 'telco' | 'none' = hasActivePayhereSub
           ? 'payhere'
           : hasActiveTelcoSub
-          ? 'telco'
-          : 'none';
+            ? 'telco'
+            : 'none';
 
         return {
           id: p.id,
@@ -2918,7 +2918,7 @@ export class AuthService {
                   if (typeof p.micMuted === 'boolean') micMuted = p.micMuted;
                   if (typeof p.hasUserSpoken === 'boolean') hasUserSpoken = p.hasUserSpoken;
                   if (p.guideStatus) guideStatus = p.guideStatus;
-                } catch {}
+                } catch { }
               }
             }
 
@@ -2932,7 +2932,7 @@ export class AuthService {
               };
             }
           }
-        } catch {}
+        } catch { }
       }
 
       let onboardingEvents: any[] = [];
@@ -3076,6 +3076,12 @@ export class AuthService {
       mspaceEnabled: config.mspaceEnabled ?? true,
       telcoUnsubButtonEnabled: config.telcoUnsubButtonEnabled ?? true,
       onboardingAudiosEnabled: config.onboardingAudiosEnabled ?? false,
+      maintenanceMode: config.maintenanceMode ?? {
+        enabled: false,
+        title: 'Maya is Tuning Up!',
+        message: "We are currently conducting scheduled improvements to ensure your English speaking coach is smoother, faster, and always reliable. We'll be back online soon!",
+      },
+   
     };
   }
 
@@ -3309,8 +3315,8 @@ export class AuthService {
     const prefix = digits.startsWith('94')
       ? digits.slice(2, 4)
       : digits.startsWith('0')
-      ? digits.slice(1, 3)
-      : digits.slice(0, 2);
+        ? digits.slice(1, 3)
+        : digits.slice(0, 2);
     if (prefix === '70' || prefix === '71' || provider === 'mspace') {
       return 'Mobitel (mSpace)';
     }
@@ -3880,8 +3886,8 @@ export class AuthService {
           period === 'weekly'
             ? now - 7 * 24 * 60 * 60 * 1000
             : period === 'monthly'
-            ? now - 30 * 24 * 60 * 60 * 1000
-            : 0;
+              ? now - 30 * 24 * 60 * 60 * 1000
+              : 0;
 
         const [
           { data: profiles },
@@ -3927,8 +3933,8 @@ export class AuthService {
               const ts = row.completed_at
                 ? new Date(row.completed_at).getTime()
                 : row.created_at
-                ? new Date(row.created_at).getTime()
-                : now;
+                  ? new Date(row.created_at).getTime()
+                  : now;
               if (cutoffMs === 0 || ts >= cutoffMs) {
                 let set = completedLevelsByUser.get(row.user_id);
                 if (!set) {
@@ -4070,7 +4076,7 @@ export class AuthService {
           .from('profiles')
           .update({ last_comeback_at: now })
           .eq('id', userId);
-      } catch (err: any) {}
+      } catch (err: any) { }
 
       await this.supabase.from('onboarding_events').insert({
         user_id: userId,
@@ -4217,7 +4223,7 @@ export class AuthService {
         action: 'claim',
         metadata: claimRecord,
       });
-    } catch {}
+    } catch { }
 
     const updatedProfile = await this.getProfile(userId);
 
@@ -4569,7 +4575,7 @@ export class AuthService {
         .from('promotion_campaigns')
         .update({ status })
         .eq('id', normalizedId);
-    } catch {}
+    } catch { }
 
     const found = this.localCampaigns.find((c) => c.id === normalizedId);
     if (found) {

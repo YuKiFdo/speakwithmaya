@@ -17,6 +17,7 @@ import { promotionsApi } from '@/services/promotions/promotions-api';
 import { authService } from '@/services/auth/auth-service';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { router } from 'expo-router';
+import { getBackendBaseUrl } from '@/utils/backend-url';
 
 export interface OutageApologyBannerProps {
   userTier?: 'starter' | 'basic' | 'pro' | 'premium' | string;
@@ -41,6 +42,18 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
     let isMounted = true;
     (async () => {
       try {
+        // If app is currently under maintenance, hide apology popup so it never clashes
+        try {
+          const cfgRes = await fetch(`${getBackendBaseUrl()}/v1/app-config`);
+          if (cfgRes.ok) {
+            const cfg = await cfgRes.json();
+            if (cfg?.maintenanceMode?.enabled) {
+              if (isMounted) setIsVisible(false);
+              return;
+            }
+          }
+        } catch {}
+
         const claimed = await AppStorage.getItem(STORAGE_DISMISSED_KEY);
         if (isMounted) {
           setIsVisible(claimed !== 'true');
@@ -172,6 +185,12 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
               <Text style={styles.ctaBtnText}>{theme.btnText}</Text>
             )}
           </Pressable>
+
+          {/* Support Contact */}
+          <Text style={styles.supportEmailText}>
+            Need help? Reach us at{' '}
+            <Text style={styles.supportEmailLink}>speakwithmaya.com@gmail.com</Text>
+          </Text>
         </View>
       </View>
     </Modal>
@@ -288,5 +307,16 @@ const styles = StyleSheet.create({
     ...fontStyle('outfit', 'bold'),
     fontSize: 16,
     color: '#FFFFFF',
+  },
+  supportEmailText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 12,
+    color: '#94A3B8',
+    textAlign: 'center',
+    marginTop: 14,
+  },
+  supportEmailLink: {
+    ...fontStyle('inter', 'semiBold'),
+    color: '#64748B',
   },
 });
