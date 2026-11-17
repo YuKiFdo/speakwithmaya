@@ -1537,6 +1537,30 @@ export class AuthService {
         .then(() => { });
     }
 
+    // Auto-heal: If user is on Pro with an active promo code/pass but plan_status was 'active', ensure it's marked as 'trialing'
+    if (data.plan_tier === 'pro' && data.plan_status === 'active' && data.active_promo_code) {
+      try {
+        const { data: sub } = await this.supabase
+          .from('subscriptions')
+          .select('id, status')
+          .eq('user_id', userId)
+          .eq('status', 'active')
+          .maybeSingle();
+
+        if (!sub) {
+          data.plan_status = 'trialing';
+          this.supabase
+            .from('profiles')
+            .update({
+              plan_status: 'trialing',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', userId)
+            .then(() => {});
+        }
+      } catch {}
+    }
+
     // Auto-expire trialing Pro Pass if 3 days have elapsed
     if (
       data.plan_status === 'trialing' &&
@@ -4742,5 +4766,151 @@ export class AuthService {
     }
 
     return { success: true, id: normalizedId, status };
+  }
+
+  /**
+   * Admin: Count targeted audience for SMS broadcast
+   */
+  async getSmsAudienceCount(audience: 'all' | 'paid' | 'nonpaid'): Promise<{ count: number }> {
+    try {
+      let query = this.supabase
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .not('phone_number', 'is', null);
+
+      if (audience === 'paid') {
+        query = query
+          .in('plan_tier', ['pro', 'premium', 'basic'])
+          .eq('plan_status', 'active');
+      } else if (audience === 'nonpaid') {
+        query = query.or('plan_tier.eq.starter,plan_status.neq.active');
+      }
+
+      const { count, error } = await query;
+      if (error) {
+        this.logger.warn(`[getSmsAudienceCount] Supabase count query warning: ${error.message}`);
+        // Fallback: select phone numbers and filter
+        const { data: allProfiles } = await this.supabase
+          .from('profiles')
+          .select('id, phone_number, plan_tier, plan_status');
+        const filtered = (allProfiles || []).filter((p: any) => {
+          if (!p.phone_number) return false;
+          const isPaid =
+            (p.plan_tier === 'pro' || p.plan_tier === 'premium' || p.plan_tier === 'basic') &&
+            p.plan_status === 'active';
+          if (audience === 'paid') return isPaid;
+          if (audience === 'nonpaid') return !isPaid;
+          return true;
+        });
+        return { count: filtered.length };
+      }
+
+      return { count: count || 0 };
+    } catch (err: any) {
+      this.logger.error(`[getSmsAudienceCount] Error: ${err.message}`);
+      return { count: 0 };
+    }
+  }
+
+  /**
+   * Admin: Broadcast targeted SMS to users
+   */
+  async broadcastSms(dto: { audience: 'all' | 'paid' | 'nonpaid' | 'specific'; message: string; phoneNumbers?: string[] }) {
+    if (!dto.message || !dto.message.trim()) {
+      throw new BadRequestException('SMS message content cannot be empty.');
+    }
+
+    const cleanMessage = dto.message.trim();
+    const phoneSet = new Set<string>();
+
+    if (dto.audience === 'specific') {
+      if (!Array.isArray(dto.phoneNumbers) || dto.phoneNumbers.length === 0) {
+        throw new BadRequestException('Please provide at least one recipient phone number for specific broadcast.');
+      }
+      for (const raw of dto.phoneNumbers) {
+        const norm = this.normalizePhoneNumber(raw);
+        if (norm && norm.length >= 10) {
+          phoneSet.add(norm);
+        }
+      }
+    } else {
+      // Query profiles from database
+      const { data: profiles, error } = await this.supabase
+        .from('profiles')
+        .select('phone_number, plan_tier, plan_status')
+        .not('phone_number', 'is', null);
+
+      if (error) {
+        throw new BadRequestException(`Failed to query user profiles: ${error.message}`);
+      }
+
+      for (const p of profiles || []) {
+        if (!p.phone_number) continue;
+        const isPaid =
+          (p.plan_tier === 'pro' || p.plan_tier === 'premium' || p.plan_tier === 'basic') &&
+          p.plan_status === 'active';
+        if (dto.audience === 'paid' && !isPaid) continue;
+        if (dto.audience === 'nonpaid' && isPaid) continue;
+
+        const norm = this.normalizePhoneNumber(p.phone_number);
+        if (norm && norm.length >= 10) {
+          phoneSet.add(norm);
+        }
+      }
+    }
+
+    const recipients = Array.from(phoneSet);
+    if (recipients.length === 0) {
+      return {
+        success: true,
+        totalTargeted: 0,
+        totalSent: 0,
+        totalFailed: 0,
+        message: 'No recipients matched the targeted audience criteria.',
+      };
+    }
+
+    this.logger.log(`[broadcastSms] Starting broadcast of ${recipients.length} SMS messages for audience '${dto.audience}'...`);
+
+    let sentCount = 0;
+    let failedCount = 0;
+    const failedNumbers: string[] = [];
+
+    // Send SMS with concurrency control (5 at a time) to ensure gateway stability
+    const CHUNK_SIZE = 5;
+    for (let i = 0; i < recipients.length; i += CHUNK_SIZE) {
+      const chunk = recipients.slice(i, i + CHUNK_SIZE);
+      await Promise.all(
+        chunk.map(async (phone) => {
+          try {
+            const res = await this.smsProvider.sendRawMessage(phone, cleanMessage);
+            if (res.success) {
+              sentCount++;
+            } else {
+              failedCount++;
+              failedNumbers.push(phone);
+            }
+          } catch {
+            failedCount++;
+            failedNumbers.push(phone);
+          }
+        }),
+      );
+      // Small pause between chunks (100ms)
+      if (i + CHUNK_SIZE < recipients.length) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+
+    this.logger.log(`[broadcastSms] Completed broadcast. Sent: ${sentCount}, Failed: ${failedCount}`);
+
+    return {
+      success: true,
+      totalTargeted: recipients.length,
+      totalSent: sentCount,
+      totalFailed: failedCount,
+      failedNumbers: failedNumbers.slice(0, 20),
+      message: `Broadcast finished. Successfully sent to ${sentCount} recipient(s)${failedCount > 0 ? `, ${failedCount} failed` : ''}.`,
+    };
   }
 }

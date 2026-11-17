@@ -12,4 +12,9 @@ export interface ISmsGatewayProvider {
    * @param customMessage Optional custom message text template containing {CODE} placeholder
    */
   sendOtp(phoneNumber: string, code: string, customMessage?: string): Promise<SmsDeliveryResult>;
+
+  /**
+   * Sends an arbitrary notification / broadcast SMS directly without OTP placeholders.
+   */
+  sendRawMessage?(phoneNumber: string, message: string): Promise<SmsDeliveryResult>;
 }

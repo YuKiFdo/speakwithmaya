@@ -37,6 +37,7 @@ import {
   CreatePromotionCampaignDto,
   UpdatePromotionCampaignDto,
   UpdateCampaignStatusDto,
+  BroadcastSmsDto,
 } from './dto/auth.dto.js';
 
 @Controller('v1')
@@ -452,5 +453,24 @@ export class AuthController {
     @Body() dto: UpdateCampaignStatusDto,
   ) {
     return this.authService.updateCampaignStatus(id, dto.status);
+  }
+
+  /**
+   * Admin: Get targeted audience count for SMS broadcast
+   */
+  @Get('admin/sms-audience-count')
+  @UseGuards(AdminGuard)
+  async getSmsAudienceCount(@Query('audience') audience: 'all' | 'paid' | 'nonpaid') {
+    return this.authService.getSmsAudienceCount(audience || 'all');
+  }
+
+  /**
+   * Admin: Dispatch bulk or targeted broadcast SMS
+   */
+  @Post('admin/broadcast-sms')
+  @UseGuards(AdminGuard)
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async broadcastSms(@Body() dto: BroadcastSmsDto) {
+    return this.authService.broadcastSms(dto);
   }
 }

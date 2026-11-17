@@ -119,10 +119,6 @@ export default function AdminPromotionsScreen() {
   const [editingCampaign, setEditingCampaign] = useState<PromotionCampaign | null>(null);
   const [submittingCampaign, setSubmittingCampaign] = useState(false);
 
-  // Maintenance mode state
-  const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
-  const [togglingMaintenance, setTogglingMaintenance] = useState(false);
-
   // Campaign Form State
   const [formCode, setFormCode] = useState('');
   const [formTitle, setFormTitle] = useState('');
@@ -188,14 +184,6 @@ export default function AdminPromotionsScreen() {
       setTotalClaims(claimsData.total || 0);
       setCampaignsList(campsData || []);
 
-      // Check current maintenance mode
-      try {
-        const cfgRes = await fetch(`${getBackendBaseUrl()}/v1/app-config`);
-        if (cfgRes.ok) {
-          const cfg = await cfgRes.json();
-          setMaintenanceEnabled(!!cfg?.maintenanceMode?.enabled);
-        }
-      } catch {}
     } catch (err: any) {
       console.warn('Failed to fetch promotions data:', err);
     } finally {
@@ -207,42 +195,6 @@ export default function AdminPromotionsScreen() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  // Toggle Maintenance Mode
-  const handleToggleMaintenance = async () => {
-    try {
-      setTogglingMaintenance(true);
-      const nextState = !maintenanceEnabled;
-      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/app-config`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-token': AdminAuthStore.getToken() || '',
-        },
-        body: JSON.stringify({
-          maintenanceMode: {
-            enabled: nextState,
-            title: 'Maya is Tuning Up!',
-            message:
-              'We are currently conducting scheduled improvements to ensure your English speaking coach is smoother, faster, and always reliable. We will be back online shortly!',
-          },
-        }),
-      });
-
-      if (!res.ok) throw new Error('Failed to update maintenance mode');
-      setMaintenanceEnabled(nextState);
-      await mayaAlert.success(
-        nextState
-          ? '🛠️ Application is now under Maintenance Mode. Users will see the Maya maintenance screen.'
-          : '🟢 Application is now LIVE and accessible to all users.',
-        nextState ? 'Maintenance Mode Enabled' : 'App is Live!'
-      );
-    } catch (err: any) {
-      await mayaAlert.error(err?.message || 'Could not toggle maintenance mode', 'Error');
-    } finally {
-      setTogglingMaintenance(false);
-    }
-  };
 
   // Submit Create or Edit Campaign
   const handleSaveCampaign = async () => {
@@ -376,45 +328,16 @@ export default function AdminPromotionsScreen() {
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {/* Header info & Maintenance Mode Quick Control */}
+            {/* Header info */}
             <View style={styles.pageHeader}>
               <View>
-                <Text style={styles.pageTitle}>Promotions, Comebacks & Maintenance</Text>
+                <Text style={styles.pageTitle}>Promotions & Comebacks</Text>
                 <Text style={styles.pageSubtitle}>
-                  Monitor students returning after downtime, create custom comeback promotions, and manage scheduled maintenance.
+                  Monitor students returning after downtime, create custom campaigns, and manage promotional rewards.
                 </Text>
               </View>
 
               <View style={styles.headerActions}>
-                {/* Maintenance Mode Toggle Card */}
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.maintenancePill,
-                    maintenanceEnabled ? styles.maintenancePillActive : styles.maintenancePillInactive,
-                    pressed && { opacity: 0.8 },
-                    togglingMaintenance && { opacity: 0.6 },
-                  ]}
-                  onPress={handleToggleMaintenance}
-                  disabled={togglingMaintenance}
-                >
-                  <Text style={styles.maintenancePillIcon}>
-                    {maintenanceEnabled ? '🛠️' : '🟢'}
-                  </Text>
-                  <View style={{ marginLeft: 6 }}>
-                    <Text
-                      style={[
-                        styles.maintenancePillTitle,
-                        { color: maintenanceEnabled ? '#D97706' : '#16A34A' },
-                      ]}
-                    >
-                      {maintenanceEnabled ? 'App: Maintenance Mode' : 'App: Live Online'}
-                    </Text>
-                    <Text style={styles.maintenancePillHint}>
-                      {maintenanceEnabled ? 'Tap to Bring Live' : 'Tap for Maintenance'}
-                    </Text>
-                  </View>
-                </Pressable>
-
                 <Pressable
                   style={({ pressed }) => [styles.createBtn, pressed && { opacity: 0.85 }]}
                   onPress={handleOpenCreateModal}

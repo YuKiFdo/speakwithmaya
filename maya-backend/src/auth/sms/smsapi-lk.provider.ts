@@ -112,4 +112,72 @@ export class SmsApiLkProvider implements ISmsGatewayProvider {
       };
     }
   }
+
+  /**
+   * Dispatches a direct marketing, announcement, or maintenance notification SMS.
+   */
+  async sendRawMessage(phoneNumber: string, message: string): Promise<SmsDeliveryResult> {
+    const recipient = this.formatRecipient(phoneNumber);
+    if (!recipient || recipient.length < 9) {
+      return { success: false, error: 'Invalid recipient phone number' };
+    }
+
+    try {
+      const headers = {
+        Authorization: `Bearer ${this.apiToken}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      };
+
+      const response = await fetch(this.apiEndpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          recipient,
+          sender_id: this.senderId,
+          type: 'plain',
+          message,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (response.ok && data?.status === 'success') {
+        const msgId = typeof data.data === 'object' ? data.data?.uid || data.data?.id : String(data.data || '');
+        this.logger.log(`[SMSAPI.LK BROADCAST] ✅ Delivered to ${recipient}. MsgId: ${msgId}`);
+        return { success: true, messageId: msgId };
+      }
+
+      // Retry with SMSAPI Demo fallback if custom senderId rejected
+      if (this.senderId !== 'SMSAPI Demo') {
+        const fallbackRes = await fetch(this.apiEndpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            recipient,
+            sender_id: 'SMSAPI Demo',
+            type: 'plain',
+            message,
+          }),
+        });
+
+        const fallbackData = await fallbackRes.json().catch(() => null);
+        if (fallbackRes.ok && fallbackData?.status === 'success') {
+          const msgId = typeof fallbackData.data === 'object' ? fallbackData.data?.uid || fallbackData.data?.id : String(fallbackData.data || '');
+          this.logger.log(`[SMSAPI.LK BROADCAST] ✅ Delivered to ${recipient} via fallback. MsgId: ${msgId}`);
+          return { success: true, messageId: msgId };
+        }
+      }
+
+      return {
+        success: false,
+        error: data?.message || `HTTP ${response.status}`,
+      };
+    } catch (err: any) {
+      this.logger.error(`[SMSAPI.LK BROADCAST] ❌ Error delivering to ${recipient}: ${err.message}`);
+      return { success: false, error: err.message };
+    }
+  }
 }

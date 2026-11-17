@@ -533,10 +533,23 @@ export default function UpgradeScreen() {
   const [showOtherPlans, setShowOtherPlans] = useState<boolean>(false);
   const [openFaq, setOpenFaq] = useState<string | null>(null);
 
+  const isTrialing = stats.isTrialing;
   const currentTier = (stats.planTier || (stats.isPro ? 'pro' : 'starter')).toLowerCase();
-  const currentWeight = TIER_ORDER[currentTier] ?? 0;
-  const isPaidUser = currentWeight > 0;
-  const isStarter = currentTier === 'starter';
+  const currentWeight = isTrialing ? 0 : (TIER_ORDER[currentTier] ?? 0);
+  const isPaidUser = currentWeight > 0 && !isTrialing;
+  const isStarter = currentTier === 'starter' && !isTrialing;
+
+  const pageTitleText = isTrialing
+    ? 'Keep Maya Pro with Special Offer'
+    : isPaidUser
+    ? 'Manage Your Plan'
+    : 'Upgrade to Pro';
+
+  const pageSubtitleText = isTrialing
+    ? 'You are currently enjoying a free 3-Day Pro Trial! Upgrade to keep full Pro access and 20% savings.'
+    : isPaidUser
+    ? 'Switch between plans or manage your practice time and features.'
+    : 'Unlock more practice time and powerful features to improve your English faster.';
 
   const [activeTestimonialIdx, setActiveTestimonialIdx] = useState<number>(0);
   const testimonialFadeAnim = useRef(new Animated.Value(1)).current;
@@ -802,6 +815,7 @@ export default function UpgradeScreen() {
             activeTab={activeTab}
             onSelectTab={handleSelectTab}
             isPro={stats.isPro}
+            isTrialing={isTrialing}
             planTier={stats.planTier}
             isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
             usedMinutes={stats.usedMinutes}
@@ -819,6 +833,7 @@ export default function UpgradeScreen() {
           <MobileTopBar
             pinned
             showBackButton={false}
+            isTrialing={isTrialing}
           />
 
           {/* ──────────── MAIN CONTENT ──────────── */}
@@ -841,12 +856,10 @@ export default function UpgradeScreen() {
               >
                 <View>
                   <Text style={[styles.pageTitle, styles.pageTitleDesktop]}>
-                    {isPaidUser ? 'Manage Your Plan' : 'Upgrade to Pro'}
+                    {pageTitleText}
                   </Text>
                   <Text style={[styles.pageSubtitle, styles.pageSubtitleDesktop]}>
-                    {isPaidUser
-                      ? 'Switch between plans or manage your practice time and features.'
-                      : 'Unlock more practice time and powerful features to improve your English faster.'}
+                    {pageSubtitleText}
                   </Text>
                 </View>
                 <UserLevelBadge
@@ -854,6 +867,7 @@ export default function UpgradeScreen() {
                   xpLabel={stats.xpLabel}
                   progress={stats.progress}
                   isPro={stats.isPro}
+                  isTrialing={isTrialing}
                   planTier={stats.planTier}
                   isInactive={stats.isSubscriptionLocked || stats.isTelcoUnsubscribed}
                 />
@@ -861,26 +875,26 @@ export default function UpgradeScreen() {
             ) : (
               <View style={styles.mobileHeadingSection}>
                 <Text style={styles.pageTitle}>
-                  {isPaidUser ? 'Manage Your Plan' : 'Upgrade to Pro'}
+                  {pageTitleText}
                 </Text>
                 <Text style={styles.pageSubtitle}>
-                  {isPaidUser
-                    ? 'Switch between plans or manage your practice time and features.'
-                    : 'Unlock more practice time and powerful features to improve your English faster.'}
+                  {pageSubtitleText}
                 </Text>
               </View>
             )}
 
-          {/* ──────────── 3 MONTHS PRO SPECIAL OFFER CARD (For starter users) ──────────── */}
-          {isStarter && (
+          {/* ──────────── 3 MONTHS PRO SPECIAL OFFER CARD (For starter and trialing users) ──────────── */}
+          {(isStarter || isTrialing) && (
             <View style={styles.specialOfferContainer}>
               <View style={styles.specialOfferCard}>
                 {/* Header ribbon / badge row (Matches Figma Pasted Image) */}
                 <View style={styles.specialOfferHeaderRow}>
                   <View style={styles.specialOfferBadgeLeft}>
-                    <Ionicons name="lock-closed" size={14} color="#0D4EFD" />
+                    <Ionicons name={isTrialing ? 'gift' : 'lock-closed'} size={14} color="#0D4EFD" />
                     <Text style={styles.specialOfferBadgeLeftText}>
-                      Your special offer is reserved for you
+                      {isTrialing
+                        ? 'Special Pro Trial Offer Reserved for You'
+                        : 'Your special offer is reserved for you'}
                     </Text>
                   </View>
                   <View style={styles.saveBadgePill}>
@@ -971,54 +985,64 @@ export default function UpgradeScreen() {
               </View>
 
               {/* See more plans toggle line */}
-              <View style={styles.seeOtherPlansWrap}>
-                <View style={styles.seeOtherPlansLine} />
-                <Pressable
-                  style={styles.seeOtherPlansButton}
-                  onPress={() =>
-                    setShowOtherPlans((prev) => {
-                      const next = !prev;
-                      if (next) {
-                        trackViewAllPlans();
-                      }
-                      return next;
-                    })
-                  }
-                >
-                  <Text style={styles.seeOtherPlansText}>
-                    {showOtherPlans ? 'Show fewer plans' : 'See more Plans'}
-                  </Text>
-                  <Animated.View
-                    style={
-                      Platform.OS === 'web'
-                        ? ({
-                            marginLeft: 5,
-                            display: 'inline-flex',
-                            willChange: 'transform',
-                            animation: showOtherPlans
-                              ? 'none'
-                              : 'mayaChevronFloat 1.6s ease-in-out infinite',
-                          } as any)
-                        : {
-                            marginLeft: 5,
-                            transform: [{ translateY: showOtherPlans ? 0 : chevronBounce }],
-                          }
+              {isTrialing ? (
+                <View style={styles.seeOtherPlansWrap}>
+                  <View style={styles.seeOtherPlansLine} />
+                  <View style={styles.trialMonthlyDividerBadge}>
+                    <Text style={styles.trialMonthlyDividerText}>Or choose a monthly subscription:</Text>
+                  </View>
+                  <View style={styles.seeOtherPlansLine} />
+                </View>
+              ) : (
+                <View style={styles.seeOtherPlansWrap}>
+                  <View style={styles.seeOtherPlansLine} />
+                  <Pressable
+                    style={styles.seeOtherPlansButton}
+                    onPress={() =>
+                      setShowOtherPlans((prev) => {
+                        const next = !prev;
+                        if (next) {
+                          trackViewAllPlans();
+                        }
+                        return next;
+                      })
                     }
                   >
-                    <Ionicons
-                      name={showOtherPlans ? 'chevron-up' : 'chevron-down'}
-                      size={16}
-                      color="#0D4EFD"
-                    />
-                  </Animated.View>
-                </Pressable>
-                <View style={styles.seeOtherPlansLine} />
-              </View>
+                    <Text style={styles.seeOtherPlansText}>
+                      {showOtherPlans ? 'Show fewer plans' : 'See more Plans'}
+                    </Text>
+                    <Animated.View
+                      style={
+                        Platform.OS === 'web'
+                          ? ({
+                              marginLeft: 5,
+                              display: 'inline-flex',
+                              willChange: 'transform',
+                              animation: showOtherPlans
+                                ? 'none'
+                                : 'mayaChevronFloat 1.6s ease-in-out infinite',
+                            } as any)
+                          : {
+                              marginLeft: 5,
+                              transform: [{ translateY: showOtherPlans ? 0 : chevronBounce }],
+                            }
+                      }
+                    >
+                      <Ionicons
+                        name={showOtherPlans ? 'chevron-up' : 'chevron-down'}
+                        size={16}
+                        color="#0D4EFD"
+                      />
+                    </Animated.View>
+                  </Pressable>
+                  <View style={styles.seeOtherPlansLine} />
+                </View>
+              )}
             </View>
           )}
 
-          {/* ──────────── PRICING CARDS (Shown if not starter or if showOtherPlans is true) ──────────── */}
-          {(!isStarter || showOtherPlans) && (
+          {/* ──────────── PRICING CARDS (Shown if not starter or if showOtherPlans is true or trialing) ──────────── */}
+          {(!isStarter || showOtherPlans || isTrialing) && (
             <View
               style={[
                 styles.cardsRow,
@@ -1030,17 +1054,22 @@ export default function UpgradeScreen() {
             >
               {PLANS.map((plan) => {
                 const planWeight = TIER_ORDER[plan.id] ?? 0;
-                const isCurrentPlan = currentTier === plan.id;
-                const isUpgrade = planWeight > currentWeight;
-                const isDowngrade = planWeight < currentWeight;
+                const isCurrentPlan = !isTrialing && currentTier === plan.id;
+                const isTrialPlan = isTrialing && plan.id === 'pro';
+                const isUpgrade = isTrialing ? planWeight >= 2 : planWeight > currentWeight;
+                const isDowngrade = !isTrialing && planWeight < currentWeight;
 
                 let ctaText = plan.ctaLabel;
                 if (isCurrentPlan) {
                   ctaText = 'Active Plan';
+                } else if (isTrialPlan) {
+                  ctaText = 'Keep Pro Monthly';
                 } else if (isUpgrade && isPaidUser) {
                   ctaText = `Upgrade to ${plan.name}`;
                 } else if (isDowngrade) {
                   ctaText = `Downgrade to ${plan.name}`;
+                } else {
+                  ctaText = `Choose ${plan.name}`;
                 }
 
                 return (
@@ -1060,11 +1089,16 @@ export default function UpgradeScreen() {
                       isCurrentPlan && styles.cardCurrentPlan,
                     ]}
                   >
-                    {/* "Active Plan" or "Most Popular" badge */}
+                    {/* "Active Plan", "3-Day Trial Active", or "Most Popular" badge */}
                     {isCurrentPlan ? (
                       <View style={styles.activePlanBadge}>
                         <Ionicons name="checkmark-circle" size={13} color="#ffffff" style={{ marginRight: 4 }} />
                         <Text style={styles.activePlanBadgeText}>Active Plan</Text>
+                      </View>
+                    ) : isTrialPlan ? (
+                      <View style={[styles.activePlanBadge, styles.trialPlanBadge]}>
+                        <Ionicons name="gift" size={13} color="#ffffff" style={{ marginRight: 4 }} />
+                        <Text style={styles.activePlanBadgeText}>3-Day Trial Active</Text>
                       </View>
                     ) : plan.badgeLabel ? (
                       <View style={styles.popularBadge}>
@@ -1713,6 +1747,9 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     letterSpacing: 0.3,
   },
+  trialPlanBadge: {
+    backgroundColor: '#7C3AED',
+  },
 
   /* Plan header */
   cardHeader: {
@@ -2327,6 +2364,19 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'bold'),
     fontSize: 13.5,
     color: '#0D4EFD',
+  },
+  trialMonthlyDividerBadge: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: Radii.pill,
+    backgroundColor: '#F3E8FF',
+    borderWidth: 1,
+    borderColor: '#E9D5FF',
+  },
+  trialMonthlyDividerText: {
+    ...fontStyle('inter', 'semiBold'),
+    fontSize: 12.5,
+    color: '#7C3AED',
   },
 
   /* ── Frequently Asked Questions ── */

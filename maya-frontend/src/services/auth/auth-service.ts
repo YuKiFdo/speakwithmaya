@@ -342,6 +342,7 @@ class AuthService {
             isSubscriptionLocked: Boolean(data.profile.is_subscription_locked),
             isGracePeriodActive: Boolean(data.profile.is_grace_period_active),
             gracePeriodEndDate: data.profile.grace_period_end || null,
+            activePromoCode: data.profile.active_promo_code || null,
           };
           OnboardingStore.setAuthSession(token, user);
 

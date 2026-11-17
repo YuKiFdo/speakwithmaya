@@ -32,6 +32,7 @@ export interface UserSessionData {
   isSubscriptionLocked?: boolean;
   isGracePeriodActive?: boolean;
   gracePeriodEndDate?: string | null;
+  activePromoCode?: string | null;
 }
 
 export interface BaselineScores {

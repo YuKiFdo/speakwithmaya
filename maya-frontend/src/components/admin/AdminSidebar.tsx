@@ -48,8 +48,9 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     ],
   },
   {
-    group: 'PLATFORM SETTINGS',
+    group: 'SYSTEM & BROADCASTS',
     items: [
+      { id: 'app-maintenance', label: 'Maintenance & SMS Broadcast', icon: 'radio', route: '/admin/maintenance' },
       { id: 'app-settings', label: 'SMS & Gateway Settings', icon: 'settings', route: '/admin/settings' },
     ],
   },

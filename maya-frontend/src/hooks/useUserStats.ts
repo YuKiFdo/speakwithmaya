@@ -430,7 +430,7 @@ export function useUserStats(): UserStats {
       resetsInText,
       isTimeExpired,
       isPro,
-      isTrialing: user?.planStatus === 'trialing',
+      isTrialing: user?.planStatus === 'trialing' || (user?.planTier === 'pro' && Boolean(user?.activePromoCode)),
       planTier,
       planStatus: user?.planStatus || 'active',
       isTestAccount: user?.isTestAccount === true,

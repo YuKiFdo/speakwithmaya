@@ -7,6 +7,7 @@ import {
   IsIn,
   IsNumber,
   IsBoolean,
+  IsArray,
   Min,
   Max,
   ValidateNested,
@@ -660,6 +661,20 @@ export class UpdateCampaignStatusDto {
   @IsString()
   @IsIn(['active', 'scheduled', 'ended', 'draft'])
   status!: 'active' | 'scheduled' | 'ended' | 'draft';
+}
+
+export class BroadcastSmsDto {
+  @IsString()
+  @IsIn(['all', 'paid', 'nonpaid', 'specific'])
+  audience!: 'all' | 'paid' | 'nonpaid' | 'specific';
+
+  @IsString()
+  @IsNotEmpty()
+  message!: string;
+
+  @IsOptional()
+  @IsArray()
+  phoneNumbers?: string[];
 }
 
 
