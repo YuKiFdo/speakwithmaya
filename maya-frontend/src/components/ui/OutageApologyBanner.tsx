@@ -12,7 +12,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
-import { AppStorage } from '@/services/storage/storage-adapter';
 import { promotionsApi } from '@/services/promotions/promotions-api';
 import { authService } from '@/services/auth/auth-service';
 import { mayaAlert } from '@/components/ui/alert-modal';
@@ -25,8 +24,6 @@ export interface OutageApologyBannerProps {
   isInactive?: boolean;
   onPressAction?: () => void;
 }
-
-const STORAGE_DISMISSED_KEY = 'maya_outage_apology_modal_claimed_v2';
 
 export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
   userTier = 'starter',
@@ -73,18 +70,19 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
           }
         } catch {}
 
-        const claimed = await AppStorage.getItem(STORAGE_DISMISSED_KEY);
+        // Authoritative Database & Campaign Period check (No local storage reliance)
+        const eligibility = await promotionsApi.checkEligibility('outage-comeback-nov26');
         if (isMounted) {
-          setIsVisible(claimed !== 'true');
+          setIsVisible(Boolean(eligibility?.available));
         }
       } catch {
-        if (isMounted) setIsVisible(true);
+        if (isMounted) setIsVisible(false);
       }
     })();
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isInactive]);
 
   const handleAction = async () => {
     if (onPressAction) {
@@ -95,7 +93,6 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
     try {
       setIsClaiming(true);
       const res = await promotionsApi.claimPromotion('outage-comeback-nov26');
-      await AppStorage.setItem(STORAGE_DISMISSED_KEY, 'true');
       setIsVisible(false);
 
       // Refresh balance so header shows updated minutes immediately
@@ -109,7 +106,6 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
       }
       router.push('/(tabs)/roadmap');
     } catch (err: any) {
-      await AppStorage.setItem(STORAGE_DISMISSED_KEY, 'true');
       setIsVisible(false);
       router.push('/(tabs)/roadmap');
     } finally {

@@ -4103,6 +4103,84 @@ export class AuthService {
   }
 
   /**
+   * Check if user is eligible to claim a promotion based on database claims and campaign period.
+   * Completely avoids client-side local storage reliance.
+   */
+  async checkPromotionEligibility(userId: string, promoCode: string) {
+    const normalizedPromo = (promoCode || 'outage-comeback-nov26').trim().toLowerCase();
+
+    const profile = await this.getProfile(userId);
+    if (!profile) {
+      return { available: false, reason: 'user_not_found' };
+    }
+
+    // Inactive students cannot claim outage compensation
+    if (
+      profile.plan_status === 'canceled' ||
+      profile.plan_status === 'expired' ||
+      profile.plan_status === 'past_due'
+    ) {
+      return { available: false, reason: 'user_inactive' };
+    }
+
+    // Check if user has already claimed this promotion in DB
+    const { data: claims } = await this.supabase
+      .from('promotion_claims')
+      .select('id, claimed_at, status')
+      .eq('user_id', userId)
+      .eq('promo_code', normalizedPromo);
+
+    if (claims && claims.length > 0) {
+      return { available: false, alreadyClaimed: true, reason: 'already_claimed' };
+    }
+
+    // Check onboarding_events backup
+    const { data: eventClaims } = await this.supabase
+      .from('onboarding_events')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('event_name', 'promo_claim')
+      .eq('step', normalizedPromo);
+
+    if (eventClaims && eventClaims.length > 0) {
+      return { available: false, alreadyClaimed: true, reason: 'already_claimed' };
+    }
+
+    // Check campaign validity window from DB or local seed
+    let campaign: any = null;
+    try {
+      const { data: dbCampaign } = await this.supabase
+        .from('promotion_campaigns')
+        .select('*')
+        .eq('id', normalizedPromo)
+        .maybeSingle();
+      if (dbCampaign) campaign = dbCampaign;
+    } catch {}
+
+    if (!campaign) {
+      campaign = this.localCampaigns.find((c) => c.id === normalizedPromo);
+    }
+
+    if (campaign) {
+      if (campaign.status && campaign.status !== 'active') {
+        return { available: false, reason: 'campaign_inactive' };
+      }
+      if (campaign.end_date && new Date(campaign.end_date).getTime() < Date.now()) {
+        return { available: false, reason: 'campaign_expired' };
+      }
+      if (campaign.endDate && new Date(campaign.endDate).getTime() < Date.now()) {
+        return { available: false, reason: 'campaign_expired' };
+      }
+    }
+
+    return {
+      available: true,
+      alreadyClaimed: false,
+      campaign: campaign || { id: normalizedPromo, title: 'Outage Recovery Campaign' },
+    };
+  }
+
+  /**
    * Student: Claim apology or comeback promo (3-Day Pro Pass for starters, +100 bonus minutes for paid users)
    * Extensible for future holiday/marketing promotions.
    */

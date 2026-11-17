@@ -98,6 +98,28 @@ class PromotionsApi {
   }
 
   /**
+   * Check if user is eligible to claim a promotion (verifies DB claim history and campaign period)
+   */
+  async checkEligibility(promoCode: string = 'outage-comeback-nov26'): Promise<{
+    available: boolean;
+    alreadyClaimed?: boolean;
+    campaign?: any;
+    reason?: string;
+  }> {
+    try {
+      const res = await fetch(`${this.baseUrl}/v1/promotions/check/${encodeURIComponent(promoCode)}`, {
+        headers: this.getUserHeaders(),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+      return { available: false, reason: 'error_response' };
+    } catch {
+      return { available: false, reason: 'network_error' };
+    }
+  }
+
+  /**
    * Claim comeback/apology promo
    */
   async claimPromotion(promoCode: string = 'outage-comeback-nov26') {

@@ -370,6 +370,18 @@ export class AuthController {
   }
 
   /**
+   * Student: Check if promotion is available to claim (verifies database claim record and campaign validity)
+   */
+  @Get('promotions/check/:promoCode')
+  @UseGuards(AuthGuard)
+  async checkPromotionEligibility(
+    @GetUser('id') userId: string,
+    @Param('promoCode') promoCode: string,
+  ) {
+    return this.authService.checkPromotionEligibility(userId, promoCode);
+  }
+
+  /**
    * Student: Claim comeback/apology promotion
    */
   @Post('promotions/claim')
