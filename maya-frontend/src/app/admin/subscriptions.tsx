@@ -24,6 +24,8 @@ import {
   TopUpPackageStats,
 } from '@/services/payment/payhere-types';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
+import { ShowMoreButton } from '@/components/admin/ShowMoreButton';
+import { useShowMore } from '@/hooks/useShowMore';
 import { mayaAlert } from '@/components/ui/alert-modal';
 
 type AdminViewTab = 'subscriptions' | 'telco' | 'renewals' | 'topups';
@@ -262,6 +264,12 @@ export default function AdminSubscriptionsScreen() {
       return true;
     });
   }, [orders, searchQuery]);
+
+  // Client-side "show more" paging (resets when search/filters change)
+  const subsPaged = useShowMore(filteredSubscriptions, `${selectedStatus}|${selectedTier}|${searchQuery}`);
+  const telcoPaged = useShowMore(filteredTelcoSubscriptions, `${selectedTelcoStatus}|${searchQuery}`);
+  const renewalsPaged = useShowMore(renewalOrders, searchQuery);
+  const topUpsPaged = useShowMore(topUpOrders, searchQuery);
 
   const handleOpenPaymentsModal = async (target: {
     id: string;
@@ -896,7 +904,8 @@ export default function AdminSubscriptionsScreen() {
                     </Text>
                   </View>
                 ) : (
-                  filteredSubscriptions.map((sub, index) => {
+                  <>
+                    {subsPaged.visible.map((sub, index) => {
                     const isPastDue = sub.status === 'PAST_DUE';
                     const isActive = sub.status === 'ACTIVE';
                     const isCancelled = sub.status === 'CANCELLED';
@@ -1104,7 +1113,9 @@ export default function AdminSubscriptionsScreen() {
                         </View>
                       </View>
                     );
-                  })
+                  })}
+                    <ShowMoreButton shown={subsPaged.visible.length} total={subsPaged.total} nextBatch={subsPaged.nextBatch} onPress={subsPaged.showMore} />
+                  </>
                 )}
                   </View>
                 </ScrollView>
@@ -1141,7 +1152,8 @@ export default function AdminSubscriptionsScreen() {
                         </Text>
                       </View>
                     ) : (
-                      filteredTelcoSubscriptions.map((tSub, index) => {
+                      <>
+                        {telcoPaged.visible.map((tSub, index) => {
                         const isActive = tSub.status === 'ACTIVE';
                         const isUpgraded = tSub.status === 'UPGRADED';
                         const isActionLoading = actionLoadingId === tSub.id;
@@ -1335,7 +1347,9 @@ export default function AdminSubscriptionsScreen() {
                             </View>
                           </View>
                         );
-                      })
+                      })}
+                        <ShowMoreButton shown={telcoPaged.visible.length} total={telcoPaged.total} nextBatch={telcoPaged.nextBatch} onPress={telcoPaged.showMore} />
+                      </>
                     )}
                   </View>
                 </ScrollView>
@@ -1370,7 +1384,8 @@ export default function AdminSubscriptionsScreen() {
                     </Text>
                   </View>
                 ) : (
-                  renewalOrders.map((ord, index) => {
+                  <>
+                    {renewalsPaged.visible.map((ord, index) => {
                     const isSuccess = ord.status === 'completed';
                     const isFailed = ord.status === 'failed';
                     const cardNum = ord.raw_payload?.card_no || ord.raw_payload?.card_masked || '';
@@ -1551,7 +1566,9 @@ export default function AdminSubscriptionsScreen() {
                         </View>
                       </View>
                     );
-                  })
+                  })}
+                    <ShowMoreButton shown={renewalsPaged.visible.length} total={renewalsPaged.total} nextBatch={renewalsPaged.nextBatch} onPress={renewalsPaged.showMore} />
+                  </>
                 )}
                   </View>
                 </ScrollView>
@@ -1587,7 +1604,8 @@ export default function AdminSubscriptionsScreen() {
                     </Text>
                   </View>
                 ) : (
-                  topUpOrders.map((ord, index) => {
+                  <>
+                    {topUpsPaged.visible.map((ord, index) => {
                     const isSuccess = ord.status === 'completed';
                     const pkgId = ord.add_on_package_id || 'Top-Up';
                     const pkgBadgeColor =
@@ -1734,7 +1752,9 @@ export default function AdminSubscriptionsScreen() {
                         </View>
                       </View>
                     );
-                  })
+                  })}
+                    <ShowMoreButton shown={topUpsPaged.visible.length} total={topUpsPaged.total} nextBatch={topUpsPaged.nextBatch} onPress={topUpsPaged.showMore} />
+                  </>
                 )}
                   </View>
                 </ScrollView>

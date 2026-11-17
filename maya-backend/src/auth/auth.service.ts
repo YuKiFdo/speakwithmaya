@@ -3833,7 +3833,8 @@ export class AuthService {
         .from('user_complaints')
         .select('*')
         .order('created_at', { ascending: false }),
-      this.supabase.from('profiles').select('*'),
+      // Only the fields used for display; select('*') pulled every column (incl. the large onboarding_flow) for every user
+      this.supabase.from('profiles').select('id, display_name, phone_number, email, avatar_url, level, plan_tier'),
     ]);
 
     if (error) {
@@ -3923,7 +3924,8 @@ export class AuthService {
         .select('id, user_id, topic, status, duration_seconds, overall_score, user_rating, user_feedback, summary, created_at, start_time, roadmap_level_id')
         .not('user_rating', 'is', null)
         .order('created_at', { ascending: false }),
-      this.supabase.from('profiles').select('*'),
+      // Only the fields used for display; select('*') pulled every column (incl. the large onboarding_flow) for every user
+      this.supabase.from('profiles').select('id, display_name, phone_number, email, avatar_url, level, plan_tier'),
     ]);
 
     if (error) {

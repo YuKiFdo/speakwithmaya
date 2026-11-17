@@ -125,6 +125,31 @@ export function isIntroSessionTopic(topic?: string | null, scenarioTitle?: strin
 }
 
 /**
+ * Lightweight session list for periodic stats sync (durations + roadmap ids only).
+ * Avoids downloading every transcript/correction on each 60 s / focus refresh.
+ * Falls back to the full list if the backend does not support ?view=summary yet.
+ */
+export async function fetchPracticeSessionSummaries(): Promise<
+  Array<{ id: string; duration_seconds: number; roadmap_level_id?: string | null; roadmapLevelId?: string | null; status?: string; topic?: string }>
+> {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+    return [];
+  }
+  if (!OnboardingStore.getState().accessToken) {
+    return [];
+  }
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${getBackendBaseUrl()}/v1/sessions?view=summary`, { method: 'GET', headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) return data;
+    }
+  } catch {}
+  return fetchAllPracticeSessions();
+}
+
+/**
  * Fetches practice sessions directly from Supabase / Backend API (no localStorage).
  */
 export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]> {

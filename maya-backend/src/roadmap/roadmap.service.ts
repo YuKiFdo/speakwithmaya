@@ -98,12 +98,18 @@ export class RoadmapService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureStorageBucket();
-    // Eagerly prewarm roadmap audio in background on server start
+    // Prewarm roadmap audio in background after boot. Disabled with AUDIO_WARMUP=0.
+    // Delayed 60 s so it never competes with startup and the first wave of requests
+    // after a deploy/restart (each restart previously re-synthesized every level).
+    if (process.env.AUDIO_WARMUP === '0') {
+      this.logger.log('[Audio Warmup] Disabled via AUDIO_WARMUP=0');
+      return;
+    }
     setTimeout(() => {
       this.warmupAllLevelsAudio().catch((err) => {
         this.logger.warn(`[Audio Warmup] Failed during initial warmup: ${err?.message}`);
       });
-    }, 2500);
+    }, Number(process.env.AUDIO_WARMUP_DELAY_MS) || 60_000).unref();
   }
 
   private async ensureStorageBucket(): Promise<void> {
@@ -243,9 +249,17 @@ export class RoadmapService implements OnModuleInit {
           // 3. Otherwise synthesize fresh
           if (!this.inFlightSyntheses.has(cacheKey)) {
             this.logger.log(`[Audio Warmup] Pre-synthesizing ${lvl.title} (${lang})...`);
+            let rateLimited = false;
             await this.getBriefingAudio(lvl.id, lang).catch((e) => {
               this.logger.warn(`[Audio Warmup] Error pre-synthesizing ${lvl.id} (${lang}): ${e?.message}`);
+              rateLimited = /rate limit|429|quota/i.test(String(e?.message || ''));
             });
+            if (rateLimited) {
+              // Stop instead of hammering the TTS quota for every remaining level;
+              // remaining levels are synthesized on demand when first requested.
+              this.logger.warn('[Audio Warmup] TTS rate-limited, stopping warmup for this boot.');
+              return;
+            }
           }
         }
       }

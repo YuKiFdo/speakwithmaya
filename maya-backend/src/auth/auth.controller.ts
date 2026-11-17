@@ -18,6 +18,7 @@ import { AuthService, type UserProfileData } from './auth.service.js';
 import { AuthGuard } from './guards/auth.guard.js';
 import { AdminGuard } from './guards/admin.guard.js';
 import { GetUser } from './decorators/get-user.decorator.js';
+import { parsePageRequest, paginateArray } from '../common/pagination.js';
 import {
   SendOtpDto,
   VerifyOtpDto,
@@ -316,8 +317,12 @@ export class AuthController {
    */
   @Get('admin/complaints')
   @UseGuards(AdminGuard)
-  async getAdminComplaints() {
-    return this.authService.getAdminComplaints();
+  async getAdminComplaints(@Query('page') page?: string, @Query('limit') limit?: string) {
+    const result = await this.authService.getAdminComplaints();
+    const req = parsePageRequest(page, limit);
+    if (!req) return result;
+    const { items, pagination } = paginateArray(result.complaints, req);
+    return { ...result, complaints: items, pagination };
   }
 
   /**
@@ -347,8 +352,12 @@ export class AuthController {
    */
   @Get('admin/session-reviews')
   @UseGuards(AdminGuard)
-  async getAdminSessionReviews() {
-    return this.authService.getAdminSessionReviews();
+  async getAdminSessionReviews(@Query('page') page?: string, @Query('limit') limit?: string) {
+    const result = await this.authService.getAdminSessionReviews();
+    const req = parsePageRequest(page, limit);
+    if (!req) return result;
+    const { items, pagination } = paginateArray(result.reviews, req);
+    return { ...result, reviews: items, pagination };
   }
 
   /**

@@ -103,7 +103,12 @@ export class SessionsController {
 
   @Get('sessions')
   @UseGuards(AuthGuard)
-  async getSessions(@GetUser('id') userId: string) {
+  async getSessions(@GetUser('id') userId: string, @Query('view') view?: string) {
+    // ?view=summary: lightweight list for periodic stats sync (no transcripts,
+    // corrections, storage listing or roadmap lookups)
+    if (view === 'summary') {
+      return this.sessionsService.getUserSessionSummaries(userId);
+    }
     return this.sessionsService.getUserSessions(userId);
   }
 
