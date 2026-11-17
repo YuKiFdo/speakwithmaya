@@ -153,8 +153,8 @@ export class PayHereController {
    */
   @Get('admin/subscriptions')
   @UseGuards(AdminGuard)
-  async getAdminSubscriptions() {
-    return this.payHereService.getAdminSubscriptions();
+  async getAdminSubscriptions(@Query('include') include?: string) {
+    return this.payHereService.getAdminSubscriptions(include);
   }
 
   /**

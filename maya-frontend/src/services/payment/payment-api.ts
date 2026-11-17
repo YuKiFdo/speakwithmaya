@@ -4,6 +4,7 @@ import {
   PayHereCheckoutParams,
   SubscriptionRecord,
   AdminSubscriptionsResponse,
+  AdminSubscriptionsList,
 } from './payhere-types';
 import { getBackendBaseUrl } from '@/utils/backend-url';
 
@@ -199,8 +200,10 @@ class PaymentApiService {
   /**
    * Admin: List all subscribers and overall revenue stats.
    */
-  async getAdminSubscriptions(): Promise<AdminSubscriptionsResponse> {
-    const res = await fetch(`${this.baseUrl}/v1/admin/subscriptions`, {
+  async getAdminSubscriptions(include?: AdminSubscriptionsList[]): Promise<AdminSubscriptionsResponse> {
+    // `include` limits which lists are returned (stats + counts always come back)
+    const qs = include && include.length > 0 ? `?include=${include.join(',')}` : '';
+    const res = await fetch(`${this.baseUrl}/v1/admin/subscriptions${qs}`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });

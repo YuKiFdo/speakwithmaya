@@ -2009,7 +2009,15 @@ export class PayHereService {
    * Admin: Queries all subscribers from database with profile metadata and calculates overview metrics,
    * including recurring renewal metrics, talk-time top-up telemetry, and Telco carrier-billed subscribers & revenue.
    */
-  async getAdminSubscriptions() {
+  async getAdminSubscriptions(includeParam?: string) {
+    const include = includeParam
+      ? new Set(
+          includeParam
+            .split(',')
+            .map((s) => s.trim().toLowerCase())
+            .filter((s) => s === 'subscriptions' || s === 'telco' || s === 'orders'),
+        )
+      : null;
     const [
       { data: subs, error: subErr },
       { data: orders },
@@ -2031,9 +2039,11 @@ export class PayHereService {
           profile:profiles(id, display_name, phone_number, level)
         `)
         .order('created_at', { ascending: false }),
+      // Only the columns used to build the telco subscriber list (select('*') also pulled
+      // the large onboarding_flow JSON for every user on each admin page load)
       this.supabase
         .from('profiles')
-        .select('*')
+        .select('id, created_at, updated_at, display_name, phone_number, level, plan_tier, plan_status, billing_cycle, minutes_balance, monthly_minutes_allowance, telco_subscriber_id, telco_provider')
         .order('created_at', { ascending: false }),
       this.supabase
         .from('phone_verifications')
@@ -2297,9 +2307,19 @@ export class PayHereService {
         renewalsFailed: failedRenewals.length,
         renewalsRevenueLkr: renewalsRevenue,
       },
-      subscriptions: items,
-      telcoSubscriptions,
-      orders: allOrders,
+      // Tab badge counts, always present so the admin UI can show them without the lists
+      counts: {
+        subscriptions: items.length,
+        telco: telcoSubscriptions.length,
+        renewals: allOrders.filter((o: any) => o.order_type === 'subscription_renewal').length,
+        topups: allOrders.filter((o: any) => o.order_type === 'add_on_topup').length,
+      },
+      // ?include=subscriptions|telco|orders (comma-separated) returns only those lists;
+      // without it every list is returned as before (backward compatible).
+      subscriptions: !include || include.has('subscriptions') ? items : [],
+      telcoSubscriptions: !include || include.has('telco') ? telcoSubscriptions : [],
+      orders: !include || include.has('orders') ? allOrders : [],
+      included: include ? [...include] : ['subscriptions', 'telco', 'orders'],
     };
   }
 

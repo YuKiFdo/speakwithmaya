@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,7 @@ import {
   TelcoSubscriptionRecord,
   AdminOrderRecord,
   TopUpPackageStats,
+  AdminSubscriptionsList,
 } from '@/services/payment/payhere-types';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
 import { ShowMoreButton } from '@/components/admin/ShowMoreButton';
@@ -29,6 +30,10 @@ import { useShowMore } from '@/hooks/useShowMore';
 import { mayaAlert } from '@/components/ui/alert-modal';
 
 type AdminViewTab = 'subscriptions' | 'telco' | 'renewals' | 'topups';
+
+/** Which backend list a tab needs (renewals and top-ups both come from orders). */
+const listForTab = (tab: AdminViewTab): AdminSubscriptionsList =>
+  tab === 'subscriptions' ? 'subscriptions' : tab === 'telco' ? 'telco' : 'orders';
 
 export default function AdminSubscriptionsScreen() {
   const { isPhone } = useBreakpoint();
@@ -39,6 +44,17 @@ export default function AdminSubscriptionsScreen() {
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
   const [telcoSubscriptions, setTelcoSubscriptions] = useState<TelcoSubscriptionRecord[]>([]);
   const [orders, setOrders] = useState<AdminOrderRecord[]>([]);
+  // Lazy tab loading: only the active tab's list is fetched; other tabs show counts until opened
+  const [tabCounts, setTabCounts] = useState<{ subscriptions: number; telco: number; renewals: number; topups: number } | null>(null);
+  const [loadedLists, setLoadedLists] = useState<Record<AdminSubscriptionsList, boolean>>({
+    subscriptions: false,
+    telco: false,
+    orders: false,
+  });
+  const activeTabRef = useRef<AdminViewTab>('subscriptions');
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
   const [telcoRateInput, setTelcoRateInput] = useState('12');
   const [isSavingTelcoRate, setIsSavingTelcoRate] = useState(false);
   const [selectedTelcoStatus, setSelectedTelcoStatus] = useState<'ALL' | 'ACTIVE' | 'UPGRADED' | 'CANCELLED'>('ALL');
@@ -92,13 +108,30 @@ export default function AdminSubscriptionsScreen() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [isReconciling, setIsReconciling] = useState(false);
 
-  const loadData = async () => {
+  // Loads stats + counts and ONLY the list for `list` (defaults to the active tab).
+  // After an action, other tabs' lists are marked stale and refetched when opened.
+  const loadData = async (list: AdminSubscriptionsList = listForTab(activeTabRef.current)) => {
     setIsLoading(true);
     try {
-      const res = await paymentApi.getAdminSubscriptions();
-      setSubscriptions(res.subscriptions || []);
-      setTelcoSubscriptions(res.telcoSubscriptions || []);
-      setOrders(res.orders || []);
+      const res = await paymentApi.getAdminSubscriptions([list]);
+      const included = res.included;
+      if (!included) {
+        // Older backend without ?include support: it returned every list
+        setSubscriptions(res.subscriptions || []);
+        setTelcoSubscriptions(res.telcoSubscriptions || []);
+        setOrders(res.orders || []);
+        setLoadedLists({ subscriptions: true, telco: true, orders: true });
+      } else {
+        if (included.includes('subscriptions')) setSubscriptions(res.subscriptions || []);
+        if (included.includes('telco')) setTelcoSubscriptions(res.telcoSubscriptions || []);
+        if (included.includes('orders')) setOrders(res.orders || []);
+        setLoadedLists({
+          subscriptions: included.includes('subscriptions'),
+          telco: included.includes('telco'),
+          orders: included.includes('orders'),
+        });
+      }
+      if (res.counts) setTabCounts(res.counts);
       if (res.stats) {
         const rateLkr = res.stats.telcoDailyPriceLkr || 12;
         setTelcoRateInput(String(rateLkr));
@@ -138,9 +171,14 @@ export default function AdminSubscriptionsScreen() {
     }
   };
 
+  // Fetch the active tab's list on mount and the first time each tab is opened
   useEffect(() => {
-    loadData();
-  }, []);
+    const list = listForTab(activeTab);
+    if (!loadedLists[list]) {
+      loadData(list);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Filtered Subscriptions
   const filteredSubscriptions = useMemo(() => {
@@ -486,7 +524,7 @@ export default function AdminSubscriptionsScreen() {
                     activeTab === 'subscriptions' && styles.tabSelectorItemTextActive,
                   ]}
                 >
-                  Card Subscriptions ({subscriptions.length})
+                  Card Subscriptions ({loadedLists.subscriptions || !tabCounts ? subscriptions.length : tabCounts.subscriptions})
                 </Text>
               </Pressable>
 
@@ -505,7 +543,7 @@ export default function AdminSubscriptionsScreen() {
                     activeTab === 'telco' && styles.tabSelectorItemTextActive,
                   ]}
                 >
-                  Telco Subscribers ({telcoSubscriptions.length})
+                  Telco Subscribers ({loadedLists.telco || !tabCounts ? telcoSubscriptions.length : tabCounts.telco})
                 </Text>
               </Pressable>
 
@@ -524,7 +562,7 @@ export default function AdminSubscriptionsScreen() {
                     activeTab === 'renewals' && styles.tabSelectorItemTextActive,
                   ]}
                 >
-                  Renewal Run History ({renewalOrders.length})
+                  Renewal Run History ({loadedLists.orders || !tabCounts ? renewalOrders.length : tabCounts.renewals})
                 </Text>
               </Pressable>
 
@@ -543,7 +581,7 @@ export default function AdminSubscriptionsScreen() {
                     activeTab === 'topups' && styles.tabSelectorItemTextActive,
                   ]}
                 >
-                  Extra Minutes Top-Ups ({topUpOrders.length})
+                  Extra Minutes Top-Ups ({loadedLists.orders || !tabCounts ? topUpOrders.length : tabCounts.topups})
                 </Text>
               </Pressable>
             </View>
@@ -866,7 +904,7 @@ export default function AdminSubscriptionsScreen() {
                 {/* Refresh Button */}
                 <Pressable
                   style={({ pressed }) => [styles.refreshButton, pressed && { opacity: 0.7 }]}
-                  onPress={loadData}
+                  onPress={() => loadData()}
                 >
                   <Feather name="rotate-cw" size={14} color="#0d9488" style={{ marginRight: 6 }} />
                   <Text style={styles.refreshButtonText}>Refresh</Text>
