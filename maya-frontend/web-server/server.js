@@ -239,6 +239,15 @@ const server = http.createServer((req, res) => {
     pathname = pathname.replace(/\/+$/, '');
   }
 
+  // Health check endpoint for Cloudflare / monitoring
+  if (pathname === '/health' || pathname === '/healthz') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+    });
+    return res.end(JSON.stringify({ status: 'ok', app: 'maya-frontend', uptime: Math.round(process.uptime()) }));
+  }
+
   if (pathname === '/') {
     pathname = '/index.html';
   }

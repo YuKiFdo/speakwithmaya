@@ -10,7 +10,16 @@ on:
 
 jobs:
   deploy:
+    name: Deploy Backend (${{ matrix.target.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # Ensure deployment to backup proceeds even if primary is offline
+      matrix:
+        target:
+          - id: azure
+            name: 'Azure Primary'
+          - id: ovh
+            name: 'OVH Backup'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,22 +37,52 @@ jobs:
           npm ci --ignore-scripts
           npm run build
 
-      - name: Deploy to Ubuntu VM
+      - name: Deploy to ${{ matrix.target.name }}
         env:
-          SSH_KEY: ${{ secrets.VM_SSH_KEY }}
-          VM_IP: ${{ secrets.VM_IP || '20.198.240.185' }}
-          VM_USER: ${{ secrets.VM_USER || 'speakwithmaya' }}
+          TARGET_ID: ${{ matrix.target.id }}
+          VM_IP: ${{ matrix.target.id == 'azure' && (secrets.VM_IP || '20.198.240.185') || (secrets.BACKUP_VM_IP || '139.99.192.179') }}
+          VM_USER: ${{ matrix.target.id == 'azure' && (secrets.VM_USER || 'speakwithmaya') || (secrets.BACKUP_VM_USER || secrets.VM_USER || 'speakwithmaya') }}
+          SSH_KEY: ${{ matrix.target.id == 'azure' && secrets.VM_SSH_KEY || (secrets.BACKUP_VM_SSH_KEY || secrets.VM_SSH_KEY) }}
+          VM_PASSWORD: ${{ matrix.target.id == 'ovh' && secrets.BACKUP_VM_PASSWORD || '' }}
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H "$VM_IP" >> ~/.ssh/known_hosts
+          touch ~/.ssh/known_hosts
+
+          USE_SSHPASS=false
+          if [ -n "$SSH_KEY" ]; then
+            echo "$SSH_KEY" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+          elif [ -n "$VM_PASSWORD" ]; then
+            sudo apt-get update && sudo apt-get install -y sshpass
+            USE_SSHPASS=true
+          else
+            echo "ERROR: Neither SSH_KEY nor VM_PASSWORD provided for $TARGET_ID"
+            exit 1
+          fi
+
+          ssh-keyscan -H "$VM_IP" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          run_ssh() {
+            if [ "$USE_SSHPASS" = true ]; then
+              sshpass -p "$VM_PASSWORD" ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
+            else
+              ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
+            fi
+          }
+
+          run_rsync() {
+            if [ "$USE_SSHPASS" = true ]; then
+              rsync -avz --delete -e "sshpass -p '$VM_PASSWORD' ssh -o StrictHostKeyChecking=no" "$@"
+            else
+              rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" "$@"
+            fi
+          }
 
           # Ensure app directory exists
-          ssh "$VM_USER@$VM_IP" "mkdir -p /home/$VM_USER/apps/maya-backend"
+          run_ssh "mkdir -p /home/$VM_USER/apps/maya-backend"
 
           # Sync backend built artifacts and package manifests to VM
-          rsync -avz --delete \
+          run_rsync \
             --exclude '.git' \
             --exclude 'node_modules' \
             --exclude 'src' \
@@ -52,7 +91,7 @@ jobs:
             ./maya-backend/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-backend/"
 
           # Install espeak-ng (for Piper TTS phonemization), production dependencies, and start/restart PM2
-          ssh "$VM_USER@$VM_IP" "bash -l -c '
+          run_ssh "bash -l -c '
             if ! command -v espeak-ng >/dev/null 2>&1; then
               sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends espeak-ng || true
             fi

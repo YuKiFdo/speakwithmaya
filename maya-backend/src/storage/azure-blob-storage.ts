@@ -193,13 +193,25 @@ export class AzureStorageAdapter {
   }
 }
 
+import { attachR2StorageIfConfigured } from './r2-storage.js';
+
 /**
- * If AZURE_STORAGE_CONNECTION_STRING is present, replaces `supabaseClient.storage`
- * with AzureStorageAdapter so all audio uploads/downloads use Azure Blob Storage.
+ * Attaches the appropriate cloud storage adapter to `supabaseClient.storage`:
+ * 1. Cloudflare R2 (if R2_ACCESS_KEY_ID is configured)
+ * 2. Azure Blob Storage (if AZURE_STORAGE_CONNECTION_STRING is configured)
+ * 3. Native Supabase Storage (default fallback)
  */
 export function attachAzureStorageIfConfigured(supabaseClient: any): void {
+  if (!supabaseClient) return;
+
+  // 1. Prioritize Cloudflare R2 if configured (multi-cloud & zero-egress)
+  if (attachR2StorageIfConfigured(supabaseClient)) {
+    return;
+  }
+
+  // 2. Fall back to Azure Blob Storage if configured
   const connStr = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  if (!connStr || !supabaseClient) return;
+  if (!connStr) return;
 
   try {
     const adapter = new AzureStorageAdapter(connStr);

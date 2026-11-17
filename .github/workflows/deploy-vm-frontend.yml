@@ -10,7 +10,16 @@ on:
 
 jobs:
   deploy:
+    name: Deploy Frontend (${{ matrix.target.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # Ensure deployment to backup proceeds even if primary is offline
+      matrix:
+        target:
+          - id: azure
+            name: 'Azure Primary'
+          - id: ovh
+            name: 'OVH Backup'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -37,33 +46,63 @@ jobs:
           npx expo export --platform web
           node ./scripts/precompress-dist.js
 
-      - name: Deploy to Ubuntu VM
+      - name: Deploy to ${{ matrix.target.name }}
         env:
-          SSH_KEY: ${{ secrets.VM_SSH_KEY }}
-          VM_IP: ${{ secrets.VM_IP || '20.198.240.185' }}
-          VM_USER: ${{ secrets.VM_USER || 'speakwithmaya' }}
+          TARGET_ID: ${{ matrix.target.id }}
+          VM_IP: ${{ matrix.target.id == 'azure' && (secrets.VM_IP || '20.198.240.185') || (secrets.BACKUP_VM_IP || '139.99.192.179') }}
+          VM_USER: ${{ matrix.target.id == 'azure' && (secrets.VM_USER || 'speakwithmaya') || (secrets.BACKUP_VM_USER || secrets.VM_USER || 'speakwithmaya') }}
+          SSH_KEY: ${{ matrix.target.id == 'azure' && secrets.VM_SSH_KEY || (secrets.BACKUP_VM_SSH_KEY || secrets.VM_SSH_KEY) }}
+          VM_PASSWORD: ${{ matrix.target.id == 'ovh' && secrets.BACKUP_VM_PASSWORD || '' }}
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H "$VM_IP" >> ~/.ssh/known_hosts
+          touch ~/.ssh/known_hosts
+
+          USE_SSHPASS=false
+          if [ -n "$SSH_KEY" ]; then
+            echo "$SSH_KEY" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+          elif [ -n "$VM_PASSWORD" ]; then
+            sudo apt-get update && sudo apt-get install -y sshpass
+            USE_SSHPASS=true
+          else
+            echo "ERROR: Neither SSH_KEY nor VM_PASSWORD provided for $TARGET_ID"
+            exit 1
+          fi
+
+          ssh-keyscan -H "$VM_IP" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          run_ssh() {
+            if [ "$USE_SSHPASS" = true ]; then
+              sshpass -p "$VM_PASSWORD" ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
+            else
+              ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
+            fi
+          }
+
+          run_rsync() {
+            if [ "$USE_SSHPASS" = true ]; then
+              rsync -avz -e "sshpass -p '$VM_PASSWORD' ssh -o StrictHostKeyChecking=no" "$@"
+            else
+              rsync -avz -e "ssh -o StrictHostKeyChecking=no" "$@"
+            fi
+          }
 
           # Ensure app directories exist
-          ssh "$VM_USER@$VM_IP" "mkdir -p /home/$VM_USER/apps/maya-frontend/dist /home/$VM_USER/apps/maya-frontend/web-server"
+          run_ssh "mkdir -p /home/$VM_USER/apps/maya-frontend/dist /home/$VM_USER/apps/maya-frontend/web-server"
 
           # Sync exported dist directory while preserving hashed _expo/static & assets from recent deploys
           # so in-flight tabs never hit 404 on old bundle hashes, then prune bundles older than 7 days.
-          rsync -avz --delete --exclude='_expo/' --exclude='assets/' ./maya-frontend/dist/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/"
-          rsync -avz ./maya-frontend/dist/_expo/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/_expo/"
-          rsync -avz ./maya-frontend/dist/assets/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/assets/"
-          ssh "$VM_USER@$VM_IP" "find /home/$VM_USER/apps/maya-frontend/dist/_expo /home/$VM_USER/apps/maya-frontend/dist/assets -type f -mtime +7 -delete || true"
-          rsync -avz --delete ./maya-frontend/web-server/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/web-server/"
-          rsync -avz ./maya-frontend/ecosystem.config.cjs "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/"
+          run_rsync --delete --exclude='_expo/' --exclude='assets/' ./maya-frontend/dist/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/"
+          run_rsync ./maya-frontend/dist/_expo/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/_expo/"
+          run_rsync ./maya-frontend/dist/assets/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/assets/"
+          run_ssh "find /home/$VM_USER/apps/maya-frontend/dist/_expo /home/$VM_USER/apps/maya-frontend/dist/assets -type f -mtime +7 -delete 2>/dev/null || true"
+          run_rsync --delete ./maya-frontend/web-server/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/web-server/"
+          run_rsync ./maya-frontend/ecosystem.config.cjs "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/"
 
-          # Recreate PM2 process so it switches cleanly from built-in `pm2 serve` to `./web-server/server.js`
-          ssh "$VM_USER@$VM_IP" "bash -l -c '
+          # Start or reload PM2 process
+          run_ssh "bash -l -c '
             cd /home/$VM_USER/apps/maya-frontend
-            pm2 delete maya-frontend || true
+            pm2 delete maya-frontend 2>/dev/null || true
             pm2 start ecosystem.config.cjs --update-env
             pm2 save
           '"

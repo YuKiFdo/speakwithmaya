@@ -66,6 +66,7 @@ export class RoadmapService implements OnModuleInit {
   private readonly audioCacheDir = path.resolve(process.cwd(), 'assets', 'audio-cache');
 
   private get storageProviderLabel(): string {
+    if (process.env.R2_ACCESS_KEY_ID) return 'Cloudflare R2';
     return process.env.AZURE_STORAGE_CONNECTION_STRING ? 'Azure Blob Storage' : 'Supabase Storage';
   }
 

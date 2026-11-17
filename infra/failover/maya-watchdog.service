@@ -1,0 +1,17 @@
+[Unit]
+Description=Maya AI Cloudflare Failover Watchdog Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=speakwithmaya
+WorkingDirectory=/home/speakwithmaya/failover-watchdog
+ExecStart=/bin/bash /home/speakwithmaya/failover-watchdog/cloudflare-watchdog.sh
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/speakwithmaya/failover-watchdog/watchdog.log
+StandardError=append:/home/speakwithmaya/failover-watchdog/watchdog.log
+
+[Install]
+WantedBy=multi-user.target
+
