@@ -151,4 +151,10 @@ export interface AdminSubscriptionsResponse {
   subscriptions: SubscriptionRecord[];
   telcoSubscriptions?: TelcoSubscriptionRecord[];
   orders?: AdminOrderRecord[];
+  /** Tab badge counts (always present on newer backends) */
+  counts?: { subscriptions: number; telco: number; renewals: number; topups: number };
+  /** Which lists the response actually contains (see ?include=) */
+  included?: Array<'subscriptions' | 'telco' | 'orders'>;
 }
+
+export type AdminSubscriptionsList = 'subscriptions' | 'telco' | 'orders';

@@ -2457,7 +2457,43 @@ export class AuthService {
   /**
    * Admin: Get comprehensive analytics overview for dashboard (levels, language modes, plans, goals, demographics, trends)
    */
+  /**
+   * The overview reads whole profiles / sessions / usage_ledger tables and aggregates them,
+   * so it is cached for 60 s with single-flight: repeated dashboard loads and refreshes share
+   * one computation instead of re-downloading every table each time.
+   */
+  private analyticsOverviewCache: { at: number; promise: Promise<any> } | null = null;
+  private static readonly ANALYTICS_CACHE_TTL_MS = 60_000;
+
   async getAdminAnalyticsOverview() {
+    const now = Date.now();
+    if (
+      !this.analyticsOverviewCache ||
+      now - this.analyticsOverviewCache.at > AuthService.ANALYTICS_CACHE_TTL_MS
+    ) {
+      const promise = this.computeAdminAnalyticsOverview();
+      this.analyticsOverviewCache = { at: now, promise };
+      promise.catch(() => {
+        if (this.analyticsOverviewCache?.promise === promise) this.analyticsOverviewCache = null;
+      });
+    }
+    return this.analyticsOverviewCache.promise;
+  }
+
+  /** Only the profile columns the analytics overview uses (not select('*') incl. onboarding_flow). */
+  private async fetchAnalyticsProfiles() {
+    const base =
+      'id, created_at, display_name, phone_number, plan_tier, plan_status, level, goal, employment_status, daily_goal_minutes, minutes_balance, monthly_minutes_allowance';
+    const withLang = await this.supabase
+      .from('profiles')
+      .select(`${base}, language_mode`)
+      .order('created_at', { ascending: false });
+    if (!withLang.error) return withLang;
+    // language_mode is optional in some databases (see savePreferences fallback)
+    return this.supabase.from('profiles').select(base).order('created_at', { ascending: false });
+  }
+
+  private async computeAdminAnalyticsOverview() {
     if (!this.supabase) {
       throw new InternalServerErrorException('Supabase database client not configured.');
     }
@@ -2470,7 +2506,7 @@ export class AuthService {
         { data: ledger, error: ledErr },
         registeredTestAccounts,
       ] = await Promise.all([
-        this.supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        this.fetchAnalyticsProfiles(),
         this.supabase.from('sessions').select('id, user_id, duration_seconds, created_at'),
         this.supabase.from('onboarding_events').select('user_id, metadata, created_at').eq('event_name', 'select_language_mode'),
         this.supabase.from('usage_ledger').select('user_id, cost_lkr, cost_usd, total_tokens'),
