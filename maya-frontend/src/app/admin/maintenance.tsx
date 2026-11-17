@@ -30,6 +30,16 @@ interface MaintenanceConfig {
   estimatedEndTime?: string;
 }
 
+interface RegisteredUserItem {
+  id: string;
+  displayName: string;
+  phoneNumber: string;
+  email?: string | null;
+  planTier: string;
+  planStatus: string;
+  avatarUrl?: string | null;
+}
+
 const DEFAULT_MAINTENANCE: MaintenanceConfig = {
   enabled: false,
   title: 'Maya is Tuning Up!',
@@ -88,6 +98,14 @@ export default function AdminMaintenanceScreen() {
     date: string;
   } | null>(null);
 
+  // Registered Users Search & Multi-Select for Specific Audience
+  const [availableUsers, setAvailableUsers] = useState<RegisteredUserItem[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [selectedUsers, setSelectedUsers] = useState<RegisteredUserItem[]>([]);
+  const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
+
   // Keep sidebar in sync with screen size
   useEffect(() => {
     setSidebarOpen(!isPhone);
@@ -97,6 +115,31 @@ export default function AdminMaintenanceScreen() {
     'Content-Type': 'application/json',
     'x-admin-token': AdminAuthStore.getToken() || '',
   });
+
+  // Helper to extract unique numbers from both selected users and manual text
+  const getSpecificRecipientNumbers = useCallback((): string[] => {
+    const numberSet = new Set<string>();
+
+    // 1. From selected users
+    selectedUsers.forEach((u) => {
+      const clean = u.phoneNumber.replace(/\D/g, '');
+      if (clean.length >= 9) {
+        numberSet.add(clean);
+      }
+    });
+
+    // 2. From manual text input
+    if (specificNumbersText.trim()) {
+      const parsed = specificNumbersText
+        .split(/[\n,;]+/)
+        .map((n) => n.trim().replace(/\D/g, ''))
+        .filter((n) => n.length >= 9);
+
+      parsed.forEach((n) => numberSet.add(n));
+    }
+
+    return Array.from(numberSet);
+  }, [selectedUsers, specificNumbersText]);
 
   // Fetch Current Maintenance Status
   const fetchMaintenanceConfig = useCallback(async () => {
@@ -121,13 +164,39 @@ export default function AdminMaintenanceScreen() {
     }
   }, []);
 
+  // Fetch registered users for the multi-select dropdown
+  const fetchRegisteredUsers = useCallback(async () => {
+    try {
+      setIsLoadingUsers(true);
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/users?limit=1000`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const usersList: RegisteredUserItem[] = (data.users || [])
+          .filter((u: any) => u.phoneNumber && u.phoneNumber.trim().length >= 7)
+          .map((u: any) => ({
+            id: u.id,
+            displayName: u.displayName || 'Unnamed Student',
+            phoneNumber: u.phoneNumber,
+            email: u.email || null,
+            planTier: (u.planTier || 'starter').toLowerCase(),
+            planStatus: (u.planStatus || 'active').toLowerCase(),
+            avatarUrl: u.avatarUrl || null,
+          }));
+        setAvailableUsers(usersList);
+      }
+    } catch (e: any) {
+      console.warn('Failed to load registered users:', e.message);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  }, []);
+
   // Fetch Audience Count for SMS
   const fetchAudienceCount = useCallback(async (targetAudience: SmsAudience) => {
     if (targetAudience === 'specific') {
-      const parsed = specificNumbersText
-        .split(/[\n,;]+/)
-        .map((n) => n.trim().replace(/\D/g, ''))
-        .filter((n) => n.length >= 9);
+      const parsed = getSpecificRecipientNumbers();
       setAudienceCount(parsed.length);
       return;
     }
@@ -147,7 +216,7 @@ export default function AdminMaintenanceScreen() {
     } finally {
       setLoadingAudienceCount(false);
     }
-  }, [specificNumbersText]);
+  }, [getSpecificRecipientNumbers]);
 
   useEffect(() => {
     fetchMaintenanceConfig();
@@ -156,8 +225,61 @@ export default function AdminMaintenanceScreen() {
   useEffect(() => {
     if (activeTab === 'sms') {
       fetchAudienceCount(audience);
+      if (availableUsers.length === 0) {
+        fetchRegisteredUsers();
+      }
     }
-  }, [activeTab, audience, fetchAudienceCount]);
+  }, [activeTab, audience, fetchAudienceCount, fetchRegisteredUsers, availableUsers.length]);
+
+  // Keep specific audience count in sync when selected users or manual text change
+  useEffect(() => {
+    if (audience === 'specific') {
+      setAudienceCount(getSpecificRecipientNumbers().length);
+    }
+  }, [audience, selectedUsers, specificNumbersText, getSpecificRecipientNumbers]);
+
+  // Handle User Toggle in Dropdown
+  const handleToggleUserSelection = (user: RegisteredUserItem) => {
+    setSelectedUsers((prev) => {
+      const exists = prev.some((u) => u.id === user.id);
+      if (exists) {
+        return prev.filter((u) => u.id !== user.id);
+      } else {
+        return [...prev, user];
+      }
+    });
+  };
+
+  // Filter registered users based on search text
+  const filteredUsers = availableUsers.filter((u) => {
+    if (!userSearchQuery.trim()) return true;
+    const q = userSearchQuery.trim().toLowerCase();
+    const cleanPhoneDigits = u.phoneNumber.replace(/\D/g, '');
+    const cleanQueryDigits = q.replace(/\D/g, '');
+
+    const nameMatch = u.displayName.toLowerCase().includes(q);
+    const emailMatch = u.email ? u.email.toLowerCase().includes(q) : false;
+    const phoneMatch =
+      u.phoneNumber.toLowerCase().includes(q) ||
+      (cleanQueryDigits.length > 0 && cleanPhoneDigits.includes(cleanQueryDigits));
+
+    return nameMatch || emailMatch || phoneMatch;
+  });
+
+  const areAllFilteredSelected =
+    filteredUsers.length > 0 &&
+    filteredUsers.every((u) => selectedUsers.some((sel) => sel.id === u.id));
+
+  const handleSelectAllFiltered = () => {
+    if (areAllFilteredSelected) {
+      const matchingIds = new Set(filteredUsers.map((u) => u.id));
+      setSelectedUsers((prev) => prev.filter((u) => !matchingIds.has(u.id)));
+    } else {
+      const existingIds = new Set(selectedUsers.map((u) => u.id));
+      const toAdd = filteredUsers.filter((u) => !existingIds.has(u.id));
+      setSelectedUsers((prev) => [...prev, ...toAdd]);
+    }
+  };
 
   // Toggle Maintenance Mode (On/Off)
   const handleToggleMaintenance = async () => {
@@ -276,18 +398,19 @@ export default function AdminMaintenanceScreen() {
 
     let targetNumbers: string[] | undefined = undefined;
     if (audience === 'specific') {
-      const parsed = specificNumbersText
-        .split(/[\n,;]+/)
-        .map((n) => n.trim().replace(/\D/g, ''))
-        .filter((n) => n.length >= 9);
+      const parsed = getSpecificRecipientNumbers();
 
       if (parsed.length === 0) {
-        await mayaAlert.error('Please enter at least one valid phone number.', 'No Phone Numbers');
+        await mayaAlert.error(
+          'Please select at least one registered student or enter a valid mobile number.',
+          'No Recipients Selected'
+        );
         return;
       }
       targetNumbers = parsed;
     }
 
+    const targetCount = audience === 'specific' ? (targetNumbers?.length || 0) : (audienceCount || 0);
     const audienceLabel =
       audience === 'all'
         ? 'All Registered Students'
@@ -295,11 +418,13 @@ export default function AdminMaintenanceScreen() {
         ? 'Paid Subscribers Only'
         : audience === 'nonpaid'
         ? 'Free / Starter Students'
-        : `${targetNumbers?.length || 0} Specific Numbers`;
+        : `${targetCount} Specific Recipient(s) (${selectedUsers.length} selected student(s)${
+            specificNumbersText.trim() ? ' + manual numbers' : ''
+          })`;
 
     const confirmed = await mayaAlert.confirm({
       title: 'Confirm SMS Broadcast',
-      message: `Are you sure you want to dispatch this SMS to ${audienceLabel}?\n\nTarget Recipients: ~${audienceCount ?? (targetNumbers?.length || 0)} users\n\nSMS Message:\n"${smsMessage.trim()}"`,
+      message: `Are you sure you want to dispatch this SMS to ${audienceLabel}?\n\nTarget Recipients: ${targetCount} user(s)\n\nSMS Message:\n"${smsMessage.trim()}"`,
       confirmText: 'Dispatch SMS Now',
       cancelText: 'Cancel',
       type: 'warning',
@@ -749,17 +874,22 @@ export default function AdminMaintenanceScreen() {
                       </Text>
                     </Pressable>
 
-                    {/* Option 4: Specific Numbers */}
+                    {/* Option 4: Specific Students & Numbers */}
                     <Pressable
                       style={[
                         styles.audienceOptionCard,
                         audience === 'specific' && styles.audienceOptionCardActive,
                       ]}
-                      onPress={() => setAudience('specific')}
+                      onPress={() => {
+                        setAudience('specific');
+                        if (availableUsers.length === 0) {
+                          fetchRegisteredUsers();
+                        }
+                      }}
                     >
                       <View style={styles.audienceIconRow}>
                         <Ionicons
-                          name="phone-portrait-outline"
+                          name="person-add-outline"
                           size={20}
                           color={audience === 'specific' ? '#0d9488' : '#64748B'}
                         />
@@ -770,33 +900,257 @@ export default function AdminMaintenanceScreen() {
                           ]}
                         />
                       </View>
-                      <Text style={styles.audienceOptionTitle}>Specific Numbers</Text>
+                      <Text style={styles.audienceOptionTitle}>Specific Students & Numbers</Text>
                       <Text style={styles.audienceOptionDesc}>
-                        Enter custom phone numbers manually for targeted direct testing or delivery.
+                        Search & multi-select registered students from a dropdown or enter custom phone numbers.
                       </Text>
                     </Pressable>
                   </View>
 
-                  {/* Specific Numbers Textarea */}
+                  {/* Specific Students & Numbers Selector */}
                   {audience === 'specific' && (
-                    <View style={styles.specificNumbersBox}>
-                      <Text style={styles.fieldLabel}>
-                        Enter Phone Numbers (comma or line separated):
-                      </Text>
-                      <TextInput
-                        style={[styles.textInput, styles.textArea, { minHeight: 70 }]}
-                        value={specificNumbersText}
-                        onChangeText={(t) => {
-                          setSpecificNumbersText(t);
-                          fetchAudienceCount('specific');
-                        }}
-                        multiline
-                        placeholder="0771234567, 0743303318, +94712345678"
-                        placeholderTextColor="#94A3B8"
-                      />
-                      <Text style={styles.fieldHelp}>
-                        Sri Lankan numbers in formats like 077..., 9477..., or +9477... are automatically formatted.
-                      </Text>
+                    <View style={styles.specificBoxContainer}>
+                      {/* Search & Select Registered Students */}
+                      <View style={styles.specificFieldGroup}>
+                        <View style={styles.specificHeaderRow}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Feather name="user-check" size={15} color="#0d9488" />
+                            <Text style={styles.fieldLabel}>Search & Select Registered Students:</Text>
+                          </View>
+                          {selectedUsers.length > 0 && (
+                            <Pressable
+                              onPress={() => setSelectedUsers([])}
+                              hitSlop={6}
+                              style={({ pressed }) => [styles.clearSelectedBtn, pressed && { opacity: 0.6 }]}
+                            >
+                              <Text style={styles.clearSelectedBtnText}>Clear All ({selectedUsers.length})</Text>
+                            </Pressable>
+                          )}
+                        </View>
+
+                        {/* Selected User Tag Chips */}
+                        {selectedUsers.length > 0 && (
+                          <View style={styles.selectedChipsWrap}>
+                            {selectedUsers.map((user) => (
+                              <View key={user.id} style={styles.userChip}>
+                                <View style={styles.userChipAvatar}>
+                                  <Text style={styles.userChipAvatarText}>
+                                    {user.displayName.charAt(0).toUpperCase()}
+                                  </Text>
+                                </View>
+                                <Text style={styles.userChipName} numberOfLines={1}>
+                                  {user.displayName}
+                                </Text>
+                                <Text style={styles.userChipPhone}>
+                                  ({user.phoneNumber.replace(/^(\+?94|0)?/, '0')})
+                                </Text>
+                                <Pressable
+                                  onPress={() => handleToggleUserSelection(user)}
+                                  hitSlop={8}
+                                  style={({ pressed }) => [styles.userChipRemoveBtn, pressed && { opacity: 0.5 }]}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Remove ${user.displayName}`}
+                                >
+                                  <Feather name="x" size={13} color="#64748B" />
+                                </Pressable>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+
+                        {/* Search Input Bar */}
+                        <View style={styles.userSearchInputWrap}>
+                          <Feather name="search" size={16} color="#94A3B8" style={{ marginLeft: 12 }} />
+                          <TextInput
+                            style={styles.userSearchInput}
+                            placeholder="Type student name, phone (07x...), or email to search..."
+                            placeholderTextColor="#94A3B8"
+                            value={userSearchQuery}
+                            onChangeText={(q) => {
+                              setUserSearchQuery(q);
+                              if (!isUserDropdownOpen) setIsUserDropdownOpen(true);
+                            }}
+                            onFocus={() => setIsUserDropdownOpen(true)}
+                          />
+                          {userSearchQuery.trim().length > 0 && (
+                            <Pressable
+                              onPress={() => setUserSearchQuery('')}
+                              hitSlop={6}
+                              style={{ paddingHorizontal: 8 }}
+                            >
+                              <Feather name="x-circle" size={16} color="#94A3B8" />
+                            </Pressable>
+                          )}
+                          <Pressable
+                            onPress={() => setIsUserDropdownOpen((prev) => !prev)}
+                            style={styles.dropdownToggleBtn}
+                            accessibilityRole="button"
+                            accessibilityLabel="Toggle dropdown"
+                          >
+                            <Feather
+                              name={isUserDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                              size={18}
+                              color="#64748B"
+                            />
+                          </Pressable>
+                        </View>
+
+                        {/* Dropdown Menu List */}
+                        {isUserDropdownOpen && (
+                          <View style={styles.userDropdownContainer}>
+                            {isLoadingUsers ? (
+                              <View style={styles.dropdownLoadingRow}>
+                                <ActivityIndicator size="small" color="#0d9488" />
+                                <Text style={styles.dropdownLoadingText}>Loading registered students...</Text>
+                              </View>
+                            ) : filteredUsers.length === 0 ? (
+                              <View style={styles.dropdownEmptyRow}>
+                                <Text style={styles.dropdownEmptyText}>
+                                  No students found matching "{userSearchQuery}".
+                                </Text>
+                              </View>
+                            ) : (
+                              <>
+                                {/* Dropdown Header Toolbar */}
+                                <View style={styles.dropdownToolbar}>
+                                  <Text style={styles.dropdownToolbarCount}>
+                                    Showing {filteredUsers.length} of {availableUsers.length} students
+                                  </Text>
+                                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                                    {filteredUsers.length > 0 && (
+                                      <Pressable
+                                        onPress={handleSelectAllFiltered}
+                                        style={({ pressed }) => [styles.dropdownToolbarAction, pressed && { opacity: 0.7 }]}
+                                      >
+                                        <Text style={styles.dropdownToolbarActionText}>
+                                          {areAllFilteredSelected ? 'Deselect Matching' : 'Select All Matching'}
+                                        </Text>
+                                      </Pressable>
+                                    )}
+                                    <Pressable
+                                      onPress={() => setIsUserDropdownOpen(false)}
+                                      style={({ pressed }) => [styles.dropdownToolbarClose, pressed && { opacity: 0.7 }]}
+                                    >
+                                      <Text style={styles.dropdownToolbarCloseText}>Done</Text>
+                                    </Pressable>
+                                  </View>
+                                </View>
+
+                                {/* Scrollable List */}
+                                <ScrollView
+                                  style={styles.dropdownListScroll}
+                                  nestedScrollEnabled={true}
+                                  keyboardShouldPersistTaps="handled"
+                                  showsVerticalScrollIndicator={true}
+                                >
+                                  {filteredUsers.slice(0, 100).map((user) => {
+                                    const isSelected = selectedUsers.some((u) => u.id === user.id);
+                                    const isPro = user.planTier === 'pro' || user.planTier === 'premium';
+                                    const isTrial = user.planStatus === 'trialing';
+
+                                    return (
+                                      <Pressable
+                                        key={user.id}
+                                        onPress={() => handleToggleUserSelection(user)}
+                                        style={({ pressed }) => [
+                                          styles.dropdownUserItem,
+                                          isSelected && styles.dropdownUserItemActive,
+                                          pressed && { backgroundColor: '#F0FDFA' },
+                                        ]}
+                                      >
+                                        {/* Avatar */}
+                                        <View style={[styles.itemAvatar, isSelected && styles.itemAvatarSelected]}>
+                                          <Text style={[styles.itemAvatarText, isSelected && styles.itemAvatarTextSelected]}>
+                                            {user.displayName.charAt(0).toUpperCase()}
+                                          </Text>
+                                        </View>
+
+                                        {/* User Info */}
+                                        <View style={{ flex: 1, marginRight: 8 }}>
+                                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                            <Text style={styles.itemUserName} numberOfLines={1}>
+                                              {user.displayName}
+                                            </Text>
+                                            {isTrial ? (
+                                              <View style={styles.trialBadgeSmall}>
+                                                <Text style={styles.trialBadgeSmallText}>TRIAL</Text>
+                                              </View>
+                                            ) : isPro ? (
+                                              <View style={styles.proBadgeSmall}>
+                                                <Text style={styles.proBadgeSmallText}>{user.planTier.toUpperCase()}</Text>
+                                              </View>
+                                            ) : (
+                                              <View style={styles.starterBadgeSmall}>
+                                                <Text style={styles.starterBadgeSmallText}>STARTER</Text>
+                                              </View>
+                                            )}
+                                          </View>
+                                          <Text style={styles.itemUserPhone}>
+                                            {user.phoneNumber} {user.email ? `• ${user.email}` : ''}
+                                          </Text>
+                                        </View>
+
+                                        {/* Checkbox */}
+                                        <Ionicons
+                                          name={isSelected ? 'checkbox' : 'square-outline'}
+                                          size={20}
+                                          color={isSelected ? '#0d9488' : '#94A3B8'}
+                                        />
+                                      </Pressable>
+                                    );
+                                  })}
+                                  {filteredUsers.length > 100 && (
+                                    <View style={styles.dropdownListFooter}>
+                                      <Text style={styles.dropdownListFooterText}>
+                                        Showing first 100 results. Use search to narrow down further.
+                                      </Text>
+                                    </View>
+                                  )}
+                                </ScrollView>
+                              </>
+                            )}
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Manual Phone Numbers Collapsible */}
+                      <View style={styles.manualNumbersSection}>
+                        <Pressable
+                          onPress={() => setShowManualInput((prev) => !prev)}
+                          style={styles.toggleManualInputBtn}
+                        >
+                          <Feather
+                            name={showManualInput ? 'minus-circle' : 'plus-circle'}
+                            size={14}
+                            color="#0d9488"
+                            style={{ marginRight: 6 }}
+                          />
+                          <Text style={styles.toggleManualInputBtnText}>
+                            {showManualInput
+                              ? 'Hide Custom Phone Numbers'
+                              : '+ Or Add/Paste Custom Numbers Manually'}
+                          </Text>
+                        </Pressable>
+
+                        {showManualInput && (
+                          <View style={styles.manualInputContainer}>
+                            <Text style={styles.fieldLabel}>
+                              Enter Additional Phone Numbers (comma or line separated):
+                            </Text>
+                            <TextInput
+                              style={[styles.textInput, styles.textArea, { minHeight: 70 }]}
+                              value={specificNumbersText}
+                              onChangeText={setSpecificNumbersText}
+                              multiline
+                              placeholder="0771234567, 0743303318, +94712345678"
+                              placeholderTextColor="#94A3B8"
+                            />
+                            <Text style={styles.fieldHelp}>
+                              Raw mobile numbers entered here will be combined with the selected students above.
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
                   )}
                 </View>
@@ -1338,8 +1692,284 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'regular'),
     lineHeight: 16,
   },
-  specificNumbersBox: {
-    marginTop: 14,
+  /* Specific Students & Numbers Selector */
+  specificBoxContainer: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  specificFieldGroup: {
+    marginBottom: 12,
+  },
+  specificHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  clearSelectedBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  clearSelectedBtnText: {
+    fontSize: 11.5,
+    color: '#DC2626',
+    ...fontStyle('inter', 'bold'),
+  },
+  selectedChipsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  userChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDFA',
+    borderWidth: 1,
+    borderColor: '#99F6E4',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    gap: 6,
+  },
+  userChipAvatar: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#0D9488',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userChipAvatarText: {
+    fontSize: 10,
+    color: '#FFFFFF',
+    ...fontStyle('inter', 'bold'),
+  },
+  userChipName: {
+    fontSize: 12,
+    color: '#0F766E',
+    ...fontStyle('inter', 'semiBold'),
+    maxWidth: 130,
+  },
+  userChipPhone: {
+    fontSize: 11,
+    color: '#64748B',
+    ...fontStyle('inter', 'regular'),
+  },
+  userChipRemoveBtn: {
+    padding: 2,
+  },
+  userSearchInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    height: 44,
+  },
+  userSearchInput: {
+    flex: 1,
+    height: '100%',
+    paddingHorizontal: 10,
+    fontSize: 13,
+    color: '#0F172A',
+    ...fontStyle('inter', 'regular'),
+  },
+  dropdownToggleBtn: {
+    paddingHorizontal: 12,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userDropdownContainer: {
+    marginTop: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    overflow: 'hidden',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
+        zIndex: 50,
+      } as any,
+      default: {
+        elevation: 6,
+      },
+    }),
+  },
+  dropdownLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    gap: 10,
+  },
+  dropdownLoadingText: {
+    fontSize: 12.5,
+    color: '#64748B',
+    ...fontStyle('inter', 'regular'),
+  },
+  dropdownEmptyRow: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropdownEmptyText: {
+    fontSize: 12.5,
+    color: '#94A3B8',
+    ...fontStyle('inter', 'regular'),
+  },
+  dropdownToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: '#F8FAFC',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  dropdownToolbarCount: {
+    fontSize: 11.5,
+    color: '#64748B',
+    ...fontStyle('inter', 'medium'),
+  },
+  dropdownToolbarAction: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: '#F0FDFA',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#CCFBF1',
+  },
+  dropdownToolbarActionText: {
+    fontSize: 11,
+    color: '#0D9488',
+    ...fontStyle('inter', 'bold'),
+  },
+  dropdownToolbarClose: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    backgroundColor: '#0D9488',
+    borderRadius: 6,
+  },
+  dropdownToolbarCloseText: {
+    fontSize: 11,
+    color: '#FFFFFF',
+    ...fontStyle('inter', 'bold'),
+  },
+  dropdownListScroll: {
+    maxHeight: 250,
+  },
+  dropdownUserItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  dropdownUserItemActive: {
+    backgroundColor: '#F0FDFA',
+  },
+  itemAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  itemAvatarSelected: {
+    backgroundColor: '#0D9488',
+  },
+  itemAvatarText: {
+    fontSize: 13,
+    color: '#475569',
+    ...fontStyle('inter', 'bold'),
+  },
+  itemAvatarTextSelected: {
+    color: '#FFFFFF',
+  },
+  itemUserName: {
+    fontSize: 13,
+    color: '#0F172A',
+    ...fontStyle('inter', 'semiBold'),
+  },
+  itemUserPhone: {
+    fontSize: 11.5,
+    color: '#64748B',
+    ...fontStyle('inter', 'regular'),
+    marginTop: 2,
+  },
+  trialBadgeSmall: {
+    backgroundColor: '#F3E8FF',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  trialBadgeSmallText: {
+    fontSize: 9,
+    color: '#7C3AED',
+    ...fontStyle('inter', 'bold'),
+  },
+  proBadgeSmall: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  proBadgeSmallText: {
+    fontSize: 9,
+    color: '#2563EB',
+    ...fontStyle('inter', 'bold'),
+  },
+  starterBadgeSmall: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  starterBadgeSmallText: {
+    fontSize: 9,
+    color: '#64748B',
+    ...fontStyle('inter', 'medium'),
+  },
+  dropdownListFooter: {
+    padding: 10,
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+  },
+  dropdownListFooterText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    ...fontStyle('inter', 'regular'),
+  },
+  manualNumbersSection: {
+    marginTop: 10,
+  },
+  toggleManualInputBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  toggleManualInputBtnText: {
+    fontSize: 12.5,
+    color: '#0D9488',
+    ...fontStyle('inter', 'semiBold'),
+  },
+  manualInputContainer: {
+    marginTop: 8,
+    padding: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
 
   /* Composer */

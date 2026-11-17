@@ -23,7 +23,7 @@ import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { DesktopSidebar, DashboardTab } from '@/components/navigation/desktop-sidebar';
 import { MobileTopBar } from '@/components/navigation/mobile-top-bar';
 import { MayaPrimaryButton } from '@/components/ui/maya-primary-button';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, Feather } from '@expo/vector-icons';
 import { useUserStats } from '@/hooks/useUserStats';
 import { paymentApi } from '@/services/payment/payment-api';
 import { payHereGateway } from '@/services/payment/payhere-gateway';
@@ -932,22 +932,32 @@ export default function UpgradeScreen() {
                       <Text style={styles.specialOfferOriginalPrice}>LKR 3,600 / month</Text>
                     </View>
 
-                    {/* Right Column: Prominent MayaPrimaryButton */}
+                    {/* Right Column: Prominent Special Offer CTA Button */}
                     <View style={styles.specialOfferCtaCol}>
-                      <MayaPrimaryButton
-                        label="Get This Offer"
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.specialOfferButton,
+                          pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
+                          loadingPlanId === '3-months-pro' && { opacity: 0.7 },
+                        ]}
                         onPress={() => handleSelectPlan('3-months-pro')}
-                        loading={loadingPlanId === '3-months-pro'}
                         disabled={loadingPlanId !== null}
-                        height={48}
-                        borderRadius={999}
-                        showArrow
-                        style={{ minWidth: 196, paddingHorizontal: 24 }}
-                      />
+                        accessibilityRole="button"
+                        accessibilityLabel="Get This Offer"
+                      >
+                        {loadingPlanId === '3-months-pro' ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <View style={styles.specialOfferButtonContent}>
+                            <Text style={styles.specialOfferButtonText}>Get This Offer</Text>
+                            <Feather name="arrow-right" size={17} color="#FFFFFF" style={{ marginLeft: 8 }} />
+                          </View>
+                        )}
+                      </Pressable>
                     </View>
                   </View>
                 ) : (
-                  /* Mobile: Prominent MayaPrimaryButton */
+                  /* Mobile: Prominent Special Offer CTA Button */
                   <View style={styles.specialOfferMobileBody}>
                     <View style={styles.specialOfferMobileTopRow}>
                       <View style={{ flex: 1 }}>
@@ -970,15 +980,26 @@ export default function UpgradeScreen() {
                     </View>
 
                     <View style={{ marginTop: 14, width: '100%' }}>
-                      <MayaPrimaryButton
-                        label="Get This Offer"
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.specialOfferButtonMobile,
+                          pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
+                          loadingPlanId === '3-months-pro' && { opacity: 0.7 },
+                        ]}
                         onPress={() => handleSelectPlan('3-months-pro')}
-                        loading={loadingPlanId === '3-months-pro'}
                         disabled={loadingPlanId !== null}
-                        height={48}
-                        borderRadius={999}
-                        showArrow
-                      />
+                        accessibilityRole="button"
+                        accessibilityLabel="Get This Offer"
+                      >
+                        {loadingPlanId === '3-months-pro' ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <View style={styles.specialOfferButtonContent}>
+                            <Text style={styles.specialOfferButtonText}>Get This Offer</Text>
+                            <Feather name="arrow-right" size={17} color="#FFFFFF" style={{ marginLeft: 8 }} />
+                          </View>
+                        )}
+                      </Pressable>
                     </View>
                   </View>
                 )}
@@ -2290,17 +2311,25 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   specialOfferButton: {
-    backgroundColor: '#2563EB',
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-    borderRadius: 24,
+    backgroundColor: '#0D4EFD',
+    paddingHorizontal: 26,
+    paddingVertical: 13,
+    borderRadius: 999,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     ...Platform.select({
       web: {
-        boxShadow: '0 4px 10px rgba(37, 99, 235, 0.25)',
+        boxShadow: '0 4px 14px rgba(13, 78, 253, 0.35)',
+        cursor: 'pointer',
       } as any,
+      default: {
+        shadowColor: '#0D4EFD',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+      },
     }),
   },
   specialOfferMobileBody: {
@@ -2317,28 +2346,38 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   specialOfferButtonMobile: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#0D4EFD',
     width: '100%',
     paddingVertical: 14,
-    borderRadius: 14,
+    borderRadius: 999,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 6,
     ...Platform.select({
       web: {
-        boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)',
+        boxShadow: '0 4px 14px rgba(13, 78, 253, 0.35)',
+        cursor: 'pointer',
       } as any,
+      default: {
+        shadowColor: '#0D4EFD',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+      },
     }),
   },
   specialOfferButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   specialOfferButtonText: {
-    ...fontStyle('inter', 'semiBold'),
-    fontSize: 14.5,
+    ...fontStyle('inter', 'bold'),
+    fontSize: 15,
     color: '#FFFFFF',
+    letterSpacing: 0.2,
   },
 
   /* ── See Other Plans Toggle ── */
