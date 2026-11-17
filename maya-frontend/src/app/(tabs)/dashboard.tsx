@@ -39,6 +39,7 @@ import { fetchAllPracticeSessions } from '@/services/supabase';
 import { paymentApi } from '@/services/payment/payment-api';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { OutageApologyBanner } from '@/components/ui/OutageApologyBanner';
+import { ProPassExpiredModal } from '@/components/modals/ProPassExpiredModal';
 import { promotionsApi } from '@/services/promotions/promotions-api';
 
 interface ScenarioItem {
@@ -340,6 +341,33 @@ export default function DashboardScreen() {
   const [createSessionVisible, setCreateSessionVisible] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<{ id: string; title: string } | null>(null);
   const [isResumingSession, setIsResumingSession] = useState(false);
+  const [showProPassExpired, setShowProPassExpired] = useState(false);
+
+  // Check if 3-day Pro Pass has ended for trialing students
+  useEffect(() => {
+    (async () => {
+      if (params.test_pro_pass_expired === '1' || params.pro_pass_expired === '1') {
+        setShowProPassExpired(true);
+        return;
+      }
+
+      const dismissed = await AppStorage.getItem('maya_pro_pass_expired_dismissed');
+      if (dismissed === 'true') return;
+
+      const profile = await authService.getUserProfile();
+      if (profile) {
+        const isTrialEnded =
+          profile.plan_status === 'expired' ||
+          (profile.plan_status === 'trialing' &&
+            profile.minutes_reset_at &&
+            new Date(profile.minutes_reset_at) <= new Date());
+
+        if (isTrialEnded) {
+          setShowProPassExpired(true);
+        }
+      }
+    })();
+  }, [params]);
 
   const activeConversation = useActiveConversation();
 
@@ -640,11 +668,14 @@ export default function DashboardScreen() {
               ) : undefined
             }
           >
-            {/* Outage Apology & Comeback Compensation Banner */}
-            <OutageApologyBanner
-              userTier={planTier}
-              isPaidUser={isPro}
-            />
+            {/* Outage Apology & Comeback Compensation Banner (Active students only) */}
+            {!Boolean(stats.isSubscriptionLocked || stats.isTelcoUnsubscribed) && (
+              <OutageApologyBanner
+                userTier={planTier}
+                isPaidUser={isPro}
+                isInactive={Boolean(stats.isSubscriptionLocked || stats.isTelcoUnsubscribed)}
+              />
+            )}
 
             {/* TOP SECTION: Header + Hero Banner paired together on desktop */}
             <View style={isDesktop ? styles.desktopTopGroup : undefined}>
@@ -1078,6 +1109,19 @@ export default function DashboardScreen() {
           onUpgradePrompt={() => {
             setCreateSessionVisible(false);
             setActivePopup('unlock-premium');
+          }}
+        />
+
+        {/* PRO PASS EXPIRED MODAL (Triggered when 3-day trialing Pro Pass has ended) */}
+        <ProPassExpiredModal
+          visible={showProPassExpired}
+          onClose={async () => {
+            setShowProPassExpired(false);
+            await AppStorage.setItem('maya_pro_pass_expired_dismissed', 'true');
+          }}
+          onContinueStarter={async () => {
+            setShowProPassExpired(false);
+            await AppStorage.setItem('maya_pro_pass_expired_dismissed', 'true');
           }}
         />
       </View>

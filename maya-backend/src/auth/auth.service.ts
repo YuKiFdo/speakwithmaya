@@ -1536,19 +1536,23 @@ export class AuthService {
         .then(() => { });
     }
 
-    // Auto-heal missing add_on_minutes_balance: If balance exceeds monthly allowance and add_on is 0
+    // Auto-expire trialing Pro Pass if 3 days have elapsed
     if (
-      data.monthly_minutes_allowance &&
-      data.minutes_balance > data.monthly_minutes_allowance &&
-      (!data.add_on_minutes_balance || data.add_on_minutes_balance === 0)
+      data.plan_status === 'trialing' &&
+      data.minutes_reset_at &&
+      new Date(data.minutes_reset_at) <= new Date()
     ) {
-      const extraMinutes = data.minutes_balance - data.monthly_minutes_allowance;
-      data.add_on_minutes_balance = extraMinutes;
+      data.plan_tier = 'starter';
+      data.plan_status = 'expired';
       this.supabase
         .from('profiles')
-        .update({ add_on_minutes_balance: extraMinutes, updated_at: new Date().toISOString() })
+        .update({
+          plan_tier: 'starter',
+          plan_status: 'expired',
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', userId)
-        .then(() => { });
+        .then(() => {});
     }
 
     const profile = await this.checkAndResetMonthlyQuota(data as UserProfileData);
@@ -4108,6 +4112,15 @@ export class AuthService {
     const profile = await this.getProfile(userId);
     if (!profile) {
       throw new NotFoundException('User profile not found');
+    }
+
+    // Outage compensation is for active students only - not for inactive / canceled accounts
+    if (
+      profile.plan_status === 'canceled' ||
+      profile.plan_status === 'expired' ||
+      profile.plan_status === 'past_due'
+    ) {
+      throw new BadRequestException('Outage compensation is available for active students only.');
     }
 
     let alreadyClaimed = false;

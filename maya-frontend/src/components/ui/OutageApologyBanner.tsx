@@ -22,6 +22,7 @@ import { getBackendBaseUrl } from '@/utils/backend-url';
 export interface OutageApologyBannerProps {
   userTier?: 'starter' | 'basic' | 'pro' | 'premium' | string;
   isPaidUser?: boolean;
+  isInactive?: boolean;
   onPressAction?: () => void;
 }
 
@@ -30,6 +31,7 @@ const STORAGE_DISMISSED_KEY = 'maya_outage_apology_modal_claimed_v2';
 export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
   userTier = 'starter',
   isPaidUser = false,
+  isInactive = false,
   onPressAction,
 }) => {
   const { isPhone } = useBreakpoint();
@@ -42,6 +44,23 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
     let isMounted = true;
     (async () => {
       try {
+        // Do NOT show anything for inactive / locked students
+        if (isInactive) {
+          if (isMounted) setIsVisible(false);
+          return;
+        }
+
+        const user = await authService.getUserProfile();
+        if (
+          user &&
+          (user.plan_status === 'canceled' ||
+            user.plan_status === 'expired' ||
+            user.plan_status === 'past_due')
+        ) {
+          if (isMounted) setIsVisible(false);
+          return;
+        }
+
         // If app is currently under maintenance, hide apology popup so it never clashes
         try {
           const cfgRes = await fetch(`${getBackendBaseUrl()}/v1/app-config`);
@@ -98,7 +117,7 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
     }
   };
 
-  if (!isVisible) {
+  if (isInactive || !isVisible) {
     return null;
   }
 
