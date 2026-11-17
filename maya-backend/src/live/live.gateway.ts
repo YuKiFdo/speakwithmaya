@@ -133,6 +133,8 @@ const BACKPRESSURE_THRESHOLD = 128 * 1024;
 const HEARTBEAT_INTERVAL_MS = 10_000;
 // Heartbeat timeout: 30 seconds without pong (gives 3 heartbeat cycles grace period)
 const HEARTBEAT_TIMEOUT_MS = 30_000;
+/** Opt-in verbose per-packet logging during the greeting phase (off in production). */
+const LIVE_PACKET_TRACE = process.env.LIVE_PACKET_TRACE === '1';
 
 @WebSocketGateway({
   path: '/live-session',
@@ -1446,7 +1448,10 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (response.serverContent.modelTurn?.parts) {
           const partSummaries = response.serverContent.modelTurn.parts.map((p: any, idx: number) => {
             if (p.inlineData) {
-              const byteLen = p.inlineData.data ? Buffer.from(p.inlineData.data, 'base64').length : 0;
+              // Compute decoded size arithmetically instead of base64-decoding every packet
+              const b64: string = p.inlineData.data || '';
+              const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+              const byteLen = b64 ? Math.floor((b64.length * 3) / 4) - padding : 0;
               return `p#${idx}:audio(${p.inlineData.mimeType || 'unknown'},${byteLen}B)`;
             }
             if (p.text) {
@@ -1475,8 +1480,13 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         detail += ` toolCall=[${response.toolCall.functionCalls?.map((f: any) => f.name).join(', ')}]`;
       }
 
-      const logMsg = `[${state.sessionId}] 📦 [Greeting Packet #${state.greetingPacketCount}] (+${elapsedMs}ms) ${detail}`;
-      this.logger.log(logMsg);
+      // Per-packet log lines are opt-in (LIVE_PACKET_TRACE=1); the timeline is still
+      // kept in greetingRawEvents and dumped by the greeting watchdog on failure.
+      if (LIVE_PACKET_TRACE) {
+        this.logger.log(
+          `[${state.sessionId}] 📦 [Greeting Packet #${state.greetingPacketCount}] (+${elapsedMs}ms) ${detail}`,
+        );
+      }
       state.greetingRawEvents.push(`+${elapsedMs}ms: ${detail}`);
     }
 

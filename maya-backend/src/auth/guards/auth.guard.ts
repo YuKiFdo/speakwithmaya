@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { AuthService } from '../auth.service.js';
+import { AuthService, type UserProfileData } from '../auth.service.js';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 
 /**
@@ -88,7 +88,7 @@ export class AuthGuard implements CanActivate {
 
     const userId = this.authService.validateAuthToken(token);
     recordAuthCall(userId, request);
-    const user = await this.authService.getProfile(userId);
+    const user = await this.loadProfile(userId, request);
 
     if (!user) {
       throw new UnauthorizedException('User account does not exist or has been deactivated');
@@ -98,4 +98,54 @@ export class AuthGuard implements CanActivate {
     request.user = user;
     return true;
   }
+
+  /**
+   * GET /v1/auth/me is read-only and is hit in bursts by clients, so it is served
+   * from a short per-user cache with single-flight (concurrent calls share one DB read).
+   * Every other route always reads fresh, because handlers may use request.user
+   * (e.g. minutes balance) for writes. Any non-GET request by the user clears their
+   * entry so their next /auth/me reflects the change.
+   */
+  private async loadProfile(userId: string, request: any): Promise<UserProfileData> {
+    const method = String(request.method || 'GET').toUpperCase();
+    const path = String(request.originalUrl || request.url || '').split('?')[0];
+
+    if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+      profileCache.delete(userId);
+    }
+    if (method !== 'GET' || !ME_PATH_RE.test(path)) {
+      return this.authService.getProfile(userId);
+    }
+
+    const now = Date.now();
+    const cached = profileCache.get(userId);
+    if (cached) {
+      if (cached.value && cached.expiresAt > now) return cached.value;
+      if (cached.inFlight) return cached.inFlight;
+    }
+
+    const inFlight = this.authService.getProfile(userId);
+    if (profileCache.size >= PROFILE_CACHE_MAX && !profileCache.has(userId)) {
+      // Bounded: evict the oldest entry (Map preserves insertion order)
+      const oldest = profileCache.keys().next().value;
+      if (oldest !== undefined) profileCache.delete(oldest);
+    }
+    profileCache.set(userId, { inFlight, expiresAt: 0 });
+    try {
+      const value = await inFlight;
+      profileCache.set(userId, { value, expiresAt: Date.now() + PROFILE_CACHE_TTL_MS });
+      return value;
+    } catch (err) {
+      profileCache.delete(userId);
+      throw err;
+    }
+  }
 }
+
+const ME_PATH_RE = /\/auth\/me\/?$/;
+const PROFILE_CACHE_TTL_MS = 5_000;
+const PROFILE_CACHE_MAX = 5_000;
+const profileCache = new Map<
+  string,
+  { value?: UserProfileData; inFlight?: Promise<UserProfileData>; expiresAt: number }
+>();

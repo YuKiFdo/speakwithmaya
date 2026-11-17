@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -349,36 +349,49 @@ export default function DashboardScreen() {
   const [showProPassExpired, setShowProPassExpired] = useState(false);
   const [promoEligibility, setPromoEligibility] = useState<{ available: boolean; alreadyClaimed?: boolean } | null>(null);
 
-  // Check if 3-day Pro Pass has ended for trialing students
+  // Check if 3-day Pro Pass has ended for trialing students.
+  // NOTE: useLocalSearchParams() returns a NEW object on every render, so depending on
+  // `params` re-ran this effect on every render; each run fetched /v1/auth/me, which
+  // updated the store and re-rendered again (an infinite ~1 req/s loop). Depend on the
+  // primitive values only, and fetch the profile at most once per mount.
+  const anyParams = params as any;
+  const testProPassExpiredParam = anyParams?.test_pro_pass_expired as string | undefined;
+  const proPassExpiredParam = anyParams?.pro_pass_expired as string | undefined;
+  const popupParam = anyParams?.popup as string | undefined;
+  const proPassCheckDoneRef = useRef(false);
+
   useEffect(() => {
     (async () => {
-      const anyParams = params as any;
       if (
-        anyParams?.test_pro_pass_expired === '1' ||
-        anyParams?.pro_pass_expired === '1' ||
-        params?.popup === ('pro-pass-expired' as any)
+        testProPassExpiredParam === '1' ||
+        proPassExpiredParam === '1' ||
+        popupParam === 'pro-pass-expired'
       ) {
         setShowProPassExpired(true);
         return;
       }
+
+      if (proPassCheckDoneRef.current) return;
+      proPassCheckDoneRef.current = true;
 
       const dismissed = await AppStorage.getItem('maya_pro_pass_expired_dismissed');
       if (dismissed === 'true') return;
 
       const profile = ((await authService.fetchUserProfile()) || OnboardingStore.getState().user) as any;
       if (profile) {
+        // fetchUserProfile() returns camelCase fields; accept snake_case too for safety
+        const planStatus = profile.planStatus ?? profile.plan_status;
+        const resetAt = profile.minutesResetAt ?? profile.minutes_reset_at;
         const isTrialEnded =
-          profile.plan_status === 'expired' ||
-          (profile.plan_status === 'trialing' &&
-            profile.minutes_reset_at &&
-            new Date(profile.minutes_reset_at) <= new Date());
+          planStatus === 'expired' ||
+          (planStatus === 'trialing' && resetAt && new Date(resetAt) <= new Date());
 
         if (isTrialEnded) {
           setShowProPassExpired(true);
         }
       }
     })();
-  }, [params]);
+  }, [testProPassExpiredParam, proPassExpiredParam, popupParam]);
 
   const activeConversation = useActiveConversation();
 
