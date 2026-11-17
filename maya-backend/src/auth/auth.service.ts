@@ -1530,6 +1530,11 @@ export class AuthService {
       throw new NotFoundException('User profile not found in database.');
     }
 
+    // onboarding_flow is an ever-growing JSONB click log (~12 KB+ per user). It is not
+    // needed by the auth guard or /v1/auth/me (admin views load it with their own query),
+    // so drop it here to keep it out of request.user and every /auth/me response.
+    delete (data as any).onboarding_flow;
+
     const postIntroSteps = [
       '/onboarding/complete',
       '/(tabs)/dashboard',
@@ -4004,6 +4009,7 @@ export class AuthService {
     string,
     { timestamp: number; data: { rankedEntries: any[]; totalParticipants: number } }
   >();
+  private readonly leaderboardInFlight = new Map<string, Promise<void>>();
 
   /**
    * Public / Student Leaderboard: Computes rankings across all real users in `public.profiles`
@@ -4019,10 +4025,22 @@ export class AuthService {
       return { entries: [], myEntry: null, totalParticipants: 0 };
     }
 
+    let releaseLeaderboardFlight: () => void = () => {};
     try {
       const now = Date.now();
       const cacheKey = `${period}:${limit}`;
-      const cached = this.leaderboardCache.get(cacheKey);
+      let cached = this.leaderboardCache.get(cacheKey);
+
+      // Single-flight: the rebuild reads whole profiles/progress/sessions tables, so when
+      // the cache expires, concurrent requests wait for one rebuild instead of each running it.
+      if (!(cached && now - cached.timestamp < 30_000)) {
+        const pending = this.leaderboardInFlight.get(cacheKey);
+        if (pending) {
+          // Bounded wait: never hang a request on someone else's rebuild
+          await Promise.race([pending, new Promise((r) => setTimeout(r, 15_000).unref?.())]);
+          cached = this.leaderboardCache.get(cacheKey);
+        }
+      }
 
       let rankedEntries: any[];
       let totalParticipants: number;
@@ -4032,6 +4050,14 @@ export class AuthService {
         rankedEntries = cached.data.rankedEntries;
         totalParticipants = cached.data.totalParticipants;
       } else {
+        let releaseFlight!: () => void;
+        const flight = new Promise<void>((resolve) => (releaseFlight = resolve));
+        this.leaderboardInFlight.set(cacheKey, flight);
+        releaseLeaderboardFlight = () => {
+          if (this.leaderboardInFlight.get(cacheKey) === flight) this.leaderboardInFlight.delete(cacheKey);
+          releaseFlight();
+        };
+
         const cutoffMs =
           period === 'weekly'
             ? now - 7 * 24 * 60 * 60 * 1000
@@ -4186,6 +4212,8 @@ export class AuthService {
           timestamp: now,
           data: { rankedEntries, totalParticipants },
         });
+        releaseLeaderboardFlight();
+        releaseLeaderboardFlight = () => {};
       }
 
       // Find user entry across all ranked entries before slicing to top limit
@@ -4209,6 +4237,7 @@ export class AuthService {
         totalParticipants,
       };
     } catch (err: any) {
+      releaseLeaderboardFlight();
       this.logger.warn(`getPublicLeaderboard error: ${err?.message}`);
       return { entries: [], myEntry: null, totalParticipants: 0 };
     }
