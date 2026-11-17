@@ -103,25 +103,57 @@ class PromotionsApi {
     } catch {}
   }
 
+  private eligibilityPromises: Record<
+    string,
+    Promise<{
+      available: boolean;
+      alreadyClaimed?: boolean;
+      campaign?: any;
+      reason?: string;
+    }>
+  > = {};
+
   /**
-   * Check if user is eligible to claim a promotion (verifies DB claim history and campaign period)
+   * Check if user is eligible to claim a promotion (verifies DB claim history and campaign period).
+   * Caches in-flight/completed promise for instant reuse across components.
    */
-  async checkEligibility(promoCode: string = 'outage-comeback-nov26'): Promise<{
+  checkEligibility(promoCode: string = 'outage-comeback-nov26'): Promise<{
     available: boolean;
     alreadyClaimed?: boolean;
     campaign?: any;
     reason?: string;
   }> {
-    try {
-      const res = await fetch(`${this.baseUrl}/v1/promotions/check/${encodeURIComponent(promoCode)}`, {
-        headers: this.getUserHeaders(),
-      });
-      if (res.ok) {
-        return await res.json();
+    const key = (promoCode || 'outage-comeback-nov26').trim().toLowerCase();
+    if (key in this.eligibilityPromises) {
+      return this.eligibilityPromises[key]!;
+    }
+
+    const promise = (async () => {
+      try {
+        const res = await fetch(`${this.baseUrl}/v1/promotions/check/${encodeURIComponent(key)}`, {
+          headers: this.getUserHeaders(),
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+        return { available: false, reason: 'error_response' };
+      } catch {
+        return { available: false, reason: 'network_error' };
       }
-      return { available: false, reason: 'error_response' };
-    } catch {
-      return { available: false, reason: 'network_error' };
+    })();
+
+    this.eligibilityPromises[key] = promise;
+    return promise;
+  }
+
+  /**
+   * Invalidate eligibility cache after claiming
+   */
+  clearEligibilityCache(promoCode?: string) {
+    if (promoCode) {
+      delete this.eligibilityPromises[promoCode.trim().toLowerCase()];
+    } else {
+      this.eligibilityPromises = {};
     }
   }
 
@@ -139,6 +171,8 @@ class PromotionsApi {
     if (!res.ok) {
       throw new Error(data.message || 'Failed to claim promotion');
     }
+
+    this.clearEligibilityCache(promoCode);
 
     if (data.profile?.minutes_balance !== undefined) {
       OnboardingStore.updateMinutesBalance(data.profile.minutes_balance);

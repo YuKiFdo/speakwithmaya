@@ -285,6 +285,10 @@ export default function DashboardScreen() {
   const { height: windowHeight } = useWindowDimensions();
 
   useEffect(() => {
+    // Prefetch promotion eligibility immediately in parallel during initial load
+    promotionsApi.checkEligibility('outage-comeback-nov26').then((res) => {
+      setPromoEligibility(res);
+    }).catch(() => {});
     authService.fetchUserProfile();
     promotionsApi.recordComebackPing('outage_recovery');
     authService.logEvent(
@@ -343,6 +347,7 @@ export default function DashboardScreen() {
   const [selectedScenario, setSelectedScenario] = useState<{ id: string; title: string } | null>(null);
   const [isResumingSession, setIsResumingSession] = useState(false);
   const [showProPassExpired, setShowProPassExpired] = useState(false);
+  const [promoEligibility, setPromoEligibility] = useState<{ available: boolean; alreadyClaimed?: boolean } | null>(null);
 
   // Check if 3-day Pro Pass has ended for trialing students
   useEffect(() => {
@@ -680,6 +685,7 @@ export default function DashboardScreen() {
                 userTier={planTier}
                 isPaidUser={isPro}
                 isInactive={Boolean(stats.isSubscriptionLocked || stats.isTelcoUnsubscribed)}
+                initialEligibility={promoEligibility}
               />
             )}
 

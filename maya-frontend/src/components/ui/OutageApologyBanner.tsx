@@ -23,6 +23,7 @@ export interface OutageApologyBannerProps {
   userTier?: 'starter' | 'basic' | 'pro' | 'premium' | string;
   isPaidUser?: boolean;
   isInactive?: boolean;
+  initialEligibility?: { available: boolean; alreadyClaimed?: boolean } | null;
   onPressAction?: () => void;
 }
 
@@ -30,10 +31,11 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
   userTier = 'starter',
   isPaidUser = false,
   isInactive = false,
+  initialEligibility = null,
   onPressAction,
 }) => {
   const { isPhone } = useBreakpoint();
-  const [isVisible, setIsVisible] = useState<boolean>(false);
+  const [isVisible, setIsVisible] = useState<boolean>(() => Boolean(initialEligibility?.available));
   const [isClaiming, setIsClaiming] = useState<boolean>(false);
 
   const isProOrPaid = isPaidUser || (userTier !== 'starter' && userTier !== 'trial');
@@ -48,7 +50,7 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
           return;
         }
 
-        const user = ((await authService.fetchUserProfile()) || OnboardingStore.getState().user) as any;
+        const user = OnboardingStore.getState().user as any;
         if (
           user &&
           (user.plan_status === 'canceled' ||
@@ -59,19 +61,13 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
           return;
         }
 
-        // If app is currently under maintenance, hide apology popup so it never clashes
-        try {
-          const cfgRes = await fetch(`${getBackendBaseUrl()}/v1/app-config`);
-          if (cfgRes.ok) {
-            const cfg = await cfgRes.json();
-            if (cfg?.maintenanceMode?.enabled) {
-              if (isMounted) setIsVisible(false);
-              return;
-            }
-          }
-        } catch {}
+        // Fast path: if initialEligibility already provided
+        if (initialEligibility !== null && initialEligibility !== undefined) {
+          if (isMounted) setIsVisible(Boolean(initialEligibility.available));
+          return;
+        }
 
-        // Authoritative Database & Campaign Period check (No local storage reliance)
+        // Fast path: single instant authoritative check (no serial waterfalls)
         const eligibility = await promotionsApi.checkEligibility('outage-comeback-nov26');
         if (isMounted) {
           setIsVisible(Boolean(eligibility?.available));
@@ -83,7 +79,7 @@ export const OutageApologyBanner: React.FC<OutageApologyBannerProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [isInactive]);
+  }, [isInactive, initialEligibility]);
 
   const handleAction = async () => {
     if (onPressAction) {
