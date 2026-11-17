@@ -3,6 +3,16 @@ import { WsAdapter } from '@nestjs/platform-ws';
 import express from 'express';
 import { AppModule, ObserveInstrument } from './app.module.js';
 
+// Global outbound fetch timeout safeguard: prevent unbounded hangs if caller omitted AbortSignal
+const _origFetch = globalThis.fetch;
+const OUTBOUND_HTTP_TIMEOUT_MS = Number(process.env.OUTBOUND_HTTP_TIMEOUT_MS) || 30000;
+globalThis.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+  if (!init?.signal) {
+    return _origFetch(input, { ...init, signal: AbortSignal.timeout(OUTBOUND_HTTP_TIMEOUT_MS) });
+  }
+  return _origFetch(input, init);
+} as typeof fetch;
+
 async function bootstrap() {
   const isObserveEnabled =
     process.env.OBSERVE_ENABLED !== 'false' &&

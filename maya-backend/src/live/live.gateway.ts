@@ -141,6 +141,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(LiveGateway.name);
   private readonly clients = new Map<WebSocket, ClientSessionState>();
   private readonly sessionStateById = new Map<string, PersistentSessionAudioState>();
+  // Evicts persistent session audio once no socket has used it for this long.
+  // Previously entries were never removed, so every session's raw PCM stayed in memory
+  // until PM2 restarted the process at max_memory_restart.
+  private readonly sessionEvictionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private static readonly SESSION_STATE_TTL_MS = 10 * 60 * 1000;
   private readonly ai: GoogleGenAI;
   private readonly liveModel: string;
 
@@ -519,8 +524,36 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       state.opusEncoder = null;
       state.opusPcmBuffer = Buffer.alloc(0);
+
+      if (!isSupersededReconnect) {
+        this.scheduleSessionStateEviction(state.sessionId);
+      }
     }
     this.clients.delete(client);
+  }
+
+  private scheduleSessionStateEviction(sessionId: string) {
+    const existing = this.sessionEvictionTimers.get(sessionId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.sessionEvictionTimers.delete(sessionId);
+      const stillActive = Array.from(this.clients.values()).some(
+        (s) => s.sessionId === sessionId && s.ws.readyState === WebSocket.OPEN,
+      );
+      if (stillActive) return;
+      const persistent = this.sessionStateById.get(sessionId);
+      if (persistent) {
+        // Drop buffer references so the PCM memory is released immediately.
+        persistent.userAudioChunks.length = 0;
+        persistent.modelAudioChunks.length = 0;
+        persistent.chronologicalAudioTurns.length = 0;
+        persistent.userTurnAudioMap.clear();
+        persistent.modelTurnAudioMap.clear();
+        this.sessionStateById.delete(sessionId);
+      }
+    }, LiveGateway.SESSION_STATE_TTL_MS);
+    timer.unref?.();
+    this.sessionEvictionTimers.set(sessionId, timer);
   }
 
   // ─── PERSISTENT SESSION STATE ACROSS RECONNECTS ──────────────────────────────
@@ -553,6 +586,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           otherClient.close(1000, 'Superseded by reconnected session');
         } catch {}
       }
+    }
+
+    const pendingEviction = this.sessionEvictionTimers.get(sid);
+    if (pendingEviction) {
+      clearTimeout(pendingEviction);
+      this.sessionEvictionTimers.delete(sid);
     }
 
     let persistent = this.sessionStateById.get(sid);
@@ -1491,7 +1530,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
           if (state.supportsOpus && state.opusEncoder) {
             // Compress 24kHz PCM to Opus (20ms frames = 480 samples = 960 bytes)
-            const chunkBuffer = Buffer.from(part.inlineData.data, 'base64');
+            // (reuses chunkBuffer decoded above instead of base64-decoding a second time)
             state.opusPcmBuffer = Buffer.concat([state.opusPcmBuffer, chunkBuffer]);
 
             const FRAME_SAMPLES = 480;

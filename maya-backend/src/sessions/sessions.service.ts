@@ -5,7 +5,15 @@ import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, G
 import { RoadmapService } from '../roadmap/roadmap.service.js';
 import { parseCanonicalLessonContent, formatCanonicalLessonContent } from '../roadmap/dto/roadmap.dto.js';
 import { randomUUID, createHash, createHmac } from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { readFile } from 'node:fs/promises';
+import { BoundedMap } from '../common/bounded-map.js';
+import { PiperWorkerClient, PiperSegment } from './piper-worker-client.js';
+
+const execFileAsync = promisify(execFile);
+const ESPEAK_VOICE_RE = /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i;
+export const MAX_TTS_TEXT_LENGTH = 1000;
 import { GoogleGenAI, Type } from '@google/genai';
 
 export function toValidUuid(str?: string): string {
@@ -50,23 +58,24 @@ export function encodePcmToWav(
 export function resamplePcm16Mono(inputBuffer: Buffer, fromRate: number, toRate: number): Buffer {
   if (fromRate === toRate || inputBuffer.length === 0) return inputBuffer;
   const numInputSamples = Math.floor(inputBuffer.length / 2);
+  if (numInputSamples === 0) return Buffer.alloc(0);
+  // Typed-array views are several times faster than per-sample readInt16LE/writeInt16LE.
+  const src = inputBuffer.byteOffset % 2 === 0
+    ? new Int16Array(inputBuffer.buffer, inputBuffer.byteOffset, numInputSamples)
+    : new Int16Array(Uint8Array.from(inputBuffer.subarray(0, numInputSamples * 2)).buffer);
   const ratio = toRate / fromRate;
   const numOutputSamples = Math.floor(numInputSamples * ratio);
-  const outBuffer = Buffer.alloc(numOutputSamples * 2);
-
+  const out = new Int16Array(numOutputSamples);
+  const last = numInputSamples - 1;
   for (let i = 0; i < numOutputSamples; i++) {
     const srcIndex = i / ratio;
-    const srcIndexFloor = Math.floor(srcIndex);
-    const srcIndexCeil = Math.min(srcIndexFloor + 1, numInputSamples - 1);
-    const weight = srcIndex - srcIndexFloor;
-
-    const s1 = inputBuffer.readInt16LE(srcIndexFloor * 2);
-    const s2 = inputBuffer.readInt16LE(srcIndexCeil * 2);
-    const interpolated = Math.round(s1 * (1 - weight) + s2 * weight);
-    const clamped = Math.max(-32768, Math.min(32767, interpolated));
-    outBuffer.writeInt16LE(clamped, i * 2);
+    const f = Math.floor(srcIndex);
+    const c = f + 1 > last ? last : f + 1;
+    const w = srcIndex - f;
+    const v = Math.round(src[f] * (1 - w) + src[c] * w);
+    out[i] = v < -32768 ? -32768 : v > 32767 ? 32767 : v;
   }
-  return outBuffer;
+  return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
 }
 
 export interface UsageRecord {
@@ -132,19 +141,42 @@ const DEFAULT_LEARNER_NAME = 'Learner';
 
 const SRI_LANKA_TZ = 'Asia/Colombo';
 
+// Intl.DateTimeFormat construction costs ~100us; build each formatter once.
+const SL_DISPLAY_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: SRI_LANKA_TZ,
+  month: 'short',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+const SL_DATE_KEY_FMT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: SRI_LANKA_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+const SL_DATE_LABEL_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: SRI_LANKA_TZ,
+  month: 'short',
+  day: 'numeric',
+});
+const SL_HOUR_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: SRI_LANKA_TZ,
+  hour: 'numeric',
+  hourCycle: 'h23',
+});
+const SL_MONTH_YEAR_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: SRI_LANKA_TZ,
+  month: 'numeric',
+  year: 'numeric',
+});
+
 export function formatSriLankaDisplayDate(dateInput: Date | string | number): string {
   const d = new Date(dateInput);
   if (isNaN(d.getTime())) return '';
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: SRI_LANKA_TZ,
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  });
-  const parts = formatter.formatToParts(d);
+  const parts = SL_DISPLAY_FMT.formatToParts(d);
   const month = parts.find((p) => p.type === 'month')?.value || '';
   const day = parts.find((p) => p.type === 'day')?.value || '';
   const hour = parts.find((p) => p.type === 'hour')?.value || '00';
@@ -156,43 +188,24 @@ export function formatSriLankaDisplayDate(dateInput: Date | string | number): st
 export function getSriLankaDateKey(dateInput: Date | string | number = new Date()): string {
   const d = new Date(dateInput);
   if (isNaN(d.getTime())) return '';
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: SRI_LANKA_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
+  return SL_DATE_KEY_FMT.format(d);
 }
 
 export function getSriLankaDateLabel(dateInput: Date | string | number): string {
   const d = new Date(dateInput);
   if (isNaN(d.getTime())) return '';
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: SRI_LANKA_TZ,
-    month: 'short',
-    day: 'numeric',
-  }).format(d);
+  return SL_DATE_LABEL_FMT.format(d);
 }
 
 export function getSriLankaHour(dateInput: Date | string | number): number {
   const d = new Date(dateInput);
   if (isNaN(d.getTime())) return 0;
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: SRI_LANKA_TZ,
-    hour: 'numeric',
-    hourCycle: 'h23',
-  });
-  return parseInt(formatter.format(d), 10);
+  return parseInt(SL_HOUR_FMT.format(d), 10);
 }
 
 export function getSriLankaMonthYear(dateInput: Date | string | number = new Date()): { month: number; year: number } {
   const d = new Date(dateInput);
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: SRI_LANKA_TZ,
-    month: 'numeric',
-    year: 'numeric',
-  });
-  const parts = formatter.formatToParts(d);
+  const parts = SL_MONTH_YEAR_FMT.formatToParts(d);
   const month = parseInt(parts.find((p) => p.type === 'month')?.value || '1', 10) - 1;
   const year = parseInt(parts.find((p) => p.type === 'year')?.value || '2026', 10);
   return { month, year };
@@ -212,22 +225,22 @@ export class SessionsService {
     'gemini-3.5-flash-lite',
   ].filter(Boolean) as string[];
   private readonly usdToLkr = Number(process.env.USD_TO_LKR) || 308.50;
-  private readonly activeSessions = new Map<string, { userId?: string; userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string; roadmapLevelId?: string }>();
+  private readonly activeSessions = new BoundedMap<string, { userId?: string; userName?: string; model?: string; topic?: string; scenarioId?: string; languageMode?: string; sinhalaStyle?: string; roadmapLevelId?: string }>(2000);
   private readonly recentDiagnostics = new Map<string, SessionDiagnosticsRecord>();
-  private readonly translationCache = new Map<string, string>();
-  private readonly hintCache = new Map<string, { hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number }>();
-  private readonly sessionHintUsage = new Map<string, { count: number; totalTokens: number; costUsd: number; costLkr: number; generatedKeys?: Set<string> }>();
+  private readonly translationCache = new BoundedMap<string, string>(2000);
+  private readonly hintCache = new BoundedMap<string, { hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number }>(2000);
+  private readonly sessionHintUsage = new BoundedMap<string, { count: number; totalTokens: number; costUsd: number; costLkr: number; generatedKeys?: Set<string> }>(2000);
 
   private get storageProviderLabel(): string {
     return process.env.AZURE_STORAGE_CONNECTION_STRING ? 'Azure Blob Storage' : 'Supabase Storage';
   }
 
-  private readonly sessionRecordingsMap = new Map<string, { userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string }>();
-  private readonly sessionTurnAudioMap = new Map<string, Map<number, string>>();
-  private readonly sessionTurnTranscriptMap = new Map<string, Map<number, string>>();
-  private readonly usageCache = new Map<string, { timestamp: number; data: any }>();
+  private readonly sessionRecordingsMap = new BoundedMap<string, { userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string }>(2000);
+  private readonly sessionTurnAudioMap = new BoundedMap<string, Map<number, string>>(2000);
+  private readonly sessionTurnTranscriptMap = new BoundedMap<string, Map<number, string>>(2000);
+  private readonly usageCache = new BoundedMap<string, { timestamp: number; data: any }>(30, 15_000);
   private lastOrphanReconcileTime = 0;
-  private readonly authoritativeTurnsMap = new Map<string, Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>();
+  private readonly authoritativeTurnsMap = new BoundedMap<string, Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>(2000);
   private readonly saveTurnsLocks = new Map<string, Promise<void>>();
   private readonly finalizingSessionIds = new Set<string>();
   private lastOrphanReconcileAt = 0;
@@ -314,11 +327,13 @@ export class SessionsService {
     return this.authoritativeTurnsMap.get(validId) || this.authoritativeTurnsMap.get(sessionId);
   }
   private readonly inFlightHintPromises = new Map<string, Promise<{ hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number; tokens?: { promptTokens: number; outputTokens: number; totalTokens: number } }>>();
-  private readonly ttsAudioCache = new Map<string, { audioBase64: string; mimeType: string }>();
+  private readonly ttsAudioCache = new BoundedMap<string, { audioBase64: string; mimeType: string }>(150);
   private piperSession: any = null;
   private piperConfig: any = null;
   private piperG2p: any = null;
   private piperInitPromise: Promise<boolean> | null = null;
+  private piperWorker: PiperWorkerClient | null = null;
+  private readonly inFlightTts = new Map<string, Promise<{ audioBase64: string; mimeType: string }>>();
   private genAiClient: GoogleGenAI | null = null;
 
   constructor(
@@ -327,7 +342,7 @@ export class SessionsService {
     this.geminiApiKey = process.env.GEMINI_API_KEY;
     this.liveModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
     if (this.geminiApiKey) {
-      this.genAiClient = new GoogleGenAI({ apiKey: this.geminiApiKey });
+      this.genAiClient = new GoogleGenAI({ apiKey: this.geminiApiKey, httpOptions: { timeout: 30000 } });
     }
 
     const rawSupabaseUrl = process.env.SUPABASE_URL || 'https://clfjfhdsjwkzgxwoolgp.supabase.co';
@@ -350,7 +365,23 @@ export class SessionsService {
     }
   }
 
-  async ensureRecordingsBucket(): Promise<void> {
+  private recordingsBucketReady: Promise<void> | null = null;
+
+  /**
+   * Verifies the recordings bucket once per process. It used to call listBuckets()
+   * before every single turn upload, doubling storage round-trips during live calls.
+   */
+  ensureRecordingsBucket(): Promise<void> {
+    if (!this.supabase) return Promise.resolve();
+    if (!this.recordingsBucketReady) {
+      this.recordingsBucketReady = this.verifyRecordingsBucket().catch(() => {
+        this.recordingsBucketReady = null;
+      });
+    }
+    return this.recordingsBucketReady;
+  }
+
+  private async verifyRecordingsBucket(): Promise<void> {
     if (!this.supabase) return;
     try {
       const { data: buckets } = await this.supabase.storage.listBuckets();
@@ -360,6 +391,7 @@ export class SessionsService {
       }
     } catch (err: any) {
       this.logger.warn(`Could not verify/create storage bucket: ${err?.message}`);
+      throw err; // reset the memo so a later call retries
     }
   }
 
@@ -3848,7 +3880,7 @@ ${memoryPart}`;
     const apiKey = this.geminiApiKey;
     if (apiKey) {
       try {
-        const ai = this.genAiClient || new GoogleGenAI({ apiKey });
+        const ai = this.genAiClient || new GoogleGenAI({ apiKey, httpOptions: { timeout: 30000 } });
         const prompt = `Translate the following English phrase into natural, spoken Sri Lankan Sinhala.
 Phrase: "${text}"
 
@@ -3945,7 +3977,7 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
 - Use everyday spoken Sri Lankan Sinhala, e.g. "මම සාමාන්‍යයෙන් තේ එකක් බොනවා."`;
 
         const executeCall = async () => {
-          const ai = this.genAiClient || new GoogleGenAI({ apiKey });
+          const ai = this.genAiClient || new GoogleGenAI({ apiKey, httpOptions: { timeout: 30000 } });
           let lastError: any = null;
 
           for (const model of this.flashCandidateModels) {
@@ -4093,13 +4125,13 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
   }
 
   private float32ToPcm16Buffer(samples: Float32Array): Buffer {
-    const buf = Buffer.alloc(samples.length * 2);
+    const out = new Int16Array(samples.length);
     for (let i = 0; i < samples.length; i++) {
-      const clamped = Math.max(-1, Math.min(1, samples[i]));
-      const int16 = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-      buf.writeInt16LE(int16, i * 2);
+      const v = samples[i];
+      const clamped = v < -1 ? -1 : v > 1 ? 1 : v;
+      out[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
     }
-    return buf;
+    return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
   }
 
   private async getOrtModule(): Promise<any> {
@@ -4118,7 +4150,7 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
   }
 
   private async initPiper(): Promise<boolean> {
-    if (this.piperSession && this.piperConfig) {
+    if ((this.piperSession || this.piperWorker) && this.piperConfig) {
       return true;
     }
     if (this.piperInitPromise) {
@@ -4127,7 +4159,6 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
 
     this.piperInitPromise = (async () => {
       try {
-        const ortModule = await this.getOrtModule();
         const path = await import('path');
         const fs = await import('fs');
 
@@ -4161,15 +4192,30 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
         const modelPath = path.join(foundDir, `${foundModel}.onnx`);
         const configPath = path.join(foundDir, `${foundModel}.onnx.json`);
 
-        this.piperConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        this.piperSession = await ortModule.InferenceSession.create(modelPath);
+        this.piperConfig = JSON.parse(await readFile(configPath, 'utf8'));
+
+        // Run ONNX inference in a worker thread so it never blocks the main event loop.
+        if (PiperWorkerClient.isAvailable()) {
+          try {
+            const client = new PiperWorkerClient(modelPath);
+            await client.init();
+            this.piperWorker = client;
+            this.logger.log('[PiperTTS] Inference running in dedicated worker thread');
+          } catch (workerErr: any) {
+            this.logger.warn(`[PiperTTS] Worker init failed (${workerErr?.message}); falling back to in-process inference`);
+          }
+        }
+        if (!this.piperWorker) {
+          const ortModule = await this.getOrtModule();
+          this.piperSession = await ortModule.InferenceSession.create(modelPath, { intraOpNumThreads: 1, interOpNumThreads: 1 });
+        }
 
         // Verify espeak-ng is available (check standard Linux binary paths in case PM2 PATH is minimal)
         const espeakCandidates = ['espeak-ng', '/usr/bin/espeak-ng', '/usr/local/bin/espeak-ng'];
         let verifiedEspeakCmd: string | null = null;
         for (const cmd of espeakCandidates) {
           try {
-            execSync(`${cmd} --version`, { stdio: 'pipe' });
+            await execFileAsync(cmd, ['--version'], { timeout: 5000 });
             verifiedEspeakCmd = cmd;
             break;
           } catch {}
@@ -4208,19 +4254,25 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
   /**
    * Convert text to IPA phonemes using espeak-ng.
    * espeak-ng outputs IPA that exactly matches what Piper models were trained on.
+   *
+   * SECURITY: text is passed as a discrete argv entry via execFile (no shell), so
+   * shell metacharacters such as $(...) or backticks are never interpreted.
+   * The previous execSync(`... "${text}"`) form allowed command injection from the
+   * public /sessions/tts endpoint, and it blocked the event loop for every segment.
    */
-  private espeakTextToIpa(text: string, voice: string = 'en-us'): string {
-    // --ipa: output IPA, -q: quiet (no audio), -v: voice
-    // espeak-ng outputs IPA with stress marks, word boundaries, etc.
-    const cleanText = text.replace(/"/g, '\\"').replace(/\n/g, ' ').substring(0, 2000);
+  async espeakTextToIpa(text: string, voice: string = 'en-us'): Promise<string> {
+    const cleanText = String(text || '').replace(/[\r\n]+/g, ' ').substring(0, 2000);
+    if (!cleanText.trim()) return '';
+    const safeVoice = ESPEAK_VOICE_RE.test(voice) ? voice : 'en-us';
     const cmd = typeof this.piperG2p === 'string' && this.piperG2p.includes('espeak') ? this.piperG2p : 'espeak-ng';
     try {
-      const result = execSync(`${cmd} --ipa -q -v ${voice} "${cleanText}"`, {
+      // `--` ends option parsing so text starting with "-" is never treated as a flag.
+      const { stdout } = await execFileAsync(cmd, ['--ipa', '-q', '-v', safeVoice, '--', cleanText], {
         encoding: 'utf8',
         timeout: 5000,
-        stdio: ['pipe', 'pipe', 'pipe'],
+        maxBuffer: 1024 * 1024,
       });
-      return (result || '').trim();
+      return (stdout || '').trim();
     } catch (err: any) {
       this.logger.warn(`[PiperTTS] espeak-ng phonemization failed: ${err?.message}`);
       return '';
@@ -4299,72 +4351,67 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
   }
 
   async generateTtsAudio(dto: SessionTtsDto): Promise<{ audioBase64: string; mimeType: string }> {
-    const text = (dto.text || '').trim();
+    const text = (dto.text || '').trim().slice(0, MAX_TTS_TEXT_LENGTH);
     if (!text) {
       return { audioBase64: '', mimeType: 'audio/wav' };
     }
     const voice = dto.voice || 'Maya';
     const cacheKey = `${voice}:${text}`;
-    if (this.ttsAudioCache.has(cacheKey)) {
-      return this.ttsAudioCache.get(cacheKey)!;
+    const cachedAudio = this.ttsAudioCache.get(cacheKey);
+    if (cachedAudio) {
+      return cachedAudio;
     }
 
+    // Collapse concurrent identical requests into a single synthesis.
+    const inFlight = this.inFlightTts.get(cacheKey);
+    if (inFlight) return inFlight;
+
+    const task = this.synthesizePiper(text, cacheKey).finally(() => {
+      this.inFlightTts.delete(cacheKey);
+    });
+    this.inFlightTts.set(cacheKey, task);
+    return task;
+  }
+
+  private async synthesizePiper(text: string, cacheKey: string): Promise<{ audioBase64: string; mimeType: string }> {
     try {
       const ready = await this.initPiper();
-      if (ready && this.piperSession && this.piperConfig) {
-        const ortModule = await this.getOrtModule();
+      if (ready && (this.piperWorker || this.piperSession) && this.piperConfig) {
         const sampleRate = this.piperConfig.audio?.sample_rate || 22050;
         const segments = this.splitSpeechIntoSegments(text);
-        const floatSegments: Float32Array[] = [];
+        const espeakVoice = this.piperConfig.espeak?.voice || 'en-us';
 
-        for (let i = 0; i < segments.length; i++) {
-          const seg = segments[i];
-          let phonemeIds: number[] = [];
-
-          if (typeof this.piperG2p === 'string' && this.piperG2p.includes('espeak')) {
-            const espeakVoice = this.piperConfig.espeak?.voice || 'en-us';
-            const ipa = this.espeakTextToIpa(seg.text, espeakVoice);
-            if (ipa) {
-              phonemeIds = this.ipaToPhonemeIds(ipa, this.piperConfig.phoneme_id_map);
+        // Phonemize all segments concurrently (async child processes, no event-loop blocking).
+        const phonemeIdList = await Promise.all(
+          segments.map(async (seg) => {
+            if (typeof this.piperG2p === 'string' && this.piperG2p.includes('espeak')) {
+              const ipa = await this.espeakTextToIpa(seg.text, espeakVoice);
+              return ipa ? this.ipaToPhonemeIds(ipa, this.piperConfig.phoneme_id_map) : [];
             }
-          } else if (this.piperG2p && typeof this.piperG2p === 'object') {
-            const encoded = this.piperG2p.encode(seg.text, this.piperConfig.phoneme_id_map, { language: 'en' });
-            phonemeIds = encoded.phonemeIds;
-          }
-
-          if (phonemeIds.length > 0) {
-            const feeds = {
-              input: new ortModule.Tensor('int64', new BigInt64Array(phonemeIds.map((id: number) => BigInt(id))), [1, phonemeIds.length]),
-              input_lengths: new ortModule.Tensor('int64', new BigInt64Array([BigInt(phonemeIds.length)]), [1]),
-              scales: new ortModule.Tensor('float32', new Float32Array([0.667, 1.0, 0.8]), [3]),
-            };
-
-            const result = await this.piperSession.run(feeds);
-            if (result?.output?.data) {
-              floatSegments.push(result.output.data);
+            if (this.piperG2p && typeof this.piperG2p === 'object') {
+              return this.piperG2p.encode(seg.text, this.piperConfig.phoneme_id_map, { language: 'en' }).phonemeIds as number[];
             }
-          }
+            return [] as number[];
+          }),
+        );
 
-          // Insert natural acoustic silence pause after sentence full-stop or colon (skip after final segment)
-          if (i < segments.length - 1 && seg.pauseMs > 0) {
-            const silenceSamples = Math.round((sampleRate * seg.pauseMs) / 1000);
-            floatSegments.push(new Float32Array(silenceSamples));
-          }
+        const piperSegments: PiperSegment[] = segments.map((seg, i) => ({
+          ids: phonemeIdList[i] || [],
+          // Natural pause after sentence full-stop or colon (skip after final segment)
+          pauseSamples: i < segments.length - 1 && seg.pauseMs > 0 ? Math.round((sampleRate * seg.pauseMs) / 1000) : 0,
+        }));
+
+        if (!piperSegments.some((s) => s.ids.length > 0)) {
+          return { audioBase64: '', mimeType: 'audio/wav' };
         }
 
-        if (floatSegments.length > 0) {
-          const totalSamples = floatSegments.reduce((acc, arr) => acc + arr.length, 0);
-          const combinedFloat = new Float32Array(totalSamples);
-          let offset = 0;
-          for (const arr of floatSegments) {
-            combinedFloat.set(arr, offset);
-            offset += arr.length;
-          }
+        const pcmBuffer = this.piperWorker
+          ? await this.piperWorker.synthesize(piperSegments)
+          : await this.runPiperInProcess(piperSegments);
 
-          const pcmBuffer = this.float32ToPcm16Buffer(combinedFloat);
-          const wavBase64 = this.pcmToWavBase64(pcmBuffer, sampleRate, 1);
+        if (pcmBuffer.length > 0) {
           const resObj = {
-            audioBase64: wavBase64,
+            audioBase64: this.pcmToWavBase64(pcmBuffer, sampleRate, 1),
             mimeType: 'audio/wav',
           };
           this.ttsAudioCache.set(cacheKey, resObj);
@@ -4372,10 +4419,36 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
         }
       }
     } catch (piperErr: any) {
-      this.logger.warn(`[PiperTTS] Synthesis failed for "${text}": ${piperErr?.message}`);
+      this.logger.warn(`[PiperTTS] Synthesis failed for "${text.slice(0, 80)}": ${piperErr?.message}`);
     }
 
     return { audioBase64: '', mimeType: 'audio/wav' };
+  }
+
+  /** Fallback when the worker thread is unavailable (e.g. running TS sources under vitest). */
+  private async runPiperInProcess(segments: PiperSegment[]): Promise<Buffer> {
+    const ortModule = await this.getOrtModule();
+    const floatSegments: Float32Array[] = [];
+    for (const seg of segments) {
+      if (seg.ids.length > 0) {
+        const feeds = {
+          input: new ortModule.Tensor('int64', BigInt64Array.from(seg.ids, (id: number) => BigInt(id)), [1, seg.ids.length]),
+          input_lengths: new ortModule.Tensor('int64', new BigInt64Array([BigInt(seg.ids.length)]), [1]),
+          scales: new ortModule.Tensor('float32', new Float32Array([0.667, 1.0, 0.8]), [3]),
+        };
+        const result = await this.piperSession.run(feeds);
+        if (result?.output?.data) floatSegments.push(result.output.data);
+      }
+      if (seg.pauseSamples > 0) floatSegments.push(new Float32Array(seg.pauseSamples));
+    }
+    const totalSamples = floatSegments.reduce((acc, arr) => acc + arr.length, 0);
+    const combinedFloat = new Float32Array(totalSamples);
+    let offset = 0;
+    for (const arr of floatSegments) {
+      combinedFloat.set(arr, offset);
+      offset += arr.length;
+    }
+    return this.float32ToPcm16Buffer(combinedFloat);
   }
 
   findHighlightDiff(
@@ -4505,7 +4578,7 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
     const apiKey = this.geminiApiKey;
     if (apiKey) {
       try {
-        const ai = new GoogleGenAI({ apiKey });
+        const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 30000 } });
         const dialogueSummary = (turns as any[])
           .map((t: any, idx: number) => `Turn ${idx} [${t.role.toUpperCase()}]: ${t.text}`)
           .join('\n');

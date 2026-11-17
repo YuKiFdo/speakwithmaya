@@ -152,6 +152,10 @@ const DEFAULT_APP_CONFIG: AppConfigData = {
   },
 };
 
+
+// Built once: toLocaleDateString({ timeZone }) / new Intl.DateTimeFormat cost ~80-100us per call.
+const SL_DATE_KEY_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Colombo' });
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -1998,7 +2002,73 @@ export class AuthService {
   /**
    * Admin: List users with aggregation metrics (sessions count, total tokens, total spend LKR, roadmap progress).
    */
+  /** Cached unfiltered admin-users dataset (full-table aggregation is expensive). */
+  private adminUsersCache: { at: number; promise: Promise<any> } | null = null;
+  private static readonly ADMIN_USERS_CACHE_TTL_MS = 20_000;
+
+  /** Call after any admin mutation that changes what /admin/users shows. */
+  invalidateAdminUsersCache() {
+    this.adminUsersCache = null;
+  }
+
+  /**
+   * Admin users list with server-side filtering and pagination.
+   * - `page` + `limit`: returns that page (limit defaults to 12, max 1000) plus `pagination`.
+   * - `limit` only: returns the first `limit` users (used by the SMS recipient dropdown).
+   * - neither: returns all users (backward compatible).
+   * Banner `stats` are always computed over all users; `stats.filteredCount` is the filtered total.
+   */
   async getAdminUsers(query?: AdminUsersQueryDto) {
+    const now = Date.now();
+    if (!this.adminUsersCache || now - this.adminUsersCache.at > AuthService.ADMIN_USERS_CACHE_TTL_MS) {
+      const promise = this.computeAdminUsersDataset();
+      this.adminUsersCache = { at: now, promise };
+      promise.catch(() => {
+        if (this.adminUsersCache?.promise === promise) this.adminUsersCache = null;
+      });
+    }
+    const dataset = await this.adminUsersCache.promise;
+
+    let users: any[] = dataset.users;
+    if (query?.search) {
+      const q = query.search.toLowerCase().trim();
+      users = users.filter(
+        (u) =>
+          u.displayName.toLowerCase().includes(q) ||
+          (u.phoneNumber || '').toLowerCase().includes(q) ||
+          (u.email && u.email.toLowerCase().includes(q)) ||
+          u.id.toLowerCase().includes(q) ||
+          u.goal.toLowerCase().includes(q),
+      );
+    }
+    if (query?.tier && query.tier !== 'ALL') {
+      users = users.filter((u) => u.planTier.toLowerCase() === query.tier!.toLowerCase());
+    }
+    if (query?.level && query.level !== 'ALL') {
+      users = users.filter((u) => u.level.toLowerCase() === query.level!.toLowerCase());
+    }
+    if (query?.status && query.status !== 'ALL') {
+      users = users.filter((u) => u.planStatus.toLowerCase() === query.status!.toLowerCase());
+    }
+
+    const total = users.length;
+    const parsedLimit = parseInt(query?.limit || '', 10);
+    const parsedPage = parseInt(query?.page || '', 10);
+    const hasPage = Number.isFinite(parsedPage) && parsedPage > 0;
+    const hasLimit = Number.isFinite(parsedLimit) && parsedLimit > 0;
+    const pageSize = Math.min(1000, hasLimit ? parsedLimit : hasPage ? 12 : total || 1);
+    const totalPages = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
+    const page = hasPage ? Math.min(parsedPage, totalPages) : 1;
+    const pageUsers = hasPage || hasLimit ? users.slice((page - 1) * pageSize, page * pageSize) : users;
+
+    return {
+      stats: { ...dataset.stats, filteredCount: total },
+      users: pageUsers,
+      pagination: { page, pageSize, total, totalPages },
+    };
+  }
+
+  private async computeAdminUsersDataset(query?: AdminUsersQueryDto) {
     if (!this.supabase) {
       throw new InternalServerErrorException('Supabase database client not configured.');
     }
@@ -2034,19 +2104,22 @@ export class AuthService {
         return false;
       };
 
-      // 2. Fetch sessions to aggregate per user
-      const { data: sessions } = await this.supabase
-        .from('sessions')
-        .select('id, user_id, topic, duration_seconds, overall_score, fluency_score, grammar_score, pronunciation_score, created_at, status')
-        .order('created_at', { ascending: false });
-
-      // 3. Fetch usage ledger to aggregate spend and tokens per user
-      const { data: ledgerEntries } = await this.supabase
-        .from('usage_ledger')
-        .select('user_id, session_id, total_tokens, cost_lkr, cost_usd');
-
-      // 4. Fetch subscriptions & verified Telco OTP records
-      const [{ data: subs }, { data: telcoVerifs }] = await Promise.all([
+      // 2-5. Fetch sessions, ledger, subscriptions, telco verifications and roadmap progress
+      // in parallel (previously awaited one after another).
+      const [
+        { data: sessions },
+        { data: ledgerEntries },
+        { data: subs },
+        { data: telcoVerifs },
+        { data: progress },
+      ] = await Promise.all([
+        this.supabase
+          .from('sessions')
+          .select('id, user_id, topic, duration_seconds, overall_score, fluency_score, grammar_score, pronunciation_score, created_at, status')
+          .order('created_at', { ascending: false }),
+        this.supabase
+          .from('usage_ledger')
+          .select('user_id, session_id, total_tokens, cost_lkr, cost_usd'),
         this.supabase
           .from('subscriptions')
           .select('id, user_id, plan_tier, status, amount_lkr, next_billing_date, payhere_subscription_id, updated_at'),
@@ -2056,12 +2129,10 @@ export class AuthService {
           .eq('is_verified', true)
           .like('otp_hash', 'TELCO:%')
           .order('created_at', { ascending: false }),
+        this.supabase
+          .from('user_roadmap_progress')
+          .select('user_id, roadmap_level_id, status, is_passed, score_percent, completed_at'),
       ]);
-
-      // 5. Fetch roadmap progress
-      const { data: progress } = await this.supabase
-        .from('user_roadmap_progress')
-        .select('user_id, roadmap_level_id, status, is_passed, score_percent, completed_at');
 
       // Index verified TELCO OTP records by normalized digits
       const telcoVerifByDigits = new Map<string, { provider: 'ideamart' | 'mspace'; verifiedAt: string; referenceNo: string }>();
@@ -2137,6 +2208,7 @@ export class AuthService {
           : (p.baseline_fluency_score || 0);
 
         const lastSession = userSessions[0];
+        const onboardingInfo = this.resolveOnboardingCallStatus(p, userSessions);
         const email = (p as any).email || null;
         const avatarUrl = (p as any).avatar_url || null;
         const isTestAccount = isTestProfile(p);
@@ -2227,18 +2299,9 @@ export class AuthService {
           },
           lastActiveStep: p.last_active_step,
           onboardingCompletedAt: p.onboarding_completed_at,
-          onboardingCallStatus: (() => {
-            const info = this.resolveOnboardingCallStatus(p, userSessions);
-            return info.status;
-          })(),
-          onboardingCallStatusLabel: (() => {
-            const info = this.resolveOnboardingCallStatus(p, userSessions);
-            return info.label;
-          })(),
-          onboardingCallDuration: (() => {
-            const info = this.resolveOnboardingCallStatus(p, userSessions);
-            return info.duration;
-          })(),
+          onboardingCallStatus: onboardingInfo.status,
+          onboardingCallStatusLabel: onboardingInfo.label,
+          onboardingCallDuration: onboardingInfo.duration,
           createdAt: p.created_at,
           updatedAt: p.updated_at,
           // Aggregated Metrics
@@ -2301,23 +2364,26 @@ export class AuthService {
       // Calculate Today & 7-Day Trend Metrics (Sri Lanka Timezone)
       const slDateStr = (dateInput?: string | Date | null): string => {
         if (!dateInput) return '';
-        try {
-          const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
-          return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' });
-        } catch {
-          return '';
-        }
+        const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+        return isNaN(d.getTime()) ? '' : SL_DATE_KEY_FMT.format(d);
       };
 
       const todaySlKey = slDateStr(new Date());
 
-      const todayRegisteredCount = allProfiles.filter(
-        (p) => slDateStr(p.created_at) === todaySlKey,
-      ).length;
+      // Bucket rows by Sri Lanka day once (O(n)) instead of re-formatting every row for every day.
+      const regsByDay = new Map<string, number>();
+      for (const p of allProfiles) {
+        const k = slDateStr(p.created_at);
+        if (k) regsByDay.set(k, (regsByDay.get(k) || 0) + 1);
+      }
+      const sessionsByDay = new Map<string, number>();
+      for (const sess of (sessions || []) as any[]) {
+        const k = slDateStr(sess.created_at);
+        if (k) sessionsByDay.set(k, (sessionsByDay.get(k) || 0) + 1);
+      }
 
-      const todaySessionsCount = (sessions || []).filter(
-        (s: any) => slDateStr(s.created_at) === todaySlKey,
-      ).length;
+      const todayRegisteredCount = regsByDay.get(todaySlKey) || 0;
+      const todaySessionsCount = sessionsByDay.get(todaySlKey) || 0;
 
       // Generate 7-day trend series for visual charts
       const past7Days = Array.from({ length: 7 }, (_, i) => {
@@ -2332,7 +2398,7 @@ export class AuthService {
       });
 
       const registrationTrend = past7Days.map(({ dateKey, dayLabel, isToday }) => {
-        const count = allProfiles.filter((p) => slDateStr(p.created_at) === dateKey).length;
+        const count = regsByDay.get(dateKey) || 0;
         return {
           date: dateKey,
           label: isToday ? 'Today' : dayLabel,
@@ -2341,7 +2407,7 @@ export class AuthService {
       });
 
       const sessionTrend = past7Days.map(({ dateKey, dayLabel, isToday }) => {
-        const count = (sessions || []).filter((s: any) => slDateStr(s.created_at) === dateKey).length;
+        const count = sessionsByDay.get(dateKey) || 0;
         return {
           date: dateKey,
           label: isToday ? 'Today' : dayLabel,
@@ -2717,12 +2783,8 @@ export class AuthService {
       // 8. 14-Day Growth and Session Activity Trends (Sri Lanka Timezone, real users only)
       const slDateStr = (dateInput?: string | Date | null): string => {
         if (!dateInput) return '';
-        try {
-          const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
-          return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' });
-        } catch {
-          return '';
-        }
+        const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+        return isNaN(d.getTime()) ? '' : SL_DATE_KEY_FMT.format(d);
       };
 
       const past14Days = Array.from({ length: 14 }, (_, i) => {
@@ -2743,9 +2805,20 @@ export class AuthService {
 
       const todaySlKey = slDateStr(new Date());
 
+      const realRegsByDay = new Map<string, number>();
+      for (const p of realProfiles) {
+        const k = slDateStr(p.created_at);
+        if (k) realRegsByDay.set(k, (realRegsByDay.get(k) || 0) + 1);
+      }
+      const realSessionsByDay = new Map<string, number>();
+      for (const sess of realSessions) {
+        const k = slDateStr(sess.created_at);
+        if (k) realSessionsByDay.set(k, (realSessionsByDay.get(k) || 0) + 1);
+      }
+
       const days14 = past14Days.map(({ dateKey, dayLabel, weekday, isToday }) => {
-        const registrations = realProfiles.filter((p) => slDateStr(p.created_at) === dateKey).length;
-        const sessionCount = realSessions.filter((s) => slDateStr(s.created_at) === dateKey).length;
+        const registrations = realRegsByDay.get(dateKey) || 0;
+        const sessionCount = realSessionsByDay.get(dateKey) || 0;
         return {
           date: dateKey,
           dayLabel: isToday ? 'Today' : `${weekday} ${dayLabel}`,
@@ -2757,7 +2830,7 @@ export class AuthService {
       });
 
       const newUsersLast7Days = days14.slice(7).reduce((acc, d) => acc + d.registrations, 0);
-      const newUsersToday = realProfiles.filter((p) => slDateStr(p.created_at) === todaySlKey).length;
+      const newUsersToday = realRegsByDay.get(todaySlKey) || 0;
 
       return {
         kpis: {
@@ -3024,6 +3097,7 @@ export class AuthService {
    * Admin: Update user's profile, allowance, or plan directly.
    */
   async adminUpdateUser(userId: string, dto: AdminUpdateUserDto) {
+    this.invalidateAdminUsersCache();
     if (!this.supabase) {
       throw new InternalServerErrorException('Supabase database client not configured.');
     }
@@ -3260,6 +3334,7 @@ export class AuthService {
    * Admin: Create and provision a new test account
    */
   async createTestAccount(dto: CreateTestAccountDto): Promise<{ success: boolean; testAccount: TestAccountItem }> {
+    this.invalidateAdminUsersCache();
     const phone = this.normalizePhoneNumber(dto.phoneNumber);
     if (!phone || phone.length < 10) {
       throw new BadRequestException('Please provide a valid phone number.');
@@ -3403,6 +3478,7 @@ export class AuthService {
     unsubscribedTelco?: boolean;
     unsubscribedPayhere?: boolean;
   }> {
+    this.invalidateAdminUsersCache();
     if (!this.supabase) {
       throw new InternalServerErrorException('Supabase database client not configured.');
     }
@@ -3592,6 +3668,7 @@ export class AuthService {
    * Admin: Remove a test account and delete its corresponding profile
    */
   async deleteTestAccount(idOrPhone: string): Promise<{ success: boolean; deletedId: string }> {
+    this.invalidateAdminUsersCache();
     const config = await this.getAppConfig();
     const existingList = config.testAccounts || [];
     const cleanParam = idOrPhone.trim();

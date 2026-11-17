@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -448,6 +448,9 @@ export default function AdminUsersScreen() {
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 12;
+  // Server-side pagination: the backend returns one page at a time.
+  const [serverTotal, setServerTotal] = useState(0);
+  const [serverTotalPages, setServerTotalPages] = useState(1);
 
   // Modal: Test Accounts (Zero OTP Bypass)
   const [testAccounts, setTestAccounts] = useState<TestAccountItem[]>([]);
@@ -666,7 +669,7 @@ export default function AdminUsersScreen() {
     }
   };
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (page: number = currentPage) => {
     try {
       setIsLoading(true);
       const baseUrl = getBackendBaseUrl();
@@ -675,12 +678,21 @@ export default function AdminUsersScreen() {
         tier: selectedTier,
         level: selectedLevel,
         status: selectedStatus,
+        page: String(page),
+        limit: String(pageSize),
       });
 
       const res = await fetch(`${baseUrl}/v1/admin/users?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users || []);
+        if (data.pagination) {
+          setServerTotal(data.pagination.total || 0);
+          setServerTotalPages(data.pagination.totalPages || 1);
+          if (data.pagination.page && data.pagination.page !== page) {
+            setCurrentPage(data.pagination.page);
+          }
+        }
         if (data.stats) {
           setStats(data.stats);
         }
@@ -693,15 +705,25 @@ export default function AdminUsersScreen() {
   };
 
   useEffect(() => {
-    fetchUsers();
+    fetchUsers(1);
     fetchTestAccounts();
     fetchComplaints();
   }, [selectedTier, selectedLevel, selectedStatus]);
 
+  // Fetch the requested page from the server when the page changes
+  const isFirstPageRender = useRef(true);
+  useEffect(() => {
+    if (isFirstPageRender.current) {
+      isFirstPageRender.current = false;
+      return;
+    }
+    fetchUsers(currentPage);
+  }, [currentPage]);
+
   // Debounced search trigger
   useEffect(() => {
     const handler = setTimeout(() => {
-      fetchUsers();
+      fetchUsers(1);
     }, 350);
     return () => clearTimeout(handler);
   }, [searchQuery]);
@@ -736,11 +758,8 @@ export default function AdminUsersScreen() {
   };
 
   // Pagination calculation
-  const totalPages = Math.max(1, Math.ceil(users.length / pageSize));
-  const paginatedUsers = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return users.slice(start, start + pageSize);
-  }, [users, currentPage, pageSize]);
+  const totalPages = Math.max(1, serverTotalPages);
+  const paginatedUsers = users;
 
   const getTierColor = (tier: string) => {
     switch (tier?.toLowerCase()) {
@@ -1122,7 +1141,7 @@ export default function AdminUsersScreen() {
               <View style={styles.tableCardHeader}>
                 <Text style={styles.tableTitle}>Student Directory & Usage Ledger</Text>
                 <Text style={styles.tableSubtitle}>
-                  Showing {paginatedUsers.length} of {users.length} students
+                  Showing {paginatedUsers.length} of {serverTotal} students
                 </Text>
               </View>
 
