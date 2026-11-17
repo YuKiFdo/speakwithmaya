@@ -1,3 +1,4 @@
+
 name: Deploy Backend to Ubuntu VM (Production)
 
 on:
@@ -9,17 +10,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
-    name: Deploy Backend (${{ matrix.target.name }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false # Ensure deployment to backup proceeds even if primary is offline
-      matrix:
-        target:
-          - id: azure
-            name: 'Azure Primary'
-          - id: ovh
-            name: 'OVH Backup'
+  build:
+    name: Build Production Backend
+    runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -27,36 +21,88 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: 'npm'
-          cache-dependency-path: 'maya-backend/package-lock.json'
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: maya-backend/package-lock.json
 
-      - name: Install dependencies & Build
+      - name: Install dependencies
         working-directory: ./maya-backend
-        run: |
-          npm ci --ignore-scripts
-          npm run build
+        run: npm ci
 
-      - name: Deploy to ${{ matrix.target.name }}
+      - name: Build NestJS
+        working-directory: ./maya-backend
+        run: npm run build
+
+      - name: Keep production dependencies only
+        working-directory: ./maya-backend
+        run: npm prune --omit=dev
+
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy-package
+
+          rsync -a \
+            --exclude='/src/' \
+            --exclude='/test/' \
+            --exclude='/.git/' \
+            --exclude='/.env' \
+            --exclude='/node_modules/.cache/' \
+            ./maya-backend/ ./deploy-package/
+
+          tar -czf maya-backend-deploy.tar.gz \
+            -C deploy-package .
+
+      - name: Upload deployment package
+        uses: actions/upload-artifact@v4
+        with:
+          name: maya-backend-production
+          path: maya-backend-deploy.tar.gz
+          retention-days: 1
+
+  deploy:
+    name: Deploy (${{ matrix.target.name }})
+    needs: build
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - id: azure
+            name: Azure Primary
+          - id: ovh
+            name: OVH Backup
+
+    steps:
+      - name: Download deployment package
+        uses: actions/download-artifact@v4
+        with:
+          name: maya-backend-production
+          path: ./deployment
+
+      - name: Configure SSH and deploy
         env:
           TARGET_ID: ${{ matrix.target.id }}
           VM_IP: ${{ matrix.target.id == 'azure' && (secrets.VM_IP || '20.198.240.185') || (secrets.BACKUP_VM_IP || '139.99.192.179') }}
           VM_USER: ${{ matrix.target.id == 'azure' && (secrets.VM_USER || 'speakwithmaya') || (secrets.BACKUP_VM_USER || 'ubuntu') }}
           SSH_KEY: ${{ matrix.target.id == 'azure' && secrets.VM_SSH_KEY || (secrets.BACKUP_VM_SSH_KEY || '') }}
           VM_PASSWORD: ${{ matrix.target.id == 'ovh' && secrets.BACKUP_VM_PASSWORD || '' }}
+
         run: |
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
 
           USE_SSHPASS=false
+
           if [ -n "$VM_PASSWORD" ]; then
-            sudo apt-get update && sudo apt-get install -y sshpass
+            sudo apt-get update
+            sudo apt-get install -y sshpass
             USE_SSHPASS=true
           elif [ -n "$SSH_KEY" ]; then
             echo "$SSH_KEY" > ~/.ssh/id_rsa
             chmod 600 ~/.ssh/id_rsa
           else
-            echo "ERROR: Neither SSH_KEY nor VM_PASSWORD provided for $TARGET_ID"
+            echo "ERROR: Missing SSH credentials for $TARGET_ID"
             exit 1
           fi
 
@@ -64,39 +110,63 @@ jobs:
 
           run_ssh() {
             if [ "$USE_SSHPASS" = true ]; then
-              sshpass -p "$VM_PASSWORD" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$VM_USER@$VM_IP" "$@"
+              sshpass -p "$VM_PASSWORD" ssh \
+                -o StrictHostKeyChecking=no \
+                -o PreferredAuthentications=password \
+                -o PubkeyAuthentication=no \
+                "$VM_USER@$VM_IP" "$@"
             else
-              ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
+              ssh -o StrictHostKeyChecking=no \
+                "$VM_USER@$VM_IP" "$@"
             fi
           }
 
           run_rsync() {
             if [ "$USE_SSHPASS" = true ]; then
-              rsync -avz --delete -e "sshpass -p '$VM_PASSWORD' ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
+              rsync -avz -e "sshpass -p '$VM_PASSWORD' ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
             else
-              rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" "$@"
+              rsync -avz -e "ssh -o StrictHostKeyChecking=no" "$@"
             fi
           }
 
-          # Ensure app directory exists
-          run_ssh "mkdir -p /home/$VM_USER/apps/maya-backend"
+          APP_DIR="/home/$VM_USER/apps/maya-backend"
 
-          # Sync backend built artifacts and package manifests to VM
+          echo "Preparing deployment on $TARGET_ID"
+
+          run_ssh "mkdir -p '$APP_DIR'"
+
+          echo "Uploading production package..."
+
           run_rsync \
-            --exclude '.git' \
-            --exclude 'node_modules' \
-            --exclude 'src' \
-            --exclude 'test' \
-            --exclude '.env' \
-            ./maya-backend/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-backend/"
+            ./deployment/maya-backend-deploy.tar.gz \
+            "$VM_USER@$VM_IP:/tmp/maya-backend-deploy.tar.gz"
 
-          # Install espeak-ng (for Piper TTS phonemization), production dependencies, and start/restart PM2
+          echo "Extracting production package..."
+
           run_ssh "bash -l -c '
+            set -e
+
+            APP_DIR=\"$APP_DIR\"
+
             if ! command -v espeak-ng >/dev/null 2>&1; then
-              sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends espeak-ng || true
+              sudo -n apt-get update
+              sudo -n apt-get install -y --no-install-recommends espeak-ng
             fi
-            cd /home/$VM_USER/apps/maya-backend
-            npm ci --omit=dev --legacy-peer-deps --ignore-scripts
-            pm2 startOrReload ecosystem.config.cjs --update-env || pm2 start ecosystem.config.cjs --update-env
+
+            cd \"\$APP_DIR\"
+
+            rm -rf node_modules dist
+
+            tar -xzf /tmp/maya-backend-deploy.tar.gz
+
+            rm -f /tmp/maya-backend-deploy.tar.gz
+
+            echo \"Deployment files extracted\"
+
+            pm2 startOrReload ecosystem.config.cjs --update-env || \
+              pm2 start ecosystem.config.cjs --update-env
+
             pm2 save
+
+            echo \"Deployment completed successfully\"
           '"

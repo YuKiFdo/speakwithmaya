@@ -156,10 +156,23 @@ const DEFAULT_APP_CONFIG: AppConfigData = {
 // Built once: toLocaleDateString({ timeZone }) / new Intl.DateTimeFormat cost ~80-100us per call.
 const SL_DATE_KEY_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Colombo' });
 
+export interface BroadcastSmsJob {
+  jobId: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  totalTargeted: number;
+  totalSent: number;
+  totalFailed: number;
+  failedNumbers: string[];
+  createdAt: string;
+  completedAt?: string;
+  message?: string;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly supabase: SupabaseClient;
+  private readonly smsBroadcastJobs = new Map<string, BroadcastSmsJob>();
 
   constructor(
     private readonly configService: ConfigService,
@@ -4890,7 +4903,8 @@ export class AuthService {
   }
 
   /**
-   * Admin: Broadcast targeted SMS to users
+   * Admin: Broadcast targeted SMS to users as a background job.
+   * Returns immediately with { jobId, totalTargeted } to prevent holding HTTP requests open.
    */
   async broadcastSms(dto: { audience: 'all' | 'paid' | 'nonpaid' | 'specific'; message: string; phoneNumbers?: string[] }) {
     if (!dto.message || !dto.message.trim()) {
@@ -4940,6 +4954,7 @@ export class AuthService {
     if (recipients.length === 0) {
       return {
         success: true,
+        jobId: null,
         totalTargeted: 0,
         totalSent: 0,
         totalFailed: 0,
@@ -4947,47 +4962,75 @@ export class AuthService {
       };
     }
 
-    this.logger.log(`[broadcastSms] Starting broadcast of ${recipients.length} SMS messages for audience '${dto.audience}'...`);
+    const jobId = crypto.randomUUID();
+    const job: BroadcastSmsJob = {
+      jobId,
+      status: 'processing',
+      totalTargeted: recipients.length,
+      totalSent: 0,
+      totalFailed: 0,
+      failedNumbers: [],
+      createdAt: new Date().toISOString(),
+    };
+    this.smsBroadcastJobs.set(jobId, job);
 
-    let sentCount = 0;
-    let failedCount = 0;
-    const failedNumbers: string[] = [];
+    this.logger.log(`[broadcastSms] Queued background SMS broadcast job ${jobId} for ${recipients.length} recipients (audience '${dto.audience}')...`);
 
-    // Send SMS with concurrency control (5 at a time) to ensure gateway stability
-    const CHUNK_SIZE = 5;
-    for (let i = 0; i < recipients.length; i += CHUNK_SIZE) {
-      const chunk = recipients.slice(i, i + CHUNK_SIZE);
-      await Promise.all(
-        chunk.map(async (phone) => {
-          try {
-            const res = await this.smsProvider.sendRawMessage(phone, cleanMessage);
-            if (res.success) {
-              sentCount++;
-            } else {
-              failedCount++;
-              failedNumbers.push(phone);
+    // Process sends in the background (fire-and-forget with chunking)
+    (async () => {
+      const CHUNK_SIZE = 5;
+      for (let i = 0; i < recipients.length; i += CHUNK_SIZE) {
+        const chunk = recipients.slice(i, i + CHUNK_SIZE);
+        await Promise.all(
+          chunk.map(async (phone) => {
+            try {
+              const res = await this.smsProvider.sendRawMessage(phone, cleanMessage);
+              if (res.success) {
+                job.totalSent++;
+              } else {
+                job.totalFailed++;
+                job.failedNumbers.push(phone);
+              }
+            } catch {
+              job.totalFailed++;
+              job.failedNumbers.push(phone);
             }
-          } catch {
-            failedCount++;
-            failedNumbers.push(phone);
-          }
-        }),
-      );
-      // Small pause between chunks (100ms)
-      if (i + CHUNK_SIZE < recipients.length) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
+          }),
+        );
+        // Small pause between chunks (100ms)
+        if (i + CHUNK_SIZE < recipients.length) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
       }
-    }
 
-    this.logger.log(`[broadcastSms] Completed broadcast. Sent: ${sentCount}, Failed: ${failedCount}`);
+      job.status = 'completed';
+      job.completedAt = new Date().toISOString();
+      job.message = `Broadcast finished. Successfully sent to ${job.totalSent} recipient(s)${job.totalFailed > 0 ? `, ${job.totalFailed} failed` : ''}.`;
+      this.logger.log(`[broadcastSms] Job ${jobId} finished. Sent: ${job.totalSent}, Failed: ${job.totalFailed}`);
+
+      // Auto-expire job from memory after 1 hour to prevent memory bloat
+      setTimeout(() => {
+        this.smsBroadcastJobs.delete(jobId);
+      }, 60 * 60 * 1000);
+    })().catch((err: any) => {
+      job.status = 'failed';
+      job.completedAt = new Date().toISOString();
+      job.message = `Broadcast failed unexpectedly: ${err?.message || String(err)}`;
+      this.logger.error(`[broadcastSms] Job ${jobId} encountered fatal error: ${err?.message}`);
+    });
 
     return {
       success: true,
+      jobId,
       totalTargeted: recipients.length,
-      totalSent: sentCount,
-      totalFailed: failedCount,
-      failedNumbers: failedNumbers.slice(0, 20),
-      message: `Broadcast finished. Successfully sent to ${sentCount} recipient(s)${failedCount > 0 ? `, ${failedCount} failed` : ''}.`,
+      message: `Broadcast job started. ${recipients.length} SMS message(s) queued for background delivery.`,
     };
+  }
+
+  /**
+   * Admin: Get progress and status of a background SMS broadcast job
+   */
+  getBroadcastSmsJob(jobId: string): BroadcastSmsJob | null {
+    return this.smsBroadcastJobs.get(jobId) || null;
   }
 }

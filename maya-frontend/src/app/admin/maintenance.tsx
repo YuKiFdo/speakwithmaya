@@ -378,6 +378,27 @@ export default function AdminMaintenanceScreen() {
         throw new Error(data.message || 'Failed to dispatch test SMS');
       }
 
+      if (data.jobId) {
+        // Poll for completion (test SMS has 1 recipient, finishes quickly)
+        for (let i = 0; i < 20; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const pollRes = await fetch(`${getBackendBaseUrl()}/v1/admin/broadcast-sms/${data.jobId}`, {
+            headers: getAuthHeaders(),
+          });
+          if (pollRes.ok) {
+            const jobStatus = await pollRes.json();
+            if (jobStatus.status === 'completed') {
+              if (jobStatus.totalFailed > 0) {
+                throw new Error('SMS Gateway rejected or failed to deliver the test SMS.');
+              }
+              break;
+            } else if (jobStatus.status === 'failed') {
+              throw new Error(jobStatus.message || 'Failed to send test SMS');
+            }
+          }
+        }
+      }
+
       await mayaAlert.success(
         `Test SMS sent successfully to ${testNumber.trim()}! Please check your handset.`,
         'Test SMS Delivered'
@@ -448,17 +469,55 @@ export default function AdminMaintenanceScreen() {
         throw new Error(data.message || 'Broadcast request failed');
       }
 
-      setLastBroadcastResult({
-        totalTargeted: data.totalTargeted || 0,
-        totalSent: data.totalSent || 0,
-        totalFailed: data.totalFailed || 0,
-        date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      });
+      if (data.jobId) {
+        // Poll background job for live progress
+        let isDone = false;
+        const startTime = Date.now();
+        while (!isDone && Date.now() - startTime < 15 * 60 * 1000) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          try {
+            const pollRes = await fetch(`${getBackendBaseUrl()}/v1/admin/broadcast-sms/${data.jobId}`, {
+              headers: getAuthHeaders(),
+            });
+            if (pollRes.ok) {
+              const jobStatus = await pollRes.json();
+              setLastBroadcastResult({
+                totalTargeted: jobStatus.totalTargeted || data.totalTargeted || 0,
+                totalSent: jobStatus.totalSent || 0,
+                totalFailed: jobStatus.totalFailed || 0,
+                date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              });
 
-      await mayaAlert.success(
-        `Broadcast completed!\n\n• Successfully Sent: ${data.totalSent}\n• Failed: ${data.totalFailed}\n• Total Targeted: ${data.totalTargeted}`,
-        'Broadcast Complete'
-      );
+              if (jobStatus.status === 'completed' || jobStatus.status === 'failed') {
+                isDone = true;
+                if (jobStatus.status === 'completed') {
+                  await mayaAlert.success(
+                    `Broadcast completed!\n\n• Successfully Sent: ${jobStatus.totalSent}\n• Failed: ${jobStatus.totalFailed}\n• Total Targeted: ${jobStatus.totalTargeted}`,
+                    'Broadcast Complete'
+                  );
+                } else {
+                  await mayaAlert.error(jobStatus.message || 'Broadcast job failed', 'Broadcast Failed');
+                }
+                break;
+              }
+            }
+          } catch (pollErr: any) {
+            console.warn('[Broadcast Poll Warning]', pollErr);
+          }
+        }
+      } else {
+        setLastBroadcastResult({
+          totalTargeted: data.totalTargeted || 0,
+          totalSent: data.totalSent || 0,
+          totalFailed: data.totalFailed || 0,
+          date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        });
+
+        await mayaAlert.success(
+          `Broadcast completed!\n\n• Successfully Sent: ${data.totalSent || 0}\n• Failed: ${data.totalFailed || 0}\n• Total Targeted: ${data.totalTargeted || 0}`,
+          'Broadcast Complete'
+        );
+      }
     } catch (err: any) {
       await mayaAlert.error(err.message || 'Broadcast could not be completed', 'Broadcast Failed');
     } finally {
