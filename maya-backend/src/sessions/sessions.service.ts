@@ -2937,9 +2937,21 @@ ${memoryPart}`;
     const statusFilter = (query?.status || '').toLowerCase().trim();
     const modelFilter = (query?.model || '').toLowerCase().trim();
 
+    // range=custom: inclusive Sri Lanka calendar days [from, to], capped at 92 days.
+    const todayKey = getSriLankaDateKey(new Date());
+    let customFrom: string | null = null;
+    let customTo: string | null = null;
+    if (range === 'custom' && query?.from) {
+      customFrom = query.from;
+      customTo = query.to && query.to >= query.from ? query.to : todayKey;
+      if (customTo > todayKey) customTo = todayKey;
+      const maxFrom = new Date(new Date(`${customTo}T00:00:00+05:30`).getTime() - 91 * 86_400_000);
+      if (new Date(`${customFrom}T00:00:00+05:30`) < maxFrom) customFrom = getSriLankaDateKey(maxFrom);
+    }
+
     // 60-second in-memory response cache to make admin navigation instantaneous
     // (was 15 s; each rebuild costs several cross-region database round trips)
-    const cacheKey = `${range}_${search}_${statusFilter}_${modelFilter}`;
+    const cacheKey = `${range}_${customFrom}_${customTo}_${search}_${statusFilter}_${modelFilter}`;
     const cached = this.usageCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < 60000) {
       return cached.data;
@@ -2997,9 +3009,13 @@ ${memoryPart}`;
 
         // Database date range indexing
         if (range === 'today') {
-          const startOfDay = new Date();
-          startOfDay.setHours(0, 0, 0, 0);
+          // Sri Lanka midnight (the server runs in UTC, so setHours(0) was 05:30 SL time)
+          const startOfDay = new Date(`${todayKey}T00:00:00+05:30`);
           queryBuilder = queryBuilder.gte('created_at', startOfDay.toISOString());
+        } else if (customFrom && customTo) {
+          const start = new Date(`${customFrom}T00:00:00+05:30`);
+          const end = new Date(new Date(`${customTo}T00:00:00+05:30`).getTime() + 86_400_000);
+          queryBuilder = queryBuilder.gte('created_at', start.toISOString()).lt('created_at', end.toISOString());
         } else if (range === '7d') {
           const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
           queryBuilder = queryBuilder.gte('created_at', sevenDaysAgo.toISOString());
@@ -3008,8 +3024,8 @@ ${memoryPart}`;
           queryBuilder = queryBuilder.gte('created_at', thirtyDaysAgo.toISOString());
         }
 
-        // Sensible cap to prevent unbound network fetches
-        queryBuilder = queryBuilder.limit(300);
+        // Sensible cap to prevent unbound network fetches (custom ranges may span up to 92 days)
+        queryBuilder = queryBuilder.limit(customFrom ? 1000 : 300);
 
         const { data: ledgerEntries, error } = await queryBuilder;
 
@@ -3220,14 +3236,23 @@ ${memoryPart}`;
         });
       });
     } else {
-      // 30 days real data aggregation (last 30 days ending today)
+      // Day buckets: the custom [from, to] range, otherwise the last 30 days ending today
       const days: { key: string; label: string }[] = [];
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const key = getSriLankaDateKey(d);
-        const label = i === 0 ? 'Today' : getSriLankaDateLabel(d);
-        days.push({ key, label });
+      if (customFrom && customTo) {
+        const endMs = new Date(`${customTo}T12:00:00+05:30`).getTime();
+        for (let t = new Date(`${customFrom}T12:00:00+05:30`).getTime(); t <= endMs; t += 86_400_000) {
+          const d = new Date(t);
+          const key = getSriLankaDateKey(d);
+          days.push({ key, label: key === todayKey ? 'Today' : getSriLankaDateLabel(d) });
+        }
+      } else {
+        for (let i = 29; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          const key = getSriLankaDateKey(d);
+          const label = i === 0 ? 'Today' : getSriLankaDateLabel(d);
+          days.push({ key, label });
+        }
       }
 
       const dayMap = new Map<string, { tokens: number; minutes: number; costLkr: number; costUsd: number; sessionsCount: number }>();

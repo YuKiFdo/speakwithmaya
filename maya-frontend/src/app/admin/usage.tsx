@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -263,6 +263,13 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+/** Sri Lanka calendar date (YYYY-MM-DD) offset by `deltaDays` from today. */
+function slDateKey(deltaDays: number): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Colombo' }).format(
+    new Date(Date.now() + deltaDays * 86_400_000),
+  );
+}
+
 export default function AdminUsageScreen() {
   const { isPhone } = useBreakpoint();
   const { width: windowWidth } = useWindowDimensions();
@@ -273,6 +280,14 @@ export default function AdminUsageScreen() {
 
   // Filter States
   const [selectedRange, setSelectedRange] = useState<'today' | '7d' | '30d' | 'custom'>('30d');
+  // Custom range (Sri Lanka dates, YYYY-MM-DD). Drafts are edited in the inputs; the applied
+  // pair is what the backend is queried with (only after "Apply", so typing doesn't refetch).
+  const [customFromDraft, setCustomFromDraft] = useState(() => slDateKey(-29));
+  const [customToDraft, setCustomToDraft] = useState(() => slDateKey(0));
+  const [customApplied, setCustomApplied] = useState(() => ({ from: slDateKey(-29), to: slDateKey(0) }));
+  const [customError, setCustomError] = useState<string | null>(null);
+  // Ignore responses from superseded requests (fast range switching used to show stale data)
+  const usageRequestSeq = useRef(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('All Statuses');
   const [selectedModel, setSelectedModel] = useState<string>('All Models');
@@ -326,6 +341,7 @@ export default function AdminUsageScreen() {
 
   // Fetch usage data from backend
   const fetchUsageData = async () => {
+    const seq = ++usageRequestSeq.current;
     try {
       setLoading(true);
       const baseUrl = getBackendBaseUrl();
@@ -335,22 +351,42 @@ export default function AdminUsageScreen() {
         status: selectedStatus === 'All Statuses' ? '' : selectedStatus,
         model: selectedModel === 'All Models' ? '' : selectedModel,
       });
+      if (selectedRange === 'custom') {
+        params.set('from', customApplied.from);
+        params.set('to', customApplied.to);
+      }
 
       const res = await fetch(`${baseUrl}/v1/admin/usage?${params.toString()}`);
       if (res.ok) {
         const json = await res.json();
-        setData(json);
+        if (seq === usageRequestSeq.current) setData(json);
       }
     } catch (err) {
       console.warn('[AdminUsage] Error fetching usage logs:', err);
     } finally {
-      setLoading(false);
+      if (seq === usageRequestSeq.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchUsageData();
-  }, [selectedRange, selectedStatus, selectedModel]);
+  }, [selectedRange, selectedStatus, selectedModel, customApplied]);
+
+  const applyCustomRange = () => {
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const from = customFromDraft.trim();
+    const to = customToDraft.trim();
+    if (!re.test(from) || !re.test(to) || isNaN(Date.parse(from)) || isNaN(Date.parse(to))) {
+      setCustomError('Use the format YYYY-MM-DD');
+      return;
+    }
+    if (from > to) {
+      setCustomError('"From" must be on or before "To"');
+      return;
+    }
+    setCustomError(null);
+    setCustomApplied({ from, to });
+  };
 
   // Debounced search trigger
   useEffect(() => {
@@ -742,6 +778,45 @@ export default function AdminUsageScreen() {
                   })}
                 </View>
               </View>
+
+              {selectedRange === 'custom' && (
+                <View style={styles.customRangeRow}>
+                  <View style={styles.customRangeField}>
+                    <Text style={styles.customRangeLabel}>From</Text>
+                    <TextInput
+                      value={customFromDraft}
+                      onChangeText={setCustomFromDraft}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor="#94a3b8"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      maxLength={10}
+                      style={styles.customRangeInput}
+                      onSubmitEditing={applyCustomRange}
+                    />
+                  </View>
+                  <View style={styles.customRangeField}>
+                    <Text style={styles.customRangeLabel}>To</Text>
+                    <TextInput
+                      value={customToDraft}
+                      onChangeText={setCustomToDraft}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor="#94a3b8"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      maxLength={10}
+                      style={styles.customRangeInput}
+                      onSubmitEditing={applyCustomRange}
+                    />
+                  </View>
+                  <Pressable onPress={applyCustomRange} style={styles.customRangeApply}>
+                    <Text style={styles.customRangeApplyText}>Apply</Text>
+                  </Pressable>
+                  <Text style={styles.customRangeHint}>
+                    {customError || `Showing ${customApplied.from} to ${customApplied.to} (max 92 days)`}
+                  </Text>
+                </View>
+              )}
 
               {/* SVG Wave Chart */}
               <View
@@ -2573,6 +2648,47 @@ const styles = StyleSheet.create({
     ...fontStyle('inter', 'bold'),
     fontSize: 15,
     color: '#0f172a',
+  },
+  customRangeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    gap: 12,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  customRangeField: {
+    minWidth: 140,
+  },
+  customRangeLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 4,
+  },
+  customRangeInput: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: '#0f172a',
+    backgroundColor: '#fff',
+  },
+  customRangeApply: {
+    backgroundColor: '#0f766e',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  customRangeApplyText: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  customRangeHint: {
+    fontSize: 12,
+    color: '#64748b',
+    paddingBottom: 8,
   },
   rangePillContainer: {
     flexDirection: 'row',

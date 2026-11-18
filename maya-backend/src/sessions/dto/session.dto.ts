@@ -1,4 +1,4 @@
-import { IsString, IsBoolean, IsOptional, IsNumber, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsBoolean, IsOptional, IsNumber, IsArray, ValidateNested, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateSessionTokenDto {
@@ -323,6 +323,16 @@ export class QueryUsageDto {
   @IsOptional()
   @IsString()
   model?: string;
+
+  /** range=custom: first day (Sri Lanka date, YYYY-MM-DD), inclusive */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from?: string;
+
+  /** range=custom: last day (Sri Lanka date, YYYY-MM-DD), inclusive */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to?: string;
 }
 
 export class TranslateDto {
