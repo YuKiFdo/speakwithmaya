@@ -8,49 +8,94 @@ on:
       - '.github/workflows/deploy-vm-landing.yml'
   workflow_dispatch:
 
+concurrency:
+  group: vm-production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
+  build-and-push:
+    name: Build & Push Landing Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      image_sha: ${{ steps.meta.outputs.image_sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name and tags
+        id: meta
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/${REPO_LOWER}-landing"
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE}:latest" >> $GITHUB_OUTPUT
+          echo "image_sha=${IMAGE}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Landing Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./maya-landing
+          file: ./maya-landing/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_tag }}
+            ${{ steps.meta.outputs.image_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
     name: Deploy Landing (${{ matrix.target.name }})
+    needs: build-and-push
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false # Ensure deployment to backup proceeds even if primary is offline
+      fail-fast: false
       matrix:
         target:
           - id: azure
             name: 'Azure Primary'
           - id: ovh
             name: 'OVH Backup'
+
     steps:
       - name: Checkout code
+        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: 'maya-landing/package-lock.json'
-
-      - name: Install dependencies & Build
-        working-directory: ./maya-landing
-        run: |
-          npm ci
-          npm run build
-
-      - name: Deploy to ${{ matrix.target.name }}
+      - name: Deploy Landing to ${{ matrix.target.name }}
+        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         env:
           TARGET_ID: ${{ matrix.target.id }}
           VM_IP: ${{ matrix.target.id == 'azure' && (secrets.VM_IP || '20.198.240.185') || (secrets.BACKUP_VM_IP || '139.99.192.179') }}
           VM_USER: ${{ matrix.target.id == 'azure' && (secrets.VM_USER || 'speakwithmaya') || (secrets.BACKUP_VM_USER || 'ubuntu') }}
           SSH_KEY: ${{ matrix.target.id == 'azure' && secrets.VM_SSH_KEY || (secrets.BACKUP_VM_SSH_KEY || '') }}
           VM_PASSWORD: ${{ matrix.target.id == 'ovh' && secrets.BACKUP_VM_PASSWORD || '' }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+
         run: |
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
 
           USE_SSHPASS=false
           if [ -n "$VM_PASSWORD" ]; then
-            sudo apt-get update && sudo apt-get install -y sshpass
+            sudo apt-get install -y --no-install-recommends sshpass || (sudo apt-get update && sudo apt-get install -y sshpass)
             USE_SSHPASS=true
           elif [ -n "$SSH_KEY" ]; then
             echo "$SSH_KEY" > ~/.ssh/id_rsa
@@ -64,34 +109,53 @@ jobs:
 
           run_ssh() {
             if [ "$USE_SSHPASS" = true ]; then
-              sshpass -p "$VM_PASSWORD" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$VM_USER@$VM_IP" "$@"
+              sshpass -p "$VM_PASSWORD" ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$VM_USER@$VM_IP" "$@"
             else
-              ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
+              ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
             fi
           }
 
           run_rsync() {
             if [ "$USE_SSHPASS" = true ]; then
-              rsync -avz --delete -e "sshpass -p '$VM_PASSWORD' ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
+              rsync -az --stats -e "sshpass -p '$VM_PASSWORD' ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
             else
-              rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" "$@"
+              rsync -az --stats -e "ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no" "$@"
             fi
           }
 
-          # Ensure app directory exists
-          run_ssh "mkdir -p /home/$VM_USER/apps/maya-landing"
+          APP_DIR="/home/$VM_USER/apps/maya-landing"
 
-          # Sync landing files to VM
-          run_rsync \
-            --exclude '.git' \
-            --exclude 'node_modules' \
-            --exclude '.next/cache' \
-            ./maya-landing/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-landing/"
+          echo "Preparing deployment on $TARGET_ID ($VM_IP)..."
+          run_ssh "mkdir -p '$APP_DIR'"
 
-          # Install production dependencies and start/restart PM2
+          echo "Syncing docker-compose configuration..."
+          run_rsync ./maya-landing/docker-compose.yml "$VM_USER@$VM_IP:$APP_DIR/docker-compose.yml"
+
+          echo "Pulling Landing Docker image and launching container..."
           run_ssh "bash -l -c '
-            cd /home/$VM_USER/apps/maya-landing
-            npm ci --omit=dev
-            pm2 startOrReload ecosystem.config.cjs --update-env || pm2 start ecosystem.config.cjs --update-env
-            pm2 save
+            set -e
+            APP_DIR=\"$APP_DIR\"
+            cd \"\$APP_DIR\"
+
+            # Authenticate Docker against ghcr.io using temporary GitHub Actions token
+            echo \"$REGISTRY_PASSWORD\" | docker login ghcr.io -u \"$REGISTRY_USER\" --password-stdin
+
+            # Pull the new image BEFORE touching the running app, so a failed pull leaves it serving
+            export LANDING_IMAGE=\"$IMAGE_TAG\"
+            docker compose pull maya-landing
+
+            # One-time migration: remove the legacy host PM2 process that holds port 3001
+            if command -v pm2 >/dev/null 2>&1 && pm2 describe maya-landing >/dev/null 2>&1; then
+              pm2 delete maya-landing
+              pm2 save --force
+            fi
+
+            # Recreate the container on the new image (brief restart; old one is stopped first)
+            docker compose up -d --remove-orphans maya-landing
+
+            # Remove dangling images to keep the disk clean
+            docker image prune -f
+
+            echo \"Landing Docker container successfully running:\"
+            docker compose ps maya-landing
           '"

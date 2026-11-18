@@ -12,10 +12,10 @@ import { AuthService } from '../auth/auth.service.js';
 import { CreateSessionTokenDto } from '../sessions/dto/session.dto.js';
 import { randomUUID } from 'node:crypto';
 
-let OpusScriptClass: any = null;
-import('opusscript')
+let OpusEncoderClass: any = null;
+import('@discordjs/opus')
   .then((mod) => {
-    OpusScriptClass = mod.default || mod;
+    OpusEncoderClass = mod.OpusEncoder || mod.default?.OpusEncoder || mod.default || mod;
   })
   .catch(() => {});
 
@@ -147,7 +147,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Previously entries were never removed, so every session's raw PCM stayed in memory
   // until PM2 restarted the process at max_memory_restart.
   private readonly sessionEvictionTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private static readonly SESSION_STATE_TTL_MS = 10 * 60 * 1000;
+  private static readonly SESSION_STATE_TTL_MS = 2 * 60 * 1000;
   private readonly ai: GoogleGenAI;
   private readonly liveModel: string;
 
@@ -866,21 +866,21 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           } catch {}
         }, maxAllowedMs);
 
-        // Initialize Opus compression if client supports it (cuts downlink bandwidth from 512kbps to ~24kbps)
+        // Initialize Opus compression if client supports it (native @discordjs/opus C++ bindings)
         state.supportsOpus = !!message.supportsOpus;
         if (state.supportsOpus) {
           try {
-            if (!OpusScriptClass) {
-              const mod = await import('opusscript').catch(() => null);
-              if (mod) OpusScriptClass = mod.default || mod;
+            if (!OpusEncoderClass) {
+              const mod = await import('@discordjs/opus').catch(() => null);
+              if (mod) OpusEncoderClass = mod.OpusEncoder || mod.default?.OpusEncoder || mod.default || mod;
             }
-            if (OpusScriptClass) {
-              state.opusEncoder = new OpusScriptClass(24000, 1, OpusScriptClass.Application.VOIP);
+            if (OpusEncoderClass) {
+              state.opusEncoder = new OpusEncoderClass(24000, 1);
               state.opusPcmBuffer = Buffer.alloc(0);
-              this.logger.log(`[${state.sessionId}] 🚀 Opus compression enabled for client downlink (24kHz VOIP, 20ms frames)`);
+              this.logger.log(`[${state.sessionId}] 🚀 Native @discordjs/opus compression enabled for client downlink (24kHz VOIP, 20ms frames)`);
               this.addSessionLog(state, 'opus_enabled');
             } else {
-              this.logger.warn(`[${state.sessionId}] Opus module unavailable in runtime, falling back to raw PCM`);
+              this.logger.warn(`[${state.sessionId}] @discordjs/opus module unavailable in runtime, falling back to raw PCM`);
               state.opusEncoder = null;
               state.supportsOpus = false;
             }
@@ -1551,7 +1551,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
               state.opusPcmBuffer = state.opusPcmBuffer.subarray(FRAME_BYTES);
 
               try {
-                const opusPacket = state.opusEncoder.encode(frame, FRAME_SAMPLES);
+                const opusPacket = state.opusEncoder.encode(frame);
                 this.safeSendToClient(state, JSON.stringify({
                   type: 'audio_opus',
                   data: opusPacket.toString('base64'),
@@ -1635,7 +1635,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         state.opusPcmBuffer = Buffer.alloc(0);
 
         try {
-          const opusPacket = state.opusEncoder.encode(padded, FRAME_SAMPLES);
+          const opusPacket = state.opusEncoder.encode(padded);
           this.safeSendToClient(state, JSON.stringify({
             type: 'audio_opus',
             data: opusPacket.toString('base64'),

@@ -1,0 +1,17 @@
+services:
+  maya-landing:
+    image: ${LANDING_IMAGE:-ghcr.io/yukifdo/speakwithmaya-landing:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maya-landing
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"

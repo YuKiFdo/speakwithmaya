@@ -1,0 +1,68 @@
+services:
+  # 1. NestJS Backend & Gemini Live WebSockets (Port 3000)
+  maya-backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/yukifdo/speakwithmaya-backend:latest}
+    build:
+      context: ./maya-backend
+      dockerfile: Dockerfile
+    container_name: maya-backend
+    restart: unless-stopped
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 180s
+      retries: 3
+    network_mode: "host"
+    env_file:
+      - path: ./maya-backend/.env.production
+        required: false
+      - path: ./maya-backend/.env
+        required: false
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      - ./maya-backend/assets/audio-cache:/app/assets/audio-cache
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # 2. Universal Expo Web Client (Port 8080) -> app.speakwithmaya.com & admin.speakwithmaya.com
+  maya-frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/yukifdo/speakwithmaya-frontend:latest}
+    build:
+      context: ./maya-frontend
+      dockerfile: Dockerfile
+    container_name: maya-frontend
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # 3. Next.js Landing Site (Port 3001) -> speakwithmaya.com
+  maya-landing:
+    image: ${LANDING_IMAGE:-ghcr.io/yukifdo/speakwithmaya-landing:latest}
+    build:
+      context: ./maya-landing
+      dockerfile: Dockerfile
+    container_name: maya-landing
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"

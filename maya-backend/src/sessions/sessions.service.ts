@@ -2793,7 +2793,8 @@ ${memoryPart}`;
   async reconcileOrphanedSessions(force: boolean = false): Promise<number> {
     if (!this.supabase) return 0;
     const now = Date.now();
-    if (!force && now - this.lastOrphanReconcileAt < 15_000) {
+    // Throttle to at most once every 5 minutes (was 15s) to prevent DB overload during user traffic
+    if (!force && now - this.lastOrphanReconcileAt < 5 * 60_000) {
       return 0;
     }
     this.lastOrphanReconcileAt = now;

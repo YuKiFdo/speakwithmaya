@@ -8,58 +8,85 @@ on:
       - '.github/workflows/deploy-vm-frontend.yml'
   workflow_dispatch:
 
-# One VM deploy at a time across BOTH apps: on the 2-vCPU VMs a backend boot (~1 min of
-# full CPU) overlapping a frontend deploy starved the backend past PM2's ready timeout and
-# took the API down (2026-11-18 01:39-01:45 UTC). Runs queue instead of overlapping.
+# One VM deploy at a time across ALL apps: on the 2-vCPU VMs a backend boot (~1 min of
+# full CPU) overlapping another deploy starved the backend and took the API down
+# (2026-11-18 01:39-01:45 UTC). Runs queue instead of overlapping.
 concurrency:
   group: vm-production-deploy
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
+  build-and-push:
+    name: Build & Push Frontend Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      image_sha: ${{ steps.meta.outputs.image_sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name and tags
+        id: meta
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/${REPO_LOWER}-frontend"
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE}:latest" >> $GITHUB_OUTPUT
+          echo "image_sha=${IMAGE}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Frontend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./maya-frontend
+          file: ./maya-frontend/Dockerfile
+          push: true
+          build-args: |
+            EXPO_PUBLIC_BACKEND_URL=${{ vars.EXPO_PUBLIC_BACKEND_URL || 'https://api.speakwithmaya.com' }}
+            EXPO_PUBLIC_USE_SERVER_LIVE=true
+            EXPO_PUBLIC_SUPABASE_URL=${{ vars.PROD_SUPABASE_URL || 'https://sjhvhjxbkpidrjbpiqfw.supabase.co' }}
+            EXPO_PUBLIC_SUPABASE_ANON_KEY=${{ vars.PROD_SUPABASE_ANON_KEY || 'sb_publishable_usiFVN4cjSUgfKokGGBgyw_FFjWHg5f' }}
+          tags: |
+            ${{ steps.meta.outputs.image_tag }}
+            ${{ steps.meta.outputs.image_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
     name: Deploy Frontend (${{ matrix.target.name }})
+    needs: build-and-push
     runs-on: ubuntu-latest
-    # Azure primary is down (2026-11-17); its job failed every run after a ~2 min SSH timeout.
-    # Azure steps are skipped unless repo variable ENABLE_AZURE_DEPLOY == 'true'.
+
     strategy:
-      fail-fast: false # Ensure deployment to backup proceeds even if primary is offline
+      fail-fast: false
       matrix:
         target:
           - id: azure
             name: 'Azure Primary'
           - id: ovh
             name: 'OVH Backup'
+
     steps:
       - name: Checkout code
         if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: 'maya-frontend/package-lock.json'
-
-      - name: Install dependencies
-        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
-        working-directory: ./maya-frontend
-        run: npm ci
-
-      - name: Export Expo Static Web
-        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
-        working-directory: ./maya-frontend
-        env:
-          EXPO_PUBLIC_BACKEND_URL: ${{ vars.EXPO_PUBLIC_BACKEND_URL || 'https://api.speakwithmaya.com' }}
-          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.PROD_SUPABASE_URL || 'https://sjhvhjxbkpidrjbpiqfw.supabase.co' }}
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.PROD_SUPABASE_ANON_KEY || 'sb_publishable_usiFVN4cjSUgfKokGGBgyw_FFjWHg5f' }}
-          EXPO_PUBLIC_USE_SERVER_LIVE: 'true'
-        run: |
-          npx expo export --platform web
-          node ./scripts/precompress-dist.js
-
-      - name: Deploy to ${{ matrix.target.name }}
+      - name: Deploy Frontend to ${{ matrix.target.name }}
         if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         env:
           TARGET_ID: ${{ matrix.target.id }}
@@ -67,6 +94,10 @@ jobs:
           VM_USER: ${{ matrix.target.id == 'azure' && (secrets.VM_USER || 'speakwithmaya') || (secrets.BACKUP_VM_USER || 'ubuntu') }}
           SSH_KEY: ${{ matrix.target.id == 'azure' && secrets.VM_SSH_KEY || (secrets.BACKUP_VM_SSH_KEY || '') }}
           VM_PASSWORD: ${{ matrix.target.id == 'ovh' && secrets.BACKUP_VM_PASSWORD || '' }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+
         run: |
           mkdir -p ~/.ssh
           touch ~/.ssh/known_hosts
@@ -95,28 +126,45 @@ jobs:
 
           run_rsync() {
             if [ "$USE_SSHPASS" = true ]; then
-              rsync -az --stats --skip-compress=gz/br/tgz/png/jpg/jpeg/webp/gif/mp3/mp4/woff/woff2/ttf/otf/zip -e "sshpass -p '$VM_PASSWORD' ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
+              rsync -az --stats -e "sshpass -p '$VM_PASSWORD' ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
             else
-              rsync -az --stats --skip-compress=gz/br/tgz/png/jpg/jpeg/webp/gif/mp3/mp4/woff/woff2/ttf/otf/zip -e "ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no" "$@"
+              rsync -az --stats -e "ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no" "$@"
             fi
           }
 
-          # Ensure app directories exist
-          run_ssh "mkdir -p /home/$VM_USER/apps/maya-frontend/dist /home/$VM_USER/apps/maya-frontend/web-server"
+          APP_DIR="/home/$VM_USER/apps/maya-frontend"
 
-          # Sync exported dist directory while preserving hashed _expo/static & assets from recent deploys
-          # so in-flight tabs never hit 404 on old bundle hashes, then prune bundles older than 7 days.
-          run_rsync --delete --exclude='_expo/' --exclude='assets/' ./maya-frontend/dist/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/"
-          run_rsync ./maya-frontend/dist/_expo/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/_expo/"
-          run_rsync ./maya-frontend/dist/assets/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/dist/assets/"
-          run_ssh "find /home/$VM_USER/apps/maya-frontend/dist/_expo /home/$VM_USER/apps/maya-frontend/dist/assets -type f -mtime +7 -delete 2>/dev/null || true"
-          run_rsync --delete ./maya-frontend/web-server/ "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/web-server/"
-          run_rsync ./maya-frontend/ecosystem.config.cjs "$VM_USER@$VM_IP:/home/$VM_USER/apps/maya-frontend/"
+          echo "Preparing deployment on $TARGET_ID ($VM_IP)..."
+          run_ssh "mkdir -p '$APP_DIR'"
 
-          # Start or reload PM2 process
+          echo "Syncing docker-compose configuration..."
+          run_rsync ./maya-frontend/docker-compose.yml "$VM_USER@$VM_IP:$APP_DIR/docker-compose.yml"
+
+          echo "Pulling Frontend Docker image and launching container..."
           run_ssh "bash -l -c '
-            cd /home/$VM_USER/apps/maya-frontend
-            # Graceful reload (wait_ready): old process serves until the new one is listening
-            pm2 startOrReload ecosystem.config.cjs --update-env || pm2 start ecosystem.config.cjs --update-env
-            pm2 save
+            set -e
+            APP_DIR=\"$APP_DIR\"
+            cd \"\$APP_DIR\"
+
+            # Authenticate Docker against ghcr.io using temporary GitHub Actions token
+            echo \"$REGISTRY_PASSWORD\" | docker login ghcr.io -u \"$REGISTRY_USER\" --password-stdin
+
+            # Pull the new image BEFORE touching the running app, so a failed pull leaves it serving
+            export FRONTEND_IMAGE=\"$IMAGE_TAG\"
+            docker compose pull maya-frontend
+
+            # One-time migration: remove the legacy host PM2 process that holds port 8080
+            if command -v pm2 >/dev/null 2>&1 && pm2 describe maya-frontend >/dev/null 2>&1; then
+              pm2 delete maya-frontend
+              pm2 save --force
+            fi
+
+            # Recreate the container on the new image (brief restart; old one is stopped first)
+            docker compose up -d --remove-orphans maya-frontend
+
+            # Remove dangling images to keep the disk clean
+            docker image prune -f
+
+            echo \"Frontend Docker container successfully running:\"
+            docker compose ps maya-frontend
           '"

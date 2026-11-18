@@ -21,7 +21,7 @@ const external = [
   // native add-ons and packages that read their own files at runtime
   'onnxruntime-node',
   'onnxruntime-web',
-  'opusscript',
+  '@discordjs/opus',
   '@piper-plus/g2p',
   // optional Nest integrations required lazily inside try/catch (not installed)
   '@nestjs/microservices',

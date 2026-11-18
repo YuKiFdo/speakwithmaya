@@ -1,0 +1,17 @@
+services:
+  maya-frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/yukifdo/speakwithmaya-frontend:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maya-frontend
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"

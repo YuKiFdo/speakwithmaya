@@ -1512,13 +1512,37 @@ export class AuthService {
 
   /**
    * Retrieves user profile strictly from database with up-to-date quotas.
+   * Explicitly lists columns to avoid downloading large JSONB blobs (such as onboarding_flow).
    */
   async getProfile(userId: string): Promise<UserProfileData> {
-    const { data, error } = await this.supabase
+    const cols = [
+      'id', 'phone_number', 'display_name', 'email', 'avatar_url', 'level',
+      'goal', 'challenge', 'plan_tier', 'plan_status', 'billing_cycle',
+      'monthly_minutes_allowance', 'add_on_minutes_balance', 'minutes_balance',
+      'minutes_reset_at', 'native_language', 'employment_status', 'daily_goal_minutes',
+      'baseline_fluency_score', 'baseline_grammar_score', 'baseline_pronunciation_score',
+      'last_active_step', 'onboarding_completed_at', 'created_at', 'updated_at',
+      'telco_provider', 'telco_subscriber_id', 'telco_reference_no', 'telco_status',
+      'has_telco_subscription', 'is_subscription_locked', 'is_grace_period_active',
+      'grace_period_end', 'active_promo_code', 'ai_correction_mode', 'language_mode'
+    ].join(', ');
+
+    let { data, error }: { data: any; error: any } = await (this.supabase
       .from('profiles')
-      .select('*')
+      .select(cols)
       .eq('id', userId)
-      .maybeSingle();
+      .maybeSingle() as any);
+
+    if (error && (error.code === 'PGRST204' || /column .* does not exist/i.test(error.message || ''))) {
+      const basicCols = 'id, phone_number, display_name, email, avatar_url, level, goal, challenge, plan_tier, plan_status, billing_cycle, monthly_minutes_allowance, add_on_minutes_balance, minutes_balance, minutes_reset_at, native_language, employment_status, daily_goal_minutes, baseline_fluency_score, baseline_grammar_score, baseline_pronunciation_score, last_active_step, onboarding_completed_at, created_at, updated_at';
+      const fallback: { data: any; error: any } = await (this.supabase
+        .from('profiles')
+        .select(basicCols)
+        .eq('id', userId)
+        .maybeSingle() as any);
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error) {
       this.logger.error(`Database error in getProfile: ${error.message}`);
@@ -1529,10 +1553,9 @@ export class AuthService {
       throw new NotFoundException('User profile not found in database.');
     }
 
-    // onboarding_flow is an ever-growing JSONB click log (~12 KB+ per user). It is not
-    // needed by the auth guard or /v1/auth/me (admin views load it with their own query),
-    // so drop it here to keep it out of request.user and every /auth/me response.
-    delete (data as any).onboarding_flow;
+    if (data) {
+      delete (data as any).onboarding_flow;
+    }
 
     const postIntroSteps = [
       '/onboarding/complete',
@@ -1601,7 +1624,7 @@ export class AuthService {
         .then(() => {});
     }
 
-    const profile = await this.checkAndResetMonthlyQuota(data as UserProfileData);
+    const profile = await this.checkAndResetMonthlyQuota(data as any as UserProfileData);
 
     const hasTelco = Boolean(profile.telco_subscriber_id);
     const isTelcoUnsubscribed = hasTelco && profile.plan_status === 'canceled';
@@ -2113,8 +2136,6 @@ export class AuthService {
     // Self-healing column list: if the database lacks a column ("column profiles.x does not
     // exist"), drop just that column, retry, and remember the working list for this process,
     // so a schema difference costs one failed query per boot instead of one per rebuild.
-    // (onboarding_call_status / onboarding_call_duration_seconds were removed: they do not
-    // exist in production, and the call-status resolver already falls back to session data.)
     let cols = this.adminUsersProfileCols;
     for (let attempt = 0; attempt < 4; attempt++) {
       const res = await this.supabase
@@ -2125,13 +2146,22 @@ export class AuthService {
         this.adminUsersProfileCols = cols;
         return res;
       }
-      const missing = /column profiles\.(\w+) does not exist/i.exec(res.error.message || '')?.[1];
-      if (!missing || !cols.includes(missing)) break;
+      const msg = res.error.message || '';
+      const missing =
+        /column profiles\.(\w+) does not exist/i.exec(msg)?.[1] ||
+        /Could not find the '(\w+)' column of 'profiles'/i.exec(msg)?.[1] ||
+        /column '(\w+)' does not exist/i.exec(msg)?.[1];
+      if (!missing || !cols.includes(missing)) {
+        // Not a missing column error (e.g. timeout, abort, or network issue).
+        // NEVER fall back to select('*')! Return error cleanly so caller can serve lastGood cache.
+        this.logger.warn(`[AdminUsers] Narrow profile select encountered error (${msg}); avoiding select('*') fallback`);
+        return res;
+      }
       this.logger.warn(`[AdminUsers] profiles.${missing} does not exist; dropping it from the select`);
       cols = cols.filter((c) => c !== missing);
     }
-    this.logger.warn(`[AdminUsers] Narrow profile select failed; using select('*')`);
-    return this.supabase.from('profiles').select('*').order('created_at', { ascending: false });
+    this.logger.warn(`[AdminUsers] Narrow profile select failed after column retries; avoiding select('*') fallback`);
+    return { data: null, error: new Error('Failed to fetch admin users profiles after schema retries') };
   }
 
   private adminUsersProfileCols: string[] = [
@@ -2148,8 +2178,10 @@ export class AuthService {
    * Preferred path: SQL functions from migration 021 (admin_user_activity_stats and
    * admin_sessions_per_day), which return only the totals instead of every session, ledger and
    * progress row. If the migration is not applied yet, falls back to the old whole-table reads.
+   * On timeout/abort, serves cached lastGood instead of whole-table scan to protect event loop.
    */
   private adminActivityRpcMissing = false;
+  private adminUserActivityLastGood: AdminUserActivity | null = null;
 
   private async fetchAdminUserActivity(): Promise<AdminUserActivity> {
     if (!this.adminActivityRpcMissing) {
@@ -2182,15 +2214,22 @@ export class AuthService {
         for (const d of (days.data || []) as any[]) {
           sessionsByDay.set(String(d.day).slice(0, 10), Number(d.sessions || 0));
         }
-        return { byUser, totalSeconds, sessionsByDay };
+        const result = { byUser, totalSeconds, sessionsByDay };
+        this.adminUserActivityLastGood = result;
+        return result;
       }
       const err = stats.error || days.error;
       const msg = err?.message || 'unexpected response';
       if (isMissingFunctionError(err)) {
         this.adminActivityRpcMissing = true;
         this.logger.warn('[AdminUsers] SQL functions from migration 021 not found; using whole-table reads. Apply 021_admin_aggregates_and_indexes.sql.');
+        return this.fetchAdminUserActivityLegacy();
       } else {
-        this.logger.warn(`[AdminUsers] admin_user_activity_stats failed (${msg}); using whole-table reads`);
+        this.logger.warn(`[AdminUsers] admin_user_activity_stats failed (${msg}); skipping whole-table scan fallback`);
+        if (this.adminUserActivityLastGood) {
+          return this.adminUserActivityLastGood;
+        }
+        return { byUser: new Map(), totalSeconds: 0, sessionsByDay: new Map() };
       }
     }
     return this.fetchAdminUserActivityLegacy();
@@ -2283,7 +2322,7 @@ export class AuthService {
         throw new InternalServerErrorException('Database query failed for profiles.');
       }
 
-      const allProfiles = (profiles || []) as UserProfileData[];
+      const allProfiles = (profiles || []) as any as UserProfileData[];
 
       const testPhoneDigitsSet = new Set<string>(
         (registeredTestAccounts || [])
@@ -2604,7 +2643,9 @@ export class AuthService {
 
   private noteAdminView() {
     this.lastAdminViewAt = Date.now();
-    if (this.adminRefreshTimer || process.env.ADMIN_BACKGROUND_REFRESH === '0') return;
+    // Default to OFF unless explicitly enabled with ADMIN_BACKGROUND_REFRESH=1
+    // (disabled by default to prevent background database spikes during live voice calls)
+    if (this.adminRefreshTimer || process.env.ADMIN_BACKGROUND_REFRESH !== '1') return;
     this.adminRefreshTimer = setInterval(() => {
       if (Date.now() - this.lastAdminViewAt > AuthService.ADMIN_ACTIVE_WINDOW_MS) {
         clearInterval(this.adminRefreshTimer!);
@@ -2645,8 +2686,13 @@ export class AuthService {
    * Per-user totals and per-user-per-day session counts for the Analytics overview.
    * Uses the SQL functions from migrations 021/022 when present (kilobytes instead of every
    * session and ledger row); otherwise computes the same shape from whole-table reads.
+   * On timeout/abort, serves cached lastGood instead of whole-table scan to protect event loop.
    */
   private analyticsRpcMissing = false;
+  private analyticsActivityLastGood: {
+    byUser: Map<string, UserActivityTotals>;
+    userDays: Array<{ userId: string; day: string; sessions: number }>;
+  } | null = null;
 
   private async fetchAnalyticsActivity(): Promise<{
     byUser: Map<string, UserActivityTotals>;
@@ -2658,7 +2704,7 @@ export class AuthService {
         this.supabase.rpc('admin_user_sessions_per_day', { days: 14 }),
       ]);
       if (!days.error && Array.isArray(days.data) && !this.adminActivityRpcMissing) {
-        return {
+        const result = {
           byUser: totals.byUser,
           userDays: (days.data as any[]).map((d) => ({
             userId: d.user_id,
@@ -2666,15 +2712,31 @@ export class AuthService {
             sessions: Number(d.sessions || 0),
           })),
         };
+        this.analyticsActivityLastGood = result;
+        return result;
       }
       if (isMissingFunctionError(days.error)) {
         this.analyticsRpcMissing = true;
         this.logger.warn('[Analytics] admin_user_sessions_per_day not found; using whole-table reads. Apply 022_admin_analytics_daily.sql.');
       } else if (days.error) {
-        this.logger.warn(`[Analytics] admin_user_sessions_per_day failed (${days.error.message}); using whole-table reads`);
+        this.logger.warn(`[Analytics] admin_user_sessions_per_day failed (${days.error.message}); skipping whole-table scan fallback`);
+        if (this.analyticsActivityLastGood) {
+          return this.analyticsActivityLastGood;
+        }
+        return { byUser: totals.byUser || new Map(), userDays: [] };
       }
     }
 
+    if (this.analyticsRpcMissing || this.adminActivityRpcMissing) {
+      return this.fetchAnalyticsActivityLegacy();
+    }
+    return { byUser: new Map(), userDays: [] };
+  }
+
+  private async fetchAnalyticsActivityLegacy(): Promise<{
+    byUser: Map<string, UserActivityTotals>;
+    userDays: Array<{ userId: string; day: string; sessions: number }>;
+  }> {
     const [{ data: sessions }, { data: ledger }] = await Promise.all([
       this.supabase.from('sessions').select('user_id, duration_seconds, created_at'),
       this.supabase.from('usage_ledger').select('user_id, cost_lkr, cost_usd, total_tokens'),
@@ -4293,13 +4355,14 @@ export class AuthService {
   /**
    * In-memory cache for public leaderboard to make it blazing fast.
    * Key format: `${period}:${limit}` -> caches top ranked entries.
-   * TTL: 30 seconds.
+   * TTL: 5 minutes with stale-while-revalidate.
    */
+  private static readonly LEADERBOARD_CACHE_TTL_MS = 5 * 60_000;
   private readonly leaderboardCache = new Map<
     string,
     { timestamp: number; data: { rankedEntries: any[]; totalParticipants: number } }
   >();
-  private readonly leaderboardInFlight = new Map<string, Promise<void>>();
+  private readonly leaderboardInFlight = new Map<string, Promise<{ rankedEntries: any[]; totalParticipants: number }>>();
 
   /**
    * Public / Student Leaderboard: Computes rankings across all real users in `public.profiles`
@@ -4315,221 +4378,221 @@ export class AuthService {
       return { entries: [], myEntry: null, totalParticipants: 0 };
     }
 
-    let releaseLeaderboardFlight: () => void = () => {};
     try {
       const now = Date.now();
       const cacheKey = `${period}:${limit}`;
-      let cached = this.leaderboardCache.get(cacheKey);
+      const cached = this.leaderboardCache.get(cacheKey);
 
-      // Single-flight: the rebuild reads whole profiles/progress/sessions tables, so when
-      // the cache expires, concurrent requests wait for one rebuild instead of each running it.
-      if (!(cached && now - cached.timestamp < 30_000)) {
-        const pending = this.leaderboardInFlight.get(cacheKey);
-        if (pending) {
-          // Bounded wait: never hang a request on someone else's rebuild
-          await Promise.race([pending, new Promise((r) => setTimeout(r, 15_000).unref?.())]);
-          cached = this.leaderboardCache.get(cacheKey);
-        }
+      // Stale-while-revalidate: if fresh cache hit (under 5 min), return immediately!
+      if (cached && now - cached.timestamp < AuthService.LEADERBOARD_CACHE_TTL_MS) {
+        return this.formatLeaderboardResponse(cached.data.rankedEntries, cached.data.totalParticipants, userId, limit);
       }
 
-      let rankedEntries: any[];
-      let totalParticipants: number;
-
-      if (cached && now - cached.timestamp < 30_000) {
-        // Cache hit (under 30s)
-        rankedEntries = cached.data.rankedEntries;
-        totalParticipants = cached.data.totalParticipants;
-      } else {
-        let releaseFlight!: () => void;
-        const flight = new Promise<void>((resolve) => (releaseFlight = resolve));
-        this.leaderboardInFlight.set(cacheKey, flight);
-        releaseLeaderboardFlight = () => {
-          if (this.leaderboardInFlight.get(cacheKey) === flight) this.leaderboardInFlight.delete(cacheKey);
-          releaseFlight();
-        };
-
-        const cutoffMs =
-          period === 'weekly'
-            ? now - 7 * 24 * 60 * 60 * 1000
-            : period === 'monthly'
-              ? now - 30 * 24 * 60 * 60 * 1000
-              : 0;
-
-        const [
-          { data: profiles },
-          { data: progressRows },
-          { data: sessionRows },
-        ] = await Promise.all([
-          this.supabase
-            .from('profiles')
-            .select('id, display_name, phone_number, avatar_url, created_at, monthly_minutes_allowance, add_on_minutes_balance, minutes_balance')
-            .order('created_at', { ascending: true }),
-          this.supabase
-            .from('user_roadmap_progress')
-            .select('id, user_id, roadmap_level_id, level_number, status, is_passed, xp_earned, completed_at, created_at'),
-          this.supabase
-            .from('sessions')
-            .select('id, user_id, duration_seconds, created_at, status, roadmap_level_id'),
-        ]);
-
-        const allProfiles = Array.isArray(profiles) ? profiles : [];
-
-        const xpByUser = new Map<string, number>();
-        const allTimeXpByUser = new Map<string, number>();
-        const completedLevelsByUser = new Map<string, Set<string>>();
-        const allTimeLevelsByUser = new Map<string, Set<string>>();
-
-        if (Array.isArray(progressRows)) {
-          for (const row of progressRows) {
-            if (!row.user_id) continue;
-            if (row.status === 'completed' || row.is_passed) {
-              const key = String(row.roadmap_level_id || row.level_number || row.id || '');
-              const earned = typeof row.xp_earned === 'number' ? row.xp_earned : Number(row.xp_earned) || 0;
-
-              let allSet = allTimeLevelsByUser.get(row.user_id);
-              if (!allSet) {
-                allSet = new Set<string>();
-                allTimeLevelsByUser.set(row.user_id, allSet);
-              }
-              if (!allSet.has(key)) {
-                allSet.add(key);
-                allTimeXpByUser.set(row.user_id, (allTimeXpByUser.get(row.user_id) || 0) + earned);
-              }
-
-              const ts = row.completed_at
-                ? new Date(row.completed_at).getTime()
-                : row.created_at
-                  ? new Date(row.created_at).getTime()
-                  : now;
-              if (cutoffMs === 0 || ts >= cutoffMs) {
-                let set = completedLevelsByUser.get(row.user_id);
-                if (!set) {
-                  set = new Set<string>();
-                  completedLevelsByUser.set(row.user_id, set);
-                }
-                if (!set.has(key)) {
-                  set.add(key);
-                  xpByUser.set(row.user_id, (xpByUser.get(row.user_id) || 0) + earned);
-                }
-              }
-            }
-          }
+      // If stale cache hit exists, serve it instantly and rebuild in the background
+      if (cached) {
+        if (!this.leaderboardInFlight.has(cacheKey)) {
+          this.rebuildLeaderboardDataset(cacheKey, period, limit).catch(() => {});
         }
-
-        const sessionSecondsByUser = new Map<string, number>();
-        const allTimeSessionSecondsByUser = new Map<string, number>();
-        if (Array.isArray(sessionRows)) {
-          for (const s of sessionRows) {
-            if (!s.user_id) continue;
-            const dur = Number(s.duration_seconds) || 0;
-            allTimeSessionSecondsByUser.set(
-              s.user_id,
-              (allTimeSessionSecondsByUser.get(s.user_id) || 0) + dur,
-            );
-            const ts = s.created_at ? new Date(s.created_at).getTime() : now;
-            if (cutoffMs === 0 || ts >= cutoffMs) {
-              sessionSecondsByUser.set(
-                s.user_id,
-                (sessionSecondsByUser.get(s.user_id) || 0) + dur,
-              );
-            }
-            if (!s.roadmap_level_id && dur >= 30) {
-              // Normal practice sessions (General chat, Workplace): 5 XP per 1 minute practiced
-              const normalMins = Math.max(1, Math.floor(dur / 60));
-              const normalXp = normalMins * 5;
-              allTimeXpByUser.set(s.user_id, (allTimeXpByUser.get(s.user_id) || 0) + normalXp);
-              if (cutoffMs === 0 || ts >= cutoffMs) {
-                xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + normalXp);
-              }
-            }
-          }
-        }
-
-        const entries = allProfiles.map((p: any) => {
-          // Strictly use database XP from user_roadmap_progress (never calculate fake XP from minutes)
-          const dbPeriodXp = xpByUser.get(p.id) || 0;
-          const dbAllTimeXp = allTimeXpByUser.get(p.id) || dbPeriodXp;
-          const sessionMinutes = Math.round((sessionSecondsByUser.get(p.id) || 0) / 60);
-          const allowance = Number(p.monthly_minutes_allowance ?? 5) + Number(p.add_on_minutes_balance ?? 0);
-          const balance = Number(p.minutes_balance ?? allowance);
-          const quotaMinutesUsed = Math.max(0, allowance - balance);
-          const minutesConsumed = Math.max(sessionMinutes, quotaMinutesUsed);
-
-          const levelNumber = Math.max(1, Math.floor(dbAllTimeXp / 500) + 1);
-
-          const avatarUrl = (p as any).avatar_url || null;
-          const rawName = (p.display_name || '').trim();
-          const fallbackPhone = p.phone_number
-            ? `Learner ••${String(p.phone_number).slice(-4)}`
-            : 'Learner';
-
-          return {
-            userId: p.id,
-            displayName: rawName || fallbackPhone,
-            avatarUrl,
-            levelNumber,
-            xp: dbPeriodXp,
-            minutesConsumed,
-            createdAt: p.created_at || '',
-          };
-        });
-
-        // Rank strictly by DB XP first, then DB minutesConsumed second
-        entries.sort((a, b) => {
-          if (b.xp !== a.xp) return b.xp - a.xp;
-          if (b.minutesConsumed !== a.minutesConsumed) return b.minutesConsumed - a.minutesConsumed;
-          return String(a.createdAt).localeCompare(String(b.createdAt));
-        });
-
-        let activeRankCounter = 0;
-        rankedEntries = entries.map((entry) => {
-          const hasActivity = entry.xp > 0 || entry.minutesConsumed > 0;
-          return {
-            rank: hasActivity ? ++activeRankCounter : null,
-            userId: entry.userId,
-            displayName: entry.displayName,
-            avatarUrl: entry.avatarUrl,
-            levelNumber: entry.levelNumber,
-            xp: entry.xp,
-            minutesConsumed: entry.minutesConsumed,
-          };
-        });
-
-        totalParticipants = rankedEntries.length;
-
-        // Store into memory cache
-        this.leaderboardCache.set(cacheKey, {
-          timestamp: now,
-          data: { rankedEntries, totalParticipants },
-        });
-        releaseLeaderboardFlight();
-        releaseLeaderboardFlight = () => {};
+        return this.formatLeaderboardResponse(cached.data.rankedEntries, cached.data.totalParticipants, userId, limit);
       }
 
-      // Find user entry across all ranked entries before slicing to top limit
-      let myEntry: any = null;
-      if (userId) {
-        const found = rankedEntries.find((r) => r.userId === userId);
-        if (found) {
-          myEntry = { ...found, isCurrentUser: true };
-        }
+      // Cold start: wait on single-flight rebuild
+      let pending = this.leaderboardInFlight.get(cacheKey);
+      if (!pending) {
+        pending = this.rebuildLeaderboardDataset(cacheKey, period, limit);
+        this.leaderboardInFlight.set(cacheKey, pending);
       }
-
-      // Limit top entries (default 50)
-      const topEntries = rankedEntries.slice(0, limit).map((r) => ({
-        ...r,
-        isCurrentUser: userId ? r.userId === userId : false,
-      }));
-
-      return {
-        entries: topEntries,
-        myEntry,
-        totalParticipants,
-      };
+      const dataset = await pending;
+      return this.formatLeaderboardResponse(dataset.rankedEntries, dataset.totalParticipants, userId, limit);
     } catch (err: any) {
-      releaseLeaderboardFlight();
       this.logger.warn(`getPublicLeaderboard error: ${err?.message}`);
       return { entries: [], myEntry: null, totalParticipants: 0 };
+    }
+  }
+
+  private formatLeaderboardResponse(
+    rankedEntries: any[],
+    totalParticipants: number,
+    userId?: string,
+    limit: number = 50,
+  ) {
+    let myEntry: any = null;
+    if (userId) {
+      const found = rankedEntries.find((r) => r.userId === userId);
+      if (found) {
+        myEntry = { ...found, isCurrentUser: true };
+      }
+    }
+
+    const topEntries = rankedEntries.slice(0, limit).map((r) => ({
+      ...r,
+      isCurrentUser: userId ? r.userId === userId : false,
+    }));
+
+    return {
+      entries: topEntries,
+      myEntry,
+      totalParticipants,
+    };
+  }
+
+  private async rebuildLeaderboardDataset(
+    cacheKey: string,
+    period: 'weekly' | 'monthly' | 'all_time',
+    limit: number,
+  ): Promise<{ rankedEntries: any[]; totalParticipants: number }> {
+    try {
+      const now = Date.now();
+      const cutoffMs =
+        period === 'weekly'
+          ? now - 7 * 24 * 60 * 60 * 1000
+          : period === 'monthly'
+            ? now - 30 * 24 * 60 * 60 * 1000
+            : 0;
+
+      const [
+        { data: profiles },
+        { data: progressRows },
+        { data: sessionRows },
+      ] = await Promise.all([
+        this.supabase
+          .from('profiles')
+          .select('id, display_name, phone_number, avatar_url, created_at, monthly_minutes_allowance, add_on_minutes_balance, minutes_balance')
+          .order('created_at', { ascending: true }),
+        this.supabase
+          .from('user_roadmap_progress')
+          .select('id, user_id, roadmap_level_id, level_number, status, is_passed, xp_earned, completed_at, created_at'),
+        this.supabase
+          .from('sessions')
+          .select('id, user_id, duration_seconds, created_at, status, roadmap_level_id'),
+      ]);
+
+      const allProfiles = Array.isArray(profiles) ? profiles : [];
+      const xpByUser = new Map<string, number>();
+      const allTimeXpByUser = new Map<string, number>();
+      const completedLevelsByUser = new Map<string, Set<string>>();
+      const allTimeLevelsByUser = new Map<string, Set<string>>();
+
+      if (Array.isArray(progressRows)) {
+        for (const row of progressRows) {
+          if (!row.user_id) continue;
+          if (row.status === 'completed' || row.is_passed) {
+            const key = String(row.roadmap_level_id || row.level_number || row.id || '');
+            const earned = typeof row.xp_earned === 'number' ? row.xp_earned : Number(row.xp_earned) || 0;
+
+            let allSet = allTimeLevelsByUser.get(row.user_id);
+            if (!allSet) {
+              allSet = new Set<string>();
+              allTimeLevelsByUser.set(row.user_id, allSet);
+            }
+            if (!allSet.has(key)) {
+              allSet.add(key);
+              allTimeXpByUser.set(row.user_id, (allTimeXpByUser.get(row.user_id) || 0) + earned);
+            }
+
+            const ts = row.completed_at
+              ? new Date(row.completed_at).getTime()
+              : row.created_at
+                ? new Date(row.created_at).getTime()
+                : now;
+            if (cutoffMs === 0 || ts >= cutoffMs) {
+              let set = completedLevelsByUser.get(row.user_id);
+              if (!set) {
+                set = new Set<string>();
+                completedLevelsByUser.set(row.user_id, set);
+              }
+              if (!set.has(key)) {
+                set.add(key);
+                xpByUser.set(row.user_id, (xpByUser.get(row.user_id) || 0) + earned);
+              }
+            }
+          }
+        }
+      }
+
+      const sessionSecondsByUser = new Map<string, number>();
+      const allTimeSessionSecondsByUser = new Map<string, number>();
+      if (Array.isArray(sessionRows)) {
+        for (const s of sessionRows) {
+          if (!s.user_id) continue;
+          const dur = Number(s.duration_seconds) || 0;
+          allTimeSessionSecondsByUser.set(
+            s.user_id,
+            (allTimeSessionSecondsByUser.get(s.user_id) || 0) + dur,
+          );
+          const ts = s.created_at ? new Date(s.created_at).getTime() : now;
+          if (cutoffMs === 0 || ts >= cutoffMs) {
+            sessionSecondsByUser.set(
+              s.user_id,
+              (sessionSecondsByUser.get(s.user_id) || 0) + dur,
+            );
+          }
+          if (!s.roadmap_level_id && dur >= 30) {
+            const normalMins = Math.max(1, Math.floor(dur / 60));
+            const normalXp = normalMins * 5;
+            allTimeXpByUser.set(s.user_id, (allTimeXpByUser.get(s.user_id) || 0) + normalXp);
+            if (cutoffMs === 0 || ts >= cutoffMs) {
+              xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + normalXp);
+            }
+          }
+        }
+      }
+
+      const entries = allProfiles.map((p: any) => {
+        const dbPeriodXp = xpByUser.get(p.id) || 0;
+        const dbAllTimeXp = allTimeXpByUser.get(p.id) || dbPeriodXp;
+        const sessionMinutes = Math.round((sessionSecondsByUser.get(p.id) || 0) / 60);
+        const allowance = Number(p.monthly_minutes_allowance ?? 5) + Number(p.add_on_minutes_balance ?? 0);
+        const balance = Number(p.minutes_balance ?? allowance);
+        const quotaMinutesUsed = Math.max(0, allowance - balance);
+        const minutesConsumed = Math.max(sessionMinutes, quotaMinutesUsed);
+        const levelNumber = Math.max(1, Math.floor(dbAllTimeXp / 500) + 1);
+        const avatarUrl = (p as any).avatar_url || null;
+        const rawName = (p.display_name || '').trim();
+        const fallbackPhone = p.phone_number
+          ? `Learner ••${String(p.phone_number).slice(-4)}`
+          : 'Learner';
+
+        return {
+          userId: p.id,
+          displayName: rawName || fallbackPhone,
+          avatarUrl,
+          levelNumber,
+          xp: dbPeriodXp,
+          minutesConsumed,
+          createdAt: p.created_at || '',
+        };
+      });
+
+      entries.sort((a, b) => {
+        if (b.xp !== a.xp) return b.xp - a.xp;
+        if (b.minutesConsumed !== a.minutesConsumed) return b.minutesConsumed - a.minutesConsumed;
+        return String(a.createdAt).localeCompare(String(b.createdAt));
+      });
+
+      let activeRankCounter = 0;
+      const rankedEntries = entries.map((entry) => {
+        const hasActivity = entry.xp > 0 || entry.minutesConsumed > 0;
+        return {
+          rank: hasActivity ? ++activeRankCounter : null,
+          userId: entry.userId,
+          displayName: entry.displayName,
+          avatarUrl: entry.avatarUrl,
+          levelNumber: entry.levelNumber,
+          xp: entry.xp,
+          minutesConsumed: entry.minutesConsumed,
+        };
+      });
+
+      const totalParticipants = rankedEntries.length;
+      const dataset = { rankedEntries, totalParticipants };
+      this.leaderboardCache.set(cacheKey, {
+        timestamp: now,
+        data: dataset,
+      });
+      return dataset;
+    } finally {
+      this.leaderboardInFlight.delete(cacheKey);
     }
   }
 
