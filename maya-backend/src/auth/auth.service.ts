@@ -1476,37 +1476,10 @@ export class AuthService {
       this.logger.warn(`Could not insert into onboarding_events: ${err?.message}`);
     }
 
-    // 2. Append to profiles.onboarding_flow JSONB array
-    try {
-      const { data: profile } = await this.supabase
-        .from('profiles')
-        .select('onboarding_flow')
-        .eq('id', userId)
-        .maybeSingle();
-
-      const rawFlow = (profile as any)?.onboarding_flow;
-      const existingFlow = Array.isArray(rawFlow) ? rawFlow : [];
-      const updatedFlow = [
-        ...existingFlow,
-        {
-          event: dto.event,
-          step: dto.step,
-          action: dto.action || 'click',
-          metadata: dto.metadata || {},
-          timestamp: nowIso,
-        },
-      ];
-
-      await this.supabase
-        .from('profiles')
-        .update({
-          onboarding_flow: updatedFlow,
-          updated_at: nowIso,
-        })
-        .eq('id', userId);
-    } catch (err: any) {
-      this.logger.warn(`Could not update profiles.onboarding_flow: ${err?.message}`);
-    }
+    // 2. (Removed) Appending to profiles.onboarding_flow: it read the user's whole JSON array,
+    // appended one click and wrote it all back (2 extra round trips + a growing payload on
+    // every event). onboarding_events above is the source of truth; the admin view already
+    // reads onboarding_events first and only falls back to onboarding_flow for old users.
 
     return { success: true };
   }

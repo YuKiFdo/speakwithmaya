@@ -3,6 +3,7 @@ import {
   Post,
   Put,
   Get,
+  Logger,
   Delete,
   Body,
   Param,
@@ -19,6 +20,13 @@ import { AuthGuard } from './guards/auth.guard.js';
 import { AdminGuard } from './guards/admin.guard.js';
 import { GetUser } from './decorators/get-user.decorator.js';
 import { parsePageRequest, paginateArray } from '../common/pagination.js';
+
+const backgroundLogger = new Logger('AuthControllerBackground');
+
+/** Runs a non-critical write after the response is sent; failures are logged, never thrown. */
+function runInBackground(label: string, work: Promise<unknown>): void {
+  work.catch((err: any) => backgroundLogger.warn(`[${label}] background write failed: ${err?.message}`));
+}
 import {
   SendOtpDto,
   VerifyOtpDto,
@@ -108,7 +116,10 @@ export class AuthController {
     @Body() dto: UpdateStepDto,
     @GetUser('id') userId: string,
   ) {
-    return this.authService.updateStep(userId, dto);
+    // Fire-and-forget: the client ignores this response, so it no longer waits for the
+    // profile write (previously 6-9 s under load because it queued behind other requests).
+    runInBackground('updateStep', this.authService.updateStep(userId, dto));
+    return { success: true, queued: true, step: dto.step };
   }
 
   @Post('users/event')
@@ -118,7 +129,9 @@ export class AuthController {
     @Body() dto: LogOnboardingEventDto,
     @GetUser('id') userId: string,
   ) {
-    return this.authService.logOnboardingEvent(userId, dto);
+    // Fire-and-forget analytics write (client ignores the response)
+    runInBackground('logOnboardingEvent', this.authService.logOnboardingEvent(userId, dto));
+    return { success: true, queued: true };
   }
 
   @Post('plans/upgrade')
@@ -378,7 +391,9 @@ export class AuthController {
     @GetUser('id') userId: string,
     @Body() dto: ComebackPingDto,
   ) {
-    return this.authService.recordComebackPing(userId, dto?.metadata);
+    // Fire-and-forget analytics write (client ignores the response)
+    runInBackground('recordComebackPing', this.authService.recordComebackPing(userId, dto?.metadata));
+    return { success: true, queued: true, timestamp: new Date().toISOString() };
   }
 
   /**
