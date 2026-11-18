@@ -2641,6 +2641,79 @@ export class AuthService {
     return this.supabase.from('profiles').select(base).order('created_at', { ascending: false });
   }
 
+  /**
+   * Per-user totals and per-user-per-day session counts for the Analytics overview.
+   * Uses the SQL functions from migrations 021/022 when present (kilobytes instead of every
+   * session and ledger row); otherwise computes the same shape from whole-table reads.
+   */
+  private analyticsRpcMissing = false;
+
+  private async fetchAnalyticsActivity(): Promise<{
+    byUser: Map<string, UserActivityTotals>;
+    userDays: Array<{ userId: string; day: string; sessions: number }>;
+  }> {
+    if (!this.analyticsRpcMissing && !this.adminActivityRpcMissing) {
+      const [totals, days] = await Promise.all([
+        this.fetchAdminUserActivity(),
+        this.supabase.rpc('admin_user_sessions_per_day', { days: 14 }),
+      ]);
+      if (!days.error && Array.isArray(days.data) && !this.adminActivityRpcMissing) {
+        return {
+          byUser: totals.byUser,
+          userDays: (days.data as any[]).map((d) => ({
+            userId: d.user_id,
+            day: String(d.day).slice(0, 10),
+            sessions: Number(d.sessions || 0),
+          })),
+        };
+      }
+      if (isMissingFunctionError(days.error)) {
+        this.analyticsRpcMissing = true;
+        this.logger.warn('[Analytics] admin_user_sessions_per_day not found; using whole-table reads. Apply 022_admin_analytics_daily.sql.');
+      } else if (days.error) {
+        this.logger.warn(`[Analytics] admin_user_sessions_per_day failed (${days.error.message}); using whole-table reads`);
+      }
+    }
+
+    const [{ data: sessions }, { data: ledger }] = await Promise.all([
+      this.supabase.from('sessions').select('user_id, duration_seconds, created_at'),
+      this.supabase.from('usage_ledger').select('user_id, cost_lkr, cost_usd, total_tokens'),
+    ]);
+    const byUser = new Map<string, UserActivityTotals>();
+    const get = (id: string) => {
+      let a = byUser.get(id);
+      if (!a) {
+        a = { ...EMPTY_USER_ACTIVITY };
+        byUser.set(id, a);
+      }
+      return a;
+    };
+    const cutoff = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    const dayCounts = new Map<string, { userId: string; day: string; sessions: number }>();
+    for (const r of (sessions || []) as any[]) {
+      if (!r.user_id) continue;
+      const a = get(r.user_id);
+      a.sessions += 1;
+      a.seconds += Number(r.duration_seconds || 0);
+      const d = r.created_at ? new Date(r.created_at) : null;
+      if (d && !isNaN(d.getTime()) && d.getTime() >= cutoff) {
+        const day = SL_DATE_KEY_FMT.format(d);
+        const key = `${r.user_id}|${day}`;
+        const cur = dayCounts.get(key) || { userId: r.user_id, day, sessions: 0 };
+        cur.sessions += 1;
+        dayCounts.set(key, cur);
+      }
+    }
+    for (const l of (ledger || []) as any[]) {
+      if (!l.user_id) continue;
+      const a = get(l.user_id);
+      a.costLkr += Number(l.cost_lkr || 0);
+      a.costUsd += Number(l.cost_usd || 0);
+      a.tokens += Number(l.total_tokens || 0);
+    }
+    return { byUser, userDays: [...dayCounts.values()] };
+  }
+
   private async computeAdminAnalyticsOverview() {
     if (!this.supabase) {
       throw new InternalServerErrorException('Supabase database client not configured.');
@@ -2649,15 +2722,13 @@ export class AuthService {
     try {
       const [
         { data: profiles, error: pErr },
-        { data: sessions, error: sErr },
+        activity,
         { data: langEvents, error: lErr },
-        { data: ledger, error: ledErr },
         registeredTestAccounts,
       ] = await Promise.all([
         this.fetchAnalyticsProfiles(),
-        this.supabase.from('sessions').select('id, user_id, duration_seconds, created_at'),
+        this.fetchAnalyticsActivity(),
         this.supabase.from('onboarding_events').select('user_id, metadata, created_at').eq('event_name', 'select_language_mode'),
-        this.supabase.from('usage_ledger').select('user_id, cost_lkr, cost_usd, total_tokens'),
         this.getTestAccounts().catch(() => [] as TestAccountItem[]),
       ]);
 
@@ -2667,8 +2738,6 @@ export class AuthService {
       }
 
       const allProfiles = (profiles || []) as any[];
-      const allSessions = (sessions || []) as any[];
-      const allLedger = (ledger || []) as any[];
       const allLangEvents = (langEvents || []) as any[];
 
       // Test account identification - strictly exclude from all analytics
@@ -2704,8 +2773,6 @@ export class AuthService {
       const totalUsers = realProfiles.length;
 
       // Filter sessions and usage ledger to include only real users
-      const realSessions = allSessions.filter((s) => s.user_id && realUserIdSet.has(s.user_id));
-      const realLedger = allLedger.filter((l) => l.user_id && realUserIdSet.has(l.user_id));
 
       // 1. Language Coaching Modes (3 choices: Sinhala Support vs English Only vs Deep Guidance)
       // Collect real user's latest choice from onboarding_events or profile.language_mode
@@ -2967,20 +3034,19 @@ export class AuthService {
 
       // 7. KPIs & Usage Calculations (real sessions only)
       let totalDurationSecs = 0;
-
-      realSessions.forEach((s) => {
-        totalDurationSecs += Number(s.duration_seconds || 0);
-      });
-
+      let totalSessionCount = 0;
       let totalCostLkr = 0;
       let totalCostUsd = 0;
       let totalTokens = 0;
 
-      realLedger.forEach((l) => {
-        totalCostLkr += Number(l.cost_lkr || 0);
-        totalCostUsd += Number(l.cost_usd || 0);
-        totalTokens += Number(l.total_tokens || 0);
-      });
+      for (const [userId, t] of activity.byUser) {
+        if (!realUserIdSet.has(userId)) continue;
+        totalDurationSecs += t.seconds;
+        totalSessionCount += t.sessions;
+        totalCostLkr += t.costLkr;
+        totalCostUsd += t.costUsd;
+        totalTokens += t.tokens;
+      }
 
       // 8. 14-Day Growth and Session Activity Trends (Sri Lanka Timezone, real users only)
       const slDateStr = (dateInput?: string | Date | null): string => {
@@ -3013,9 +3079,9 @@ export class AuthService {
         if (k) realRegsByDay.set(k, (realRegsByDay.get(k) || 0) + 1);
       }
       const realSessionsByDay = new Map<string, number>();
-      for (const sess of realSessions) {
-        const k = slDateStr(sess.created_at);
-        if (k) realSessionsByDay.set(k, (realSessionsByDay.get(k) || 0) + 1);
+      for (const d of activity.userDays) {
+        if (!realUserIdSet.has(d.userId)) continue;
+        realSessionsByDay.set(d.day, (realSessionsByDay.get(d.day) || 0) + d.sessions);
       }
 
       const days14 = past14Days.map(({ dateKey, dayLabel, weekday, isToday }) => {
@@ -3039,8 +3105,8 @@ export class AuthService {
           totalUsers,
           activeSubscriptions: rawStatusesCount['active'] || 0,
           totalPracticeMinutes: Math.round(totalDurationSecs / 60),
-          totalSessions: realSessions.length,
-          avgSessionDurationSeconds: realSessions.length > 0 ? Math.round(totalDurationSecs / realSessions.length) : 0,
+          totalSessions: totalSessionCount,
+          avgSessionDurationSeconds: totalSessionCount > 0 ? Math.round(totalDurationSecs / totalSessionCount) : 0,
           totalCostLkr: Number(totalCostLkr.toFixed(2)),
           totalCostUsd: Number(totalCostUsd.toFixed(2)),
           totalTokens,
