@@ -441,6 +441,9 @@ export class SessionsService {
       }
 
       this.recordingFolderCache.delete(validSessionId);
+      // History list caches folder listings per session; drop it so the new files show up
+      this.completedSessionFilesCache.delete(validSessionId);
+      if (sessionId !== validSessionId) this.completedSessionFilesCache.delete(sessionId);
       this.lastSavedSessionId = validSessionId;
       this.sessionRecordingsMap.set(validSessionId, { userAudioUrl, modelAudioUrl, fullConversationAudioUrl });
       if (sessionId !== validSessionId) {
@@ -3679,8 +3682,13 @@ ${memoryPart}`;
                 // Cache permanently for completed sessions to prevent future storage.list roundtrips.
                 // Also cache sessions older than 1 hour whatever their status: dropped / never-finished
                 // sessions were re-listed on EVERY history load (up to 50 Storage API calls each time).
+                // Only once the recording is actually there: recordings are encoded and uploaded
+                // in the background after the call, so a listing taken right after a call can be
+                // empty. Caching that permanently made the history list show "no audio" while the
+                // detail view (which lists fresh) had it.
                 const ageMs = Date.now() - new Date(sess.created_at || sess.start_time || 0).getTime();
-                if (sess.status === 'completed' || sess.end_time || ageMs > 60 * 60 * 1000) {
+                const recordingComplete = SessionsService.hasRecordingFile(fSet, 'full_conversation');
+                if (recordingComplete || ageMs > 60 * 60 * 1000) {
                   this.completedSessionFilesCache.set(validSessionId, fSet);
                   this.completedSessionFilesCache.set(sess.id, fSet);
                 }
