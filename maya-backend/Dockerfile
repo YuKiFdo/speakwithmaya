@@ -1,7 +1,13 @@
+# Layer layout matters on the VPS: it pulls and unpacks only layers it does not have, and
+# with heavy CPU steal unpacking ~1 GB of node_modules took 10+ minutes per deploy. The old
+# Dockerfile ran `npm prune` after the build, so node_modules became a new layer on EVERY
+# commit. Now production deps are installed in their own stage that depends only on the
+# lockfile, and the frequently-changing dist/ is the last, small layer.
+
 # -------------------------------------------------------------
-# Stage 1: Build & native compilation (builder)
+# Stage 1: production dependencies only (cached until package*.json changes)
 # -------------------------------------------------------------
-FROM node:22-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS deps
 
 WORKDIR /app
 
@@ -17,22 +23,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV ONNXRUNTIME_NODE_INSTALL=skip
 
 COPY package*.json ./
+RUN npm ci --omit=dev --legacy-peer-deps
 
-# Lockfile-exact install (runs node-gyp for @discordjs/opus)
+# -------------------------------------------------------------
+# Stage 2: build (needs devDependencies)
+# -------------------------------------------------------------
+FROM deps AS builder
+
 RUN npm ci --legacy-peer-deps
 
 COPY tsconfig*.json nest-cli.json ./
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 
-# Compile TypeScript to dist/ and produce the single-file bundle dist/main.js
+# Compile TypeScript to dist/ and produce the single-file bundle dist/main.js (+ workers)
 RUN npm run build && npm run bundle
 
-# Drop devDependencies; native binaries stay in node_modules
-RUN npm prune --omit=dev --legacy-peer-deps
-
 # -------------------------------------------------------------
-# Stage 2: Production runtime
+# Stage 3: Production runtime
 # -------------------------------------------------------------
 FROM node:22-bookworm-slim AS production
 
@@ -50,10 +58,11 @@ ENV PORT=3000
 # freed memory get reused instead of piling up.
 ENV MALLOC_ARENA_MAX=2
 
-COPY --chown=node:node --from=builder /app/package*.json ./
-COPY --chown=node:node --from=builder /app/node_modules/ ./node_modules/
-COPY --chown=node:node --from=builder /app/dist/ ./dist/
+# Stable layers first (reused by the VPS across deploys), dist/ last (changes every deploy)
+COPY --chown=node:node --from=deps /app/package*.json ./
+COPY --chown=node:node --from=deps /app/node_modules/ ./node_modules/
 COPY --chown=node:node assets/ ./assets/
+COPY --chown=node:node --from=builder /app/dist/ ./dist/
 
 USER node
 
