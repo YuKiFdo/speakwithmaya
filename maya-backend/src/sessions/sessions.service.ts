@@ -27,58 +27,11 @@ export function toValidUuid(str?: string): string {
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 }
 
-export function encodePcmToWav(
-  pcmBuffer: Buffer,
-  sampleRate: number = 16000,
-  numChannels: number = 1,
-  bitDepth: number = 16,
-): Buffer {
-  const byteRate = sampleRate * numChannels * (bitDepth / 8);
-  const blockAlign = numChannels * (bitDepth / 8);
-  const dataSize = pcmBuffer.length;
-  const headerSize = 44;
-  const buffer = Buffer.alloc(headerSize + dataSize);
-
-  buffer.write('RIFF', 0);
-  buffer.writeUInt32LE(36 + dataSize, 4);
-  buffer.write('WAVE', 8);
-  buffer.write('fmt ', 12);
-  buffer.writeUInt32LE(16, 16);
-  buffer.writeUInt16LE(1, 20);
-  buffer.writeUInt16LE(numChannels, 22);
-  buffer.writeUInt32LE(sampleRate, 24);
-  buffer.writeUInt32LE(byteRate, 28);
-  buffer.writeUInt16LE(blockAlign, 32);
-  buffer.writeUInt16LE(bitDepth, 34);
-  buffer.write('data', 36);
-  buffer.writeUInt32LE(dataSize, 40);
-
-  pcmBuffer.copy(buffer, 44);
-  return buffer;
-}
-
-export function resamplePcm16Mono(inputBuffer: Buffer, fromRate: number, toRate: number): Buffer {
-  if (fromRate === toRate || inputBuffer.length === 0) return inputBuffer;
-  const numInputSamples = Math.floor(inputBuffer.length / 2);
-  if (numInputSamples === 0) return Buffer.alloc(0);
-  // Typed-array views are several times faster than per-sample readInt16LE/writeInt16LE.
-  const src = inputBuffer.byteOffset % 2 === 0
-    ? new Int16Array(inputBuffer.buffer, inputBuffer.byteOffset, numInputSamples)
-    : new Int16Array(Uint8Array.from(inputBuffer.subarray(0, numInputSamples * 2)).buffer);
-  const ratio = toRate / fromRate;
-  const numOutputSamples = Math.floor(numInputSamples * ratio);
-  const out = new Int16Array(numOutputSamples);
-  const last = numInputSamples - 1;
-  for (let i = 0; i < numOutputSamples; i++) {
-    const srcIndex = i / ratio;
-    const f = Math.floor(srcIndex);
-    const c = f + 1 > last ? last : f + 1;
-    const w = srcIndex - f;
-    const v = Math.round(src[f] * (1 - w) + src[c] * w);
-    out[i] = v < -32768 ? -32768 : v > 32767 ? 32767 : v;
-  }
-  return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
-}
+// Pure PCM helpers live in audio-codec.ts so the audio-finalize worker can import them
+// without pulling in this service; re-exported here for existing importers.
+export { encodePcmToWav, resamplePcm16Mono } from './audio-codec.js';
+import { AudioFinalizeClient } from './audio-finalize-client.js';
+import { encodePcmToWav, resamplePcm16Mono } from './audio-codec.js';
 
 export interface UsageRecord {
   id: string;
@@ -331,6 +284,8 @@ export class SessionsService {
     return this.authoritativeTurnsMap.get(validId) || this.authoritativeTurnsMap.get(sessionId);
   }
   private readonly inFlightHintPromises = new Map<string, Promise<{ hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number; tokens?: { promptTokens: number; outputTokens: number; totalTokens: number } }>>();
+  /** Builds recording files off the main thread when sessions end. */
+  private readonly audioFinalize = new AudioFinalizeClient();
   private readonly ttsAudioCache = new BoundedMap<string, { audioBase64: string; mimeType: string }>(150);
   private piperSession: any = null;
   private piperConfig: any = null;
@@ -436,131 +391,67 @@ export class SessionsService {
     let fullConversationAudioUrl: string | undefined;
 
     try {
-      if (userPcm && userPcm.length > 0) {
-        const userWav = encodePcmToWav(userPcm, 16000);
-        const userFilePath = `${validSessionId}/user_recording.wav`;
-        const { error: userErr } = await this.supabase.storage
-          .from('session-recordings')
-          .upload(userFilePath, userWav, {
-            contentType: 'audio/wav',
-            upsert: true,
-          });
+      // CPU-heavy part (concat / resample / encode) runs in the audio-finalize worker so
+      // sessions ending together cannot stall live calls; only uploads happen here.
+      const files = await this.audioFinalize.build({
+        userPcm,
+        modelPcm,
+        userTurns: userTurnAudioMap ? Array.from(userTurnAudioMap.entries()) : [],
+        modelTurns: modelTurnAudioMap ? Array.from(modelTurnAudioMap.entries()) : [],
+        chronologicalTurns: (chronologicalTurns || []).map((t) => ({ pcm: t.pcm, sampleRate: t.sampleRate })),
+      });
+      const bucket = this.supabase.storage.from('session-recordings');
+      const publicUrlOf = (path: string) =>
+        (bucket.getPublicUrl(path)?.data?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+      const put = async (path: string, body: Buffer) => {
+        const { error } = await bucket.upload(path, body, { contentType: files.mime, upsert: true });
+        return error;
+      };
 
-        if (userErr) {
-          this.logger.error(`Failed to upload user recording: ${userErr.message}`);
+      if (files.user) {
+        const path = `${validSessionId}/user_recording.${files.ext}`;
+        const err = await put(path, files.user);
+        if (err) {
+          this.logger.error(`Failed to upload user recording: ${err.message}`);
         } else {
-          const { data: pubData } = this.supabase.storage
-            .from('session-recordings')
-            .getPublicUrl(userFilePath);
-          userAudioUrl = (pubData?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
-          this.logger.log(`[SessionsService] 🎙️ Saved user audio recording to ${this.storageProviderLabel}: ${userAudioUrl} (${(userWav.length / 1024).toFixed(1)} KB)`);
+          userAudioUrl = publicUrlOf(path);
+          this.logger.log(`[SessionsService] 🎙️ Saved user audio recording to ${this.storageProviderLabel}: ${userAudioUrl} (${(files.user.length / 1024).toFixed(1)} KB)`);
         }
       }
 
-      if (modelPcm && modelPcm.length > 0) {
-        const modelWav = encodePcmToWav(modelPcm, 24000);
-        const modelFilePath = `${validSessionId}/model_recording.wav`;
-        const { error: modelErr } = await this.supabase.storage
-          .from('session-recordings')
-          .upload(modelFilePath, modelWav, {
-            contentType: 'audio/wav',
-            upsert: true,
-          });
-
-        if (modelErr) {
-          this.logger.error(`Failed to upload model recording: ${modelErr.message}`);
+      if (files.model) {
+        const path = `${validSessionId}/model_recording.${files.ext}`;
+        const err = await put(path, files.model);
+        if (err) {
+          this.logger.error(`Failed to upload model recording: ${err.message}`);
         } else {
-          const { data: pubData } = this.supabase.storage
-            .from('session-recordings')
-            .getPublicUrl(modelFilePath);
-          modelAudioUrl = (pubData?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
-          this.logger.log(`[SessionsService] 🤖 Saved model audio recording to ${this.storageProviderLabel}: ${modelAudioUrl} (${(modelWav.length / 1024).toFixed(1)} KB)`);
+          modelAudioUrl = publicUrlOf(path);
+          this.logger.log(`[SessionsService] 🤖 Saved model audio recording to ${this.storageProviderLabel}: ${modelAudioUrl} (${(files.model.length / 1024).toFixed(1)} KB)`);
         }
       }
 
-      // Synthesize full chronological conversation (Model -> User -> Model -> User in proper order)
-      if (chronologicalTurns && chronologicalTurns.length > 0) {
-        try {
-          const silence24k = Buffer.alloc(16800); // 350ms silence between conversational turns
-          const pcmSegments: Buffer[] = [];
-
-          for (const turn of chronologicalTurns) {
-            if (turn.pcm && turn.pcm.length > 0) {
-              const pcm24k = turn.sampleRate === 24000
-                ? turn.pcm
-                : resamplePcm16Mono(turn.pcm, turn.sampleRate, 24000);
-              pcmSegments.push(pcm24k);
-              pcmSegments.push(silence24k);
-            }
-          }
-
-          if (pcmSegments.length > 0) {
-            const combinedPcm = Buffer.concat(pcmSegments);
-            const fullWav = encodePcmToWav(combinedPcm, 24000);
-            const fullFilePath = `${validSessionId}/full_conversation.wav`;
-            const { error: fullErr } = await this.supabase.storage
-              .from('session-recordings')
-              .upload(fullFilePath, fullWav, {
-                contentType: 'audio/wav',
-                upsert: true,
-              });
-
-            if (!fullErr) {
-              const { data: pubData } = this.supabase.storage
-                .from('session-recordings')
-                .getPublicUrl(fullFilePath);
-              fullConversationAudioUrl = (pubData?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
-              this.logger.log(`[SessionsService] 🎧 Saved chronological full conversation to ${this.storageProviderLabel}: ${fullConversationAudioUrl} (${(fullWav.length / 1024).toFixed(1)} KB)`);
-            }
-          }
-        } catch (err: any) {
-          this.logger.warn(`Could not synthesize chronological full_conversation.wav: ${err?.message}`);
+      if (files.full) {
+        const path = `${validSessionId}/full_conversation.${files.ext}`;
+        const err = await put(path, files.full);
+        if (!err) {
+          fullConversationAudioUrl = publicUrlOf(path);
+          this.logger.log(`[SessionsService] 🎧 Saved chronological full conversation to ${this.storageProviderLabel}: ${fullConversationAudioUrl} (${(files.full.length / 1024).toFixed(1)} KB)`);
+        } else {
+          this.logger.warn(`Could not upload full conversation: ${err.message}`);
         }
       }
 
-      // Upload isolated per-turn audio clips to Supabase Storage in parallel
+      // Per-turn clips, uploaded in parallel
       const turnUrls = new Map<number, string>();
-      const supabaseClient = this.supabase;
-
-      if (userTurnAudioMap && userTurnAudioMap.size > 0) {
-        const uploadTasks = Array.from(userTurnAudioMap.entries()).map(async ([turnIdx, turnPcm]) => {
-          if (turnPcm && turnPcm.length > 0) {
-            const turnWav = encodePcmToWav(turnPcm, 16000);
-            const turnFilePath = `${validSessionId}/turns/user_turn_${turnIdx}.wav`;
-            const { error: turnErr } = await supabaseClient.storage
-              .from('session-recordings')
-              .upload(turnFilePath, turnWav, {
-                contentType: 'audio/wav',
-                upsert: true,
-              });
-
-            if (!turnErr) {
-              const { data: turnPub } = supabaseClient.storage
-                .from('session-recordings')
-                .getPublicUrl(turnFilePath);
-              const turnUrl = (turnPub?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
-              turnUrls.set(turnIdx, turnUrl);
-            }
-          }
-        });
-        await Promise.all(uploadTasks);
-      }
-
-      if (modelTurnAudioMap && modelTurnAudioMap.size > 0) {
-        const modelUploads = Array.from(modelTurnAudioMap.entries()).map(async ([turnIdx, turnPcm]) => {
-          if (turnPcm && turnPcm.length > 0) {
-            const turnWav = encodePcmToWav(turnPcm, 24000);
-            const turnFilePath = `${validSessionId}/turns/model_turn_${turnIdx}.wav`;
-            await supabaseClient.storage
-              .from('session-recordings')
-              .upload(turnFilePath, turnWav, {
-                contentType: 'audio/wav',
-                upsert: true,
-              });
-          }
-        });
-        await Promise.all(modelUploads);
-      }
+      await Promise.all([
+        ...files.userTurns.map(async ([turnIdx, body]) => {
+          const path = `${validSessionId}/turns/user_turn_${turnIdx}.${files.ext}`;
+          if (!(await put(path, body))) turnUrls.set(turnIdx, publicUrlOf(path));
+        }),
+        ...files.modelTurns.map(async ([turnIdx, body]) => {
+          await put(`${validSessionId}/turns/model_turn_${turnIdx}.${files.ext}`, body);
+        }),
+      ]);
 
       this.sessionTurnAudioMap.set(validSessionId, turnUrls);
       if (sessionId !== validSessionId) {

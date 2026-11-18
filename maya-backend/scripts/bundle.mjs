@@ -79,5 +79,18 @@ if (!fs.existsSync(WORKER_SRC)) {
   throw new Error(`${WORKER_SRC} missing: run nest build before bundling`);
 }
 fs.copyFileSync(WORKER_SRC, 'dist/piper-inference.worker.js');
+
+// The audio-finalize worker imports ./audio-codec.js, so bundle it into one file that sits
+// next to dist/main.js (it is resolved relative to import.meta.url like the Piper worker).
+await build({
+  entryPoints: ['dist/sessions/audio-finalize.worker.js'],
+  outfile: 'dist/audio-finalize.worker.js',
+  bundle: true,
+  platform: 'node',
+  target: 'node22',
+  format: 'esm',
+  legalComments: 'none',
+  logLevel: 'warning',
+});
 fs.rmSync('dist/main.bundle.js', { force: true });
 console.log('Bundled into dist/main.js (original entry kept as dist/main.unbundled.js)');
