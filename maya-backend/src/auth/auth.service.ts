@@ -3469,6 +3469,25 @@ export class AuthService {
       if (this.appConfigCache && this.appConfigCache.expiresAt > now) {
         return { ...this.appConfigCache.value };
       }
+      // Stale-while-revalidate: once a value exists, an expired cache is served immediately
+      // while ONE background refresh runs, so no user request waits for the ~1.5 s
+      // cross-region read (seen as [SlowRequest] GET /v1/app-config after every expiry).
+      // Values older than APP_CONFIG_MAX_STALE_MS are not served; the caller waits instead.
+      if (this.appConfigCache && now - this.appConfigCache.expiresAt < AuthService.APP_CONFIG_MAX_STALE_MS) {
+        if (!this.appConfigInFlight) {
+          const load = this.loadAppConfigFromDb();
+          this.appConfigInFlight = load;
+          load
+            .then((value) => {
+              this.appConfigCache = { value, expiresAt: Date.now() + AuthService.APP_CONFIG_TTL_MS };
+            })
+            .catch(() => undefined)
+            .finally(() => {
+              if (this.appConfigInFlight === load) this.appConfigInFlight = null;
+            });
+        }
+        return { ...this.appConfigCache.value };
+      }
       if (this.appConfigInFlight) {
         return { ...(await this.appConfigInFlight) };
       }
@@ -3486,6 +3505,7 @@ export class AuthService {
   }
 
   private static readonly APP_CONFIG_TTL_MS = 30_000;
+  private static readonly APP_CONFIG_MAX_STALE_MS = 10 * 60_000;
   private appConfigCache: { value: AppConfigData; expiresAt: number } | null = null;
   private appConfigInFlight: Promise<AppConfigData> | null = null;
 
