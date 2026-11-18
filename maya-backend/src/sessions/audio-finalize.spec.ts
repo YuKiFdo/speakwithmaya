@@ -9,7 +9,7 @@ const pcm = (samples: number, v = 1000) => {
 };
 
 describe('buildSessionAudioFiles', () => {
-  it('builds user/model/full/per-turn WAVs with correct rates and sizes', () => {
+  it('without an Opus encoder: full + per-turn WAVs (no whole-session tracks)', () => {
     const files = buildSessionAudioFiles({
       userPcm: pcm(16000), // 1s @16k
       modelPcm: pcm(24000), // 1s @24k
@@ -21,8 +21,10 @@ describe('buildSessionAudioFiles', () => {
       ],
     });
     expect(files.mime).toBe('audio/wav');
-    expect(files.user!.readUInt32LE(24)).toBe(16000);
-    expect(files.model!.readUInt32LE(24)).toBe(24000);
+    expect((files as any).user).toBeUndefined();
+    expect((files as any).model).toBeUndefined();
+    expect(files.userTurns[0][1].readUInt32LE(24)).toBe(16000);
+    expect(files.modelTurns[0][1].readUInt32LE(24)).toBe(24000);
     // full = (24000 + 16800/2 gap) + (24000 + 8400 gap) samples * 2 bytes + 44 header
     expect(files.full!.length).toBe(44 + (24000 + 8400) * 2 * 2);
     expect(files.userTurns.map(([i]) => i)).toEqual([0]);
@@ -34,7 +36,7 @@ describe('AudioFinalizeClient', () => {
   it('falls back to inline work when the compiled worker is not present', async () => {
     const c = new AudioFinalizeClient(new URL('file:///nonexistent/audio-finalize.worker.js'));
     expect(c.isAvailable()).toBe(false);
-    const files = await c.build({ userPcm: pcm(1600) });
-    expect(files.user!.length).toBe(44 + 3200);
+    const files = await c.build({ userTurns: [[0, pcm(1600)]] });
+    expect(files.userTurns).toHaveLength(1); // WebM if the native Opus module loads, else WAV
   });
 });

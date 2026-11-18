@@ -393,70 +393,54 @@ export class SessionsService {
     try {
       // CPU-heavy part (concat / resample / encode) runs in the audio-finalize worker so
       // sessions ending together cannot stall live calls; only uploads happen here.
-      const files = await this.audioFinalize.build({
-        userPcm,
-        modelPcm,
-        userTurns: userTurnAudioMap ? Array.from(userTurnAudioMap.entries()) : [],
-        modelTurns: modelTurnAudioMap ? Array.from(modelTurnAudioMap.entries()) : [],
-        chronologicalTurns: (chronologicalTurns || []).map((t) => ({ pcm: t.pcm, sampleRate: t.sampleRate })),
-      });
+      // The whole-session user/model tracks are no longer stored (they duplicated the
+      // full conversation + per-turn clips), so their PCM is not even sent to the worker.
+      void userPcm;
+      void modelPcm;
       const bucket = this.supabase.storage.from('session-recordings');
       const publicUrlOf = (path: string) =>
         (bucket.getPublicUrl(path)?.data?.publicUrl || '').replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
-      const put = async (path: string, body: Buffer) => {
-        const { error } = await bucket.upload(path, body, { contentType: files.mime, upsert: true });
+      const put = async (path: string, body: Buffer, mime: string) => {
+        const { error } = await bucket.upload(path, body, { contentType: mime, upsert: true });
         return error;
       };
 
-      if (files.user) {
-        const path = `${validSessionId}/user_recording.${files.ext}`;
-        const err = await put(path, files.user);
-        if (err) {
-          this.logger.error(`Failed to upload user recording: ${err.message}`);
-        } else {
-          userAudioUrl = publicUrlOf(path);
-          this.logger.log(`[SessionsService] 🎙️ Saved user audio recording to ${this.storageProviderLabel}: ${userAudioUrl} (${(files.user.length / 1024).toFixed(1)} KB)`);
-        }
-      }
+      // 1) Per-turn clips FIRST: the feedback screen's "You said" needs them right after the
+      //    call, while the long full-conversation file can follow.
+      const turnFiles = await this.audioFinalize.build({
+        userTurns: userTurnAudioMap ? Array.from(userTurnAudioMap.entries()) : [],
+        modelTurns: modelTurnAudioMap ? Array.from(modelTurnAudioMap.entries()) : [],
+      });
+      const turnUrls = new Map<number, string>();
+      await Promise.all([
+        ...turnFiles.userTurns.map(async ([turnIdx, body]) => {
+          const path = `${validSessionId}/turns/user_turn_${turnIdx}.${turnFiles.ext}`;
+          if (!(await put(path, body, turnFiles.mime))) turnUrls.set(turnIdx, publicUrlOf(path));
+        }),
+        ...turnFiles.modelTurns.map(async ([turnIdx, body]) => {
+          await put(`${validSessionId}/turns/model_turn_${turnIdx}.${turnFiles.ext}`, body, turnFiles.mime);
+        }),
+      ]);
+      this.recordingFolderCache.delete(`${validSessionId}/turns`);
+      this.sessionTurnAudioMap.set(validSessionId, turnUrls);
+      if (sessionId !== validSessionId) this.sessionTurnAudioMap.set(sessionId, turnUrls);
 
-      if (files.model) {
-        const path = `${validSessionId}/model_recording.${files.ext}`;
-        const err = await put(path, files.model);
-        if (err) {
-          this.logger.error(`Failed to upload model recording: ${err.message}`);
-        } else {
-          modelAudioUrl = publicUrlOf(path);
-          this.logger.log(`[SessionsService] 🤖 Saved model audio recording to ${this.storageProviderLabel}: ${modelAudioUrl} (${(files.model.length / 1024).toFixed(1)} KB)`);
-        }
-      }
-
-      if (files.full) {
-        const path = `${validSessionId}/full_conversation.${files.ext}`;
-        const err = await put(path, files.full);
+      // 2) Chronological full conversation (history playback)
+      const fullFiles = await this.audioFinalize.build({
+        chronologicalTurns: (chronologicalTurns || []).map((t) => ({ pcm: t.pcm, sampleRate: t.sampleRate })),
+      });
+      if (fullFiles.full) {
+        const path = `${validSessionId}/full_conversation.${fullFiles.ext}`;
+        const err = await put(path, fullFiles.full, fullFiles.mime);
         if (!err) {
           fullConversationAudioUrl = publicUrlOf(path);
-          this.logger.log(`[SessionsService] 🎧 Saved chronological full conversation to ${this.storageProviderLabel}: ${fullConversationAudioUrl} (${(files.full.length / 1024).toFixed(1)} KB)`);
+          this.logger.log(`[SessionsService] 🎧 Saved chronological full conversation to ${this.storageProviderLabel}: ${fullConversationAudioUrl} (${(fullFiles.full.length / 1024).toFixed(1)} KB)`);
         } else {
           this.logger.warn(`Could not upload full conversation: ${err.message}`);
         }
       }
 
-      // Per-turn clips, uploaded in parallel
-      const turnUrls = new Map<number, string>();
-      await Promise.all([
-        ...files.userTurns.map(async ([turnIdx, body]) => {
-          const path = `${validSessionId}/turns/user_turn_${turnIdx}.${files.ext}`;
-          if (!(await put(path, body))) turnUrls.set(turnIdx, publicUrlOf(path));
-        }),
-        ...files.modelTurns.map(async ([turnIdx, body]) => {
-          await put(`${validSessionId}/turns/model_turn_${turnIdx}.${files.ext}`, body);
-        }),
-      ]);
-
-      this.sessionTurnAudioMap.set(validSessionId, turnUrls);
-      if (sessionId !== validSessionId) {
-        this.sessionTurnAudioMap.set(sessionId, turnUrls);
-      }
+      this.recordingFolderCache.delete(validSessionId);
       this.lastSavedSessionId = validSessionId;
       this.sessionRecordingsMap.set(validSessionId, { userAudioUrl, modelAudioUrl, fullConversationAudioUrl });
       if (sessionId !== validSessionId) {
@@ -470,6 +454,76 @@ export class SessionsService {
     }
   }
 
+  /**
+   * Recordings are WebM/Opus since 2026-11-18 (WAV before), and the whole-session
+   * user/model tracks are no longer stored. Every reader goes through these helpers so old
+   * (.wav) and new (.webm) sessions both resolve, and user/model requests fall back to the
+   * full conversation.
+   */
+  private readonly recordingFolderCache = new BoundedMap<string, Set<string>>(500, 10 * 60_000);
+
+  /** File names present in `<sessionId>/` or `<sessionId>/turns/` (cached ~10 min). */
+  private async listRecordingFolder(folder: string): Promise<Set<string>> {
+    const cached = this.recordingFolderCache.get(folder);
+    if (cached) return cached;
+    let names = new Set<string>();
+    if (!this.supabase) return names;
+    try {
+      const { data } = await this.supabase.storage.from('session-recordings').list(folder);
+      names = new Set((data || []).map((f: any) => f.name));
+    } catch {
+      /* treat as empty */
+    }
+    // Only cache non-empty listings: a session still uploading should be re-checked
+    if (names.size > 0) this.recordingFolderCache.set(folder, names);
+    return names;
+  }
+
+  /** Storage key of a recording, preferring WebM then WAV; null when none exists. */
+  async resolveRecordingPath(
+    sessionId: string,
+    type: 'full' | 'user' | 'model' | 'turn' = 'full',
+    speaker: 'user' | 'model' = 'user',
+    index: number = 0,
+  ): Promise<string | null> {
+    const id = toValidUuid(sessionId);
+    const folder = type === 'turn' ? `${id}/turns` : id;
+    const candidates =
+      type === 'turn'
+        ? [`${speaker}_turn_${index}.webm`, `${speaker}_turn_${index}.wav`]
+        : type === 'full'
+          ? ['full_conversation.webm', 'full_conversation.wav']
+          : [`${type}_recording.wav`, 'full_conversation.webm', 'full_conversation.wav'];
+    const pick = (names: Set<string>) => candidates.find((n) => names.has(n));
+    let hit = pick(await this.listRecordingFolder(folder));
+    if (!hit && this.recordingFolderCache.has(folder)) {
+      // Cached listing may predate an upload that just finished: re-list once
+      this.recordingFolderCache.delete(folder);
+      hit = pick(await this.listRecordingFolder(folder));
+    }
+    return hit ? `${folder}/${hit}` : null;
+  }
+
+  /** True when the listed folder contains `<base>.webm` or `<base>.wav`. */
+  static hasRecordingFile(files: Set<string> | null | undefined, base: string): boolean {
+    return !!files && (files.has(`${base}.webm`) || files.has(`${base}.wav`));
+  }
+
+  /**
+   * URL for a recording that is resolved when it is requested (302 to the real file), for
+   * places that build URLs without knowing which format a session was stored in.
+   */
+  recordingEndpointUrl(
+    sessionId: string,
+    type: 'full' | 'user' | 'model' | 'turn',
+    speaker: 'user' | 'model' = 'user',
+    index: number = 0,
+  ): string {
+    const base = (process.env.PUBLIC_API_URL || 'https://api.speakwithmaya.com').replace(/\/+$/, '');
+    const q = type === 'turn' ? `type=turn&speaker=${speaker}&index=${index}` : `type=${type}`;
+    return `${base}/v1/sessions/${toValidUuid(sessionId)}/recording-audio?${q}`;
+  }
+
   async getRecordingAudioUrl(
     sessionId: string,
     type: 'full' | 'user' | 'model' | 'turn' = 'full',
@@ -479,40 +533,25 @@ export class SessionsService {
     if (!this.supabase) return null;
     const validSessionId = toValidUuid(sessionId);
 
-    // 1. Check in-memory recordings map for fast hit
+    // 1. In-memory URLs from this process's recent saves
     const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
-    if (type === 'full' && rec?.fullConversationAudioUrl && rec.fullConversationAudioUrl.startsWith('http')) {
+    if (type === 'full' && rec?.fullConversationAudioUrl?.startsWith('http')) {
       return rec.fullConversationAudioUrl;
     }
-    if (type === 'user' && rec?.userAudioUrl && rec.userAudioUrl.startsWith('http')) {
-      return rec.userAudioUrl;
-    }
-    if (type === 'model' && rec?.modelAudioUrl && rec.modelAudioUrl.startsWith('http')) {
-      return rec.modelAudioUrl;
-    }
-    if (type === 'turn') {
+    if (type === 'turn' && speaker === 'user') {
       const turnMap = this.sessionTurnAudioMap.get(validSessionId) || this.sessionTurnAudioMap.get(sessionId);
       const url = turnMap?.get(index);
-      if (url && url.startsWith('http')) {
-        return url;
-      }
+      if (url && url.startsWith('http')) return url;
     }
 
-    // 2. Resolve from cloud storage (Azure Blob Storage or Supabase Storage)
-    let filePath = `${validSessionId}/full_conversation.wav`;
-    if (type === 'user') filePath = `${validSessionId}/user_recording.wav`;
-    else if (type === 'model') filePath = `${validSessionId}/model_recording.wav`;
-    else if (type === 'turn') filePath = `${validSessionId}/turns/${speaker}_turn_${index}.wav`;
-
+    // 2. Whatever is actually stored (.webm or legacy .wav)
+    const path = await this.resolveRecordingPath(sessionId, type, speaker, index);
+    if (!path) return null;
     try {
-      const { data: pubData } = this.supabase.storage
-        .from('session-recordings')
-        .getPublicUrl(filePath);
-      if (pubData?.publicUrl && pubData.publicUrl.startsWith('http')) {
-        return pubData.publicUrl;
-      }
+      const { data: pubData } = this.supabase.storage.from('session-recordings').getPublicUrl(path);
+      if (pubData?.publicUrl && pubData.publicUrl.startsWith('http')) return pubData.publicUrl;
     } catch (e: any) {
-      this.logger.debug(`Could not resolve recording URL for ${filePath}: ${e?.message}`);
+      this.logger.debug(`Could not resolve recording URL for ${path}: ${e?.message}`);
     }
     return null;
   }
@@ -522,24 +561,37 @@ export class SessionsService {
     type: 'full' | 'user' | 'model' | 'turn' = 'full',
     speaker: 'user' | 'model' = 'user',
     index: number = 0,
-  ): Promise<Buffer | null> {
+  ): Promise<{ buffer: Buffer; path: string } | null> {
     if (!this.supabase) return null;
-    const validSessionId = toValidUuid(sessionId);
-    let filePath = `${validSessionId}/full_conversation.wav`;
-    if (type === 'user') filePath = `${validSessionId}/user_recording.wav`;
-    else if (type === 'model') filePath = `${validSessionId}/model_recording.wav`;
-    else if (type === 'turn') filePath = `${validSessionId}/turns/${speaker}_turn_${index}.wav`;
-
+    const path = await this.resolveRecordingPath(sessionId, type, speaker, index);
+    if (!path) return null;
     try {
-      const { data, error } = await this.supabase.storage
-        .from('session-recordings')
-        .download(filePath);
+      const { data, error } = await this.supabase.storage.from('session-recordings').download(path);
       if (error || !data) return null;
-      const ab = await data.arrayBuffer();
-      return Buffer.from(ab);
+      return { buffer: Buffer.from(await data.arrayBuffer()), path };
     } catch {
       return null;
     }
+  }
+
+  /** WAV conversions of WebM recordings for browsers without WebM/Opus (cached). */
+  private readonly wavConversionCache = new BoundedMap<string, Buffer>(20, 30 * 60_000);
+
+  /** Recording as WAV: legacy .wav files as-is, .webm decoded in the audio worker. */
+  async getRecordingAsWav(
+    sessionId: string,
+    type: 'full' | 'user' | 'model' | 'turn' = 'full',
+    speaker: 'user' | 'model' = 'user',
+    index: number = 0,
+  ): Promise<Buffer | null> {
+    const file = await this.downloadRecordingBuffer(sessionId, type, speaker, index);
+    if (!file) return null;
+    if (file.path.endsWith('.wav')) return file.buffer;
+    const hit = this.wavConversionCache.get(file.path);
+    if (hit) return hit;
+    const wav = await this.audioFinalize.webmToWav(file.buffer);
+    if (wav) this.wavConversionCache.set(file.path, wav);
+    return wav;
   }
 
   async uploadSingleTurnAudio(
@@ -565,15 +617,20 @@ export class SessionsService {
 
     try {
       await this.ensureRecordingsBucket();
-      const sampleRate = speaker === 'model' ? 24000 : 16000;
-      const turnWav = encodePcmToWav(turnPcm, sampleRate);
-      const turnFilePath = `${validSessionId}/turns/${speaker}_turn_${turnIdx}.wav`;
+      // Encoded (WebM/Opus, WAV fallback) in the audio worker, off the main thread
+      const files = await this.audioFinalize.build(
+        speaker === 'model' ? { modelTurns: [[turnIdx, turnPcm]] } : { userTurns: [[turnIdx, turnPcm]] },
+      );
+      const encoded = (speaker === 'model' ? files.modelTurns : files.userTurns)[0]?.[1];
+      if (!encoded) return undefined;
+      const turnFilePath = `${validSessionId}/turns/${speaker}_turn_${turnIdx}.${files.ext}`;
       const { error } = await this.supabase.storage
         .from('session-recordings')
-        .upload(turnFilePath, turnWav, {
-          contentType: 'audio/wav',
+        .upload(turnFilePath, encoded, {
+          contentType: files.mime,
           upsert: true,
         });
+      this.recordingFolderCache.delete(`${validSessionId}/turns`);
 
       if (!error) {
         const { data: turnPub } = this.supabase.storage
@@ -684,8 +741,8 @@ export class SessionsService {
       const conversationPayload = {
         sessionId: validSessionId,
         topic: topic || 'English Speaking Practice',
-        userAudioUrl: rec?.userAudioUrl || this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl,
-        modelAudioUrl: rec?.modelAudioUrl || this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl,
+        userAudioUrl: rec?.userAudioUrl || this.recordingEndpointUrl(validSessionId, 'user'),
+        modelAudioUrl: rec?.modelAudioUrl || this.recordingEndpointUrl(validSessionId, 'model'),
         savedAt: new Date().toISOString(),
         turns: turnsToInsert,
       };
@@ -2210,8 +2267,8 @@ ${memoryPart}`;
     let awardedXp: number = 0;
 
     const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
-    const userAudioUrl = rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined);
-    const modelAudioUrl = rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined);
+    const userAudioUrl = rec?.userAudioUrl || this.recordingEndpointUrl(validSessionId, 'user');
+    const modelAudioUrl = rec?.modelAudioUrl || this.recordingEndpointUrl(validSessionId, 'model');
 
     if (this.supabase) {
       // Guard against concurrent finalization (e.g. WebSocket disconnect + HTTP /finish arriving together)
@@ -3341,9 +3398,9 @@ ${memoryPart}`;
       } catch {}
     }
 
-    const hasFullAudio = filesSet.has('full_conversation.wav');
-    const hasUserAudio = filesSet.has('user_recording.wav');
-    const hasModelAudio = filesSet.has('model_recording.wav');
+    const hasFullAudio = SessionsService.hasRecordingFile(filesSet, 'full_conversation');
+    const hasUserAudio = SessionsService.hasRecordingFile(filesSet, 'user_recording');
+    const hasModelAudio = SessionsService.hasRecordingFile(filesSet, 'model_recording');
     const hasTurnsFolder = filesSet.has('turns');
 
     // Deduplicate turns (if historical duplicate turn_order rows exist in db, sort by timestamp first)
@@ -3374,9 +3431,9 @@ ${memoryPart}`;
         let turnAudioUrl: string | null = null;
         if (hasTurnsFolder) {
           if (t.role === 'user') {
-            turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/user_turn_${userTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
+            turnAudioUrl = this.recordingEndpointUrl(validSessionId, 'turn', 'user', userTurnCounter)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
           } else {
-            turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/model_turn_${modelTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
+            turnAudioUrl = this.recordingEndpointUrl(validSessionId, 'turn', 'model', modelTurnCounter)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
           }
         }
         if (t.role === 'user') userTurnCounter++;
@@ -3452,13 +3509,13 @@ ${memoryPart}`;
       grammarCorrections: mappedCorrections,
       topic: sess.topic || 'Speaking Practice',
       fullConversationAudioUrl: hasFullAudio
-        ? (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/full_conversation.wav`).data.publicUrl : undefined)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+        ? this.recordingEndpointUrl(validSessionId, 'full')?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
         : null,
       userAudioUrl: hasUserAudio
-        ? (rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+        ? (rec?.userAudioUrl || this.recordingEndpointUrl(validSessionId, 'user'))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
         : null,
       modelAudioUrl: hasModelAudio
-        ? (rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+        ? (rec?.modelAudioUrl || this.recordingEndpointUrl(validSessionId, 'model'))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
         : null,
       user_rating: sess.user_rating ?? null,
       user_feedback: sess.user_feedback ?? null,
@@ -3647,9 +3704,9 @@ ${memoryPart}`;
         const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sess.id);
 
         const filesSet = sessionFilesMap.get(validSessionId) || sessionFilesMap.get(sess.id);
-        const hasFullAudio = filesSet ? filesSet.has('full_conversation.wav') : Boolean(rec?.fullConversationAudioUrl);
-        const hasUserAudio = filesSet ? filesSet.has('user_recording.wav') : Boolean(rec?.userAudioUrl);
-        const hasModelAudio = filesSet ? filesSet.has('model_recording.wav') : Boolean(rec?.modelAudioUrl);
+        const hasFullAudio = filesSet ? SessionsService.hasRecordingFile(filesSet, 'full_conversation') : Boolean(rec?.fullConversationAudioUrl);
+        const hasUserAudio = filesSet ? SessionsService.hasRecordingFile(filesSet, 'user_recording') : Boolean(rec?.userAudioUrl);
+        const hasModelAudio = filesSet ? SessionsService.hasRecordingFile(filesSet, 'model_recording') : Boolean(rec?.modelAudioUrl);
         const hasTurnsFolder = filesSet ? filesSet.has('turns') : false;
 
         // Deduplicate turns (if historical duplicate turn_order rows exist in db, sort by timestamp first)
@@ -3680,9 +3737,9 @@ ${memoryPart}`;
             let turnAudioUrl: string | null = null;
             if (hasTurnsFolder) {
               if (t.role === 'user') {
-                turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/user_turn_${userTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
+                turnAudioUrl = this.recordingEndpointUrl(validSessionId, 'turn', 'user', userTurnCounter)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
               } else {
-                turnAudioUrl = (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/turns/model_turn_${modelTurnCounter}.wav`).data.publicUrl : null)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
+                turnAudioUrl = this.recordingEndpointUrl(validSessionId, 'turn', 'model', modelTurnCounter)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null;
               }
             }
             if (t.role === 'user') userTurnCounter++;
@@ -3721,15 +3778,15 @@ ${memoryPart}`;
         });
 
         let userAudioUrl = hasUserAudio
-          ? (rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+          ? (rec?.userAudioUrl || this.recordingEndpointUrl(validSessionId, 'user'))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
           : null;
 
         let modelAudioUrl = hasModelAudio
-          ? (rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+          ? (rec?.modelAudioUrl || this.recordingEndpointUrl(validSessionId, 'model'))?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
           : null;
 
         let fullConversationAudioUrl = hasFullAudio
-          ? (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/full_conversation.wav`).data.publicUrl : undefined)?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
+          ? this.recordingEndpointUrl(validSessionId, 'full')?.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp') || null
           : null;
 
         const sessTopic = (sess.topic || '').toLowerCase().trim();
@@ -4921,11 +4978,11 @@ CRITICAL RULES:
         if (!rec && this.lastSavedSessionId) {
           rec = this.sessionRecordingsMap.get(this.lastSavedSessionId);
         }
-        let userAudioUrl = rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined);
+        let userAudioUrl = rec?.userAudioUrl || this.recordingEndpointUrl(validSessionId, 'user');
         if (userAudioUrl) {
           userAudioUrl = userAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
         }
-        let modelAudioUrl = rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined);
+        let modelAudioUrl = rec?.modelAudioUrl || this.recordingEndpointUrl(validSessionId, 'model');
         if (modelAudioUrl) {
           modelAudioUrl = modelAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
         }
@@ -5084,9 +5141,8 @@ CRITICAL RULES:
 
               // If not found in-memory, construct the isolated turn URL directly from storage
               if (!isolatedTurnAudio && this.supabase && effectiveUserTurnIdx >= 0) {
-                isolatedTurnAudio = this.supabase.storage
-                  .from('session-recordings')
-                  .getPublicUrl(`${validSessionId}/turns/user_turn_${effectiveUserTurnIdx}.wav`).data.publicUrl;
+                // Resolved on request (.webm or legacy .wav) by the recording-audio endpoint
+                isolatedTurnAudio = this.recordingEndpointUrl(validSessionId, 'turn', 'user', effectiveUserTurnIdx);
               }
 
               const sentenceAudioUrl = isolatedTurnAudio
@@ -5203,11 +5259,11 @@ CRITICAL RULES:
     if (!rec && this.lastSavedSessionId) {
       rec = this.sessionRecordingsMap.get(this.lastSavedSessionId);
     }
-    let userAudioUrl = rec?.userAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/user_recording.wav`).data.publicUrl : undefined);
+    let userAudioUrl = rec?.userAudioUrl || this.recordingEndpointUrl(validSessionId, 'user');
     if (userAudioUrl) {
       userAudioUrl = userAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
     }
-    let modelAudioUrl = rec?.modelAudioUrl || (this.supabase ? this.supabase.storage.from('session-recordings').getPublicUrl(`${validSessionId}/model_recording.wav`).data.publicUrl : undefined);
+    let modelAudioUrl = rec?.modelAudioUrl || this.recordingEndpointUrl(validSessionId, 'model');
     if (modelAudioUrl) {
       modelAudioUrl = modelAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
     }

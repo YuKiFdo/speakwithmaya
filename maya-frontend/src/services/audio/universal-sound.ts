@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { createAudioPlayer, AudioPlayer } from 'expo-audio';
+import { playableRecordingUrl } from '@/utils/recording-url';
 
 export interface SoundCallbacks {
   onTimeUpdate?: (currentTime: number, duration: number) => void;
@@ -23,6 +24,8 @@ export function createUniversalSound(
   callbacks?: SoundCallbacks,
   playbackSpeed: number = 1.0,
 ): UniversalSound {
+  // Session recordings are WebM/Opus; devices that cannot play it get a WAV conversion
+  uri = playableRecordingUrl(uri);
   if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).Audio) {
     const audio = new (window as any).Audio(uri);
     audio.playbackRate = playbackSpeed;

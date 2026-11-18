@@ -124,3 +124,11 @@
 | **Automated Charging API** | `POST /merchant/v1/payment/charge` authenticated via OAuth2 Bearer token (`/merchant/v1/oauth/token`). Body: `{ type: 'PAYMENT', order_id, items, currency: 'LKR', amount, customer_token, notify_url }`. Used for server-driven backend recurring renewals and 1-click add-ons. | [PayHere Automated Charging API](https://support.payhere.lk/api-&-mobile-sdk/automated-charging-api) |
 | **Payment Retrieval API** | `GET /merchant/v1/payment/search?order_id={orderId}` authenticated via OAuth2 Bearer token (`/merchant/v1/oauth/token`). Returns `{ status: 1, data: [ { payment_id, order_id, status: 'RECEIVED' | 'REFUNDED' | 'FAILED', amount, currency, method, card_holder_name, card_no, card_expiry, customer_token } ] }`. Used for idempotent server recovery, manual sync, and client return reconciliation. Rate limit: 20 req/10s. | [PayHere Retrieval API](https://support.payhere.lk/api-&-mobile-sdk/retrieval-api) |
 
+
+## Session recording format (verified 2026-11-18)
+
+| Fact | Value | Source |
+|---|---|---|
+| **WebM/Opus in Safari `<audio>`** | Reliable from Safari / iOS **17.4**; earlier iOS versions were inconsistent (worked via Web Audio `decodeAudioData`, not `<audio>`). Ogg/Opus only from Safari / iOS **18.4**. Opus in CAF since iOS 11 (CAF not playable in Chrome/Firefox). | [WebKit 183852](https://bugs.webkit.org/show_bug.cgi?id=183852), [WebKit 238546](https://lists.webkit.org/pipermail/webkit-unassigned/2023-October/1126809.html), [caniuse mirror](https://docs.w3cub.com/browser_support_tables/opus) |
+| **Native iOS (AVPlayer)** | Does not play WebM. Native iOS uses the WAV conversion (`recording-audio?...&format=wav`). | [Apple Developer Forums 775937](https://developer.apple.com/forums/thread/775937) |
+| **Decision** | Recordings stored as **WebM/Opus 24 kbps** (MIT `@discordjs/opus` encoder, own Matroska muxer). Browsers without WebM/Opus support (`canPlayType`) and native iOS get WAV from the backend. MP3 rejected: npm encoders (`lamejs`, `@breezystack/lamejs`) are LGPL-3.0. | `maya-backend/src/sessions/webm-opus.ts`, `maya-frontend/src/utils/recording-url.ts` |

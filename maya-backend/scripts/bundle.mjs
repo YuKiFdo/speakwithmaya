@@ -86,6 +86,7 @@ await build({
   entryPoints: ['dist/sessions/audio-finalize.worker.js'],
   outfile: 'dist/audio-finalize.worker.js',
   bundle: true,
+  external: ['@discordjs/opus'], // native addon, loaded from node_modules
   platform: 'node',
   target: 'node22',
   format: 'esm',

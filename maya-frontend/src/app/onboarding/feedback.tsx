@@ -21,6 +21,7 @@ import {
   FeedbackItem,
 } from '@/utils/session-report-store';
 import { speakAsCallirrhoe, stopMayaVoiceFallback, isMayaVoiceCached } from '@/utils/maya-voice-fallback';
+import { playableRecordingUrl } from '@/utils/recording-url';
 import { feedbackIntroText, feedbackLeadInText, feedbackBetterWaySentence, YOU_SAID_TEXT } from '@/utils/feedback-narration';
 import { playUnderstoodTapSound, playFinishReviewFanfare } from '@/services/sound/sound-service';
 import Svg, { Path } from 'react-native-svg';
@@ -279,7 +280,7 @@ export default function SessionFeedbackScreen() {
           try {
             const pre = new Audio();
             pre.preload = 'auto';
-            pre.src = item.userAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp');
+            pre.src = playableRecordingUrl(item.userAudioUrl.replace(/cl+fjfhdsjwkzgxwoolgp/g, 'clfjfhdsjwkzgxwoolgp'));
           } catch {}
         }
       });
@@ -366,7 +367,7 @@ export default function SessionFeedbackScreen() {
 
       if (isPersistentRemoteAudio) {
         try {
-          const audio = new Audio(userAudioUrl);
+          const audio = new Audio(playableRecordingUrl(userAudioUrl));
           audio.preload = 'auto';
           activeAudioElementRef.current = audio;
 

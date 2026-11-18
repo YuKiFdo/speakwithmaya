@@ -1,6 +1,7 @@
 /**
  * Pure PCM helpers with no dependencies (safe to import from worker threads).
  */
+import { encodePcmToWebmOpus, type OpusEncoderFactory } from './webm-opus.js';
 
 export function encodePcmToWav(
   pcmBuffer: Buffer,
@@ -57,19 +58,17 @@ export function resamplePcm16Mono(inputBuffer: Buffer, fromRate: number, toRate:
 
 /** Raw session audio handed to the finalize step. */
 export interface SessionAudioInput {
-  userPcm?: Buffer; // 16 kHz
-  modelPcm?: Buffer; // 24 kHz
+  userPcm?: Buffer; // 16 kHz (whole-session track; no longer stored, kept for packing compat)
+  modelPcm?: Buffer; // 24 kHz (whole-session track; no longer stored)
   userTurns?: Array<[number, Buffer]>; // 16 kHz per turn
   modelTurns?: Array<[number, Buffer]>; // 24 kHz per turn
   chronologicalTurns?: Array<{ pcm: Buffer; sampleRate: number }>;
 }
 
-/** Encoded files ready to upload (content type in `mime`). */
+/** Encoded files ready to upload (content type in `mime`, file extension in `ext`). */
 export interface SessionAudioFiles {
   mime: string;
   ext: string;
-  user?: Buffer;
-  model?: Buffer;
   full?: Buffer;
   userTurns: Array<[number, Buffer]>;
   modelTurns: Array<[number, Buffer]>;
@@ -78,13 +77,21 @@ export interface SessionAudioFiles {
 const FULL_CONVERSATION_GAP = Buffer.alloc(16800); // 350 ms of 24 kHz silence between turns
 
 /**
- * Builds every recording file for a session: CPU-heavy (concat, resample, encode), so it
- * runs in the audio-finalize worker; also used inline as a fallback.
+ * Builds the stored recording files for a session: the chronological full conversation
+ * (history playback) and per-turn clips ("You said", per-turn replay). The separate
+ * whole-session user/model tracks are no longer stored: they duplicated the same audio.
+ *
+ * With an Opus encoder the files are WebM/Opus (~15x smaller than WAV); without one
+ * (native module unavailable) they fall back to WAV so recordings are never lost.
+ * CPU-heavy, so it runs in the audio-finalize worker.
  */
-export function buildSessionAudioFiles(input: SessionAudioInput): SessionAudioFiles {
-  const out: SessionAudioFiles = { mime: 'audio/wav', ext: 'wav', userTurns: [], modelTurns: [] };
-  if (input.userPcm?.length) out.user = encodePcmToWav(input.userPcm, 16000);
-  if (input.modelPcm?.length) out.model = encodePcmToWav(input.modelPcm, 24000);
+export function buildSessionAudioFiles(input: SessionAudioInput, createOpusEncoder?: OpusEncoderFactory): SessionAudioFiles {
+  const encode = createOpusEncoder
+    ? (pcm: Buffer, rate: number) => encodePcmToWebmOpus(pcm, rate, createOpusEncoder)
+    : (pcm: Buffer, rate: number) => encodePcmToWav(pcm, rate);
+  const out: SessionAudioFiles = createOpusEncoder
+    ? { mime: 'audio/webm', ext: 'webm', userTurns: [], modelTurns: [] }
+    : { mime: 'audio/wav', ext: 'wav', userTurns: [], modelTurns: [] };
 
   const segments: Buffer[] = [];
   for (const t of input.chronologicalTurns || []) {
@@ -92,10 +99,10 @@ export function buildSessionAudioFiles(input: SessionAudioInput): SessionAudioFi
     segments.push(t.sampleRate === 24000 ? t.pcm : resamplePcm16Mono(t.pcm, t.sampleRate, 24000));
     segments.push(FULL_CONVERSATION_GAP);
   }
-  if (segments.length) out.full = encodePcmToWav(Buffer.concat(segments), 24000);
+  if (segments.length) out.full = encode(Buffer.concat(segments), 24000);
 
-  for (const [idx, pcm] of input.userTurns || []) if (pcm?.length) out.userTurns.push([idx, encodePcmToWav(pcm, 16000)]);
-  for (const [idx, pcm] of input.modelTurns || []) if (pcm?.length) out.modelTurns.push([idx, encodePcmToWav(pcm, 24000)]);
+  for (const [idx, pcm] of input.userTurns || []) if (pcm?.length) out.userTurns.push([idx, encode(pcm, 16000)]);
+  for (const [idx, pcm] of input.modelTurns || []) if (pcm?.length) out.modelTurns.push([idx, encode(pcm, 24000)]);
   return out;
 }
 

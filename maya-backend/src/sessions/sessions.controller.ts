@@ -141,70 +141,65 @@ export class SessionsController {
     return this.sessionsService.getSessionDetail(sessionId);
   }
 
-  // Stream Session Recording Audio (Direct Azure CDN 302 Redirect with range fallback)
+  // Stream Session Recording Audio: 302 to the stored file (.webm, or legacy .wav), or with
+  // format=wav a WAV conversion for browsers that cannot play WebM/Opus (iOS Safari < 17.4).
   @Get('sessions/:id/recording-audio')
   async streamRecordingAudio(
     @Param('id') sessionId: string,
     @Query('type') type: string,
     @Query('speaker') speaker: string,
     @Query('index') index: string,
+    @Query('format') format: string,
     @Req() req: any,
     @Res() res: any,
   ) {
-    const cleanType = (type || 'full') as 'full' | 'user' | 'model' | 'turn';
+    const cleanType = (['full', 'user', 'model', 'turn'].includes(type) ? type : 'full') as 'full' | 'user' | 'model' | 'turn';
     const cleanSpeaker = (speaker === 'model' ? 'model' : 'user') as 'user' | 'model';
     const cleanIndex = parseInt(index || '0', 10) || 0;
 
+    const sendBuffer = (buf: Buffer, contentType: string) => {
+      const total = buf.length;
+      const range = req.headers?.range;
+      if (range) {
+        const parts = String(range).replace(/bytes=/, '').split('-');
+        const start = Math.max(0, parseInt(parts[0], 10) || 0);
+        const end = Math.min(total - 1, parts[1] ? parseInt(parts[1], 10) : total - 1);
+        res.status(206);
+        res.set({
+          'Content-Range': `bytes ${start}-${end}/${total}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': String(end - start + 1),
+          'Content-Type': contentType,
+        });
+        return res.end(buf.subarray(start, end + 1));
+      }
+      res.set({
+        'Content-Type': contentType,
+        'Content-Length': String(total),
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=86400',
+      });
+      return res.end(buf);
+    };
+
     try {
-      // Approach A: Instant 302 redirect to Azure Blob Storage CDN for native client HTTP range streaming
-      const directCdnUrl = await this.sessionsService.getRecordingAudioUrl(
-        sessionId,
-        cleanType,
-        cleanSpeaker,
-        cleanIndex,
-      );
+      if (format === 'wav') {
+        const wav = await this.sessionsService.getRecordingAsWav(sessionId, cleanType, cleanSpeaker, cleanIndex);
+        if (!wav) return res.status(404).json({ error: 'Recording audio not found' });
+        return sendBuffer(wav, 'audio/wav');
+      }
+
+      // Instant 302 redirect to the storage CDN (supports HTTP range streaming)
+      const directCdnUrl = await this.sessionsService.getRecordingAudioUrl(sessionId, cleanType, cleanSpeaker, cleanIndex);
       if (directCdnUrl) {
         res.setHeader('Cache-Control', 'public, max-age=86400');
         return res.redirect(302, directCdnUrl);
       }
 
-      // Fallback: Stream directly with byte ranges if storage adapter returned buffer
-      const audioBuffer = await this.sessionsService.downloadRecordingBuffer(
-        sessionId,
-        cleanType,
-        cleanSpeaker,
-        cleanIndex,
-      );
-      if (!audioBuffer) {
-        return res.status(404).json({ error: 'Recording audio not found' });
-      }
-
-      const totalLength = audioBuffer.length;
-      const range = req.headers?.range;
-      if (range) {
-        const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : totalLength - 1;
-        const chunksize = end - start + 1;
-        const chunk = audioBuffer.subarray(start, end + 1);
-
-        res.status(206);
-        res.set({
-          'Content-Range': `bytes ${start}-${end}/${totalLength}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Length': String(chunksize),
-          'Content-Type': 'audio/wav',
-        });
-        res.end(chunk);
-      } else {
-        res.set({
-          'Content-Type': 'audio/wav',
-          'Content-Length': String(totalLength),
-          'Accept-Ranges': 'bytes',
-          'Cache-Control': 'public, max-age=86400',
-        });
-        res.end(audioBuffer);
-      }
+      // Fallback: stream the bytes ourselves
+      const file = await this.sessionsService.downloadRecordingBuffer(sessionId, cleanType, cleanSpeaker, cleanIndex);
+      if (!file) return res.status(404).json({ error: 'Recording audio not found' });
+      return sendBuffer(file.buffer, file.path.endsWith('.webm') ? 'audio/webm' : 'audio/wav');
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Could not stream recording audio' });
     }
