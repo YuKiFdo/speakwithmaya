@@ -1,3 +1,4 @@
+import type { LogLevel } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { WsAdapter } from '@nestjs/platform-ws';
 import express from 'express';
@@ -38,7 +39,17 @@ async function bootstrap() {
     process.env.NODE_ENV !== 'test' &&
     Boolean(process.env.OBSERVE_APP_KEY && process.env.OBSERVE_APP_SECRET);
 
+  // Production skips debug/verbose output (per-turn speech-burst traces etc.): log
+  // formatting showed up in load-test profiles on the 2-vCPU VPS. LOG_LEVELS overrides,
+  // e.g. LOG_LEVELS=log,warn,error,debug to investigate.
+  const logLevels = (process.env.LOG_LEVELS
+    ? process.env.LOG_LEVELS.split(',').map((l) => l.trim())
+    : process.env.NODE_ENV === 'production'
+      ? ['log', 'warn', 'error', 'fatal']
+      : ['log', 'warn', 'error', 'fatal', 'debug', 'verbose']) as LogLevel[];
+
   const app = await NestFactory.create(AppModule, {
+    logger: logLevels,
     ...(isObserveEnabled && ObserveInstrument ? { instrument: ObserveInstrument } : {}),
   });
 
