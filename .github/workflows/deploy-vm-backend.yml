@@ -34,6 +34,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./maya-backend
+        env:
+          # onnxruntime-node's install script downloads the CUDA 12 GPU provider from NuGet on
+          # linux/x64. The VMs have no GPU (CPU binaries are bundled in the npm package), and
+          # that download timed out and failed the build. Skip it.
+          ONNXRUNTIME_NODE_INSTALL: skip
         run: npm ci
 
       - name: Build NestJS
