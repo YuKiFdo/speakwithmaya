@@ -4486,14 +4486,18 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
     const intro = title.endsWith('.') ? `${title} ${subtitle}` : `${title}. ${subtitle}`;
     const leadIn =
       item.type === 'grammar' || item.type === 'pronunciation'
-        ? 'A better way to say this is:'
-        : 'A more natural way to say this is:';
-    return [intro, 'You said', `${leadIn} ${item.betterWay || ''}`, item.whyExplanation || '']
+        ? SessionsService.BETTER_WAY_LEAD_INS[0]
+        : SessionsService.BETTER_WAY_LEAD_INS[1];
+    // Lead-in and corrected sentence are separate clips: the lead-in is fixed (cached at
+    // boot), so each card only needs its sentence synthesized.
+    return [intro, 'You said', leadIn, (item.betterWay || '').trim(), item.whyExplanation || '']
       .map((t) => t.trim())
       .filter((t) => t.length > 0 && t !== '.');
   }
 
   private static readonly FEEDBACK_TTS_VOICE = 'Amy';
+  /** Must match maya-frontend/src/utils/feedback-narration.ts BETTER_WAY_LEAD_INS. */
+  static readonly BETTER_WAY_LEAD_INS = ['A better way to say this is:', 'A more natural way to say this is:'] as const;
 
   /**
    * Background, one-at-a-time synthesis of every clip the feedback screen will play, in the
@@ -4533,10 +4537,12 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
         try {
           const ready = await this.initPiper();
           if (!ready) return;
-          await this.generateTtsAudio(
-            { text: 'You said', voice: SessionsService.FEEDBACK_TTS_VOICE } as SessionTtsDto,
-            { priority: 'low' },
-          );
+          for (const text of ['You said', ...SessionsService.BETTER_WAY_LEAD_INS]) {
+            await this.generateTtsAudio(
+              { text, voice: SessionsService.FEEDBACK_TTS_VOICE } as SessionTtsDto,
+              { priority: 'low' },
+            );
+          }
           this.logger.log(`[TTS prewarm] Piper loaded and fixed phrases cached in ${Date.now() - started}ms`);
         } catch (err: any) {
           this.logger.warn(`[TTS prewarm] Piper warmup failed: ${err?.message}`);

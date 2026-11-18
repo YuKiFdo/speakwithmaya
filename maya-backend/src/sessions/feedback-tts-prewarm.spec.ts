@@ -16,13 +16,14 @@ describe('SessionsService.feedbackNarrationTexts', () => {
     ).toEqual([
       'Let’s make this more correct. Here’s a sentence from your conversation and how you can improve it.',
       'You said',
-      'A better way to say this is: No, I am planning to do it as a freelance job.',
+      'A better way to say this is:',
+      'No, I am planning to do it as a freelance job.',
       "When expressing future plans, you need the verb 'to be' before 'planning'.",
     ]);
   });
 
   it('more_natural card uses the "more natural" lead-in and adds a period to a bare title', () => {
-    const [intro, , betterWay] = SessionsService.feedbackNarrationTexts({
+    const [intro, , leadIn, sentence] = SessionsService.feedbackNarrationTexts({
       type: 'more_natural',
       title: 'Sound more natural',
       subtitle: 'Try this.',
@@ -30,11 +31,12 @@ describe('SessionsService.feedbackNarrationTexts', () => {
       whyExplanation: 'More fluent.',
     });
     expect(intro).toBe('Sound more natural. Try this.');
-    expect(betterWay).toBe('A more natural way to say this is: I am heading out.');
+    expect(leadIn).toBe('A more natural way to say this is:');
+    expect(sentence).toBe('I am heading out.');
   });
 
   it('skips empty explanation', () => {
     const texts = SessionsService.feedbackNarrationTexts({ type: 'pronunciation', title: 'T.', subtitle: 'S', betterWay: 'beach' });
-    expect(texts).toEqual(['T. S', 'You said', 'A better way to say this is: beach']);
+    expect(texts).toEqual(['T. S', 'You said', 'A better way to say this is:', 'beach']);
   });
 });

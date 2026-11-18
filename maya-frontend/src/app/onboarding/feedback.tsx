@@ -21,7 +21,7 @@ import {
   FeedbackItem,
 } from '@/utils/session-report-store';
 import { speakAsCallirrhoe, stopMayaVoiceFallback, isMayaVoiceCached } from '@/utils/maya-voice-fallback';
-import { feedbackIntroText, feedbackBetterWayText, YOU_SAID_TEXT } from '@/utils/feedback-narration';
+import { feedbackIntroText, feedbackLeadInText, feedbackBetterWaySentence, YOU_SAID_TEXT } from '@/utils/feedback-narration';
 import { playUnderstoodTapSound, playFinishReviewFanfare } from '@/services/sound/sound-service';
 import Svg, { Path } from 'react-native-svg';
 import { useUserStats } from '@/hooks/useUserStats';
@@ -460,8 +460,10 @@ export default function SessionFeedbackScreen() {
 
     // Step 3: Auto play correct audio with matching spoken lead-in
     setCurrentSpeakingCard('betterWay');
-    const betterWayNarration = feedbackBetterWayText(item);
-    await speakAsCallirrhoePromise(betterWayNarration, 1.0);
+    // Lead-in (fixed, pre-cached) then the corrected sentence (synthesized per card)
+    await speakAsCallirrhoePromise(feedbackLeadInText(item), 1.0);
+    if (isCancelled()) return;
+    await speakAsCallirrhoePromise(feedbackBetterWaySentence(item), 1.0);
     if (isCancelled()) return;
 
     await new Promise((r) => setTimeout(r, 200));
@@ -517,12 +519,15 @@ export default function SessionFeedbackScreen() {
     stopActiveAudio();
     const seqId = ++sequenceIdRef.current;
     setCurrentSpeakingCard('betterWay');
-    const betterWayNarration = feedbackBetterWayText(currentItem);
-    speakAsCallirrhoePromise(betterWayNarration, 1.0).finally(() => {
+    void (async () => {
+      await speakAsCallirrhoePromise(feedbackLeadInText(currentItem), 1.0);
+      if (sequenceIdRef.current === seqId) {
+        await speakAsCallirrhoePromise(feedbackBetterWaySentence(currentItem), 1.0);
+      }
       if (sequenceIdRef.current === seqId) {
         setCurrentSpeakingCard(null);
       }
-    });
+    })();
   };
 
   const handleToggleExplanationAudio = () => {
