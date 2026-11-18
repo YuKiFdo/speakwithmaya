@@ -414,6 +414,11 @@ export class RoadmapService implements OnModuleInit {
     const key = adminView ? 'admin' : 'published';
     const hit = this.levelsCache.get(key);
     let rows: any[] | null = hit && hit.expiresAt > Date.now() ? hit.rows : null;
+    // Stale-while-revalidate: an expired entry is still served instantly while the refresh
+    // below runs in the background (a cache miss cost ~1.5-4 s on the cross-region read).
+    // Admin writes call invalidateLevelsCache(), which removes the entry, so edits never
+    // serve stale data.
+    const serveStale = !rows && !!hit;
 
     if (!rows) {
       let flight = this.levelsInFlight.get(key);
@@ -434,7 +439,7 @@ export class RoadmapService implements OnModuleInit {
           })
           .catch(() => {});
       }
-      rows = await flight;
+      rows = serveStale ? hit!.rows : await flight;
     }
 
     return (rows || []).map((d: any) => this.mapDbRowToEntity(structuredClone(d)));

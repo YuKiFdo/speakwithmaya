@@ -150,6 +150,30 @@ export async function fetchPracticeSessionSummaries(): Promise<
 }
 
 /**
+ * Latest sessions with only the fields the dashboard's resume banner needs
+ * (topic, scenario, summary, timing). Much smaller and faster than the full history.
+ * Falls back to the full list if the backend does not support ?view=resume yet.
+ */
+export async function fetchResumeCandidates(): Promise<any[]> {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+    return [];
+  }
+  if (!OnboardingStore.getState().accessToken) {
+    return [];
+  }
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${getBackendBaseUrl()}/v1/sessions?view=resume`, { method: 'GET', headers });
+    if (res.ok) {
+      const data = await res.json();
+      // An older backend ignores ?view=resume and returns full records (with session_turns)
+      if (Array.isArray(data)) return data;
+    }
+  } catch {}
+  return fetchAllPracticeSessions();
+}
+
+/**
  * Fetches practice sessions directly from Supabase / Backend API (no localStorage).
  */
 export async function fetchAllPracticeSessions(): Promise<SessionHistoryRecord[]> {

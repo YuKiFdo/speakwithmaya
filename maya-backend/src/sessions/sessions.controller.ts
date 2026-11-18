@@ -109,6 +109,11 @@ export class SessionsController {
     if (view === 'summary') {
       return this.sessionsService.getUserSessionSummaries(userId);
     }
+    // ?view=resume: the few latest sessions with just the fields the dashboard's
+    // "Resume Practice" banner needs (no transcripts, corrections or storage listing)
+    if (view === 'resume') {
+      return this.sessionsService.getUserResumeCandidates(userId);
+    }
     return this.sessionsService.getUserSessions(userId);
   }
 

@@ -3577,6 +3577,25 @@ ${memoryPart}`;
       }));
   }
 
+  /**
+   * Latest sessions for the dashboard's resume banner: only the columns it reads.
+   * (It used to download the full history: every turn and correction of 50 sessions.)
+   */
+  async getUserResumeCandidates(userId: string) {
+    if (!this.supabase) return [];
+    const { data, error } = await this.supabase
+      .from('sessions')
+      .select('id, topic, scenario_id, scenario_title, summary, status, duration_seconds, start_time, created_at, roadmap_level_id, level_number')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(15);
+    if (error) {
+      this.logger.error(`Error querying resume candidates: ${error.message}`);
+      return [];
+    }
+    return data || [];
+  }
+
   async getUserSessions(userId?: string) {
     if (!this.supabase) {
       return [];
@@ -3646,8 +3665,11 @@ ${memoryPart}`;
                 const fSet = files && files.length > 0 ? new Set(files.map((f) => f.name)) : new Set<string>();
                 sessionFilesMap.set(validSessionId, fSet);
                 sessionFilesMap.set(sess.id, fSet);
-                // Cache permanently for completed sessions to prevent future storage.list roundtrips
-                if (sess.status === 'completed' || sess.end_time) {
+                // Cache permanently for completed sessions to prevent future storage.list roundtrips.
+                // Also cache sessions older than 1 hour whatever their status: dropped / never-finished
+                // sessions were re-listed on EVERY history load (up to 50 Storage API calls each time).
+                const ageMs = Date.now() - new Date(sess.created_at || sess.start_time || 0).getTime();
+                if (sess.status === 'completed' || sess.end_time || ageMs > 60 * 60 * 1000) {
                   this.completedSessionFilesCache.set(validSessionId, fSet);
                   this.completedSessionFilesCache.set(sess.id, fSet);
                 }

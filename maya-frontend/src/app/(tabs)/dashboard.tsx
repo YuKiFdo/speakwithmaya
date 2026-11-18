@@ -35,7 +35,8 @@ import { authService } from '@/services/auth/auth-service';
 import { useUserStats } from '@/hooks/useUserStats';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { useActiveConversation, ActiveConversationStore, isRoadmapOrIntroTopic, isValidConversationSummary } from '@/services/store/active-conversation-store';
-import { fetchAllPracticeSessions } from '@/services/supabase';
+import { fetchResumeCandidates } from '@/services/supabase';
+import { Skeleton } from '@/components/ui/skeleton';
 import { paymentApi } from '@/services/payment/payment-api';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { OutageApologyBanner } from '@/components/ui/OutageApologyBanner';
@@ -417,10 +418,16 @@ export default function DashboardScreen() {
     authService.syncStep('/(tabs)/dashboard');
   }, []);
 
+  // Until the latest-session check finishes, a user with no locally cached conversation sees a
+  // skeleton in the hero instead of "Start a conversation" that flips to "Resume" a moment later.
+  const [resumeChecked, setResumeChecked] = useState(false);
+
   // Load authoritative latest practice session from database on mount & reconcile with active conversation
   useEffect(() => {
     let mounted = true;
-    fetchAllPracticeSessions().then((sessions) => {
+    // Never leave the hero in its loading state for long if the request hangs
+    const settleTimer = setTimeout(() => mounted && setResumeChecked(true), 4000);
+    fetchResumeCandidates().then((sessions) => {
       if (!mounted) return;
       if (sessions && sessions.length > 0) {
         // Strictly ignore intro calls, onboarding calls, or ANY roadmap curriculum sessions so the resume banner is NEVER shown for them
@@ -479,9 +486,13 @@ export default function DashboardScreen() {
           ActiveConversationStore.clear();
         }
       }
+    }).finally(() => {
+      clearTimeout(settleTimer);
+      if (mounted) setResumeChecked(true);
     });
     return () => {
       mounted = false;
+      clearTimeout(settleTimer);
     };
   }, []);
 
@@ -795,6 +806,13 @@ export default function DashboardScreen() {
                         </Pressable>
                       </View>
                     </>
+                  ) : !resumeChecked ? (
+                    <View accessibilityLabel="Loading your last conversation">
+                      <Skeleton width="70%" height={isDesktop ? 40 : 30} borderRadius={8} style={{ marginBottom: 12 }} />
+                      <Skeleton width="90%" height={14} borderRadius={4} style={{ marginBottom: 8 }} />
+                      <Skeleton width="60%" height={14} borderRadius={4} style={{ marginBottom: 20 }} />
+                      <Skeleton width={160} height={44} borderRadius={22} />
+                    </View>
                   ) : (
                     <>
                       <Text maxFontSizeMultiplier={1.2} style={[
