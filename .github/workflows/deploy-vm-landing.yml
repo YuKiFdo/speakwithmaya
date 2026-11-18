@@ -142,7 +142,7 @@ jobs:
 
             # Pull the new image BEFORE touching the running app, so a failed pull leaves it serving
             export LANDING_IMAGE=\"$IMAGE_TAG\"
-            docker compose pull maya-landing
+            docker compose pull --quiet maya-landing
 
             # One-time migration: remove the legacy host PM2 process that holds port 3001
             if command -v pm2 >/dev/null 2>&1 && pm2 describe maya-landing >/dev/null 2>&1; then

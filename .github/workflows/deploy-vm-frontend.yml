@@ -151,7 +151,7 @@ jobs:
 
             # Pull the new image BEFORE touching the running app, so a failed pull leaves it serving
             export FRONTEND_IMAGE=\"$IMAGE_TAG\"
-            docker compose pull maya-frontend
+            docker compose pull --quiet maya-frontend
 
             # One-time migration: remove the legacy host PM2 process that holds port 8080
             if command -v pm2 >/dev/null 2>&1 && pm2 describe maya-frontend >/dev/null 2>&1; then
