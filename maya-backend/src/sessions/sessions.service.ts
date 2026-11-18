@@ -2253,6 +2253,20 @@ ${memoryPart}`;
     };
   }
 
+  /** Set once the migration-023 columns are known to be missing, so later saves skip them. */
+  private sessionExtraColsMissing = false;
+
+  /** Hint usage for a session: persisted columns (migration 023) first, then process memory. */
+  private sessionHintTotals(sess: any, ...ids: Array<string | null | undefined>) {
+    const mem = ids.map((id) => (id ? this.sessionHintUsage.get(id) : undefined)).find(Boolean);
+    return {
+      count: sess?.hints_used_count ?? mem?.count ?? 0,
+      tokens: sess?.hint_tokens ?? mem?.totalTokens ?? 0,
+      costUsd: Number(sess?.hint_cost_usd ?? mem?.costUsd ?? 0),
+      costLkr: Number(sess?.hint_cost_lkr ?? mem?.costLkr ?? 0),
+    };
+  }
+
   async finishSession(sessionId: string, userId: string = 'guest-user', dto: FinishSessionDto) {
     const validSessionId = toValidUuid(sessionId);
     const { durationSeconds, tokensUsed, turns, grammarCorrections, scores } = dto;
@@ -2438,10 +2452,28 @@ ${memoryPart}`;
         if (finalRoadmapLevelId) {
           sessionPayload.roadmap_level_id = finalRoadmapLevelId;
         }
+        // Persist hint cost and language settings (previously memory-only, lost on restart).
+        // Columns come from migration 023; they are dropped below if it is not applied yet.
+        const hintMem = this.sessionHintUsage.get(validSessionId) || this.sessionHintUsage.get(sessionId);
+        const optionalCols: Record<string, unknown> = {
+          hint_tokens: hintMem ? hintMem.totalTokens : 0,
+          hint_cost_usd: hintMem ? Number(hintMem.costUsd.toFixed(6)) : 0,
+          hint_cost_lkr: hintMem ? Number(hintMem.costLkr.toFixed(2)) : 0,
+          ...(active?.languageMode ? { language_mode: active.languageMode } : {}),
+          ...(active?.sinhalaStyle ? { sinhala_style: active.sinhalaStyle } : {}),
+        };
+        if (!this.sessionExtraColsMissing) Object.assign(sessionPayload, optionalCols);
 
-        const { error: upsertErr } = await this.supabase
+        let { error: upsertErr } = await this.supabase
           .from('sessions')
           .upsert(sessionPayload, { onConflict: 'id' });
+
+        if (upsertErr && Object.keys(optionalCols).some((c) => upsertErr!.message?.includes(c))) {
+          this.sessionExtraColsMissing = true;
+          this.logger.warn('[finishSession] hint cost / language columns missing; apply 023_session_hint_cost_and_language.sql');
+          for (const c of Object.keys(optionalCols)) delete sessionPayload[c];
+          ({ error: upsertErr } = await this.supabase.from('sessions').upsert(sessionPayload, { onConflict: 'id' }));
+        }
 
         if (upsertErr) {
           let shouldRetry = false;
@@ -2931,7 +2963,7 @@ ${memoryPart}`;
 
   private sessionCountsRpcMissing = false;
 
-  async getUsageData(query: QueryUsageDto) {
+  async getUsageData(query: QueryUsageDto): Promise<any> {
     const range = query?.range || '30d';
     const search = (query?.search || '').toLowerCase().trim();
     const statusFilter = (query?.status || '').toLowerCase().trim();
@@ -2998,6 +3030,7 @@ ${memoryPart}`;
               user_rating,
               user_feedback,
               created_at,
+              hints_used_count,${this.sessionExtraColsMissing ? '' : ' hint_tokens, hint_cost_usd, hint_cost_lkr, language_mode, sinhala_style,'}
               profiles (
                 id,
                 display_name,
@@ -3027,7 +3060,13 @@ ${memoryPart}`;
         // Sensible cap to prevent unbound network fetches (custom ranges may span up to 92 days)
         queryBuilder = queryBuilder.limit(customFrom ? 1000 : 300);
 
-        const { data: ledgerEntries, error } = await queryBuilder;
+        let { data: ledgerEntries, error } = await queryBuilder;
+        if (error && !this.sessionExtraColsMissing && /hint_tokens|hint_cost|language_mode|sinhala_style/.test(error.message || '')) {
+          // Migration 023 not applied yet: remember, and retry this request without those columns
+          this.sessionExtraColsMissing = true;
+          this.usageCache.clear();
+          return this.getUsageData(query);
+        }
 
         if (error) {
           this.logger.error(`Error querying usage_ledger from Supabase: ${error.message}`);
@@ -3123,11 +3162,11 @@ ${memoryPart}`;
               costLkr: Number(Number(row.cost_lkr || 0).toFixed(2)),
               costPerMinLkr: durationSec > 0 ? Number(((row.cost_lkr || 0) / (durationSec / 60)).toFixed(2)) : 0,
               costPerMinUsd: durationSec > 0 ? Number(((row.cost_usd || 0) / (durationSec / 60)).toFixed(4)) : 0,
-              hintsUsedCount: sess?.hints_used_count ?? ((this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.count || 0),
-              hintTokens: (this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.totalTokens || 0,
-              hintCostUsd: Number(Number((this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.costUsd || 0).toFixed(6)),
-              hintCostLkr: Number(Number((this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.costLkr || 0).toFixed(2)),
-              totalWithHintsLkr: Number((Number(row.cost_lkr || 0) + Number((this.sessionHintUsage.get(row.session_id) || this.sessionHintUsage.get(toValidUuid(row.session_id)))?.costLkr || 0)).toFixed(2)),
+              hintsUsedCount: this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).count,
+              hintTokens: this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).tokens,
+              hintCostUsd: Number(this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).costUsd.toFixed(6)),
+              hintCostLkr: Number(this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).costLkr.toFixed(2)),
+              totalWithHintsLkr: Number((Number(row.cost_lkr || 0) + this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).costLkr).toFixed(2)),
               status: ((sess?.status === 'completed' ? 'Success' : 'In Progress') as 'Success' | 'In Progress'),
               turnsCount: turnsCountMap.get(row.session_id) || 0,
               correctionsCount: correctionsCountMap.get(row.session_id) || 0,
@@ -3140,8 +3179,8 @@ ${memoryPart}`;
               userRating: sess?.user_rating ?? null,
               userFeedback: sess?.user_feedback ?? null,
               topic: sess?.topic || 'Speaking Practice',
-              languageMode: this.activeSessions.get(row.session_id)?.languageMode || 'sinhala',
-              sinhalaStyle: this.activeSessions.get(row.session_id)?.sinhalaStyle || 'balanced',
+              languageMode: sess?.language_mode || this.activeSessions.get(row.session_id)?.languageMode || 'sinhala',
+              sinhalaStyle: sess?.sinhala_style || this.activeSessions.get(row.session_id)?.sinhalaStyle || 'balanced',
             };
           });
         }
@@ -3502,11 +3541,11 @@ ${memoryPart}`;
       costLkr: Number(Number(ledger?.cost_lkr || 0).toFixed(2)),
       costPerMinLkr: durationSec > 0 ? Number(((ledger?.cost_lkr || 0) / (durationSec / 60)).toFixed(2)) : 0,
       costPerMinUsd: durationSec > 0 ? Number(((ledger?.cost_usd || 0) / (durationSec / 60)).toFixed(4)) : 0,
-      hintsUsedCount: sess.hints_used_count ?? ((this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.count || 0),
-      hintTokens: (this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.totalTokens || 0,
-      hintCostUsd: Number(Number((this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.costUsd || 0).toFixed(6)),
-      hintCostLkr: Number(Number((this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.costLkr || 0).toFixed(2)),
-      totalWithHintsLkr: Number((Number(ledger?.cost_lkr || 0) + Number((this.sessionHintUsage.get(sessionId) || this.sessionHintUsage.get(validSessionId))?.costLkr || 0)).toFixed(2)),
+      hintsUsedCount: this.sessionHintTotals(sess, sessionId, validSessionId).count,
+      hintTokens: this.sessionHintTotals(sess, sessionId, validSessionId).tokens,
+      hintCostUsd: Number(this.sessionHintTotals(sess, sessionId, validSessionId).costUsd.toFixed(6)),
+      hintCostLkr: Number(this.sessionHintTotals(sess, sessionId, validSessionId).costLkr.toFixed(2)),
+      totalWithHintsLkr: Number((Number(ledger?.cost_lkr || 0) + this.sessionHintTotals(sess, sessionId, validSessionId).costLkr).toFixed(2)),
       status: sess.status === 'completed' ? 'Success' : 'In Progress',
       turnsCount: mappedTurns.length,
       correctionsCount: mappedCorrections.length,
