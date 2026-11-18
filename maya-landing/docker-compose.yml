@@ -5,6 +5,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: maya-landing
+    # Low CPU priority: static pages can wait a few ms, live calls cannot
+    cpu_shares: 256
     restart: unless-stopped
     network_mode: "host"
     environment:

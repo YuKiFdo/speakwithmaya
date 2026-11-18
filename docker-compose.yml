@@ -6,6 +6,8 @@ services:
       context: ./maya-backend
       dockerfile: Dockerfile
     container_name: maya-backend
+    # Live calls get CPU first when the 2 vCPUs are contended (relative weight; no effect when idle)
+    cpu_shares: 2048
     restart: unless-stopped
     stop_grace_period: 15s
     healthcheck:
@@ -40,6 +42,8 @@ services:
       context: ./maya-frontend
       dockerfile: Dockerfile
     container_name: maya-frontend
+    # Low CPU priority: static pages can wait a few ms, live calls cannot
+    cpu_shares: 256
     restart: unless-stopped
     network_mode: "host"
     environment:
@@ -58,6 +62,8 @@ services:
       context: ./maya-landing
       dockerfile: Dockerfile
     container_name: maya-landing
+    # Low CPU priority: static pages can wait a few ms, live calls cannot
+    cpu_shares: 256
     restart: unless-stopped
     network_mode: "host"
     environment:

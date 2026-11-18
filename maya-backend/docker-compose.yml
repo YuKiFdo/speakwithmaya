@@ -5,6 +5,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: maya-backend
+    # Live calls get CPU first when the 2 vCPUs are contended (relative weight; no effect when idle)
+    cpu_shares: 2048
     restart: unless-stopped
     stop_grace_period: 15s
     healthcheck:
