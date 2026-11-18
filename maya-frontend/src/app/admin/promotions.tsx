@@ -17,7 +17,7 @@ import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
-import { AdminTableSkeleton } from '@/components/ui/skeleton';
+import { AdminTableSkeleton, Skeleton } from '@/components/ui/skeleton';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { getBackendBaseUrl } from '@/utils/backend-url';
 import { AdminAuthStore } from '@/services/store/admin-auth-store';
@@ -95,6 +95,8 @@ export default function AdminPromotionsScreen() {
 
   const [activeTab, setActiveTab] = useState<'claims' | 'campaigns'>('claims');
   const [loading, setLoading] = useState(true);
+  // KPI cards show skeletons until the first overview response (instead of 0)
+  const [statsLoaded, setStatsLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   // Overview metrics
@@ -180,6 +182,7 @@ export default function AdminPromotionsScreen() {
       ]);
 
       setOverview(ovData);
+      setStatsLoaded(true);
       setClaims(claimsData.data || []);
       setTotalClaims(claimsData.total || 0);
       setCampaignsList(campsData || []);
@@ -361,7 +364,11 @@ export default function AdminPromotionsScreen() {
                 <View style={[styles.kpiIconBox, { backgroundColor: '#e0f2fe' }]}>
                   <Feather name="log-in" size={20} color="#0284c7" />
                 </View>
-                <Text style={styles.kpiValue}>{overview.totalComebacks}</Text>
+                {statsLoaded ? (
+                  <Text style={styles.kpiValue}>{overview.totalComebacks}</Text>
+                ) : (
+                  <Skeleton width="45%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                )}
                 <Text style={styles.kpiLabel}>Returning Students</Text>
                 <Text style={styles.kpiHint}>Logged in post-downtime</Text>
               </View>
@@ -370,7 +377,11 @@ export default function AdminPromotionsScreen() {
                 <View style={[styles.kpiIconBox, { backgroundColor: '#f3e8ff' }]}>
                   <Feather name="gift" size={20} color="#7c3aed" />
                 </View>
-                <Text style={styles.kpiValue}>{overview.totalClaims}</Text>
+                {statsLoaded ? (
+                  <Text style={styles.kpiValue}>{overview.totalClaims}</Text>
+                ) : (
+                  <Skeleton width="45%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                )}
                 <Text style={styles.kpiLabel}>Total Claims</Text>
                 <Text style={styles.kpiHint}>Across all campaigns</Text>
               </View>
@@ -379,7 +390,11 @@ export default function AdminPromotionsScreen() {
                 <View style={[styles.kpiIconBox, { backgroundColor: '#f5f3ff' }]}>
                   <Ionicons name="ribbon" size={20} color="#7c3aed" />
                 </View>
-                <Text style={styles.kpiValue}>{overview.starterProPassClaims}</Text>
+                {statsLoaded ? (
+                  <Text style={styles.kpiValue}>{overview.starterProPassClaims}</Text>
+                ) : (
+                  <Skeleton width="45%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                )}
                 <Text style={styles.kpiLabel}>3-Day Pro Passes</Text>
                 <Text style={styles.kpiHint}>120m for Free Starters</Text>
               </View>
@@ -388,7 +403,11 @@ export default function AdminPromotionsScreen() {
                 <View style={[styles.kpiIconBox, { backgroundColor: '#f0fdf4' }]}>
                   <Feather name="award" size={20} color="#16a34a" />
                 </View>
-                <Text style={styles.kpiValue}>{overview.paidBonusClaims}</Text>
+                {statsLoaded ? (
+                  <Text style={styles.kpiValue}>{overview.paidBonusClaims}</Text>
+                ) : (
+                  <Skeleton width="45%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                )}
                 <Text style={styles.kpiLabel}>Bonus Minutes Claims</Text>
                 <Text style={styles.kpiHint}>+100m for Paid users</Text>
               </View>
