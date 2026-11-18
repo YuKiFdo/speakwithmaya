@@ -289,7 +289,27 @@ class AuthService {
   /**
    * Refreshes user profile & minutes quota from backend.
    */
-  async fetchUserProfile() {
+  /**
+   * Concurrent callers share one in-flight /v1/auth/me request (the dashboard alone fired three
+   * at once on mount: the screen, the Pro-pass check and useUserStats), each a cross-region
+   * round trip. A call made after the previous one finished still fetches fresh data.
+   */
+  private profileInFlight: { token: string; promise: Promise<any> } | null = null;
+
+  fetchUserProfile(): Promise<any> {
+    const token = OnboardingStore.getState().accessToken;
+    if (!token) return Promise.resolve(null);
+    if (this.profileInFlight && this.profileInFlight.token === token) {
+      return this.profileInFlight.promise;
+    }
+    const promise = this.fetchUserProfileUncached().finally(() => {
+      if (this.profileInFlight?.promise === promise) this.profileInFlight = null;
+    });
+    this.profileInFlight = { token, promise };
+    return promise;
+  }
+
+  private async fetchUserProfileUncached() {
     const token = OnboardingStore.getState().accessToken;
     if (!token) return null;
 

@@ -43,7 +43,7 @@ jobs:
 
       - name: Build NestJS
         working-directory: ./maya-backend
-        run: npm run build
+        run: npm run build && npm run bundle
 
       - name: Keep production dependencies only
         working-directory: ./maya-backend

@@ -1,8 +1,18 @@
+const fs = require('fs');
+const path = require('path');
+
+// Prefer the single-file bundle (scripts/bundle.mjs): loading one pre-linked file instead of
+// thousands of node_modules files makes the boot much cheaper on the 2-vCPU VMs. Falls back to
+// the plain tsc output when the bundle is missing, or when BACKEND_BUNDLE=0 is set in the
+// shell that runs `pm2 startOrReload`.
+const useBundle =
+  process.env.BACKEND_BUNDLE !== '0' && fs.existsSync(path.join(__dirname, 'dist', 'main.bundle.js'));
+
 module.exports = {
   apps: [
     {
       name: 'maya-backend',
-      script: 'dist/main.js',
+      script: useBundle ? 'dist/main.bundle.js' : 'dist/main.js',
       cwd: '/home/speakwithmaya/apps/maya-backend',
       instances: 1,
       autorestart: true,

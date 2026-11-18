@@ -34,6 +34,8 @@ import { SmsApiLkProvider } from './sms/smsapi-lk.provider.js';
 import { IdeamartSmsProvider } from './sms/ideamart-sms.provider.js';
 import { TelcoSubscriptionService } from './sms/telco-subscription.service.js';
 import type { UpdateAppConfigDto } from './dto/auth.dto.js';
+import { isMissingFunctionError } from '../common/supabase-rpc.js';
+import { paginateArray, type PageRequest } from '../common/pagination.js';
 
 export interface UserProfileData {
   id: string;
@@ -155,6 +157,30 @@ const DEFAULT_APP_CONFIG: AppConfigData = {
 
 // Built once: toLocaleDateString({ timeZone }) / new Intl.DateTimeFormat cost ~80-100us per call.
 const SL_DATE_KEY_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Colombo' });
+
+interface UserActivityTotals {
+  sessions: number;
+  seconds: number;
+  avgScore: number | null;
+  lastAt: string | null;
+  intro: { topic: string; duration_seconds: number; status: string } | null;
+  tokens: number;
+  costLkr: number;
+  costUsd: number;
+  completed: number;
+}
+
+interface AdminUserActivity {
+  byUser: Map<string, UserActivityTotals>;
+  totalSeconds: number;
+  /** Sessions per Sri Lanka day key (YYYY-MM-DD) */
+  sessionsByDay: Map<string, number>;
+}
+
+const EMPTY_USER_ACTIVITY: UserActivityTotals = Object.freeze({
+  sessions: 0, seconds: 0, avgScore: null, lastAt: null, intro: null,
+  tokens: 0, costLkr: 0, costUsd: 0, completed: 0,
+}) as UserActivityTotals;
 
 export interface BroadcastSmsJob {
   jobId: string;
@@ -2013,6 +2039,7 @@ export class AuthService {
    * Banner `stats` are always computed over all users; `stats.filteredCount` is the filtered total.
    */
   async getAdminUsers(query?: AdminUsersQueryDto) {
+    this.noteAdminView();
     // Stale-while-revalidate: the dataset aggregates whole tables (all profiles, sessions,
     // ledger, subscriptions, progress), so after the TTL the previous result is served
     // immediately while ONE background rebuild runs. Only the very first load (or the first
@@ -2116,6 +2143,110 @@ export class AuthService {
     'baseline_grammar_score', 'baseline_pronunciation_score',
   ];
 
+  /**
+   * Per-user session / cost / roadmap totals for the admin Users page.
+   * Preferred path: SQL functions from migration 021 (admin_user_activity_stats and
+   * admin_sessions_per_day), which return only the totals instead of every session, ledger and
+   * progress row. If the migration is not applied yet, falls back to the old whole-table reads.
+   */
+  private adminActivityRpcMissing = false;
+
+  private async fetchAdminUserActivity(): Promise<AdminUserActivity> {
+    if (!this.adminActivityRpcMissing) {
+      const [stats, days] = await Promise.all([
+        this.supabase.rpc('admin_user_activity_stats'),
+        this.supabase.rpc('admin_sessions_per_day', { days: 14 }),
+      ]);
+      if (!stats.error && !days.error && Array.isArray(stats.data)) {
+        const byUser = new Map<string, UserActivityTotals>();
+        let totalSeconds = 0;
+        for (const r of stats.data as any[]) {
+          const seconds = Number(r.total_seconds || 0);
+          totalSeconds += seconds;
+          byUser.set(r.user_id, {
+            sessions: Number(r.total_sessions || 0),
+            seconds,
+            avgScore: r.avg_score == null ? null : Number(r.avg_score),
+            lastAt: r.last_session_at || null,
+            intro:
+              r.intro_duration != null || r.intro_status != null
+                ? { topic: 'intro', duration_seconds: Number(r.intro_duration || 0), status: r.intro_status }
+                : null,
+            tokens: Number(r.total_tokens || 0),
+            costLkr: Number(r.total_cost_lkr || 0),
+            costUsd: Number(r.total_cost_usd || 0),
+            completed: Number(r.progress_completed || 0),
+          });
+        }
+        const sessionsByDay = new Map<string, number>();
+        for (const d of (days.data || []) as any[]) {
+          sessionsByDay.set(String(d.day).slice(0, 10), Number(d.sessions || 0));
+        }
+        return { byUser, totalSeconds, sessionsByDay };
+      }
+      const err = stats.error || days.error;
+      const msg = err?.message || 'unexpected response';
+      if (isMissingFunctionError(err)) {
+        this.adminActivityRpcMissing = true;
+        this.logger.warn('[AdminUsers] SQL functions from migration 021 not found; using whole-table reads. Apply 021_admin_aggregates_and_indexes.sql.');
+      } else {
+        this.logger.warn(`[AdminUsers] admin_user_activity_stats failed (${msg}); using whole-table reads`);
+      }
+    }
+    return this.fetchAdminUserActivityLegacy();
+  }
+
+  private async fetchAdminUserActivityLegacy(): Promise<AdminUserActivity> {
+    const [{ data: sessions }, { data: ledger }, { data: progress }] = await Promise.all([
+      this.supabase
+        .from('sessions')
+        .select('user_id, topic, duration_seconds, overall_score, created_at, status')
+        .order('created_at', { ascending: false }),
+      this.supabase.from('usage_ledger').select('user_id, total_tokens, cost_lkr, cost_usd'),
+      this.supabase.from('user_roadmap_progress').select('user_id, status, is_passed'),
+    ]);
+    const byUser = new Map<string, UserActivityTotals & { scoreSum: number; scoreN: number }>();
+    const get = (id: string) => {
+      let a = byUser.get(id);
+      if (!a) {
+        a = { ...EMPTY_USER_ACTIVITY, scoreSum: 0, scoreN: 0 };
+        byUser.set(id, a);
+      }
+      return a;
+    };
+    let totalSeconds = 0;
+    const sessionsByDay = new Map<string, number>();
+    for (const s of (sessions || []) as any[]) {
+      const a = get(s.user_id);
+      a.sessions += 1;
+      a.seconds += s.duration_seconds || 0;
+      totalSeconds += s.duration_seconds || 0;
+      if (typeof s.overall_score === 'number' && s.overall_score > 0) {
+        a.scoreSum += s.overall_score;
+        a.scoreN += 1;
+      }
+      if (!a.lastAt) a.lastAt = s.created_at; // rows are newest first
+      if (!a.intro) {
+        const t = String(s.topic || '').toLowerCase();
+        if (t.includes('intro') || t.includes('onboarding')) a.intro = s;
+      }
+      const d = s.created_at ? new Date(s.created_at) : null;
+      const k = d && !isNaN(d.getTime()) ? SL_DATE_KEY_FMT.format(d) : '';
+      if (k) sessionsByDay.set(k, (sessionsByDay.get(k) || 0) + 1);
+    }
+    for (const l of (ledger || []) as any[]) {
+      const a = get(l.user_id);
+      a.tokens += l.total_tokens || 0;
+      a.costLkr += Number(l.cost_lkr || 0);
+      a.costUsd += Number(l.cost_usd || 0);
+    }
+    for (const p of (progress || []) as any[]) {
+      if (p.status === 'completed' || p.is_passed) get(p.user_id).completed += 1;
+    }
+    for (const a of byUser.values()) a.avgScore = a.scoreN > 0 ? a.scoreSum / a.scoreN : null;
+    return { byUser, totalSeconds, sessionsByDay };
+  }
+
   private async computeAdminUsersDataset(query?: AdminUsersQueryDto) {
     if (!this.supabase) {
       throw new InternalServerErrorException('Supabase database client not configured.');
@@ -2128,22 +2259,14 @@ export class AuthService {
         { data: profiles, error: profileErr },
         registeredTestAccounts,
         appConfig,
-        { data: sessions },
-        { data: ledgerEntries },
+        activity,
         { data: subs },
         { data: telcoVerifs },
-        { data: progress },
       ] = await Promise.all([
         this.fetchAdminUsersProfiles(),
         this.getTestAccounts().catch(() => [] as TestAccountItem[]),
         this.getAppConfig(),
-        this.supabase
-          .from('sessions')
-          .select('id, user_id, topic, duration_seconds, overall_score, fluency_score, grammar_score, pronunciation_score, created_at, status')
-          .order('created_at', { ascending: false }),
-        this.supabase
-          .from('usage_ledger')
-          .select('user_id, session_id, total_tokens, cost_lkr, cost_usd'),
+        this.fetchAdminUserActivity(),
         this.supabase
           .from('subscriptions')
           .select('id, user_id, plan_tier, status, amount_lkr, next_billing_date, payhere_subscription_id, updated_at'),
@@ -2153,9 +2276,6 @@ export class AuthService {
           .eq('is_verified', true)
           .like('otp_hash', 'TELCO:%')
           .order('created_at', { ascending: false }),
-        this.supabase
-          .from('user_roadmap_progress')
-          .select('user_id, roadmap_level_id, status, is_passed, score_percent, completed_at'),
       ]);
 
       if (profileErr) {
@@ -2196,25 +2316,6 @@ export class AuthService {
       }
       const isTelcoGatewayActive = appConfig.smsGateway === 'ideamart' || appConfig.smsGateway === 'mspace';
 
-      // Map sessions by user_id
-      const sessionsByUser = new Map<string, any[]>();
-      (sessions || []).forEach((s: any) => {
-        if (!sessionsByUser.has(s.user_id)) {
-          sessionsByUser.set(s.user_id, []);
-        }
-        sessionsByUser.get(s.user_id)!.push(s);
-      });
-
-      // Map ledger by user_id
-      const ledgerByUser = new Map<string, { totalTokens: number; totalCostLkr: number; totalCostUsd: number }>();
-      (ledgerEntries || []).forEach((l: any) => {
-        const current = ledgerByUser.get(l.user_id) || { totalTokens: 0, totalCostLkr: 0, totalCostUsd: 0 };
-        current.totalTokens += l.total_tokens || 0;
-        current.totalCostLkr += Number(l.cost_lkr || 0);
-        current.totalCostUsd += Number(l.cost_usd || 0);
-        ledgerByUser.set(l.user_id, current);
-      });
-
       // Map subscriptions by user_id
       const subByUser = new Map<string, any>();
       (subs || []).forEach((s: any) => {
@@ -2224,35 +2325,16 @@ export class AuthService {
         }
       });
 
-      // Map roadmap progress by user_id
-      const progressByUser = new Map<string, { completedCount: number; passedCount: number; totalAttempts: number }>();
-      (progress || []).forEach((p: any) => {
-        const cur = progressByUser.get(p.user_id) || { completedCount: 0, passedCount: 0, totalAttempts: 0 };
-        cur.totalAttempts += 1;
-        if (p.status === 'completed' || p.is_passed) {
-          cur.completedCount += 1;
-        }
-        if (p.is_passed) {
-          cur.passedCount += 1;
-        }
-        progressByUser.set(p.user_id, cur);
-      });
-
       // Build enriched user cards
       let enrichedUsers = allProfiles.map((p) => {
-        const userSessions = sessionsByUser.get(p.id) || [];
-        const userLedger = ledgerByUser.get(p.id) || { totalTokens: 0, totalCostLkr: 0, totalCostUsd: 0 };
+        const act = activity.byUser.get(p.id) || EMPTY_USER_ACTIVITY;
         const activeSub = subByUser.get(p.id);
-        const userProgress = progressByUser.get(p.id) || { completedCount: 0, passedCount: 0, totalAttempts: 0 };
 
-        const totalPracticedSeconds = userSessions.reduce((acc, s) => acc + (s.duration_seconds || 0), 0);
-        const validScores = userSessions.filter((s) => typeof s.overall_score === 'number' && s.overall_score > 0);
-        const avgOverallScore = validScores.length > 0
-          ? Math.round(validScores.reduce((acc, s) => acc + s.overall_score, 0) / validScores.length)
-          : (p.baseline_fluency_score || 0);
+        const totalPracticedSeconds = act.seconds;
+        const avgOverallScore = act.avgScore != null ? Math.round(act.avgScore) : (p.baseline_fluency_score || 0);
 
-        const lastSession = userSessions[0];
-        const onboardingInfo = this.resolveOnboardingCallStatus(p, userSessions);
+        // Only the latest intro/onboarding call matters for the status resolver
+        const onboardingInfo = this.resolveOnboardingCallStatus(p, act.intro ? [act.intro] : []);
         const email = (p as any).email || null;
         const avatarUrl = (p as any).avatar_url || null;
         const isTestAccount = isTestProfile(p);
@@ -2350,14 +2432,14 @@ export class AuthService {
           updatedAt: p.updated_at,
           // Aggregated Metrics
           stats: {
-            totalSessions: userSessions.length,
+            totalSessions: act.sessions,
             totalPracticedMinutes: Math.round(totalPracticedSeconds / 60),
-            totalTokens: userLedger.totalTokens,
-            totalCostLkr: Number(userLedger.totalCostLkr.toFixed(2)),
-            totalCostUsd: Number(userLedger.totalCostUsd.toFixed(4)),
+            totalTokens: act.tokens,
+            totalCostLkr: Number(act.costLkr.toFixed(2)),
+            totalCostUsd: Number(act.costUsd.toFixed(4)),
             avgScore: avgOverallScore,
-            completedLevelsCount: userProgress.completedCount,
-            lastSessionDate: lastSession ? lastSession.created_at : null,
+            completedLevelsCount: act.completed,
+            lastSessionDate: act.lastAt,
             subscriptionStatus: activeSub ? activeSub.status : (p.plan_status || 'FREE'),
           },
         };
@@ -2401,9 +2483,7 @@ export class AuthService {
       }).length;
 
       const starterCount = realProfiles.filter((p) => p.plan_tier === 'starter').length;
-      const totalMinutesConsumed = Math.round(
-        (sessions || []).reduce((acc: number, s: any) => acc + (s.duration_seconds || 0), 0) / 60
-      );
+      const totalMinutesConsumed = Math.round(activity.totalSeconds / 60);
 
       // Calculate Today & 7-Day Trend Metrics (Sri Lanka Timezone)
       const slDateStr = (dateInput?: string | Date | null): string => {
@@ -2420,11 +2500,7 @@ export class AuthService {
         const k = slDateStr(p.created_at);
         if (k) regsByDay.set(k, (regsByDay.get(k) || 0) + 1);
       }
-      const sessionsByDay = new Map<string, number>();
-      for (const sess of (sessions || []) as any[]) {
-        const k = slDateStr(sess.created_at);
-        if (k) sessionsByDay.set(k, (sessionsByDay.get(k) || 0) + 1);
-      }
+      const sessionsByDay = activity.sessionsByDay;
 
       const todayRegisteredCount = regsByDay.get(todaySlKey) || 0;
       const todaySessionsCount = sessionsByDay.get(todaySlKey) || 0;
@@ -2491,19 +2567,65 @@ export class AuthService {
   private analyticsOverviewCache: { at: number; promise: Promise<any> } | null = null;
   private static readonly ANALYTICS_CACHE_TTL_MS = 60_000;
 
+  private analyticsLastGood: any = null;
+
   async getAdminAnalyticsOverview() {
+    this.noteAdminView();
     const now = Date.now();
-    if (
+    const expired =
       !this.analyticsOverviewCache ||
-      now - this.analyticsOverviewCache.at > AuthService.ANALYTICS_CACHE_TTL_MS
-    ) {
+      now - this.analyticsOverviewCache.at > AuthService.ANALYTICS_CACHE_TTL_MS;
+    if (expired) {
       const promise = this.computeAdminAnalyticsOverview();
       this.analyticsOverviewCache = { at: now, promise };
-      promise.catch(() => {
-        if (this.analyticsOverviewCache?.promise === promise) this.analyticsOverviewCache = null;
-      });
+      promise
+        .then((result) => {
+          if (this.analyticsOverviewCache?.promise === promise) this.analyticsLastGood = result;
+        })
+        .catch(() => {
+          if (this.analyticsOverviewCache?.promise === promise) this.analyticsOverviewCache = null;
+        });
+      // Stale-while-revalidate: serve the previous result instantly while one rebuild runs
+      if (this.analyticsLastGood) return this.analyticsLastGood;
     }
-    return this.analyticsOverviewCache.promise;
+    return this.analyticsOverviewCache!.promise;
+  }
+
+  /**
+   * Background refresh of the admin datasets. While an admin has viewed an admin page in the
+   * last 30 minutes, the Users and Analytics datasets are rebuilt every ~50 s in the background,
+   * so admin pages are served from memory instead of waiting on whole-table database reads.
+   * Nothing runs when no admin is active (no extra database load or egress).
+   */
+  private lastAdminViewAt = 0;
+  private adminRefreshTimer: NodeJS.Timeout | null = null;
+  private static readonly ADMIN_ACTIVE_WINDOW_MS = 30 * 60_000;
+  private static readonly ADMIN_REFRESH_INTERVAL_MS = 50_000;
+
+  private noteAdminView() {
+    this.lastAdminViewAt = Date.now();
+    if (this.adminRefreshTimer || process.env.ADMIN_BACKGROUND_REFRESH === '0') return;
+    this.adminRefreshTimer = setInterval(() => {
+      if (Date.now() - this.lastAdminViewAt > AuthService.ADMIN_ACTIVE_WINDOW_MS) {
+        clearInterval(this.adminRefreshTimer!);
+        this.adminRefreshTimer = null;
+        return;
+      }
+      this.refreshAdminDatasets().catch(() => undefined);
+    }, AuthService.ADMIN_REFRESH_INTERVAL_MS);
+    this.adminRefreshTimer.unref?.();
+  }
+
+  private async refreshAdminDatasets() {
+    const at = this.lastAdminViewAt;
+    // Calling the getters triggers the stale-while-revalidate rebuild when a cache has expired;
+    // they do not count as admin views (lastAdminViewAt is restored afterwards).
+    await Promise.allSettled([this.getAdminUsers(), this.getAdminAnalyticsOverview()]);
+    this.lastAdminViewAt = at;
+  }
+
+  onModuleDestroy() {
+    if (this.adminRefreshTimer) clearInterval(this.adminRefreshTimer);
   }
 
   /** Only the profile columns the analytics overview uses (not select('*') incl. onboarding_flow). */
@@ -3889,26 +4011,46 @@ export class AuthService {
   /**
    * Admin: Retrieve all student complaints enriched with latest user profile data
    */
-  async getAdminComplaints() {
-    const [{ data: tableRows, error }, { data: profiles }] = await Promise.all([
-      this.supabase
-        .from('user_complaints')
-        .select('*')
-        .order('created_at', { ascending: false }),
-      // Only the fields used for display; select('*') pulled every column (incl. the large onboarding_flow) for every user
-      this.supabase.from('profiles').select('id, display_name, phone_number, email, avatar_url, level, plan_tier'),
-    ]);
+  /** Display fields for just the given users (chunked to keep the request URL short). */
+  private async fetchDisplayProfiles(userIds: Array<string | null | undefined>): Promise<Map<string, any>> {
+    const ids = [...new Set(userIds.filter((id): id is string => !!id))];
+    const map = new Map<string, any>();
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+    const results = await Promise.all(
+      chunks.map((chunk) =>
+        this.supabase
+          .from('profiles')
+          .select('id, display_name, phone_number, email, avatar_url, level, plan_tier')
+          .in('id', chunk),
+      ),
+    );
+    for (const { data } of results) for (const p of data || []) map.set(p.id, p);
+    return map;
+  }
+
+  async getAdminComplaints(pageReq?: PageRequest | null) {
+    const { data: tableRows, error } = await this.supabase
+      .from('user_complaints')
+      .select('*')
+      .order('created_at', { ascending: false });
 
     if (error) {
       this.logger.error(`Failed to query user_complaints: ${error.message}`);
     }
 
-    const profileMap = new Map<string, any>();
-    for (const p of profiles || []) {
-      profileMap.set(p.id, p);
-    }
+    const allRows = ((tableRows || []) as any[]).sort(
+      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+    );
+    const openCount = allRows.filter((r) => (r.status || 'open') === 'open').length;
+    const resolvedCount = allRows.filter((r) => r.status === 'resolved').length;
 
-    const complaints = (tableRows || [])
+    // Page first, then look up only the profiles shown on this page (previously the whole
+    // profiles table was downloaded on every request just to show names).
+    const paged = pageReq ? paginateArray(allRows, pageReq) : { items: allRows, pagination: undefined };
+    const profileMap = await this.fetchDisplayProfiles(paged.items.map((r) => r.user_id));
+
+    const complaints = paged.items
       .map((row: any) => {
         const prof = row.user_id ? profileMap.get(row.user_id) : null;
         return {
@@ -3926,18 +4068,16 @@ export class AuthService {
           updatedAt: row.updated_at || row.created_at || new Date().toISOString(),
         };
       })
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    const openCount = complaints.filter((c) => c.status === 'open').length;
-    const resolvedCount = complaints.filter((c) => c.status === 'resolved').length;
+;
 
     return {
       stats: {
-        total: complaints.length,
+        total: allRows.length,
         open: openCount,
         resolved: resolvedCount,
       },
       complaints,
+      ...(paged.pagination ? { pagination: paged.pagination } : {}),
     };
   }
 
@@ -3966,7 +4106,7 @@ export class AuthService {
    * Admin: Retrieve all student session reviews enriched with user profiles,
    * calculating star counts and separating written comments.
    */
-  async getAdminSessionReviews() {
+  async getAdminSessionReviews(pageReq?: PageRequest | null) {
     if (!this.supabase) {
       return {
         stats: {
@@ -3980,26 +4120,38 @@ export class AuthService {
       };
     }
 
-    const [{ data: sessions, error }, { data: profiles }] = await Promise.all([
-      this.supabase
-        .from('sessions')
-        .select('id, user_id, topic, status, duration_seconds, overall_score, user_rating, user_feedback, summary, created_at, start_time, roadmap_level_id')
-        .not('user_rating', 'is', null)
-        .order('created_at', { ascending: false }),
-      // Only the fields used for display; select('*') pulled every column (incl. the large onboarding_flow) for every user
-      this.supabase.from('profiles').select('id, display_name, phone_number, email, avatar_url, level, plan_tier'),
-    ]);
+    // `summary` was selected but never used (it is the largest column); dropped.
+    const { data: sessions, error } = await this.supabase
+      .from('sessions')
+      .select('id, user_id, topic, duration_seconds, overall_score, user_rating, user_feedback, created_at, start_time')
+      .not('user_rating', 'is', null)
+      .order('created_at', { ascending: false });
 
     if (error) {
       this.logger.error(`Failed to query session reviews: ${error.message}`);
     }
 
-    const profileMap = new Map<string, any>();
-    for (const p of profiles || []) {
-      profileMap.set(p.id, p);
+    const allRows = ((sessions || []) as any[]).sort(
+      (a, b) =>
+        new Date(b.created_at || b.start_time || 0).getTime() - new Date(a.created_at || a.start_time || 0).getTime(),
+    );
+
+    // Stats cover every review; profiles are looked up only for the rows on this page.
+    const starCounts: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    let totalScore = 0;
+    let commentsCount = 0;
+    for (const row of allRows) {
+      const rating = Number(row.user_rating) || 5;
+      const star = Math.min(5, Math.max(1, Math.round(rating)));
+      starCounts[star] = (starCounts[star] || 0) + 1;
+      totalScore += rating;
+      if (row.user_feedback && String(row.user_feedback).trim().length > 0) commentsCount += 1;
     }
 
-    const reviews = (sessions || [])
+    const paged = pageReq ? paginateArray(allRows, pageReq) : { items: allRows, pagination: undefined };
+    const profileMap = await this.fetchDisplayProfiles(paged.items.map((r) => r.user_id));
+
+    const reviews = paged.items
       .map((row: any) => {
         const prof = row.user_id ? profileMap.get(row.user_id) : null;
         const feedback = row.user_feedback ? String(row.user_feedback).trim() : null;
@@ -4021,22 +4173,9 @@ export class AuthService {
           createdAt: row.created_at || row.start_time || new Date().toISOString(),
         };
       })
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+;
 
-    const starCounts: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
-    let totalScore = 0;
-    let commentsCount = 0;
-
-    for (const r of reviews) {
-      const star = Math.min(5, Math.max(1, Math.round(r.rating)));
-      starCounts[star] = (starCounts[star] || 0) + 1;
-      totalScore += r.rating;
-      if (r.feedback) {
-        commentsCount += 1;
-      }
-    }
-
-    const totalReviews = reviews.length;
+    const totalReviews = allRows.length;
     const avgRating = totalReviews > 0 ? Number((totalScore / totalReviews).toFixed(1)) : 0;
 
     return {
@@ -4048,6 +4187,7 @@ export class AuthService {
         starCounts,
       },
       reviews,
+      ...(paged.pagination ? { pagination: paged.pagination } : {}),
     };
   }
 

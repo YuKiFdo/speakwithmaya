@@ -16,6 +16,7 @@ const execFileAsync = promisify(execFile);
 const ESPEAK_VOICE_RE = /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i;
 export const MAX_TTS_TEXT_LENGTH = 1000;
 import { GoogleGenAI, Type } from '@google/genai';
+import { isMissingFunctionError } from '../common/supabase-rpc.js';
 
 export function toValidUuid(str?: string): string {
   if (!str) return randomUUID();
@@ -239,7 +240,7 @@ export class SessionsService {
   private readonly sessionRecordingsMap = new BoundedMap<string, { userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string }>(2000);
   private readonly sessionTurnAudioMap = new BoundedMap<string, Map<number, string>>(2000);
   private readonly sessionTurnTranscriptMap = new BoundedMap<string, Map<number, string>>(2000);
-  private readonly usageCache = new BoundedMap<string, { timestamp: number; data: any }>(30, 15_000);
+  private readonly usageCache = new BoundedMap<string, { timestamp: number; data: any }>(30, 60_000);
   private lastOrphanReconcileTime = 0;
   private readonly authoritativeTurnsMap = new BoundedMap<string, Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>(2000);
   private readonly saveTurnsLocks = new Map<string, Promise<void>>();
@@ -2928,16 +2929,19 @@ ${memoryPart}`;
     return reconciledCount;
   }
 
+  private sessionCountsRpcMissing = false;
+
   async getUsageData(query: QueryUsageDto) {
     const range = query?.range || '30d';
     const search = (query?.search || '').toLowerCase().trim();
     const statusFilter = (query?.status || '').toLowerCase().trim();
     const modelFilter = (query?.model || '').toLowerCase().trim();
 
-    // 15-second in-memory response cache to make admin navigation instantaneous
+    // 60-second in-memory response cache to make admin navigation instantaneous
+    // (was 15 s; each rebuild costs several cross-region database round trips)
     const cacheKey = `${range}_${search}_${statusFilter}_${modelFilter}`;
     const cached = this.usageCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < 15000) {
+    if (cached && Date.now() - cached.timestamp < 60000) {
       return cached.data;
     }
 
@@ -3027,7 +3031,25 @@ ${memoryPart}`;
           const correctionsCountMap = new Map<string, number>();
 
           const targetSessionIds = sessionIds.slice(0, 100);
-          if (targetSessionIds.length > 0) {
+          // Preferred: per-session counts computed in SQL (migration 021) instead of downloading
+          // every turn and correction row for 100 sessions just to count them.
+          let countsDone = false;
+          if (targetSessionIds.length > 0 && !this.sessionCountsRpcMissing) {
+            const { data: counts, error: countsErr } = await this.supabase.rpc('admin_session_counts', {
+              session_ids: targetSessionIds,
+            });
+            if (!countsErr && Array.isArray(counts)) {
+              for (const c of counts as any[]) {
+                turnsCountMap.set(c.session_id, Number(c.turns || 0));
+                correctionsCountMap.set(c.session_id, Number(c.corrections || 0));
+              }
+              countsDone = true;
+            } else if (isMissingFunctionError(countsErr)) {
+              this.sessionCountsRpcMissing = true;
+              this.logger.warn('[AdminUsage] admin_session_counts not found; counting rows in Node. Apply 021_admin_aggregates_and_indexes.sql.');
+            }
+          }
+          if (!countsDone && targetSessionIds.length > 0) {
             const [turnsRes, corrRes] = await Promise.all([
               this.supabase
                 .from('session_turns')

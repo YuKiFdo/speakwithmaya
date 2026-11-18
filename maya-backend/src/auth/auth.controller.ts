@@ -19,7 +19,7 @@ import { AuthService, type UserProfileData } from './auth.service.js';
 import { AuthGuard } from './guards/auth.guard.js';
 import { AdminGuard } from './guards/admin.guard.js';
 import { GetUser } from './decorators/get-user.decorator.js';
-import { parsePageRequest, paginateArray } from '../common/pagination.js';
+import { parsePageRequest } from '../common/pagination.js';
 
 const backgroundLogger = new Logger('AuthControllerBackground');
 
@@ -331,11 +331,8 @@ export class AuthController {
   @Get('admin/complaints')
   @UseGuards(AdminGuard)
   async getAdminComplaints(@Query('page') page?: string, @Query('limit') limit?: string) {
-    const result = await this.authService.getAdminComplaints();
-    const req = parsePageRequest(page, limit);
-    if (!req) return result;
-    const { items, pagination } = paginateArray(result.complaints, req);
-    return { ...result, complaints: items, pagination };
+    // Paging happens in the service so profiles are fetched only for the visible rows
+    return this.authService.getAdminComplaints(parsePageRequest(page, limit));
   }
 
   /**
@@ -366,11 +363,8 @@ export class AuthController {
   @Get('admin/session-reviews')
   @UseGuards(AdminGuard)
   async getAdminSessionReviews(@Query('page') page?: string, @Query('limit') limit?: string) {
-    const result = await this.authService.getAdminSessionReviews();
-    const req = parsePageRequest(page, limit);
-    if (!req) return result;
-    const { items, pagination } = paginateArray(result.reviews, req);
-    return { ...result, reviews: items, pagination };
+    // Paging happens in the service so profiles are fetched only for the visible rows
+    return this.authService.getAdminSessionReviews(parsePageRequest(page, limit));
   }
 
   /**
