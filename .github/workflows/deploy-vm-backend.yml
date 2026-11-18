@@ -153,7 +153,7 @@ jobs:
 
             # Pull the new image BEFORE touching the running app, so a failed pull leaves it serving
             export BACKEND_IMAGE=\"$IMAGE_TAG\"
-            docker compose pull maya-backend
+            docker compose pull --quiet maya-backend
 
             # One-time migration: remove the legacy host PM2 process that holds port 3000
             if command -v pm2 >/dev/null 2>&1 && pm2 describe maya-backend >/dev/null 2>&1; then
