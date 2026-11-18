@@ -508,7 +508,8 @@ export default function AnalyzingScreen() {
       }),
       Animated.timing(progressAnim, {
         toValue: 0.95,
-        duration: 60000,
+        // ~25s so the ring keeps visibly moving while analysis runs (60s looked stuck)
+        duration: 25000,
         easing: Easing.out(Easing.quad),
         useNativeDriver: false,
       }),
@@ -662,7 +663,16 @@ export default function AnalyzingScreen() {
                   },
                 ]}
               >
-                {/* Step Icon Badge with lively spring pop when completed */}
+                {/* Step Icon Badge with lively spring pop when completed. The processing ring is
+                    a SIBLING inside a wrapper (not a child sticking out of the 48px circle), so
+                    Android / mobile clipping of out-of-bounds children cannot hide it. */}
+                <View style={styles.iconWrap}>
+                {isCurrent && (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.stepSpinnerRing, { transform: [{ rotate: stepSpinRotate }] }]}
+                  />
+                )}
                 <Animated.View
                   style={[
                     styles.iconCircle,
@@ -679,12 +689,6 @@ export default function AnalyzingScreen() {
                     },
                   ]}
                 >
-                  {isCurrent && (
-                    <Animated.View
-                      pointerEvents="none"
-                      style={[styles.stepSpinnerRing, { transform: [{ rotate: stepSpinRotate }] }]}
-                    />
-                  )}
                   {isCompleted ? (
                     <Animated.View
                       style={{
@@ -725,6 +729,7 @@ export default function AnalyzingScreen() {
                     </Animated.View>
                   )}
                 </Animated.View>
+                </View>
 
                 {/* Step Text Info */}
                 <View style={styles.stepTextWrapper}>
@@ -869,10 +874,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#F1F5F9',
   },
   // Spinning arc around the in-progress step icon (top + right borders colored)
+  iconWrap: {
+    width: 54,
+    height: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   stepSpinnerRing: {
     position: 'absolute',
-    top: -3,
-    left: -3,
+    top: 0,
+    left: 0,
     width: 54,
     height: 54,
     borderRadius: 27,
