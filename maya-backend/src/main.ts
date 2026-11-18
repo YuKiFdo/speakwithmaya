@@ -3,6 +3,11 @@ import { WsAdapter } from '@nestjs/platform-ws';
 import express from 'express';
 import { Agent, setGlobalDispatcher } from 'undici';
 import { AppModule, ObserveInstrument } from './app.module.js';
+import {
+  instrumentFetch,
+  requestDiagnosticsMiddleware,
+  startEventLoopMonitor,
+} from './common/request-diagnostics.js';
 
 // Keep outbound HTTPS connections (Supabase, Gemini, etc.) alive between requests.
 // Node's default fetch closes idle sockets after ~4 s, so at low traffic almost every
@@ -18,12 +23,14 @@ setGlobalDispatcher(
 // Global outbound fetch timeout safeguard: prevent unbounded hangs if caller omitted AbortSignal
 const _origFetch = globalThis.fetch;
 const OUTBOUND_HTTP_TIMEOUT_MS = Number(process.env.OUTBOUND_HTTP_TIMEOUT_MS) || 30000;
-globalThis.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+const fetchWithTimeout = function (input: RequestInfo | URL, init?: RequestInit) {
   if (!init?.signal) {
     return _origFetch(input, { ...init, signal: AbortSignal.timeout(OUTBOUND_HTTP_TIMEOUT_MS) });
   }
   return _origFetch(input, init);
 } as typeof fetch;
+// Attribute outbound calls (Supabase, Gemini...) to the request that made them, for [SlowRequest] logs
+globalThis.fetch = instrumentFetch(fetchWithTimeout);
 
 async function bootstrap() {
   const isObserveEnabled =
@@ -34,6 +41,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     ...(isObserveEnabled && ObserveInstrument ? { instrument: ObserveInstrument } : {}),
   });
+
+  // First middleware: per-request diagnostics context + [SlowRequest] logging
+  app.use(requestDiagnosticsMiddleware);
+  startEventLoopMonitor();
 
   // PayHere notify_url sends application/x-www-form-urlencoded POST requests
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));

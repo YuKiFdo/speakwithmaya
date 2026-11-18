@@ -42,15 +42,38 @@ describe('AuthGuard profile cache', () => {
     expect(getProfile).toHaveBeenCalledTimes(1);
   });
 
-  it('always reads fresh for other routes', async () => {
+  it('shares the cache across GET routes', async () => {
     await guard.canActivate(makeContext('GET', '/v1/sessions').ctx);
-    await guard.canActivate(makeContext('GET', '/v1/sessions').ctx);
+    await guard.canActivate(makeContext('GET', '/v1/roadmap/user-progress').ctx);
+    expect(getProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('always reads fresh for non-tracking writes', async () => {
+    await guard.canActivate(makeContext('GET', '/v1/auth/me').ctx);
+    await guard.canActivate(makeContext('POST', '/v1/sessions/abc/finish').ctx);
+    await guard.canActivate(makeContext('POST', '/v1/sessions/abc/finish').ctx);
+    expect(getProfile).toHaveBeenCalledTimes(3);
+  });
+
+  it('analytics-only writes use the cache and do not invalidate it', async () => {
+    await guard.canActivate(makeContext('GET', '/v1/auth/me').ctx);
+    await guard.canActivate(makeContext('POST', '/v1/users/event').ctx);
+    await guard.canActivate(makeContext('POST', '/v1/promotions/comeback-ping').ctx);
+    await guard.canActivate(makeContext('GET', '/v1/auth/me').ctx);
+    expect(getProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('users/step reuses the cached profile but forces the next read to refetch', async () => {
+    await guard.canActivate(makeContext('GET', '/v1/auth/me').ctx);
+    await guard.canActivate(makeContext('POST', '/v1/users/step').ctx);
+    expect(getProfile).toHaveBeenCalledTimes(1);
+    await guard.canActivate(makeContext('GET', '/v1/auth/me').ctx);
     expect(getProfile).toHaveBeenCalledTimes(2);
   });
 
   it('invalidates the cached profile after a mutating request', async () => {
     await guard.canActivate(makeContext('GET', '/v1/auth/me').ctx);
-    await guard.canActivate(makeContext('POST', '/v1/users/step').ctx);
+    await guard.canActivate(makeContext('POST', '/v1/payments/checkout').ctx);
     await guard.canActivate(makeContext('GET', '/v1/auth/me').ctx);
     expect(getProfile).toHaveBeenCalledTimes(3);
   });

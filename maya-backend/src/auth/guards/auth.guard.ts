@@ -100,20 +100,31 @@ export class AuthGuard implements CanActivate {
   }
 
   /**
-   * GET /v1/auth/me is read-only and is hit in bursts by clients, so it is served
-   * from a short per-user cache with single-flight (concurrent calls share one DB read).
-   * Every other route always reads fresh, because handlers may use request.user
-   * (e.g. minutes balance) for writes. Any non-GET request by the user clears their
-   * entry so their next /auth/me reflects the change.
+   * Per-user profile cache (5 s TTL, single-flight: concurrent calls share one DB read).
+   *
+   * Every authenticated request used to run getProfile() (1-4 sequential DB round trips to
+   * Singapore), so a dashboard load firing ~8 requests paid that ~8 times over.
+   * - Cached: all GET requests, plus tracking POSTs that only need the user id
+   *   (users/event, users/step, promotions/comeback-ping).
+   * - Always fresh: every other write (session finish, payments, promotions claim, settings...),
+   *   because handlers may use request.user (e.g. minutes balance) to compute the write.
+   * - Any write except the pure-analytics ones clears the user's entry, so their next read
+   *   reflects the change (staleness is bounded by the 5 s TTL otherwise).
    */
   private async loadProfile(userId: string, request: any): Promise<UserProfileData> {
     const method = String(request.method || 'GET').toUpperCase();
     const path = String(request.originalUrl || request.url || '').split('?')[0];
+    const isRead = method === 'GET' || method === 'HEAD';
+    const isTrackingWrite = TRACKING_WRITE_RE.test(path);
 
-    if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    if (!isRead && method !== 'OPTIONS' && !ANALYTICS_ONLY_RE.test(path)) {
+      // users/step changes profile fields; it may still use a cached profile for its own guard
+      // check below, but the next read must refetch.
+      const cachedForStep = isTrackingWrite ? profileCache.get(userId)?.value : undefined;
       profileCache.delete(userId);
+      if (cachedForStep) return cachedForStep;
     }
-    if (method !== 'GET' || !ME_PATH_RE.test(path)) {
+    if (!isRead && !isTrackingWrite) {
       return this.authService.getProfile(userId);
     }
 
@@ -142,7 +153,10 @@ export class AuthGuard implements CanActivate {
   }
 }
 
-const ME_PATH_RE = /\/auth\/me\/?$/;
+/** POSTs whose handlers only need the user id (fire-and-forget tracking writes). */
+const TRACKING_WRITE_RE = /\/v1\/(users\/event|users\/step|promotions\/comeback-ping)\/?$/;
+/** Writes that never change profile data, so they do not invalidate the cache. */
+const ANALYTICS_ONLY_RE = /\/v1\/(users\/event|promotions\/comeback-ping)\/?$/;
 const PROFILE_CACHE_TTL_MS = 5_000;
 const PROFILE_CACHE_MAX = 5_000;
 const profileCache = new Map<
