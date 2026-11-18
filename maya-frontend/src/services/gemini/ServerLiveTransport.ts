@@ -107,6 +107,7 @@ export class ServerLiveTransport implements ILiveTransport {
             sessionId: config.sessionOptions?.sessionId || this.clientSessionId,
             accessToken: OnboardingStore.getState().accessToken || config.token || undefined,
             supportsOpus: !!this.opusDecoder,
+            supportsOpusBatch: !!this.opusDecoder,
             options: config.sessionOptions || {
               languageMode: config.languageMode,
               sinhalaStyle: config.sinhalaStyle,
@@ -375,32 +376,38 @@ export class ServerLiveTransport implements ILiveTransport {
         console.log(`[${getLogTimestamp()}] ⏳ [ServerLiveTransport:${this.clientSessionId}] Turn handshake received from server`);
         break;
 
-      case 'audio_opus':
-        if (msg.data && this.opusDecoder) {
+      case 'audio_opus': {
+        // Server sends either one packet ({ data }) or, when we advertised supportsOpusBatch,
+        // several consecutive 20ms packets ({ packets: [...] }) to cut per-message overhead.
+        const packets: string[] = Array.isArray(msg.packets) ? msg.packets : msg.data ? [msg.data] : [];
+        if (packets.length > 0 && this.opusDecoder) {
           this.hasModelSpokenThisTurn = true;
-          this.inboundAudioChunksCount++;
-          if (this.inboundAudioChunksCount <= 3 || this.inboundAudioChunksCount % 15 === 0) {
-            console.log(`[${getLogTimestamp()}] 🔊 [ServerLiveTransport:${this.clientSessionId}] Received audio_opus packet #${this.inboundAudioChunksCount} (${msg.data.length} chars)`);
-          }
-          try {
-            const binaryString = atob(msg.data);
-            const len = binaryString.length;
-            const opusBytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-              opusBytes[i] = binaryString.charCodeAt(i);
+          for (const packet of packets) {
+            this.inboundAudioChunksCount++;
+            if (this.inboundAudioChunksCount <= 3 || this.inboundAudioChunksCount % 15 === 0) {
+              console.log(`[${getLogTimestamp()}] 🔊 [ServerLiveTransport:${this.clientSessionId}] Received audio_opus packet #${this.inboundAudioChunksCount} (${packet.length} chars)`);
             }
-            const decodedPcm = this.opusDecoder.decode(opusBytes);
-            const int16 = new Int16Array(decodedPcm.buffer, decodedPcm.byteOffset, decodedPcm.length / 2);
-            const float32 = new Float32Array(int16.length);
-            for (let i = 0; i < int16.length; i++) {
-              float32[i] = int16[i] < 0 ? int16[i] / 32768.0 : int16[i] / 32767.0;
+            try {
+              const binaryString = atob(packet);
+              const len = binaryString.length;
+              const opusBytes = new Uint8Array(len);
+              for (let i = 0; i < len; i++) {
+                opusBytes[i] = binaryString.charCodeAt(i);
+              }
+              const decodedPcm = this.opusDecoder.decode(opusBytes);
+              const int16 = new Int16Array(decodedPcm.buffer, decodedPcm.byteOffset, decodedPcm.length / 2);
+              const float32 = new Float32Array(int16.length);
+              for (let i = 0; i < int16.length; i++) {
+                float32[i] = int16[i] < 0 ? int16[i] / 32768.0 : int16[i] / 32767.0;
+              }
+              this.callbacks.onAudioSamples?.(float32);
+            } catch (err: any) {
+              console.error(`[ServerLiveTransport:${this.clientSessionId}] Opus decode error:`, err);
             }
-            this.callbacks.onAudioSamples?.(float32);
-          } catch (err: any) {
-            console.error(`[ServerLiveTransport:${this.clientSessionId}] Opus decode error:`, err);
           }
         }
         break;
+      }
 
       case 'audio':
         if (msg.data) {

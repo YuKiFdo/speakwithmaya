@@ -68,6 +68,7 @@ class SimUser {
         type: 'start_session',
         sessionId: this.sessionId,
         supportsOpus: true,
+        supportsOpusBatch: true,
         options: { sessionId: this.sessionId, topic: 'Load test', level: 'B1', mode: 'casual', durationSeconds: 600, languageMode: 'english' },
       }));
       this.pingTimer = setInterval(() => this.safeSend(JSON.stringify({ type: 'client_ping', ts: Date.now() })), 10000);
@@ -94,7 +95,8 @@ class SimUser {
       case 'ready': if (!this.speaking && !this.awaitingReply) this.scheduleUserTurn(1500); break;
       case 'audio':
       case 'audio_opus':
-        this.m.audioFrames++;
+        // a batched message carries several 20ms packets; gaps are measured between messages
+        this.m.audioFrames += Array.isArray(msg.packets) ? msg.packets.length : 1;
         if (this.turnSentAt) { this.m.firstAudioMs.push(now - this.turnSentAt); this.turnSentAt = null; }
         if (this.lastFrameAt) this.m.frameGapsMs.push(now - this.lastFrameAt);
         this.lastFrameAt = now;

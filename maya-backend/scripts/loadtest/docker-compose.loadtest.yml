@@ -19,9 +19,10 @@ services:
       - PORT=3100
       - LIVE_FAKE_UPSTREAM=1
       - GEMINI_API_KEY=loadtest-fake
-      # Points "Supabase" at this container itself: every DB/storage call gets a fast 404,
-      # so nothing reaches production data, but the code paths still run.
-      - SUPABASE_URL=http://127.0.0.1:3100/nodb
+      # Points "Supabase" at a closed local port: Linux refuses instantly, so every DB/storage
+      # call fails fast and nothing reaches production data. (Pointing it at this container
+      # itself made it serve its own fake DB calls, inflating CPU by ~7% in profiles.)
+      - SUPABASE_URL=http://127.0.0.1:9
       - SUPABASE_SECRET_KEY=loadtest-dummy
       - JWT_SECRET=loadtest-dummy
       - TTS_PREWARM=0

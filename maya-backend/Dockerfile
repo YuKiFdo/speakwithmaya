@@ -44,6 +44,11 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+# glibc gives each thread pool its own malloc arena; with the per-session audio buffers and
+# native Opus/ONNX allocations, freed memory stayed in those arenas and RSS kept growing
+# (load test: JS heap 57 MiB but RSS ~660 MiB after all sessions closed). Two arenas makes
+# freed memory get reused instead of piling up.
+ENV MALLOC_ARENA_MAX=2
 
 COPY --chown=node:node --from=builder /app/package*.json ./
 COPY --chown=node:node --from=builder /app/node_modules/ ./node_modules/

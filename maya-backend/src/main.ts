@@ -50,7 +50,12 @@ async function bootstrap() {
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
   app.use(express.json({ limit: '10mb' }));
 
-  app.useWebSocketAdapter(new WsAdapter(app));
+  // LiveGateway reads every frame itself (client.on('message')) and the app has no
+  // @SubscribeMessage handlers, so Nest's per-message dispatch only did wasted work: the
+  // default parser ran JSON.parse(data.toString()) on every frame, including the 10/s
+  // binary mic PCM frames of every session, throwing (and catching) on each one. Load-test
+  // profiling showed it among the top CPU costs. Returning nothing makes Nest skip it.
+  app.useWebSocketAdapter(new WsAdapter(app, { messageParser: () => undefined }));
 
   // Enable CORS for web clients (Expo web, admin.speakwithmaya.com, speakwithmaya.com)
   app.enableCors({

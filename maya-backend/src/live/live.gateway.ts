@@ -29,6 +29,10 @@ interface ClientSessionState {
   userName?: string;
   isConnectedToGemini: boolean;
   supportsOpus: boolean;
+  /** Client accepts { type: 'audio_opus', packets: [...] } (several 20ms packets per message). */
+  supportsOpusBatch: boolean;
+  /** Encoded base64 Opus packets waiting to be sent as one batch. */
+  opusBatch: string[];
   opusEncoder?: any;
   opusPcmBuffer: Buffer;
   userAudioChunks: Buffer[];
@@ -170,6 +174,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       sessionId,
       isConnectedToGemini: false,
       supportsOpus: false,
+      supportsOpusBatch: false,
+      opusBatch: [],
       opusEncoder: null,
       opusPcmBuffer: Buffer.alloc(0),
       userAudioChunks: [],
@@ -869,6 +875,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         // Initialize Opus compression if client supports it (native @discordjs/opus C++ bindings)
         state.supportsOpus = !!message.supportsOpus;
+        state.supportsOpusBatch = !!message.supportsOpusBatch;
+        state.opusBatch = [];
         if (state.supportsOpus) {
           try {
             if (!OpusEncoderClass) {
@@ -1426,6 +1434,31 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       .replace(/[\u0B80-\u0BFF\u0900-\u097F\u0600-\u06FF\u0980-\u0CFF\u0D00-\u0D7F]+/g, '');
   }
 
+  /**
+   * 20ms Opus packets used to go out as one JSON message each (50 msgs/s per session):
+   * base64 + JSON + a socket write per packet were top CPU costs under load. Clients that
+   * advertise supportsOpusBatch get OPUS_BATCH_PACKETS packets per message (~17 msgs/s);
+   * older clients keep one packet per message.
+   */
+  private static readonly OPUS_BATCH_PACKETS = 3;
+
+  private queueOpusPacket(state: ClientSessionState, packet: Buffer): void {
+    const b64 = packet.toString('base64');
+    if (!state.supportsOpusBatch) {
+      this.safeSendToClient(state, JSON.stringify({ type: 'audio_opus', data: b64 }));
+      return;
+    }
+    state.opusBatch.push(b64);
+    if (state.opusBatch.length >= LiveGateway.OPUS_BATCH_PACKETS) this.flushOpusBatch(state);
+  }
+
+  private flushOpusBatch(state: ClientSessionState): void {
+    if (!state.opusBatch?.length) return;
+    const packets = state.opusBatch;
+    state.opusBatch = [];
+    this.safeSendToClient(state, JSON.stringify({ type: 'audio_opus', packets }));
+  }
+
   private handleGeminiServerMessage(
     client: WebSocket,
     state: ClientSessionState,
@@ -1558,10 +1591,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
               try {
                 const opusPacket = state.opusEncoder.encode(frame);
-                this.safeSendToClient(state, JSON.stringify({
-                  type: 'audio_opus',
-                  data: opusPacket.toString('base64'),
-                }));
+                this.queueOpusPacket(state, opusPacket);
               } catch (err: any) {
                 this.logger.warn(`[${state.sessionId}] Opus encode error: ${err?.message}`);
               }
@@ -1642,12 +1672,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         try {
           const opusPacket = state.opusEncoder.encode(padded);
-          this.safeSendToClient(state, JSON.stringify({
-            type: 'audio_opus',
-            data: opusPacket.toString('base64'),
-          }));
+          this.queueOpusPacket(state, opusPacket);
         } catch {}
       }
+      // End of the model turn: send whatever is still batched right away
+      this.flushOpusBatch(state);
 
       const modelText = this.cleanLiveTranscriptText(state.modelTranscriptAccumulator.trim());
       const isGreetingTurn = state.isGreetingInProgress;
@@ -1787,6 +1816,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
       this.logger.log(`[${state.sessionId}] ⚡ [Interrupted] User voice interrupted model response`);
+      // Barge-in: never deliver audio that was still waiting in the batch
+      state.opusBatch = [];
       state.modelTranscriptAccumulator = '';
       state.hasModelSpokenThisTurn = false;
       state.awaitingGeminiResponse = false;
