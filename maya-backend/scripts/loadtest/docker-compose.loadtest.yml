@@ -1,0 +1,33 @@
+# Isolated load-test backend on the VPS: same image as production, fake Gemini upstream,
+# and a dead database/storage target so no production data is read or written.
+#
+#   cd ~/apps/maya-loadtest
+#   BACKEND_IMAGE=ghcr.io/yukifdo/speakwithmaya-backend:<sha> docker compose -f docker-compose.loadtest.yml up -d
+#   ... run the test ...
+#   docker compose -f docker-compose.loadtest.yml down
+#
+# It uses NO env_file on purpose: the production .env (real Supabase/R2/Gemini keys) must
+# never be loaded into this container.
+services:
+  maya-backend-loadtest:
+    image: ${BACKEND_IMAGE:-ghcr.io/yukifdo/speakwithmaya-backend:latest}
+    container_name: maya-backend-loadtest
+    restart: "no"
+    network_mode: "host"
+    environment:
+      - NODE_ENV=loadtest            # fake upstream refuses to run when NODE_ENV=production
+      - PORT=3100
+      - LIVE_FAKE_UPSTREAM=1
+      - GEMINI_API_KEY=loadtest-fake
+      # Points "Supabase" at this container itself: every DB/storage call gets a fast 404,
+      # so nothing reaches production data, but the code paths still run.
+      - SUPABASE_URL=http://127.0.0.1:3100/nodb
+      - SUPABASE_SECRET_KEY=loadtest-dummy
+      - JWT_SECRET=loadtest-dummy
+      - TTS_PREWARM=0
+      - AUDIO_WARMUP=0
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "2"

@@ -11,6 +11,7 @@ import { SessionsService, toValidUuid } from '../sessions/sessions.service.js';
 import { AuthService } from '../auth/auth.service.js';
 import { CreateSessionTokenDto } from '../sessions/dto/session.dto.js';
 import { randomUUID } from 'node:crypto';
+import { isFakeLiveUpstreamEnabled, connectFakeLiveSession } from './fake-live-upstream.js';
 
 let OpusEncoderClass: any = null;
 import('@discordjs/opus')
@@ -1198,7 +1199,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       let session: any = null;
 
-      session = await this.ai.live.connect({
+      // LIVE_FAKE_UPSTREAM=1 (never in NODE_ENV=production) swaps in a local fake for
+      // cost-free load tests; see fake-live-upstream.ts.
+      const connectLive = isFakeLiveUpstreamEnabled()
+        ? (params: any) => connectFakeLiveSession(params)
+        : (params: any) => this.ai.live.connect(params);
+      session = await connectLive({
         model: this.liveModel,
         config: {
           responseModalities: [Modality.AUDIO],
