@@ -4617,7 +4617,10 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
       let done = 0;
       for (const text of texts) {
         try {
-          const res = await this.generateTtsAudio({ text, voice: SessionsService.FEEDBACK_TTS_VOICE } as SessionTtsDto);
+          const res = await this.generateTtsAudio(
+            { text, voice: SessionsService.FEEDBACK_TTS_VOICE } as SessionTtsDto,
+            { priority: 'low' },
+          );
           if (res.audioBase64) done++;
         } catch {
           // best effort: the screen still synthesizes on demand
@@ -4639,7 +4642,10 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
         try {
           const ready = await this.initPiper();
           if (!ready) return;
-          await this.generateTtsAudio({ text: 'You said', voice: SessionsService.FEEDBACK_TTS_VOICE } as SessionTtsDto);
+          await this.generateTtsAudio(
+            { text: 'You said', voice: SessionsService.FEEDBACK_TTS_VOICE } as SessionTtsDto,
+            { priority: 'low' },
+          );
           this.logger.log(`[TTS prewarm] Piper loaded and fixed phrases cached in ${Date.now() - started}ms`);
         } catch (err: any) {
           this.logger.warn(`[TTS prewarm] Piper warmup failed: ${err?.message}`);
@@ -4649,7 +4655,11 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
     t.unref?.();
   }
 
-  async generateTtsAudio(dto: SessionTtsDto): Promise<{ audioBase64: string; mimeType: string }> {
+  async generateTtsAudio(
+    dto: SessionTtsDto,
+    opts: { priority?: 'high' | 'low' } = {},
+  ): Promise<{ audioBase64: string; mimeType: string }> {
+    const priority = opts.priority || 'high';
     const text = (dto.text || '').trim().slice(0, MAX_TTS_TEXT_LENGTH);
     if (!text) {
       return { audioBase64: '', mimeType: 'audio/wav' };
@@ -4663,16 +4673,24 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
 
     // Collapse concurrent identical requests into a single synthesis.
     const inFlight = this.inFlightTts.get(cacheKey);
-    if (inFlight) return inFlight;
+    if (inFlight) {
+      // A user is now waiting for a clip that background prewarm queued: move it ahead.
+      if (priority === 'high') this.piperWorker?.promote(cacheKey);
+      return inFlight;
+    }
 
-    const task = this.synthesizePiper(text, cacheKey).finally(() => {
+    const task = this.synthesizePiper(text, cacheKey, priority).finally(() => {
       this.inFlightTts.delete(cacheKey);
     });
     this.inFlightTts.set(cacheKey, task);
     return task;
   }
 
-  private async synthesizePiper(text: string, cacheKey: string): Promise<{ audioBase64: string; mimeType: string }> {
+  private async synthesizePiper(
+    text: string,
+    cacheKey: string,
+    priority: 'high' | 'low' = 'high',
+  ): Promise<{ audioBase64: string; mimeType: string }> {
     try {
       const ready = await this.initPiper();
       if (ready && (this.piperWorker || this.piperSession) && this.piperConfig) {
@@ -4705,7 +4723,7 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
         }
 
         const pcmBuffer = this.piperWorker
-          ? await this.piperWorker.synthesize(piperSegments)
+          ? await this.piperWorker.synthesize(piperSegments, { priority, key: cacheKey })
           : await this.runPiperInProcess(piperSegments);
 
         if (pcmBuffer.length > 0) {

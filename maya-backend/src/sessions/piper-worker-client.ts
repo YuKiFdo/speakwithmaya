@@ -8,25 +8,40 @@ export interface PiperSegment {
   pauseSamples: number;
 }
 
-interface Pending {
+export type PiperPriority = 'high' | 'low';
+
+interface Job {
+  id: number;
+  key?: string;
+  priority: PiperPriority;
+  segments: PiperSegment[];
   resolve: (pcm: Buffer) => void;
   reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
 }
 
-const REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * Max time the worker may spend generating ONE clip. It does not include time waiting in
+ * the queue: the old 30s timer started at enqueue, so with several clips queued the later
+ * ones expired before the worker reached them (and the worker still generated them,
+ * wasting CPU and delaying everything behind them).
+ */
+const PROCESSING_TIMEOUT_MS = 120_000;
 
 /**
- * Owns a single Piper inference worker thread. Requests are processed one at a
- * time inside the worker, so at most one vCPU is used for TTS and the main
- * event loop is never blocked by ONNX inference.
+ * Owns a single Piper inference worker thread. Jobs are queued here and sent to the
+ * worker one at a time (at most one vCPU for TTS; the event loop is never blocked).
+ * 'high' jobs (a user is waiting) run before 'low' ones (background prewarm), and a
+ * queued job can be promoted when a user asks for the same clip.
  */
 export class PiperWorkerClient {
   private readonly logger = new Logger('PiperWorkerClient');
   private worker: Worker | null = null;
   private readyPromise: Promise<void> | null = null;
-  private readonly pending = new Map<number, Pending>();
+  private readonly queue: Job[] = [];
+  private active: { job: Job; timer: ReturnType<typeof setTimeout>; timedOut: boolean } | null = null;
   private nextId = 1;
+  /** Keys promoted before their job was enqueued (phonemization is async upstream). */
+  private readonly promotedKeys = new Set<string>();
   private disposing = false;
 
   constructor(
@@ -86,22 +101,59 @@ export class PiperWorkerClient {
   }
 
   private onMessage(msg: any) {
-    const p = this.pending.get(msg?.id);
-    if (!p) return;
-    this.pending.delete(msg.id);
-    clearTimeout(p.timer);
-    if (msg.type === 'result') {
-      p.resolve(Buffer.from(msg.pcm as ArrayBuffer));
-    } else {
-      p.reject(new Error(msg.message || 'Piper worker synthesis failed'));
+    const a = this.active;
+    if (!a || a.job.id !== msg?.id) return;
+    clearTimeout(a.timer);
+    this.active = null;
+    if (!a.timedOut) {
+      if (msg.type === 'result') a.job.resolve(Buffer.from(msg.pcm as ArrayBuffer));
+      else a.job.reject(new Error(msg.message || 'Piper worker synthesis failed'));
     }
+    this.pump();
+  }
+
+  /** Sends the next job to the worker when it is idle. */
+  private pump() {
+    if (this.active || !this.worker || this.queue.length === 0) return;
+    const idx = this.queue.findIndex((j) => j.priority === 'high');
+    const job = this.queue.splice(idx >= 0 ? idx : 0, 1)[0];
+    const timer = setTimeout(() => {
+      // Reject the caller, but keep the worker marked busy until it actually replies,
+      // so the next job never runs concurrently with this one.
+      if (this.active?.job === job) this.active.timedOut = true;
+      job.reject(new Error('Piper synthesis timed out'));
+    }, PROCESSING_TIMEOUT_MS);
+    timer.unref?.();
+    this.active = { job, timer, timedOut: false };
+    this.worker.postMessage({ type: 'synthesize', id: job.id, segments: job.segments });
   }
 
   private failAll(err: Error) {
-    for (const [id, p] of this.pending) {
-      clearTimeout(p.timer);
-      p.reject(err);
-      this.pending.delete(id);
+    if (this.active) {
+      clearTimeout(this.active.timer);
+      if (!this.active.timedOut) this.active.job.reject(err);
+      this.active = null;
+    }
+    for (const job of this.queue.splice(0)) job.reject(err);
+  }
+
+  /** Number of jobs waiting (excluding the one being generated). */
+  get queueLength(): number {
+    return this.queue.length;
+  }
+
+  /** Moves a queued background job ahead (a user is now waiting for that clip). */
+  promote(key: string): void {
+    let found = false;
+    for (const j of this.queue) {
+      if (j.key === key) {
+        j.priority = 'high';
+        found = true;
+      }
+    }
+    if (!found && this.active?.job.key !== key) {
+      if (this.promotedKeys.size > 200) this.promotedKeys.clear();
+      this.promotedKeys.add(key);
     }
   }
 
@@ -110,19 +162,23 @@ export class PiperWorkerClient {
   }
 
   /** Returns 16-bit mono PCM for the given phoneme-id segments. */
-  async synthesize(segments: PiperSegment[]): Promise<Buffer> {
+  async synthesize(
+    segments: PiperSegment[],
+    opts: { priority?: PiperPriority; key?: string } = {},
+  ): Promise<Buffer> {
     await this.start();
-    const worker = this.worker;
-    if (!worker) throw new Error('Piper worker unavailable');
-    const id = this.nextId++;
+    if (!this.worker) throw new Error('Piper worker unavailable');
     return new Promise<Buffer>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error('Piper synthesis timed out'));
-      }, REQUEST_TIMEOUT_MS);
-      timer.unref?.();
-      this.pending.set(id, { resolve, reject, timer });
-      worker.postMessage({ type: 'synthesize', id, segments });
+      const promoted = !!opts.key && this.promotedKeys.delete(opts.key);
+      this.queue.push({
+        id: this.nextId++,
+        key: opts.key,
+        priority: promoted ? 'high' : opts.priority || 'high',
+        segments,
+        resolve,
+        reject,
+      });
+      this.pump();
     });
   }
 

@@ -403,8 +403,11 @@ export default function AnalyzingScreen() {
             // can take 10-20s). Later cards download in the background while the user reads.
             if (itemsWithAudio.length > 0 && !isCancelled) {
               const [first, ...rest] = itemsWithAudio;
-              void prefetchMayaVoice(rest.flatMap((it) => feedbackNarrationTexts(it)), 180000);
-              await prefetchMayaVoice(feedbackNarrationTexts(first), FIRST_CARD_VOICE_WAIT_MS);
+              // The server generates clips one at a time in arrival order, so request the first
+              // card's clips FIRST and only then queue the other cards behind them.
+              const firstCard = prefetchMayaVoice(feedbackNarrationTexts(first), FIRST_CARD_VOICE_WAIT_MS);
+              void firstCard.then(() => prefetchMayaVoice(rest.flatMap((it) => feedbackNarrationTexts(it)), 180000));
+              await firstCard;
             }
           }
         }
