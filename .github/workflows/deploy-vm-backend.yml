@@ -9,6 +9,13 @@ on:
       - '.github/workflows/deploy-vm-backend.yml'
   workflow_dispatch:
 
+# One VM deploy at a time across BOTH apps: on the 2-vCPU VMs a backend boot (~1 min of
+# full CPU) overlapping a frontend deploy starved the backend past PM2's ready timeout and
+# took the API down (2026-11-18 01:39-01:45 UTC). Runs queue instead of overlapping.
+concurrency:
+  group: vm-production-deploy
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build Production Backend

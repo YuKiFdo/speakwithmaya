@@ -2083,18 +2083,38 @@ export class AuthService {
    * optional in older databases, so on any error it falls back to select('*').
    */
   private async fetchAdminUsersProfiles() {
-    const cols =
-      'id, created_at, updated_at, display_name, phone_number, email, avatar_url, level, goal, challenge, ' +
-      'employment_status, daily_goal_minutes, native_language, plan_tier, plan_status, billing_cycle, ' +
-      'minutes_balance, monthly_minutes_allowance, add_on_minutes_balance, minutes_reset_at, ' +
-      'telco_provider, telco_subscriber_id, last_active_step, onboarding_completed_at, ' +
-      'onboarding_call_status, onboarding_call_duration_seconds, ' +
-      'baseline_fluency_score, baseline_grammar_score, baseline_pronunciation_score';
-    const narrow = await this.supabase.from('profiles').select(cols).order('created_at', { ascending: false });
-    if (!narrow.error) return narrow;
-    this.logger.warn(`[AdminUsers] Narrow profile select failed (${narrow.error.message}); using select('*')`);
+    // Self-healing column list: if the database lacks a column ("column profiles.x does not
+    // exist"), drop just that column, retry, and remember the working list for this process,
+    // so a schema difference costs one failed query per boot instead of one per rebuild.
+    // (onboarding_call_status / onboarding_call_duration_seconds were removed: they do not
+    // exist in production, and the call-status resolver already falls back to session data.)
+    let cols = this.adminUsersProfileCols;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const res = await this.supabase
+        .from('profiles')
+        .select(cols.join(', '))
+        .order('created_at', { ascending: false });
+      if (!res.error) {
+        this.adminUsersProfileCols = cols;
+        return res;
+      }
+      const missing = /column profiles\.(\w+) does not exist/i.exec(res.error.message || '')?.[1];
+      if (!missing || !cols.includes(missing)) break;
+      this.logger.warn(`[AdminUsers] profiles.${missing} does not exist; dropping it from the select`);
+      cols = cols.filter((c) => c !== missing);
+    }
+    this.logger.warn(`[AdminUsers] Narrow profile select failed; using select('*')`);
     return this.supabase.from('profiles').select('*').order('created_at', { ascending: false });
   }
+
+  private adminUsersProfileCols: string[] = [
+    'id', 'created_at', 'updated_at', 'display_name', 'phone_number', 'email', 'avatar_url', 'level',
+    'goal', 'challenge', 'employment_status', 'daily_goal_minutes', 'native_language', 'plan_tier',
+    'plan_status', 'billing_cycle', 'minutes_balance', 'monthly_minutes_allowance',
+    'add_on_minutes_balance', 'minutes_reset_at', 'telco_provider', 'telco_subscriber_id',
+    'last_active_step', 'onboarding_completed_at', 'baseline_fluency_score',
+    'baseline_grammar_score', 'baseline_pronunciation_score',
+  ];
 
   private async computeAdminUsersDataset(query?: AdminUsersQueryDto) {
     if (!this.supabase) {
