@@ -126,6 +126,7 @@ jobs:
           run_ssh() {
             if [ "$USE_SSHPASS" = true ]; then
               sshpass -p "$VM_PASSWORD" ssh \
+                -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 \
                 -o StrictHostKeyChecking=no \
                 -o PreferredAuthentications=password \
                 -o PubkeyAuthentication=no \
