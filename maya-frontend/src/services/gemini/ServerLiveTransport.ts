@@ -31,6 +31,7 @@ export class ServerLiveTransport implements ILiveTransport {
   private clientSessionId: string = '';
   private lastPingAt: number = 0;
   private lastPongAt: number = Date.now();
+  private recentRtts: number[] = [];
   private offlineHandler: (() => void) | null = null;
   private backpressureWarningCount: number = 0;
   private opusDecoder: any = null;
@@ -358,7 +359,11 @@ export class ServerLiveTransport implements ILiveTransport {
       case 'client_pong': {
         this.lastPongAt = Date.now();
         if (typeof msg.ts === 'number') {
-          const rtt = Math.max(0, Date.now() - msg.ts);
+          // Median of the last 3 RTTs: one slow ping (e.g. a brief server stall) must not
+          // flip the call into "poor" for the next ~10s.
+          this.recentRtts.push(Math.max(0, Date.now() - msg.ts));
+          if (this.recentRtts.length > 3) this.recentRtts.shift();
+          const rtt = [...this.recentRtts].sort((a, b) => a - b)[Math.floor(this.recentRtts.length / 2)];
           const buffered = this.ws?.bufferedAmount || 0;
           const quality: 'good' | 'fair' | 'poor' =
             rtt > 450 || buffered > 48000

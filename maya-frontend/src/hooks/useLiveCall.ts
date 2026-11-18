@@ -1222,8 +1222,11 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           onNetworkQualityChange: (quality: 'good' | 'fair' | 'poor', rtt: number) => {
             setNetworkQuality(quality);
             setNetworkRttMs(rtt);
+            // Network quality only tunes buffering. It must not toggle isSlowResponse: the
+            // RTT comes from client_ping, which the server answers on its main thread, so any
+            // server stall looked like a "poor network" and showed "Maya is thinking..." while
+            // Maya was speaking normally. isSlowResponse is for real waits for a reply only.
             if (quality === 'poor') {
-              setIsSlowResponse(true);
               playerRef.current.setJitterBuffer?.(350);
               speechSyncRef.current.setLatencyMs(410);
               captureRef.current.setNetworkQuality?.('poor');
@@ -1232,7 +1235,6 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               speechSyncRef.current.setLatencyMs(310);
               captureRef.current.setNetworkQuality?.('fair');
             } else {
-              setIsSlowResponse(false);
               playerRef.current.setJitterBuffer?.(150);
               speechSyncRef.current.setLatencyMs(210);
               captureRef.current.setNetworkQuality?.('good');
