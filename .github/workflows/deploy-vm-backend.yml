@@ -76,6 +76,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
 
+    # Azure primary is down (2026-11-17); its job failed every run after a ~2 min SSH timeout.
+    # Azure steps are skipped unless repo variable ENABLE_AZURE_DEPLOY == 'true'.
     strategy:
       fail-fast: false
       matrix:
@@ -87,12 +89,14 @@ jobs:
 
     steps:
       - name: Download deployment package
+        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         uses: actions/download-artifact@v4
         with:
           name: maya-backend-production
           path: ./deployment
 
       - name: Configure SSH and deploy
+        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         env:
           TARGET_ID: ${{ matrix.target.id }}
           VM_IP: ${{ matrix.target.id == 'azure' && (secrets.VM_IP || '20.198.240.185') || (secrets.BACKUP_VM_IP || '139.99.192.179') }}
@@ -107,8 +111,7 @@ jobs:
           USE_SSHPASS=false
 
           if [ -n "$VM_PASSWORD" ]; then
-            sudo apt-get update
-            sudo apt-get install -y sshpass
+            sudo apt-get install -y --no-install-recommends sshpass || (sudo apt-get update && sudo apt-get install -y sshpass)
             USE_SSHPASS=true
           elif [ -n "$SSH_KEY" ]; then
             echo "$SSH_KEY" > ~/.ssh/id_rsa
@@ -128,16 +131,16 @@ jobs:
                 -o PubkeyAuthentication=no \
                 "$VM_USER@$VM_IP" "$@"
             else
-              ssh -o StrictHostKeyChecking=no \
+              ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no \
                 "$VM_USER@$VM_IP" "$@"
             fi
           }
 
           run_rsync() {
             if [ "$USE_SSHPASS" = true ]; then
-              rsync -avz -e "sshpass -p '$VM_PASSWORD' ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
+              rsync -az --stats --skip-compress=gz/br/tgz/png/jpg/jpeg/webp/gif/mp3/mp4/woff/woff2/ttf/otf/zip -e "sshpass -p '$VM_PASSWORD' ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
             else
-              rsync -avz -e "ssh -o StrictHostKeyChecking=no" "$@"
+              rsync -az --stats --skip-compress=gz/br/tgz/png/jpg/jpeg/webp/gif/mp3/mp4/woff/woff2/ttf/otf/zip -e "ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no" "$@"
             fi
           }
 

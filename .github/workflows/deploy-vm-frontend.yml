@@ -19,6 +19,8 @@ jobs:
   deploy:
     name: Deploy Frontend (${{ matrix.target.name }})
     runs-on: ubuntu-latest
+    # Azure primary is down (2026-11-17); its job failed every run after a ~2 min SSH timeout.
+    # Azure steps are skipped unless repo variable ENABLE_AZURE_DEPLOY == 'true'.
     strategy:
       fail-fast: false # Ensure deployment to backup proceeds even if primary is offline
       matrix:
@@ -29,9 +31,11 @@ jobs:
             name: 'OVH Backup'
     steps:
       - name: Checkout code
+        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -39,10 +43,12 @@ jobs:
           cache-dependency-path: 'maya-frontend/package-lock.json'
 
       - name: Install dependencies
+        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         working-directory: ./maya-frontend
         run: npm ci
 
       - name: Export Expo Static Web
+        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         working-directory: ./maya-frontend
         env:
           EXPO_PUBLIC_BACKEND_URL: ${{ vars.EXPO_PUBLIC_BACKEND_URL || 'https://api.speakwithmaya.com' }}
@@ -54,6 +60,7 @@ jobs:
           node ./scripts/precompress-dist.js
 
       - name: Deploy to ${{ matrix.target.name }}
+        if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         env:
           TARGET_ID: ${{ matrix.target.id }}
           VM_IP: ${{ matrix.target.id == 'azure' && (secrets.VM_IP || '20.198.240.185') || (secrets.BACKUP_VM_IP || '139.99.192.179') }}
@@ -66,7 +73,7 @@ jobs:
 
           USE_SSHPASS=false
           if [ -n "$VM_PASSWORD" ]; then
-            sudo apt-get update && sudo apt-get install -y sshpass
+            sudo apt-get install -y --no-install-recommends sshpass || (sudo apt-get update && sudo apt-get install -y sshpass)
             USE_SSHPASS=true
           elif [ -n "$SSH_KEY" ]; then
             echo "$SSH_KEY" > ~/.ssh/id_rsa
@@ -80,17 +87,17 @@ jobs:
 
           run_ssh() {
             if [ "$USE_SSHPASS" = true ]; then
-              sshpass -p "$VM_PASSWORD" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$VM_USER@$VM_IP" "$@"
+              sshpass -p "$VM_PASSWORD" ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$VM_USER@$VM_IP" "$@"
             else
-              ssh -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
+              ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no "$VM_USER@$VM_IP" "$@"
             fi
           }
 
           run_rsync() {
             if [ "$USE_SSHPASS" = true ]; then
-              rsync -avz -e "sshpass -p '$VM_PASSWORD' ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
+              rsync -az --stats --skip-compress=gz/br/tgz/png/jpg/jpeg/webp/gif/mp3/mp4/woff/woff2/ttf/otf/zip -e "sshpass -p '$VM_PASSWORD' ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" "$@"
             else
-              rsync -avz -e "ssh -o StrictHostKeyChecking=no" "$@"
+              rsync -az --stats --skip-compress=gz/br/tgz/png/jpg/jpeg/webp/gif/mp3/mp4/woff/woff2/ttf/otf/zip -e "ssh -o ControlMaster=auto -o ControlPath=/tmp/ssh-mux-%r@%h -o ControlPersist=300 -o StrictHostKeyChecking=no" "$@"
             fi
           }
 
