@@ -367,6 +367,7 @@ export class SessionsService {
     } else {
       this.logger.warn('SUPABASE_URL or keys not configured; running in local fallback mode');
     }
+    this.schedulePiperWarmup();
   }
 
   private recordingsBucketReady: Promise<void> | null = null;
@@ -4577,6 +4578,77 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
     return segments.length > 0 ? segments : [{ text, pauseMs: 0 }];
   }
 
+  /**
+   * Exact texts the feedback screen (maya-frontend/src/app/onboarding/feedback.tsx,
+   * startCardAudioSequence) sends to POST /v1/sessions/tts with voice 'Amy'. They must match
+   * character for character, or the prewarmed clips are cache misses.
+   */
+  static feedbackNarrationTexts(item: {
+    type?: string;
+    title?: string;
+    subtitle?: string;
+    betterWay?: string;
+    whyExplanation?: string;
+  }): string[] {
+    const title = (item.title || '').trim();
+    const subtitle = (item.subtitle || '').trim();
+    const intro = title.endsWith('.') ? `${title} ${subtitle}` : `${title}. ${subtitle}`;
+    const leadIn =
+      item.type === 'grammar' || item.type === 'pronunciation'
+        ? 'A better way to say this is:'
+        : 'A more natural way to say this is:';
+    return [intro, 'You said', `${leadIn} ${item.betterWay || ''}`, item.whyExplanation || '']
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0 && t !== '.');
+  }
+
+  private static readonly FEEDBACK_TTS_VOICE = 'Amy';
+
+  /**
+   * Background, one-at-a-time synthesis of every clip the feedback screen will play, in the
+   * order it plays them. Sequential on purpose: Piper is CPU-bound and live calls share the
+   * 2 vCPUs. Results only live in the in-memory TTS cache (not persisted).
+   */
+  prewarmFeedbackTts(items: Array<Parameters<typeof SessionsService.feedbackNarrationTexts>[0]>): void {
+    if (process.env.TTS_PREWARM === '0' || !items?.length) return;
+    const texts = [...new Set(items.flatMap((it) => SessionsService.feedbackNarrationTexts(it)))];
+    void (async () => {
+      const started = Date.now();
+      let done = 0;
+      for (const text of texts) {
+        try {
+          const res = await this.generateTtsAudio({ text, voice: SessionsService.FEEDBACK_TTS_VOICE } as SessionTtsDto);
+          if (res.audioBase64) done++;
+        } catch {
+          // best effort: the screen still synthesizes on demand
+        }
+      }
+      this.logger.log(`[TTS prewarm] ${done}/${texts.length} feedback clips ready in ${Date.now() - started}ms`);
+    })();
+  }
+
+  /**
+   * Loads the Piper model shortly after boot (instead of on the first user's request, which
+   * took ~30s and made the feedback screen time out silently) and caches the fixed phrases.
+   */
+  private schedulePiperWarmup(): void {
+    if (process.env.TTS_PREWARM === '0' || process.env.NODE_ENV === 'test') return;
+    const t = setTimeout(() => {
+      void (async () => {
+        const started = Date.now();
+        try {
+          const ready = await this.initPiper();
+          if (!ready) return;
+          await this.generateTtsAudio({ text: 'You said', voice: SessionsService.FEEDBACK_TTS_VOICE } as SessionTtsDto);
+          this.logger.log(`[TTS prewarm] Piper loaded and fixed phrases cached in ${Date.now() - started}ms`);
+        } catch (err: any) {
+          this.logger.warn(`[TTS prewarm] Piper warmup failed: ${err?.message}`);
+        }
+      })();
+    }, 20_000); // after boot settles, so it does not compete with startup
+    t.unref?.();
+  }
+
   async generateTtsAudio(dto: SessionTtsDto): Promise<{ audioBase64: string; mimeType: string }> {
     const text = (dto.text || '').trim().slice(0, MAX_TTS_TEXT_LENGTH);
     if (!text) {
@@ -5189,6 +5261,10 @@ CRITICAL RULES:
                 this.logger.warn(`[SessionsService] Could not persist post-analysis corrections: ${persistErr?.message}`);
               }
             }
+
+            // Synthesize the correction screen's narration now (in the background), so it is
+            // already in the TTS memory cache when the user opens the feedback screen.
+            this.prewarmFeedbackTts(finalItems);
 
             return {
               sessionId: dto.sessionId,
