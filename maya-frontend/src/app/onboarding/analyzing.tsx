@@ -75,8 +75,8 @@ if (Platform.OS === 'web') {
 
 const AnimatedCircle = Animated.createAnimatedComponent(BaseCircle);
 
-/** Max time the analyzing screen waits for the first feedback card's narration audio. */
-const FIRST_CARD_VOICE_WAIT_MS = 25000;
+/** Max time the analyzing screen waits for the first feedback card's opening clips. */
+const FIRST_CARD_VOICE_WAIT_MS = 8000;
 const RADIUS = 98;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
@@ -119,6 +119,35 @@ export default function AnalyzingScreen() {
 
   // Staggered cascade entrance animations for the 4 step rows
   const stepFadeAnims = useRef(ANALYSIS_STEPS.map(() => new Animated.Value(0))).current;
+
+  // "Processing" micro-animation for the step currently in progress: a spinning arc around
+  // its icon plus a gentle icon pulse, so it is clear which step is working right now.
+  const [stepSpinAnim] = useState(() => new Animated.Value(0));
+  const [stepPulseAnim] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    const spin = Animated.loop(
+      Animated.timing(stepSpinAnim, {
+        toValue: 1,
+        duration: 1100,
+        easing: Easing.linear,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    );
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(stepPulseAnim, { toValue: 1, duration: 650, easing: Easing.inOut(Easing.quad), useNativeDriver: Platform.OS !== 'web' }),
+        Animated.timing(stepPulseAnim, { toValue: 0, duration: 650, easing: Easing.inOut(Easing.quad), useNativeDriver: Platform.OS !== 'web' }),
+      ]),
+    );
+    spin.start();
+    pulse.start();
+    return () => {
+      spin.stop();
+      pulse.stop();
+    };
+  }, [stepSpinAnim, stepPulseAnim]);
+  const stepSpinRotate = stepSpinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const stepPulseScale = stepPulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] });
 
   const triggerCompleteJump = () => {
     if (hasTriggeredJumpRef.current) return;
@@ -398,16 +427,23 @@ export default function AnalyzingScreen() {
             console.log(`[AnalyzingScreen] 🎯 Loaded ${itemsWithAudio.length} personalized feedback items (Supabase audio: ${supabaseAudioUrl})`);
             setLatestFeedbackItems(itemsWithAudio);
 
-            // Hold the analyzing screen until the FIRST card's narration is downloaded, so the
-            // feedback screen starts speaking immediately (Piper is slow on the server: a clip
-            // can take 10-20s). Later cards download in the background while the user reads.
+            // Hold the analyzing screen only for the first card's OPENING clips (intro, "You
+            // said", lead-in): short fixed phrases, usually already cached, which play first and
+            // take several seconds to speak. The card's sentence + explanation (slow to
+            // synthesize) and later cards download in the background meanwhile; the feedback
+            // screen waits for any clip that is still generating instead of skipping it.
             if (itemsWithAudio.length > 0 && !isCancelled) {
               const [first, ...rest] = itemsWithAudio;
-              // The server generates clips one at a time in arrival order, so request the first
-              // card's clips FIRST and only then queue the other cards behind them.
-              const firstCard = prefetchMayaVoice(feedbackNarrationTexts(first), FIRST_CARD_VOICE_WAIT_MS);
-              void firstCard.then(() => prefetchMayaVoice(rest.flatMap((it) => feedbackNarrationTexts(it)), 180000));
-              await firstCard;
+              const firstTexts = feedbackNarrationTexts(first);
+              const opening = firstTexts.slice(0, 3);
+              const firstCardRest = firstTexts.slice(3);
+              // The server generates clips one at a time in arrival order: request the
+              // opening first, then the rest of card 1, then the other cards.
+              const openingReady = prefetchMayaVoice(opening, FIRST_CARD_VOICE_WAIT_MS);
+              void openingReady
+                .then(() => prefetchMayaVoice(firstCardRest, 120000))
+                .then(() => prefetchMayaVoice(rest.flatMap((it) => feedbackNarrationTexts(it)), 180000));
+              await openingReady;
             }
           }
         }
@@ -643,6 +679,12 @@ export default function AnalyzingScreen() {
                     },
                   ]}
                 >
+                  {isCurrent && (
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[styles.stepSpinnerRing, { transform: [{ rotate: stepSpinRotate }] }]}
+                    />
+                  )}
                   {isCompleted ? (
                     <Animated.View
                       style={{
@@ -659,24 +701,28 @@ export default function AnalyzingScreen() {
                     >
                       <Ionicons name="checkmark" size={22} color="#0284C7" />
                     </Animated.View>
-                  ) : step.iconType === 'material' ? (
-                    <MaterialIcons
-                      name={step.iconName as any}
-                      size={20}
-                      color={isCurrent ? '#0284C7' : '#94A3B8'}
-                    />
-                  ) : step.iconType === 'ionicons' ? (
-                    <Ionicons
-                      name={step.iconName as any}
-                      size={20}
-                      color={isCurrent ? '#0284C7' : '#94A3B8'}
-                    />
                   ) : (
-                    <Feather
-                      name={step.iconName as any}
-                      size={18}
-                      color={isCurrent ? '#0284C7' : '#94A3B8'}
-                    />
+                    <Animated.View style={isCurrent ? { transform: [{ scale: stepPulseScale }] } : undefined}>
+                      {step.iconType === 'material' ? (
+                        <MaterialIcons
+                          name={step.iconName as any}
+                          size={20}
+                          color={isCurrent ? '#0284C7' : '#94A3B8'}
+                        />
+                      ) : step.iconType === 'ionicons' ? (
+                        <Ionicons
+                          name={step.iconName as any}
+                          size={20}
+                          color={isCurrent ? '#0284C7' : '#94A3B8'}
+                        />
+                      ) : (
+                        <Feather
+                          name={step.iconName as any}
+                          size={18}
+                          color={isCurrent ? '#0284C7' : '#94A3B8'}
+                        />
+                      )}
+                    </Animated.View>
                   )}
                 </Animated.View>
 
@@ -821,6 +867,19 @@ const styles = StyleSheet.create({
   },
   iconCirclePending: {
     backgroundColor: '#F1F5F9',
+  },
+  // Spinning arc around the in-progress step icon (top + right borders colored)
+  stepSpinnerRing: {
+    position: 'absolute',
+    top: -3,
+    left: -3,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    borderWidth: 2.5,
+    borderColor: 'transparent',
+    borderTopColor: '#0284C7',
+    borderRightColor: '#7DD3FC',
   },
   stepTextWrapper: {
     flex: 1,
