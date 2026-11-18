@@ -23,7 +23,7 @@ import { Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
 import { getBackendBaseUrl } from '@/utils/backend-url';
 import { apiClient } from '@/utils/api-client';
-import { fetchAllPracticeSessions } from '@/services/supabase';
+import { fetchPracticeSessionSummaries } from '@/services/supabase';
 import { adaptSvgColor } from '@/app/admin/roadmap';
 import {
   LockIcon,
@@ -232,8 +232,10 @@ const scrollTopBottomOffset = isDesktop
           if (__DEV__) console.warn('[Roadmap] get /v1/roadmap error:', err?.message || err);
           return null;
         }),
-        fetchAllPracticeSessions().catch((err) => {
-          if (__DEV__) console.warn('[Roadmap] fetchAllPracticeSessions caught:', err);
+        // Only status + roadmap_level_id are read below: the lightweight summary list is enough
+        // (the full list downloaded every transcript and correction)
+        fetchPracticeSessionSummaries().catch((err) => {
+          if (__DEV__) console.warn('[Roadmap] fetchPracticeSessionSummaries caught:', err);
           return [];
         }),
         apiClient.get('/v1/roadmap/user-progress').catch((err) => {

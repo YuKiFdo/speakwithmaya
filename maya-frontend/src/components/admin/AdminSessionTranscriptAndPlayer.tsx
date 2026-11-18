@@ -75,7 +75,9 @@ export function AdminSessionTranscriptAndPlayer({
     const loadDetail = async () => {
       setIsLoadingDetail(true);
       try {
-        const res = await fetch(`${baseUrl}/v1/sessions/${sessionId}`);
+        // Admin-only endpoint (the admin token is attached by AdminAuthStore's fetch wrapper);
+        // /v1/sessions/:id now requires the session owner's login.
+        const res = await fetch(`${baseUrl}/v1/admin/sessions/${sessionId}`);
         if (res.ok && !cancelled) {
           const data = await res.json();
           if (Array.isArray(data.turns) && data.turns.length > 0) {

@@ -52,7 +52,8 @@ import { DesktopTopBar } from '@/components/navigation/desktop-top-bar';
 import { CommonPopup, PopupPreset } from '@/components/ui/common-popup';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { HistoryDetailSkeleton } from '@/components/ui/skeleton';
-import { fetchAllPracticeSessions, isIntroSessionTopic } from '@/services/supabase';
+import { fetchPracticeSessionList, fetchPracticeSessionDetail, isIntroSessionTopic } from '@/services/supabase';
+import type { SessionHistoryRecord } from '@/services/supabase';
 import { useUserStats } from '@/hooks/useUserStats';
 import { createUniversalSound, UniversalSound } from '@/services/audio/universal-sound';
 
@@ -81,6 +82,8 @@ export interface TranscriptTurn {
 
 export interface HistorySession {
   id: string;
+  /** false until the transcript/corrections are fetched for this session */
+  detailsLoaded?: boolean;
   mode: PracticeMode;
   title: string;
   dateGroup: 'Today' | 'Yesterday' | 'May 25, 2026' | string;
@@ -397,158 +400,11 @@ const MobileSessionCard = React.memo(function MobileSessionCard({
   );
 });
 
-export default function HistoryScreen() {
-  const params = useLocalSearchParams<{ name?: string }>();
-  const stats = useUserStats();
-  const displayName = stats.displayName || params.name || 'Learner';
-  const { isPhone } = useBreakpoint();
-  const isDesktop = !isPhone;
-  const { width: windowWidth } = useWindowDimensions();
-
-  // Navigation & Popups
-  const [activeTab, setActiveTab] = useState<DashboardTab>('history');
-  const isPro = stats.isPro;
-  const [activePopup, setActivePopup] = useState<PopupPreset | null>(null);
-
-  // Search & Filter
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMode, setSelectedMode] = useState<PracticeMode>('all');
-  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
-
-  // Immediate UI selection state for instantaneous card animation
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  // Heavy detail view state (transitioned concurrently to keep list clicks 60fps)
-  const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
-  const [isTransitioningDetail, setIsTransitioningDetail] = useState(false);
-  const [, startTransition] = useTransition();
-
-  // Audio Playback State
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackProgress, setPlaybackProgress] = useState(0);
-  const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
-  const [totalDurationSeconds, setTotalDurationSeconds] = useState(0);
-  const [waveformBars, setWaveformBars] = useState<number[]>(() => generateSpeechEnvelopeBars(42));
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
-  const [collapsedCorrections, setCollapsedCorrections] = useState<Record<string, boolean>>({});
-  const [playingTurnId, setPlayingTurnId] = useState<string | null>(null);
-  const [unreachableAudioUrls, setUnreachableAudioUrls] = useState<Set<string>>(new Set());
-
-  const activeAudioRef = useRef<UniversalSound | null>(null);
-  const activeAudioSessionIdRef = useRef<string | null>(null);
-  const playlistIndexRef = useRef<number>(-1);
-  const isPlaylistModeRef = useRef<boolean>(false);
-
-  // Stop active audio helper
-  const stopAudio = useCallback(() => {
-    isPlaylistModeRef.current = false;
-    playlistIndexRef.current = -1;
-    if (activeAudioRef.current) {
-      try {
-        activeAudioRef.current.stop();
-      } catch {}
-      activeAudioRef.current = null;
-    }
-    activeAudioSessionIdRef.current = null;
-    setIsPlaying(false);
-    setPlayingTurnId(null);
-    setPlaybackProgress(0);
-    setCurrentTimeSeconds(0);
-  }, []);
-
-  const handleSelectSession = useCallback((id: string | null) => {
-    if (id === null) {
-      // Instant back transition without concurrent lag or audio stutter
-      stopAudio();
-      setSelectedSessionId(null);
-      setDetailSessionId(null);
-      setIsTransitioningDetail(false);
-      return;
-    }
-    // Instantly highlight the newly clicked session card
-    setSelectedSessionId(id);
-    stopAudio();
-    setIsTransitioningDetail(true);
-
-    // Let the skeleton render on the next animation frame, then populate the heavy detail data
-    requestAnimationFrame(() => {
-      startTransition(() => {
-        setDetailSessionId(id);
-        setIsTransitioningDetail(false);
-      });
-    });
-  }, [startTransition, stopAudio]);
-
-  // Handle Android back gesture / hardware back button when inside a session detail
-  useEffect(() => {
-    if (!selectedSessionId) return;
-
-    const onBackPress = () => {
-      handleSelectSession(null);
-      return true; // Prevents popping tab to dashboard home
-    };
-
-    const backSubscription = BackHandler.addEventListener(
-      'hardwareBackPress',
-      onBackPress
-    );
-
-    return () => backSubscription.remove();
-  }, [selectedSessionId, handleSelectSession]);
-
-  useEffect(() => {
-    return () => {
-      stopAudio();
-    };
-  }, []);
-
-  // When switching selected session, stop previous audio
-  useEffect(() => {
-    if (activeAudioSessionIdRef.current && selectedSessionId && activeAudioSessionIdRef.current !== selectedSessionId) {
-      stopAudio();
-    }
-  }, [selectedSessionId]);
-
-  // Transcript scroll ref for "Jump to Next Correction"
-  const transcriptScrollRef = useRef<ScrollView>(null);
-  const correctionPositions = useRef<{ [id: string]: number }>({});
-  const lastCorrectionIndexScrolled = useRef<number>(-1);
-
-  // Dynamic & cached practice sessions
-  const [allSessions, setAllSessions] = useState<HistorySession[]>(() =>
-    (cachedHistorySessions || []).filter((s) => !isIntroSessionTopic(s.title))
-  );
-  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedHistorySessions || cachedHistorySessions.length === 0);
-
-
-  // Synchronize desktop selection
-  useEffect(() => {
-    if (isDesktop && !selectedSessionId && allSessions.length > 0) {
-      setSelectedSessionId(allSessions[0].id);
-      setDetailSessionId(allSessions[0].id);
-    }
-  }, [isDesktop, selectedSessionId, allSessions]);
-
-  // Handle Tab Switch
-  const handleSelectTab = (tab: DashboardTab) => {
-    if (tab === 'home') {
-      router.push({ pathname: '/dashboard', params });
-    } else if (tab === 'roadmap') {
-      router.push({ pathname: '/roadmap', params });
-    } else if (tab === 'account') {
-      router.push({ pathname: '/account', params });
-    } else {
-      setActiveTab(tab);
-    }
-  };
-
-
-  useEffect(() => {
-    fetchAllPracticeSessions().then((records) => {
-      const validRecords = (records || []).filter(
-        (r) => !isIntroSessionTopic(r.topic, r.scenario_title || r.scenarioTitle, r.scenario_id || r.scenarioId)
-      );
-      if (validRecords && validRecords.length > 0) {
-        const converted: HistorySession[] = validRecords.map((r, idx) => {
+/**
+ * Converts a backend session record into the History screen's view model.
+ * List records (details_loaded: false) have no transcript yet; it is loaded when opened.
+ */
+function convertRecordToHistorySession(r: SessionHistoryRecord): HistorySession {
           const d = parseIsoDateSafe(r.start_time);
           const durationMin = Math.max(1, Math.ceil((r.duration_seconds || 60) / 60));
           const durSecs = (r.duration_seconds || 0) % 60;
@@ -734,7 +590,7 @@ export default function HistoryScreen() {
           }
 
           // If still completely empty
-          if (transcript.length === 0) {
+          if (transcript.length === 0 && r.details_loaded !== false) {
             transcript.push({
               id: `turn-${r.id}-0`,
               speaker: 'ai',
@@ -765,7 +621,8 @@ export default function HistoryScreen() {
             durationString: `${durationMin} mins`,
             recordingLengthString,
             durationSeconds: r.duration_seconds || 60,
-            correctionsCount: rawCorrections.length,
+            correctionsCount: r.details_loaded === false ? r.corrections_count ?? 0 : rawCorrections.length,
+            detailsLoaded: r.details_loaded !== false,
             fullConversationAudioUrl: r.fullConversationAudioUrl || null,
             userAudioUrl: r.userAudioUrl || null,
             modelAudioUrl: r.modelAudioUrl || null,
@@ -788,7 +645,160 @@ export default function HistoryScreen() {
               whyExplanation: c.explanation,
             })),
           };
-        });
+}
+
+export default function HistoryScreen() {
+  const params = useLocalSearchParams<{ name?: string }>();
+  const stats = useUserStats();
+  const displayName = stats.displayName || params.name || 'Learner';
+  const { isPhone } = useBreakpoint();
+  const isDesktop = !isPhone;
+  const { width: windowWidth } = useWindowDimensions();
+
+  // Navigation & Popups
+  const [activeTab, setActiveTab] = useState<DashboardTab>('history');
+  const isPro = stats.isPro;
+  const [activePopup, setActivePopup] = useState<PopupPreset | null>(null);
+
+  // Search & Filter
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedMode, setSelectedMode] = useState<PracticeMode>('all');
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+
+  // Immediate UI selection state for instantaneous card animation
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  // Heavy detail view state (transitioned concurrently to keep list clicks 60fps)
+  const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
+  const [isTransitioningDetail, setIsTransitioningDetail] = useState(false);
+  const [, startTransition] = useTransition();
+
+  // Audio Playback State
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackProgress, setPlaybackProgress] = useState(0);
+  const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
+  const [totalDurationSeconds, setTotalDurationSeconds] = useState(0);
+  const [waveformBars, setWaveformBars] = useState<number[]>(() => generateSpeechEnvelopeBars(42));
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [collapsedCorrections, setCollapsedCorrections] = useState<Record<string, boolean>>({});
+  const [playingTurnId, setPlayingTurnId] = useState<string | null>(null);
+  const [unreachableAudioUrls, setUnreachableAudioUrls] = useState<Set<string>>(new Set());
+
+  const activeAudioRef = useRef<UniversalSound | null>(null);
+  const activeAudioSessionIdRef = useRef<string | null>(null);
+  const playlistIndexRef = useRef<number>(-1);
+  const isPlaylistModeRef = useRef<boolean>(false);
+
+  // Stop active audio helper
+  const stopAudio = useCallback(() => {
+    isPlaylistModeRef.current = false;
+    playlistIndexRef.current = -1;
+    if (activeAudioRef.current) {
+      try {
+        activeAudioRef.current.stop();
+      } catch {}
+      activeAudioRef.current = null;
+    }
+    activeAudioSessionIdRef.current = null;
+    setIsPlaying(false);
+    setPlayingTurnId(null);
+    setPlaybackProgress(0);
+    setCurrentTimeSeconds(0);
+  }, []);
+
+  const handleSelectSession = useCallback((id: string | null) => {
+    if (id === null) {
+      // Instant back transition without concurrent lag or audio stutter
+      stopAudio();
+      setSelectedSessionId(null);
+      setDetailSessionId(null);
+      setIsTransitioningDetail(false);
+      return;
+    }
+    // Instantly highlight the newly clicked session card
+    setSelectedSessionId(id);
+    stopAudio();
+    setIsTransitioningDetail(true);
+
+    // Let the skeleton render on the next animation frame, then populate the heavy detail data
+    requestAnimationFrame(() => {
+      startTransition(() => {
+        setDetailSessionId(id);
+        setIsTransitioningDetail(false);
+      });
+    });
+  }, [startTransition, stopAudio]);
+
+  // Handle Android back gesture / hardware back button when inside a session detail
+  useEffect(() => {
+    if (!selectedSessionId) return;
+
+    const onBackPress = () => {
+      handleSelectSession(null);
+      return true; // Prevents popping tab to dashboard home
+    };
+
+    const backSubscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      onBackPress
+    );
+
+    return () => backSubscription.remove();
+  }, [selectedSessionId, handleSelectSession]);
+
+  useEffect(() => {
+    return () => {
+      stopAudio();
+    };
+  }, []);
+
+  // When switching selected session, stop previous audio
+  useEffect(() => {
+    if (activeAudioSessionIdRef.current && selectedSessionId && activeAudioSessionIdRef.current !== selectedSessionId) {
+      stopAudio();
+    }
+  }, [selectedSessionId]);
+
+  // Transcript scroll ref for "Jump to Next Correction"
+  const transcriptScrollRef = useRef<ScrollView>(null);
+  const correctionPositions = useRef<{ [id: string]: number }>({});
+  const lastCorrectionIndexScrolled = useRef<number>(-1);
+
+  // Dynamic & cached practice sessions
+  const [allSessions, setAllSessions] = useState<HistorySession[]>(() =>
+    (cachedHistorySessions || []).filter((s) => !isIntroSessionTopic(s.title))
+  );
+  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedHistorySessions || cachedHistorySessions.length === 0);
+
+
+  // Synchronize desktop selection
+  useEffect(() => {
+    if (isDesktop && !selectedSessionId && allSessions.length > 0) {
+      setSelectedSessionId(allSessions[0].id);
+      setDetailSessionId(allSessions[0].id);
+    }
+  }, [isDesktop, selectedSessionId, allSessions]);
+
+  // Handle Tab Switch
+  const handleSelectTab = (tab: DashboardTab) => {
+    if (tab === 'home') {
+      router.push({ pathname: '/dashboard', params });
+    } else if (tab === 'roadmap') {
+      router.push({ pathname: '/roadmap', params });
+    } else if (tab === 'account') {
+      router.push({ pathname: '/account', params });
+    } else {
+      setActiveTab(tab);
+    }
+  };
+
+
+  useEffect(() => {
+    fetchPracticeSessionList().then((records) => {
+      const validRecords = (records || []).filter(
+        (r) => !isIntroSessionTopic(r.topic, r.scenario_title || r.scenarioTitle, r.scenario_id || r.scenarioId)
+      );
+      if (validRecords && validRecords.length > 0) {
+        const converted: HistorySession[] = validRecords.map((r) => convertRecordToHistorySession(r));
 
         cachedHistorySessions = converted;
         setAllSessions(converted);
@@ -850,6 +860,24 @@ export default function HistoryScreen() {
       allSessions.find((s) => s.id === targetId) || (isDesktop ? allSessions[0] : null)
     );
   }, [allSessions, detailSessionId, selectedSessionId, isDesktop]);
+
+  // Load the opened session's transcript/corrections on demand (the list has none)
+  const detailRequestsRef = useRef(new Set<string>());
+  useEffect(() => {
+    const target = activeSession;
+    if (!target || target.detailsLoaded !== false || detailRequestsRef.current.has(target.id)) return;
+    detailRequestsRef.current.add(target.id);
+    fetchPracticeSessionDetail(target.id)
+      .then((record) => {
+        const full = record ? convertRecordToHistorySession(record) : { ...target, detailsLoaded: true };
+        const merge = (list: HistorySession[]) => list.map((s) => (s.id === target.id ? full : s));
+        setAllSessions((prev) => merge(prev));
+        if (cachedHistorySessions) cachedHistorySessions = merge(cachedHistorySessions);
+      })
+      .finally(() => {
+        detailRequestsRef.current.delete(target.id);
+      });
+  }, [activeSession]);
 
   // Check if active session has any stored audio recordings
   const hasActiveRecording = useMemo(() => {
@@ -1444,7 +1472,7 @@ export default function HistoryScreen() {
 
                 {/* ── RIGHT COLUMN: SELECTED SESSION DETAIL ── */}
                 <View style={styles.desktopDetailColumn}>
-                  {isLoading || isTransitioningDetail ? (
+                  {isLoading || isTransitioningDetail || activeSession?.detailsLoaded === false ? (
                     <HistoryDetailSkeleton />
                   ) : activeSession ? (
                     <Reveal key={activeSession.id} variant="fade" style={{ flex: 1 }}>
@@ -1851,7 +1879,7 @@ export default function HistoryScreen() {
               </ScrollView>
 
               {/* ── MOBILE DETAIL VIEW (Slide-in overlay) ── */}
-              {selectedSessionId && (isLoading || isTransitioningDetail) ? (
+              {selectedSessionId && (isLoading || isTransitioningDetail || activeSession?.detailsLoaded === false) ? (
                 <View style={[styles.mobileDetailContainer, StyleSheet.absoluteFill, { zIndex: 10 }]}>
                   <HistoryDetailSkeleton />
                 </View>

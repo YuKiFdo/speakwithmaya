@@ -3596,10 +3596,17 @@ ${memoryPart}`;
     return data || [];
   }
 
-  async getUserSessions(userId?: string) {
+  /**
+   * options.light: list view without transcripts, corrections or storage listing; each record
+   *   gets `corrections_count` and `details_loaded: false` (the app loads one session's details
+   *   when it is opened, via getUserSessions(userId, { sessionId })).
+   * options.sessionId: only that session (must belong to userId), with full details.
+   */
+  async getUserSessions(userId?: string, options: { light?: boolean; sessionId?: string } = {}) {
     if (!this.supabase) {
       return [];
     }
+    const light = Boolean(options.light) && !options.sessionId;
 
     // Fire-and-forget: do not block the HTTP request on orphan reconciliation
     this.reconcileOrphanedSessions().catch((err) => {
@@ -3609,14 +3616,21 @@ ${memoryPart}`;
     try {
       let query = this.supabase
         .from('sessions')
-        .select(`
+        .select(
+          light
+            ? '*, grammar_corrections (count)'
+            : `
           *,
           session_turns (*),
           grammar_corrections (*)
-        `);
+        `,
+        );
 
       if (userId) {
         query = query.eq('user_id', userId);
+      }
+      if (options.sessionId) {
+        query = query.eq('id', options.sessionId);
       }
 
       // Bound to latest 50 sessions for high responsiveness
@@ -3640,11 +3654,19 @@ ${memoryPart}`;
         );
       };
       const sessions = (rawSessions || []).filter((s: any) => !isIntroSession(s));
+      const correctionCounts = new Map<string, number>();
+      if (light) {
+        for (const s of sessions as any[]) {
+          correctionCounts.set(s.id, Number(s.grammar_corrections?.[0]?.count || 0));
+          s.grammar_corrections = [];
+          s.session_turns = [];
+        }
+      }
 
       // Inspect storage files with BoundedMap cache to eliminate repetitive storage.list() calls
       const sessionFilesMap = new Map<string, Set<string>>();
       const sbClient = this.supabase;
-      if (sbClient && sessions && sessions.length > 0) {
+      if (!light && sbClient && sessions && sessions.length > 0) {
         const uncachedSessions = sessions.filter((sess: any) => {
           const validId = toValidUuid(sess.id);
           const cached = this.completedSessionFilesCache.get(validId) || this.completedSessionFilesCache.get(sess.id);
@@ -3823,6 +3845,9 @@ ${memoryPart}`;
           roadmap_level_id: matchedRoadmapLevelId,
           level_number: sess.level_number || null,
           is_roadmap: isRoadmapSession,
+          ...(light
+            ? { details_loaded: false, corrections_count: correctionCounts.get(sess.id) || 0 }
+            : { details_loaded: true, corrections_count: mappedCorrections.length }),
         };
       });
     } catch (e: unknown) {

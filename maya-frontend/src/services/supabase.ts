@@ -56,6 +56,9 @@ export interface SessionHistoryRecord {
   scenarioTitle?: string;
   is_roadmap?: boolean;
   isRoadmap?: boolean;
+  /** false: list record without transcript/corrections (load with fetchPracticeSessionDetail) */
+  details_loaded?: boolean;
+  corrections_count?: number;
   hints_used_count?: number;
   hintsUsedCount?: number;
 }
@@ -171,6 +174,44 @@ export async function fetchResumeCandidates(): Promise<any[]> {
     }
   } catch {}
   return fetchAllPracticeSessions();
+}
+
+/**
+ * History list without transcripts/corrections (details_loaded: false on each record).
+ * Falls back to the full list if the backend does not support ?view=list yet.
+ */
+export async function fetchPracticeSessionList(): Promise<SessionHistoryRecord[]> {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+    return [];
+  }
+  if (!OnboardingStore.getState().accessToken) {
+    return [];
+  }
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${getBackendBaseUrl()}/v1/sessions?view=list`, { method: 'GET', headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.filter((s: any) => !isIntroSessionTopic(s.topic, s.scenario_title || s.scenarioTitle, s.scenario_id || s.scenarioId));
+      }
+    }
+  } catch {}
+  return fetchAllPracticeSessions();
+}
+
+/** One of the signed-in user's sessions with transcript and corrections, or null. */
+export async function fetchPracticeSessionDetail(sessionId: string): Promise<SessionHistoryRecord | null> {
+  if (!OnboardingStore.getState().accessToken) return null;
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${getBackendBaseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}`, { method: 'GET', headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.id && Array.isArray(data.turns)) return data as SessionHistoryRecord;
+    }
+  } catch {}
+  return null;
 }
 
 /**

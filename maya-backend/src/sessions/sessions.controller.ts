@@ -12,6 +12,7 @@ import {
   UseGuards,
   ValidationPipe,
   UnauthorizedException,
+  NotFoundException,
 } from '@nestjs/common';
 import { SessionsService } from './sessions.service.js';
 import { AuthGuard, AdminGuard, GetUser } from '../auth/index.js';
@@ -114,11 +115,29 @@ export class SessionsController {
     if (view === 'resume') {
       return this.sessionsService.getUserResumeCandidates(userId);
     }
+    // ?view=list: history list without transcripts/corrections; details are loaded per session
+    if (view === 'list') {
+      return this.sessionsService.getUserSessions(userId, { light: true });
+    }
     return this.sessionsService.getUserSessions(userId);
   }
 
+  /**
+   * One of the signed-in user's own sessions, with transcript and corrections (History detail).
+   * Previously unauthenticated: anyone with a session id could read its transcript. The admin
+   * transcript viewer now uses GET /v1/admin/sessions/:id instead.
+   */
   @Get('sessions/:id')
-  async getSessionById(@Param('id') sessionId: string) {
+  @UseGuards(AuthGuard)
+  async getSessionById(@GetUser('id') userId: string, @Param('id') sessionId: string) {
+    const [record] = await this.sessionsService.getUserSessions(userId, { sessionId });
+    if (!record) throw new NotFoundException('Session not found');
+    return record;
+  }
+
+  @Get('admin/sessions/:id')
+  @UseGuards(AdminGuard)
+  async getAdminSessionById(@Param('id') sessionId: string) {
     return this.sessionsService.getSessionDetail(sessionId);
   }
 
