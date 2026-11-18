@@ -20,7 +20,8 @@ import {
   getLatestSessionReport,
   FeedbackItem,
 } from '@/utils/session-report-store';
-import { speakAsCallirrhoe, stopMayaVoiceFallback } from '@/utils/maya-voice-fallback';
+import { speakAsCallirrhoe, stopMayaVoiceFallback, isMayaVoiceCached } from '@/utils/maya-voice-fallback';
+import { feedbackIntroText, feedbackBetterWayText, YOU_SAID_TEXT } from '@/utils/feedback-narration';
 import { playUnderstoodTapSound, playFinishReviewFanfare } from '@/services/sound/sound-service';
 import Svg, { Path } from 'react-native-svg';
 import { useUserStats } from '@/hooks/useUserStats';
@@ -219,6 +220,18 @@ export default function SessionFeedbackScreen() {
   const activeAudioResolveRef = useRef<(() => void) | null>(null);
   const sequenceIdRef = useRef<number>(0);
 
+  // Reveal entrance: picks up where the analyzing screen's fade-out ends, so the hand-off
+  // reads as one continuous transition instead of a hard cut.
+  const [revealAnim] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    Animated.timing(revealAnim, {
+      toValue: 1,
+      duration: 420,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [revealAnim]);
+
   // Stop active playback on unmount, blur, slide change, or manual stop
   const stopActiveAudio = useCallback(() => {
     sequenceIdRef.current++;
@@ -297,7 +310,12 @@ export default function SessionFeedbackScreen() {
       activeAudioResolveRef.current = safeResolve;
 
       const wordCount = (text || '').split(/\s+/).filter(Boolean).length;
-      const maxWaitMs = Math.max(6000, wordCount * 800);
+      // Playback budget, plus time to synthesize when the clip is not downloaded yet.
+      // Piper on the 2-vCPU server needs ~2-4s per second of speech, so a clip that is
+      // still generating used to be skipped silently; wait for it instead (the user can
+      // still tap Understood / Skip at any time, which cancels the sequence).
+      const synthesisBudgetMs = isMayaVoiceCached(text) ? 0 : Math.min(45000, 8000 + wordCount * 1500);
+      const maxWaitMs = Math.max(6000, wordCount * 800) + synthesisBudgetMs;
       const timeoutId = setTimeout(safeResolve, maxWaitMs);
 
       const ok = speakAsCallirrhoe(text, {
@@ -417,11 +435,7 @@ export default function SessionFeedbackScreen() {
 
     // Step 1: Voice announces header intro:
     // "Let’s make this more correct. Here’s a sentence from your conversation and how you can improve it."
-    const cleanTitle = (item.title || '').trim();
-    const cleanSubtitle = (item.subtitle || '').trim();
-    const introText = cleanTitle.endsWith('.')
-      ? `${cleanTitle} ${cleanSubtitle}`
-      : `${cleanTitle}. ${cleanSubtitle}`;
+    const introText = feedbackIntroText(item);
 
     setCurrentSpeakingCard('intro');
     await speakAsCallirrhoePromise(introText, 1.0);
@@ -432,7 +446,7 @@ export default function SessionFeedbackScreen() {
 
     // Step 2: Auto play user audio with spoken lead-in ("You said")
     setCurrentSpeakingCard('youSaid');
-    await speakAsCallirrhoePromise('You said', 1.0);
+    await speakAsCallirrhoePromise(YOU_SAID_TEXT, 1.0);
     if (isCancelled()) return;
 
     await new Promise((r) => setTimeout(r, 150));
@@ -446,11 +460,7 @@ export default function SessionFeedbackScreen() {
 
     // Step 3: Auto play correct audio with matching spoken lead-in
     setCurrentSpeakingCard('betterWay');
-    const isBetterWayCard = item.type === 'grammar' || item.type === 'pronunciation';
-    const leadInText = isBetterWayCard
-      ? 'A better way to say this is:'
-      : 'A more natural way to say this is:';
-    const betterWayNarration = `${leadInText} ${item.betterWay}`;
+    const betterWayNarration = feedbackBetterWayText(item);
     await speakAsCallirrhoePromise(betterWayNarration, 1.0);
     if (isCancelled()) return;
 
@@ -474,11 +484,7 @@ export default function SessionFeedbackScreen() {
     stopActiveAudio();
     const seqId = ++sequenceIdRef.current;
     setCurrentSpeakingCard('intro');
-    const cleanTitle = (currentItem.title || '').trim();
-    const cleanSubtitle = (currentItem.subtitle || '').trim();
-    const introText = cleanTitle.endsWith('.')
-      ? `${cleanTitle} ${cleanSubtitle}`
-      : `${cleanTitle}. ${cleanSubtitle}`;
+    const introText = feedbackIntroText(currentItem);
 
     speakAsCallirrhoePromise(introText, 1.0).finally(() => {
       if (sequenceIdRef.current === seqId) {
@@ -511,11 +517,7 @@ export default function SessionFeedbackScreen() {
     stopActiveAudio();
     const seqId = ++sequenceIdRef.current;
     setCurrentSpeakingCard('betterWay');
-    const isBetterWayCard = currentItem.type === 'grammar' || currentItem.type === 'pronunciation';
-    const leadInText = isBetterWayCard
-      ? 'A better way to say this is:'
-      : 'A more natural way to say this is:';
-    const betterWayNarration = `${leadInText} ${currentItem.betterWay}`;
+    const betterWayNarration = feedbackBetterWayText(currentItem);
     speakAsCallirrhoePromise(betterWayNarration, 1.0).finally(() => {
       if (sequenceIdRef.current === seqId) {
         setCurrentSpeakingCard(null);
@@ -763,8 +765,21 @@ export default function SessionFeedbackScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={[styles.container, isPhone && styles.containerPhone, isWebOrDesktop && styles.containerDesktop]}>
-        
+      <Animated.View
+        style={[
+          styles.container,
+          isPhone && styles.containerPhone,
+          isWebOrDesktop && styles.containerDesktop,
+          {
+            opacity: revealAnim,
+            transform: [
+              { translateY: revealAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) },
+              { scale: revealAnim.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) },
+            ],
+          },
+        ]}
+      >
+
         {/* Top Header: Back Button + 5-Segment Progress Bar */}
         <View style={[styles.headerRow, isPhone && styles.headerRowPhone]}>
           <Pressable
@@ -1048,7 +1063,7 @@ export default function SessionFeedbackScreen() {
           }}
         />
 
-      </View>
+      </Animated.View>
     </SafeAreaView>
   );
 }

@@ -65,7 +65,11 @@ const DAILY_GOAL_AUDIO_ASSETS: Record<string, any> = {
 };
 
 let audioCtx: AudioContext | null = null;
-let activeWhooshNodes: { noise: AudioBufferSourceNode; gain: GainNode } | null = null;
+/** Every scanning whoosh still sounding on web (repeats overlap), so stop can fade them all. */
+const activeWhooshVoices = new Set<{ sources: AudioScheduledSourceNode[]; gains: GainNode[] }>();
+let scanningRepeatTimer: ReturnType<typeof setInterval> | null = null;
+let nativeScanningFadeTimer: ReturnType<typeof setInterval> | null = null;
+const SCANNING_REPEAT_MS = 3200; // whoosh is 3.4s long, so repeats overlap its fade-out
 let activeNativeScanningPlayer: any = null;
 
 interface VoicePlayerHandle {
@@ -783,7 +787,10 @@ export function playScanningSound(): void {
   if (Platform.OS !== 'web') {
     try {
       const player = createAudioPlayer(SCANNING_RADAR_ASSET);
-      player.volume = 0.55;
+      player.volume = 0.45;
+      // Loop for as long as the analyzing screen waits (analysis + first-card voice can take
+      // 20s+); stopScanningSound() fades it out.
+      player.loop = true;
       player.play();
       activeNativeScanningPlayer = player;
     } catch (err) {
@@ -792,7 +799,12 @@ export function playScanningSound(): void {
     return;
   }
 
-  // Web Audio API dynamic synthesis
+  // Web Audio API dynamic synthesis, repeated until stopScanningSound()
+  playWhooshVoice(1);
+  scanningRepeatTimer = setInterval(() => playWhooshVoice(0.6), SCANNING_REPEAT_MS);
+}
+
+function playWhooshVoice(level: number): void {
   const ctx = getAudioContext();
   if (!ctx) return;
 
@@ -829,8 +841,8 @@ export function playScanningSound(): void {
     // Audible gain envelope
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.001, now);
-    gain.gain.exponentialRampToValueAtTime(0.42, now + 0.6);
-    gain.gain.exponentialRampToValueAtTime(0.48, now + 1.8);
+    gain.gain.exponentialRampToValueAtTime(0.42 * level, now + 0.6);
+    gain.gain.exponentialRampToValueAtTime(0.48 * level, now + 1.8);
     gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
     // Subtle ethereal glass shimmer harmonic
@@ -842,7 +854,7 @@ export function playScanningSound(): void {
     shimmerOsc.frequency.exponentialRampToValueAtTime(880, now + duration);
 
     shimmerGain.gain.setValueAtTime(0.001, now);
-    shimmerGain.gain.exponentialRampToValueAtTime(0.08, now + 0.8);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.08 * level, now + 0.8);
     shimmerGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
     noise.connect(filter);
@@ -857,7 +869,9 @@ export function playScanningSound(): void {
     noise.stop(now + duration);
     shimmerOsc.stop(now + duration);
 
-    activeWhooshNodes = { noise, gain };
+    const voice = { sources: [noise, shimmerOsc] as AudioScheduledSourceNode[], gains: [gain, shimmerGain] };
+    activeWhooshVoices.add(voice);
+    noise.onended = () => activeWhooshVoices.delete(voice);
   } catch (err) {
     console.error('[sound-service] Whoosh play error:', err);
   }
@@ -866,33 +880,56 @@ export function playScanningSound(): void {
 /**
  * Stop active scanning sound across Native and Web
  */
-export function stopScanningSound(): void {
-  // Mobile Native cleanup
-  if (Platform.OS !== 'web' && activeNativeScanningPlayer) {
-    try {
-      activeNativeScanningPlayer.pause();
-    } catch {}
-    try {
-      activeNativeScanningPlayer.remove?.();
-    } catch {}
-    activeNativeScanningPlayer = null;
+export function stopScanningSound(fadeMs: number = 120): void {
+  if (scanningRepeatTimer) {
+    clearInterval(scanningRepeatTimer);
+    scanningRepeatTimer = null;
   }
 
-  // Web Audio API cleanup
-  if (activeWhooshNodes && audioCtx) {
-    try {
-      activeWhooshNodes.gain.gain.setValueAtTime(
-        activeWhooshNodes.gain.gain.value,
-        audioCtx.currentTime,
-      );
-      activeWhooshNodes.gain.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-      setTimeout(() => {
-        try {
-          activeWhooshNodes?.noise.stop();
-        } catch {}
-        activeWhooshNodes = null;
-      }, 100);
-    } catch {}
+  // Mobile Native: step the volume down, then release the player
+  if (Platform.OS !== 'web' && activeNativeScanningPlayer) {
+    const player = activeNativeScanningPlayer;
+    activeNativeScanningPlayer = null;
+    if (nativeScanningFadeTimer) clearInterval(nativeScanningFadeTimer);
+    const release = () => {
+      try { player.pause(); } catch {}
+      try { player.remove?.(); } catch {}
+    };
+    const steps = Math.max(1, Math.round(fadeMs / 40));
+    const startVolume = typeof player.volume === 'number' ? player.volume : 0.45;
+    let step = 0;
+    if (steps <= 1) {
+      release();
+    } else {
+      nativeScanningFadeTimer = setInterval(() => {
+        step++;
+        try { player.volume = Math.max(0, startVolume * (1 - step / steps)); } catch {}
+        if (step >= steps) {
+          if (nativeScanningFadeTimer) clearInterval(nativeScanningFadeTimer);
+          nativeScanningFadeTimer = null;
+          release();
+        }
+      }, 40);
+    }
+  }
+
+  // Web Audio API: ramp every overlapping whoosh to silence, then stop them
+  if (audioCtx && activeWhooshVoices.size > 0) {
+    const ctx = audioCtx;
+    const fadeSec = Math.max(0.05, fadeMs / 1000);
+    for (const voice of [...activeWhooshVoices]) {
+      try {
+        for (const g of voice.gains) {
+          g.gain.cancelScheduledValues(ctx.currentTime);
+          g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), ctx.currentTime);
+          g.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + fadeSec);
+        }
+        for (const src of voice.sources) {
+          try { src.stop(ctx.currentTime + fadeSec + 0.02); } catch {}
+        }
+      } catch {}
+      activeWhooshVoices.delete(voice);
+    }
   }
 }
 
@@ -1051,7 +1088,8 @@ function playSynthesizedAnalysisComplete(): void {
 }
 
 export function playAnalysisCompleteSound(): void {
-  stopScanningSound();
+  // Soft fade instead of a hard cut, so the completion chime lands cleanly
+  stopScanningSound(400);
   playSoundAsset(
     ANALYSIS_COMPLETE_ASSET,
     0.7,

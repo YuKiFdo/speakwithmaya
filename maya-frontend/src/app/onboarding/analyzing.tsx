@@ -22,7 +22,8 @@ import {
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { getLatestSessionReport, setLatestFeedbackItems, getLatestFeedbackItems, FeedbackItem } from '@/utils/session-report-store';
 import { ActiveConversationStore, isRoadmapOrIntroTopic } from '@/services/store/active-conversation-store';
-import { warmUpSpeechVoices } from '@/utils/maya-voice-fallback';
+import { warmUpSpeechVoices, prefetchMayaVoice } from '@/utils/maya-voice-fallback';
+import { feedbackNarrationTexts } from '@/utils/feedback-narration';
 
 interface AnalysisStep {
   id: string;
@@ -73,6 +74,9 @@ if (Platform.OS === 'web') {
 }
 
 const AnimatedCircle = Animated.createAnimatedComponent(BaseCircle);
+
+/** Max time the analyzing screen waits for the first feedback card's narration audio. */
+const FIRST_CARD_VOICE_WAIT_MS = 25000;
 const RADIUS = 98;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
@@ -155,10 +159,10 @@ export default function AnalyzingScreen() {
       ]),
       // Smooth fade-out starts during landing so there is zero dead wait time
       Animated.sequence([
-        Animated.delay(180),
+        Animated.delay(220),
         Animated.timing(screenFadeAnim, {
           toValue: 0,
-          duration: 180,
+          duration: 300,
           easing: Easing.out(Easing.quad),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -273,7 +277,7 @@ export default function AnalyzingScreen() {
       }
       Animated.timing(progressAnim, {
         toValue: 1,
-        duration: 650,
+        duration: 800,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: false,
       }).start(({ finished }) => {
@@ -393,6 +397,15 @@ export default function AnalyzingScreen() {
             });
             console.log(`[AnalyzingScreen] 🎯 Loaded ${itemsWithAudio.length} personalized feedback items (Supabase audio: ${supabaseAudioUrl})`);
             setLatestFeedbackItems(itemsWithAudio);
+
+            // Hold the analyzing screen until the FIRST card's narration is downloaded, so the
+            // feedback screen starts speaking immediately (Piper is slow on the server: a clip
+            // can take 10-20s). Later cards download in the background while the user reads.
+            if (itemsWithAudio.length > 0 && !isCancelled) {
+              const [first, ...rest] = itemsWithAudio;
+              void prefetchMayaVoice(rest.flatMap((it) => feedbackNarrationTexts(it)), 180000);
+              await prefetchMayaVoice(feedbackNarrationTexts(first), FIRST_CARD_VOICE_WAIT_MS);
+            }
           }
         }
       } catch (err) {
@@ -406,14 +419,15 @@ export default function AnalyzingScreen() {
 
     runAnalysisApi();
 
-    // Safety timeout: 45s fallback in case network completely drops or backend is unavailable
+    // Safety timeout in case network completely drops or backend is unavailable
+    // (analysis itself + up to FIRST_CARD_VOICE_WAIT_MS for the first card's narration)
     const safetyTimer = setTimeout(() => {
       if (!isApiDone) {
-        console.log('[AnalyzingScreen] ⏱️ 45s safety timeout reached, proceeding gracefully');
+        console.log('[AnalyzingScreen] ⏱️ Safety timeout reached, proceeding gracefully');
         isApiDone = true;
         completeProgressTo100();
       }
-    }, 45000);
+    }, 45000 + FIRST_CARD_VOICE_WAIT_MS);
 
     let lastStep = 0;
     const listenerId = progressAnim.addListener(({ value }) => {
@@ -443,13 +457,23 @@ export default function AnalyzingScreen() {
       }
     });
 
-    // Phase 1: Animate circular bar through steps 1-3 to ~88% over 5.2s, then hold at step 4 until API returns
-    initialAnim = Animated.timing(progressAnim, {
-      toValue: 0.88,
-      duration: 5200,
-      easing: Easing.bezier(0.2, 0.6, 0.3, 1),
-      useNativeDriver: false,
-    });
+    // Phase 1: fill quickly through the first steps, then keep creeping (never freezing, which
+    // looked stuck) toward 95% while the analysis + first-card voice load. Phase 2
+    // (completeProgressTo100) speeds the rest up to 100% as soon as everything is ready.
+    initialAnim = Animated.sequence([
+      Animated.timing(progressAnim, {
+        toValue: 0.62,
+        duration: 5500,
+        easing: Easing.bezier(0.2, 0.6, 0.3, 1),
+        useNativeDriver: false,
+      }),
+      Animated.timing(progressAnim, {
+        toValue: 0.95,
+        duration: 60000,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }),
+    ]);
 
     initialAnim.start(({ finished }) => {
       if (finished && isApiDone) {

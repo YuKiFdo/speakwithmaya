@@ -147,58 +147,18 @@ export function speakAsCallirrhoe(
     return playAudioBlob(cachedUrl, requestId, options);
   }
 
-  // 2. Synthesize via self-hosted Backend Piper TTS
-  const backendBaseUrl = getBackendBaseUrl();
+  // 2. Synthesize via self-hosted Backend Piper TTS (shares an in-flight prefetch if any)
   if (typeof window !== 'undefined') {
-    const abortController = new AbortController();
-    activeAbortController = abortController;
     activeOnEndCallback = options?.onEnd || null;
 
-    fetch(`${backendBaseUrl}/v1/sessions/tts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: cleanText, voice: 'Amy' }),
-      signal: abortController.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        const data = await res.json();
-        if (!data?.audioBase64) {
-          throw new Error('Empty audioBase64 from backend');
-        }
-
-        // Convert base64 to WAV Blob URL (still cache it even if stopped so next time is instant)
-        const byteCharacters = atob(data.audioBase64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: 'audio/wav' });
-        const blobUrl = URL.createObjectURL(blob);
-
-        audioBlobCache.set(cleanText, blobUrl);
-
+    fetchMayaVoiceUrl(cleanText)
+      .then((blobUrl) => {
         // Do NOT play if this speech request was stopped or superseded while fetching
-        if (requestId !== currentSpeechRequestId || abortController.signal.aborted) {
-          return;
-        }
-
-        if (activeAbortController === abortController) {
-          activeAbortController = null;
-        }
-
+        if (requestId !== currentSpeechRequestId) return;
         playAudioBlob(blobUrl, requestId, options);
       })
       .catch((err) => {
-        if (activeAbortController === abortController) {
-          activeAbortController = null;
-        }
-        if (err?.name === 'AbortError' || requestId !== currentSpeechRequestId) {
-          return;
-        }
+        if (requestId !== currentSpeechRequestId) return;
         if (activeOnEndCallback === options?.onEnd) {
           activeOnEndCallback = null;
         }
@@ -210,6 +170,64 @@ export function speakAsCallirrhoe(
   }
 
   return false;
+}
+
+/**
+ * Fetches (or reuses) the backend Piper clip for `text` and returns a blob: URL.
+ * Concurrent callers for the same text share one request, so a prefetch started on the
+ * analyzing screen is picked up by the feedback screen instead of being requested twice.
+ * The request is never aborted by stopMayaVoiceFallback(): a stopped clip is still cached.
+ */
+const inFlightVoice = new Map<string, Promise<string>>();
+
+function fetchMayaVoiceUrl(text: string): Promise<string> {
+  const cached = audioBlobCache.get(text);
+  if (cached) return Promise.resolve(cached);
+  const pending = inFlightVoice.get(text);
+  if (pending) return pending;
+
+  const task = (async () => {
+    const res = await fetch(`${getBackendBaseUrl()}/v1/sessions/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice: 'Amy' }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data?.audioBase64) throw new Error('Empty audioBase64 from backend');
+
+    const byteCharacters = atob(data.audioBase64);
+    const byteArray = new Uint8Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteArray[i] = byteCharacters.charCodeAt(i);
+    }
+    const blobUrl = URL.createObjectURL(new Blob([byteArray], { type: 'audio/wav' }));
+    audioBlobCache.set(text, blobUrl);
+    return blobUrl;
+  })().finally(() => {
+    inFlightVoice.delete(text);
+  });
+
+  inFlightVoice.set(text, task);
+  return task;
+}
+
+/** True when `text` can play immediately (already synthesized and downloaded). */
+export function isMayaVoiceCached(text: string): boolean {
+  return audioBlobCache.has((text || '').trim());
+}
+
+/**
+ * Downloads clips ahead of time so they play instantly later. Resolves when all are cached
+ * or `timeoutMs` elapses, whichever comes first (never rejects). Requests keep running in
+ * the background after a timeout and still land in the cache.
+ */
+export function prefetchMayaVoice(texts: string[], timeoutMs = 20000): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  const unique = [...new Set(texts.map((t) => (t || '').trim()).filter(Boolean))];
+  if (unique.length === 0) return Promise.resolve();
+  const all = Promise.allSettled(unique.map((t) => fetchMayaVoiceUrl(t))).then(() => undefined);
+  return Promise.race([all, new Promise<void>((r) => setTimeout(r, timeoutMs))]);
 }
 
 export function stopMayaVoiceFallback(): void {
