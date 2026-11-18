@@ -1522,9 +1522,11 @@ export class AuthService {
       'minutes_reset_at', 'native_language', 'employment_status', 'daily_goal_minutes',
       'baseline_fluency_score', 'baseline_grammar_score', 'baseline_pronunciation_score',
       'last_active_step', 'onboarding_completed_at', 'created_at', 'updated_at',
-      'telco_provider', 'telco_subscriber_id', 'telco_reference_no', 'telco_status',
-      'has_telco_subscription', 'is_subscription_locked', 'is_grace_period_active',
-      'grace_period_end', 'active_promo_code', 'ai_correction_mode', 'language_mode'
+      'telco_provider', 'telco_subscriber_id', 'telco_reference_no',
+      'active_promo_code', 'ai_correction_mode', 'language_mode'
+      // telco_status / has_telco_subscription / is_subscription_locked / is_grace_period_active /
+      // grace_period_end are computed below, not columns. Selecting them made every call fail
+      // and retry with the fallback list (2 round-trips per /auth/me, and telco fields dropped).
     ].join(', ');
 
     let { data, error }: { data: any; error: any } = await (this.supabase
@@ -4380,8 +4382,20 @@ export class AuthService {
 
     try {
       const now = Date.now();
-      const cacheKey = `${period}:${limit}`;
+      // The dataset is the full ranking; limit only slices it, so it is not part of the key.
+      const cacheKey = period;
       const cached = this.leaderboardCache.get(cacheKey);
+
+      // Single-flight for every rebuild (background and cold), so a burst of requests after
+      // the TTL expires triggers one rebuild instead of one per request.
+      const startRebuild = () => {
+        let pending = this.leaderboardInFlight.get(cacheKey);
+        if (!pending) {
+          pending = this.rebuildLeaderboardDataset(cacheKey, period, limit);
+          this.leaderboardInFlight.set(cacheKey, pending);
+        }
+        return pending;
+      };
 
       // Stale-while-revalidate: if fresh cache hit (under 5 min), return immediately!
       if (cached && now - cached.timestamp < AuthService.LEADERBOARD_CACHE_TTL_MS) {
@@ -4390,19 +4404,12 @@ export class AuthService {
 
       // If stale cache hit exists, serve it instantly and rebuild in the background
       if (cached) {
-        if (!this.leaderboardInFlight.has(cacheKey)) {
-          this.rebuildLeaderboardDataset(cacheKey, period, limit).catch(() => {});
-        }
+        startRebuild().catch(() => {});
         return this.formatLeaderboardResponse(cached.data.rankedEntries, cached.data.totalParticipants, userId, limit);
       }
 
       // Cold start: wait on single-flight rebuild
-      let pending = this.leaderboardInFlight.get(cacheKey);
-      if (!pending) {
-        pending = this.rebuildLeaderboardDataset(cacheKey, period, limit);
-        this.leaderboardInFlight.set(cacheKey, pending);
-      }
-      const dataset = await pending;
+      const dataset = await startRebuild();
       return this.formatLeaderboardResponse(dataset.rankedEntries, dataset.totalParticipants, userId, limit);
     } catch (err: any) {
       this.logger.warn(`getPublicLeaderboard error: ${err?.message}`);
@@ -4436,6 +4443,54 @@ export class AuthService {
     };
   }
 
+  /**
+   * Raw rows behind every leaderboard period. Weekly / monthly / all-time used to each read the
+   * same three whole tables; now they share one read per TTL window (single-flight).
+   */
+  private leaderboardRaw: { timestamp: number; data: { profiles: any[]; progressRows: any[]; sessionRows: any[] } } | null = null;
+  private leaderboardRawInFlight: Promise<{ profiles: any[]; progressRows: any[]; sessionRows: any[] }> | null = null;
+
+  private async fetchLeaderboardRaw(): Promise<{ profiles: any[]; progressRows: any[]; sessionRows: any[] }> {
+    if (this.leaderboardRaw && Date.now() - this.leaderboardRaw.timestamp < AuthService.LEADERBOARD_CACHE_TTL_MS) {
+      return this.leaderboardRaw.data;
+    }
+    if (this.leaderboardRawInFlight) return this.leaderboardRawInFlight;
+
+    this.leaderboardRawInFlight = (async () => {
+      const [profilesRes, progressRes, sessionsRes] = await Promise.all([
+        this.supabase
+          .from('profiles')
+          .select('id, display_name, phone_number, avatar_url, created_at, monthly_minutes_allowance, add_on_minutes_balance, minutes_balance')
+          .order('created_at', { ascending: true }),
+        this.supabase
+          .from('user_roadmap_progress')
+          .select('id, user_id, roadmap_level_id, level_number, status, is_passed, xp_earned, completed_at, created_at'),
+        this.supabase
+          .from('sessions')
+          .select('user_id, duration_seconds, created_at, roadmap_level_id'),
+      ]);
+      const err = profilesRes.error || progressRes.error || sessionsRes.error;
+      if (err) {
+        // Keep serving the previous rows rather than caching a partial/empty dataset
+        if (this.leaderboardRaw) return this.leaderboardRaw.data;
+        throw new Error(`leaderboard raw fetch failed: ${err.message}`);
+      }
+      const data = {
+        profiles: profilesRes.data || [],
+        progressRows: progressRes.data || [],
+        sessionRows: sessionsRes.data || [],
+      };
+      this.leaderboardRaw = { timestamp: Date.now(), data };
+      return data;
+    })();
+
+    try {
+      return await this.leaderboardRawInFlight;
+    } finally {
+      this.leaderboardRawInFlight = null;
+    }
+  }
+
   private async rebuildLeaderboardDataset(
     cacheKey: string,
     period: 'weekly' | 'monthly' | 'all_time',
@@ -4450,22 +4505,7 @@ export class AuthService {
             ? now - 30 * 24 * 60 * 60 * 1000
             : 0;
 
-      const [
-        { data: profiles },
-        { data: progressRows },
-        { data: sessionRows },
-      ] = await Promise.all([
-        this.supabase
-          .from('profiles')
-          .select('id, display_name, phone_number, avatar_url, created_at, monthly_minutes_allowance, add_on_minutes_balance, minutes_balance')
-          .order('created_at', { ascending: true }),
-        this.supabase
-          .from('user_roadmap_progress')
-          .select('id, user_id, roadmap_level_id, level_number, status, is_passed, xp_earned, completed_at, created_at'),
-        this.supabase
-          .from('sessions')
-          .select('id, user_id, duration_seconds, created_at, status, roadmap_level_id'),
-      ]);
+      const { profiles, progressRows, sessionRows } = await this.fetchLeaderboardRaw();
 
       const allProfiles = Array.isArray(profiles) ? profiles : [];
       const xpByUser = new Map<string, number>();
