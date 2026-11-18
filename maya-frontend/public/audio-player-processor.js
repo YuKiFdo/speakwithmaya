@@ -17,7 +17,15 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
     this.prebufferTarget = 3600;
     // Grace frames allowed during packet arrival delay before assuming speech ended (~350ms)
     this.underflowFrames = 0;
-    this.maxUnderflowFrames = 120; // 120 * 128 frames / 44100 ~= 350ms
+    // A mid-turn gap (server/CPU stall) waits this long for more audio before treating the
+    // turn as over. Was ~350ms, which cut Maya off mid-sentence during multi-second stalls.
+    this.maxUnderflowFrames = 700; // ~2s at 44.1-48 kHz with 128-frame quanta
+    // Rebuffering: when the queue runs dry mid-turn, hold output until the cushion refills
+    // instead of playing each late chunk the instant it lands (that sounded like stutter).
+    this.rebuffering = false;
+    // Adaptive extra cushion: +100ms per mid-turn underrun (max +300ms), -50ms per clean turn.
+    this.adaptiveExtra = 0;
+    this.underrunThisTurn = false;
 
     this.port.onmessage = (event) => {
       const msg = event.data;
@@ -36,7 +44,7 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
           this.underflowFrames = 0;
 
           // Start playing when pre-buffer threshold is reached, or resume immediately if already active
-          if (!this.isPlaying && this.totalBufferedSamples >= this.prebufferTarget) {
+          if (!this.isPlaying && this.totalBufferedSamples >= this.prebufferTarget + this.adaptiveExtra) {
             this.isPlaying = true;
             // Prepend 60ms of zero-samples (~1440 samples at 24kHz) to allow physical DACs / OS mixers
             // to unmute smoothly without clipping the first spoken syllable/consonant.
@@ -48,6 +56,9 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
         }
       } else if (msg.type === 'flush') {
         this.isFlushing = true;
+        this.rebuffering = false; // turn complete: play out whatever is left
+        if (!this.underrunThisTurn) this.adaptiveExtra = Math.max(0, this.adaptiveExtra - 1200);
+        this.underrunThisTurn = false;
         // If there's pending audio, start playing immediately even if below prebuffer threshold
         if (this.totalBufferedSamples > 0 && !this.isPlaying) {
           this.isPlaying = true;
@@ -68,6 +79,8 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
         this.isPlaying = false;
         this.isFlushing = false;
         this.underflowFrames = 0;
+        this.rebuffering = false;
+        this.underrunThisTurn = false;
         this.port.postMessage({ state: 'idle' });
       }
     };
@@ -86,6 +99,24 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
       return true;
     }
 
+    // Rebuffering after a mid-turn underrun: stay silent (consume nothing) until the cushion
+    // is back, so a stall is heard as one short pause rather than choppy fragments.
+    if (this.rebuffering) {
+      if (this.isFlushing || this.totalBufferedSamples >= this.prebufferTarget + this.adaptiveExtra) {
+        this.rebuffering = false;
+        this.underflowFrames = 0;
+      } else {
+        for (let c = 0; c < channelCount; c++) output[c].fill(0);
+        this.underflowFrames++;
+        if (this.underflowFrames >= this.maxUnderflowFrames) {
+          this.rebuffering = false;
+          this.isPlaying = false;
+          this.port.postMessage({ state: 'idle' });
+        }
+        return true;
+      }
+    }
+
     // Step ratio for hardware resampling
     const step = this.sourceSampleRate / sampleRate;
 
@@ -102,12 +133,14 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
           this.isFlushing = false;
           this.port.postMessage({ state: 'idle' });
         } else {
-          // Model is still streaming; give a grace period before declaring idle
-          this.underflowFrames++;
-          if (this.underflowFrames >= this.maxUnderflowFrames) {
-            this.isPlaying = false;
-            this.port.postMessage({ state: 'idle' });
+          // Model is still streaming but audio is late: rebuffer, and grow the cushion so the
+          // rest of this connection's turns absorb similar stalls.
+          if (!this.underrunThisTurn) {
+            this.adaptiveExtra = Math.min(7200, this.adaptiveExtra + 2400);
+            this.underrunThisTurn = true;
           }
+          this.rebuffering = true;
+          this.underflowFrames++;
         }
         break;
       }
