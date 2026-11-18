@@ -20,7 +20,7 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
-import { AdminTableSkeleton } from '@/components/ui/skeleton';
+import { AdminTableSkeleton, Skeleton } from '@/components/ui/skeleton';
 import { AdminSessionTranscriptAndPlayer } from '@/components/admin/AdminSessionTranscriptAndPlayer';
 
 interface DailyUsagePoint {
@@ -613,69 +613,101 @@ export default function AdminUsageScreen() {
               {/* 1. AI Minutes Today */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>AI Minutes Today</Text>
-                <Text style={[styles.metricValue, { color: '#0f172a' }]}>
-                  {data?.stats?.minutesToday !== undefined
-                    ? data.stats.minutesToday.toLocaleString()
-                    : '0'}
-                </Text>
+                {!!data ? (
+                  <Text style={[styles.metricValue, { color: '#0f172a' }]}>
+                    {data?.stats?.minutesToday !== undefined
+                      ? data.stats.minutesToday.toLocaleString()
+                      : '0'}
+                  </Text>
+                ) : (
+                  <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                )}
               </View>
 
               {/* 2. AI Minutes This Month */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>AI Minutes This Month</Text>
-                <Text style={[styles.metricValue, { color: '#0d9488' }]}>
-                  {data?.stats?.minutesThisMonth !== undefined
-                    ? data.stats.minutesThisMonth.toLocaleString()
-                    : '0'}
-                </Text>
+                {!!data ? (
+                  <Text style={[styles.metricValue, { color: '#0d9488' }]}>
+                    {data?.stats?.minutesThisMonth !== undefined
+                      ? data.stats.minutesThisMonth.toLocaleString()
+                      : '0'}
+                  </Text>
+                ) : (
+                  <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                )}
               </View>
 
               {/* 3. AI Sessions */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>AI Sessions</Text>
-                <Text style={[styles.metricValue, { color: '#2563eb' }]}>
-                  {data?.stats?.totalSessions !== undefined
-                    ? data.stats.totalSessions.toLocaleString()
-                    : '0'}
-                </Text>
+                {!!data ? (
+                  <Text style={[styles.metricValue, { color: '#2563eb' }]}>
+                    {data?.stats?.totalSessions !== undefined
+                      ? data.stats.totalSessions.toLocaleString()
+                      : '0'}
+                  </Text>
+                ) : (
+                  <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                )}
               </View>
 
               {/* 4. Hints Used */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Hints Used</Text>
-                <Text style={[styles.metricValue, { color: '#8b5cf6' }]}>
-                  {data?.stats?.totalHintsUsed !== undefined
-                    ? data.stats.totalHintsUsed.toLocaleString()
-                    : '0'}
-                </Text>
-                <Text style={styles.metricSubText}>
-                  Spend: LKR {(data?.stats?.totalHintCostLkr || 0).toFixed(2)}
-                </Text>
+                {!!data ? (
+                  <Text style={[styles.metricValue, { color: '#8b5cf6' }]}>
+                    {data?.stats?.totalHintsUsed !== undefined
+                      ? data.stats.totalHintsUsed.toLocaleString()
+                      : '0'}
+                  </Text>
+                ) : (
+                  <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                )}
+                {!!data ? (
+                  <Text style={styles.metricSubText}>
+                    Spend: LKR {(data?.stats?.totalHintCostLkr || 0).toFixed(2)}
+                  </Text>
+                ) : (
+                  <Skeleton width="75%" height={12} borderRadius={4} style={{ marginTop: 4 }} />
+                )}
               </View>
 
               {/* 5. Total AI Cost (Voice + Hints) */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Total AI Cost</Text>
-                <Text style={[styles.metricValue, { color: '#ea580c' }]}>
-                  {data?.stats?.grandTotalCostLkr !== undefined
-                    ? `LKR ${data.stats.grandTotalCostLkr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : data?.stats?.totalCostLkr !== undefined
-                      ? `LKR ${data.stats.totalCostLkr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : 'LKR 0.00'}
-                </Text>
-                <Text style={styles.metricSubText}>
-                  Voice: LKR {(data?.stats?.totalCostLkr || 0).toFixed(2)} | Hints: LKR {(data?.stats?.totalHintCostLkr || 0).toFixed(2)}
-                </Text>
+                {!!data ? (
+                  <Text style={[styles.metricValue, { color: '#ea580c' }]}>
+                    {data?.stats?.grandTotalCostLkr !== undefined
+                      ? `LKR ${data.stats.grandTotalCostLkr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : data?.stats?.totalCostLkr !== undefined
+                        ? `LKR ${data.stats.totalCostLkr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : 'LKR 0.00'}
+                  </Text>
+                ) : (
+                  <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                )}
+                {!!data ? (
+                  <Text style={styles.metricSubText}>
+                    Voice: LKR {(data?.stats?.totalCostLkr || 0).toFixed(2)} | Hints: LKR {(data?.stats?.totalHintCostLkr || 0).toFixed(2)}
+                  </Text>
+                ) : (
+                  <Skeleton width="75%" height={12} borderRadius={4} style={{ marginTop: 4 }} />
+                )}
               </View>
 
               {/* 6. Avg Cost Per Min */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Avg Cost Per Min</Text>
-                <Text style={[styles.metricValue, { color: '#7c3aed' }]}>
-                  {data?.stats?.avgCostPerMin !== undefined && data.stats.avgCostPerMin > 0
-                    ? `LKR ${Number(data.stats.avgCostPerMin).toFixed(2)}`
-                    : 'LKR 0.00'}
-                </Text>
+                {!!data ? (
+                  <Text style={[styles.metricValue, { color: '#7c3aed' }]}>
+                    {data?.stats?.avgCostPerMin !== undefined && data.stats.avgCostPerMin > 0
+                      ? `LKR ${Number(data.stats.avgCostPerMin).toFixed(2)}`
+                      : 'LKR 0.00'}
+                  </Text>
+                ) : (
+                  <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                )}
               </View>
             </View>
 

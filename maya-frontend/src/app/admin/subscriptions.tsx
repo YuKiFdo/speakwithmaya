@@ -24,12 +24,22 @@ import {
   TopUpPackageStats,
   AdminSubscriptionsList,
 } from '@/services/payment/payhere-types';
-import { AdminTableSkeleton } from '@/components/ui/skeleton';
+import { AdminTableSkeleton, Skeleton } from '@/components/ui/skeleton';
 import { ShowMoreButton } from '@/components/admin/ShowMoreButton';
 import { useShowMore } from '@/hooks/useShowMore';
 import { mayaAlert } from '@/components/ui/alert-modal';
 
 type AdminViewTab = 'subscriptions' | 'telco' | 'renewals' | 'topups';
+
+/** Placeholder for a stat card's value + sub-line while stats load. */
+function StatValueSkeleton() {
+  return (
+    <View style={{ gap: 8, marginTop: 6 }}>
+      <Skeleton width="60%" height={26} borderRadius={6} />
+      <Skeleton width="85%" height={12} borderRadius={4} />
+    </View>
+  );
+}
 
 /** Which backend list a tab needs (renewals and top-ups both come from orders). */
 const listForTab = (tab: AdminViewTab): AdminSubscriptionsList =>
@@ -44,6 +54,8 @@ export default function AdminSubscriptionsScreen() {
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
   const [telcoSubscriptions, setTelcoSubscriptions] = useState<TelcoSubscriptionRecord[]>([]);
   const [orders, setOrders] = useState<AdminOrderRecord[]>([]);
+  // Stat cards show skeletons until the first stats response (instead of LKR 0 / 0)
+  const [statsLoaded, setStatsLoaded] = useState(false);
   // Lazy tab loading: only the active tab's list is fetched; other tabs show counts until opened
   const [tabCounts, setTabCounts] = useState<{ subscriptions: number; telco: number; renewals: number; topups: number } | null>(null);
   const [loadedLists, setLoadedLists] = useState<Record<AdminSubscriptionsList, boolean>>({
@@ -133,6 +145,7 @@ export default function AdminSubscriptionsScreen() {
       }
       if (res.counts) setTabCounts(res.counts);
       if (res.stats) {
+        setStatsLoaded(true);
         const rateLkr = res.stats.telcoDailyPriceLkr || 12;
         setTelcoRateInput(String(rateLkr));
         setStats({
@@ -443,10 +456,16 @@ export default function AdminSubscriptionsScreen() {
                     <Feather name="dollar-sign" size={16} color="#0d9488" />
                   </View>
                 </View>
-                <Text style={styles.statValue}>LKR {stats.mrrLkr.toLocaleString()}</Text>
-                <Text style={styles.statSubtext}>
-                  Card: LKR {stats.cardMrrLkr.toLocaleString()} · Telco: LKR {stats.telcoMrrLkr.toLocaleString()}/mo
-                </Text>
+                {statsLoaded ? (
+                  <>
+                    <Text style={styles.statValue}>LKR {stats.mrrLkr.toLocaleString()}</Text>
+                    <Text style={styles.statSubtext}>
+                      Card: LKR {stats.cardMrrLkr.toLocaleString()} · Telco: LKR {stats.telcoMrrLkr.toLocaleString()}/mo
+                    </Text>
+                  </>
+                ) : (
+                  <StatValueSkeleton />
+                )}
               </View>
 
               {/* TELCO CARRIER SUBSCRIBERS & REVENUE */}
@@ -460,10 +479,16 @@ export default function AdminSubscriptionsScreen() {
                     <Feather name="smartphone" size={16} color="#0d9488" />
                   </View>
                 </View>
-                <Text style={styles.statValue}>LKR {stats.telcoTotalRevenueLkr.toLocaleString()}</Text>
-                <Text style={styles.statSubtext}>
-                  {stats.telcoActiveCount} active @ LKR {stats.telcoDailyPriceLkr}/day (+LKR {stats.telcoDailyRevenueLkr}/day)
-                </Text>
+                {statsLoaded ? (
+                  <>
+                    <Text style={styles.statValue}>LKR {stats.telcoTotalRevenueLkr.toLocaleString()}</Text>
+                    <Text style={styles.statSubtext}>
+                      {stats.telcoActiveCount} active @ LKR {stats.telcoDailyPriceLkr}/day (+LKR {stats.telcoDailyRevenueLkr}/day)
+                    </Text>
+                  </>
+                ) : (
+                  <StatValueSkeleton />
+                )}
               </Pressable>
 
               {/* ACTIVE PRE-APPROVED ACCOUNTS */}
@@ -474,8 +499,14 @@ export default function AdminSubscriptionsScreen() {
                     <Feather name="credit-card" size={16} color="#16a34a" />
                   </View>
                 </View>
-                <Text style={styles.statValue}>{stats.activeCount}</Text>
-                <Text style={styles.statSubtext}>Pre-approved cards on file</Text>
+                {statsLoaded ? (
+                  <>
+                    <Text style={styles.statValue}>{stats.activeCount}</Text>
+                    <Text style={styles.statSubtext}>Pre-approved cards on file</Text>
+                  </>
+                ) : (
+                  <StatValueSkeleton />
+                )}
               </View>
 
               {/* BACKEND RENEWALS */}
@@ -486,10 +517,16 @@ export default function AdminSubscriptionsScreen() {
                     <Feather name="repeat" size={16} color="#2563eb" />
                   </View>
                 </View>
-                <Text style={styles.statValue}>{stats.renewalsCount}</Text>
-                <Text style={styles.statSubtext}>
-                  {stats.renewalsSucceeded} successful · {stats.renewalsFailed} failed
-                </Text>
+                {statsLoaded ? (
+                  <>
+                    <Text style={styles.statValue}>{stats.renewalsCount}</Text>
+                    <Text style={styles.statSubtext}>
+                      {stats.renewalsSucceeded} successful · {stats.renewalsFailed} failed
+                    </Text>
+                  </>
+                ) : (
+                  <StatValueSkeleton />
+                )}
               </View>
 
               {/* TALK TIME TOP-UPS */}
@@ -500,10 +537,16 @@ export default function AdminSubscriptionsScreen() {
                     <Feather name="clock" size={16} color="#d97706" />
                   </View>
                 </View>
-                <Text style={styles.statValue}>LKR {stats.topUpRevenueLkr.toLocaleString()}</Text>
-                <Text style={styles.statSubtext}>
-                  +{stats.topUpMinutesSold} mins sold ({stats.topUpOrdersCount} orders)
-                </Text>
+                {statsLoaded ? (
+                  <>
+                    <Text style={styles.statValue}>LKR {stats.topUpRevenueLkr.toLocaleString()}</Text>
+                    <Text style={styles.statSubtext}>
+                      +{stats.topUpMinutesSold} mins sold ({stats.topUpOrdersCount} orders)
+                    </Text>
+                  </>
+                ) : (
+                  <StatValueSkeleton />
+                )}
               </View>
             </View>
 

@@ -19,7 +19,7 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
-import { AdminTableSkeleton } from '@/components/ui/skeleton';
+import { AdminTableSkeleton, Skeleton } from '@/components/ui/skeleton';
 import { AdminSessionTranscriptAndPlayer } from '@/components/admin/AdminSessionTranscriptAndPlayer';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { authService } from '@/services/auth/auth-service';
@@ -364,6 +364,8 @@ export default function AdminUsersScreen() {
 
   // Loading & Data
   const [isLoading, setIsLoading] = useState(true);
+  // KPI cards show skeletons until the first stats response (instead of 0)
+  const [statsLoaded, setStatsLoaded] = useState(false);
   const [users, setUsers] = useState<UserSummaryItem[]>([]);
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -695,6 +697,7 @@ export default function AdminUsersScreen() {
         }
         if (data.stats) {
           setStats(data.stats);
+          setStatsLoaded(true);
         }
       }
     } catch (err) {
@@ -851,8 +854,16 @@ export default function AdminUsersScreen() {
                 </View>
                 <View>
                   <Text style={styles.metricLabel}>Total Students</Text>
-                  <Text style={styles.metricValue}>{stats.totalUsers}</Text>
-                  <Text style={styles.metricSub}>{stats.activePaidCount} Paid Subscribers</Text>
+                  {statsLoaded ? (
+                    <Text style={styles.metricValue}>{stats.totalUsers}</Text>
+                  ) : (
+                    <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                  )}
+                  {statsLoaded ? (
+                    <Text style={styles.metricSub}>{stats.activePaidCount} Paid Subscribers</Text>
+                  ) : (
+                    <Skeleton width="75%" height={12} borderRadius={4} style={{ marginTop: 4 }} />
+                  )}
                 </View>
               </View>
 
@@ -862,10 +873,18 @@ export default function AdminUsersScreen() {
                 </View>
                 <View>
                   <Text style={styles.metricLabel}>Registered Today</Text>
-                  <Text style={[styles.metricValue, { color: '#16a34a' }]}>
-                    +{stats.todayRegisteredCount ?? 0}
-                  </Text>
-                  <Text style={styles.metricSub}>New Student Signups</Text>
+                  {statsLoaded ? (
+                    <Text style={[styles.metricValue, { color: '#16a34a' }]}>
+                      +{stats.todayRegisteredCount ?? 0}
+                    </Text>
+                  ) : (
+                    <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                  )}
+                  {statsLoaded ? (
+                    <Text style={styles.metricSub}>New Student Signups</Text>
+                  ) : (
+                    <Skeleton width="75%" height={12} borderRadius={4} style={{ marginTop: 4 }} />
+                  )}
                 </View>
               </View>
 
@@ -875,10 +894,18 @@ export default function AdminUsersScreen() {
                 </View>
                 <View>
                   <Text style={styles.metricLabel}>Today's Sessions</Text>
-                  <Text style={[styles.metricValue, { color: '#9333ea' }]}>
-                    {stats.todaySessionsCount ?? 0}
-                  </Text>
-                  <Text style={styles.metricSub}>Live Practice Calls Today</Text>
+                  {statsLoaded ? (
+                    <Text style={[styles.metricValue, { color: '#9333ea' }]}>
+                      {stats.todaySessionsCount ?? 0}
+                    </Text>
+                  ) : (
+                    <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                  )}
+                  {statsLoaded ? (
+                    <Text style={styles.metricSub}>Live Practice Calls Today</Text>
+                  ) : (
+                    <Skeleton width="75%" height={12} borderRadius={4} style={{ marginTop: 4 }} />
+                  )}
                 </View>
               </View>
 
@@ -888,10 +915,18 @@ export default function AdminUsersScreen() {
                 </View>
                 <View>
                   <Text style={styles.metricLabel}>Total Practiced</Text>
-                  <Text style={[styles.metricValue, { color: '#2563eb' }]}>{stats.totalMinutesConsumed}m</Text>
-                  <Text style={styles.metricSub}>
-                    {stats.activePaidCount} Paid · {stats.starterCount} Starter
-                  </Text>
+                  {statsLoaded ? (
+                    <Text style={[styles.metricValue, { color: '#2563eb' }]}>{stats.totalMinutesConsumed}m</Text>
+                  ) : (
+                    <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
+                  )}
+                  {statsLoaded ? (
+                    <Text style={styles.metricSub}>
+                      {stats.activePaidCount} Paid · {stats.starterCount} Starter
+                    </Text>
+                  ) : (
+                    <Skeleton width="75%" height={12} borderRadius={4} style={{ marginTop: 4 }} />
+                  )}
                 </View>
               </View>
             </View>
