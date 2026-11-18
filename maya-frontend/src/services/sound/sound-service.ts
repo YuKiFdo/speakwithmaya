@@ -13,7 +13,9 @@ const GOOD_JOB_ASSET = require('@/assets/sounds/good job.mp3');
 const HINT_BUTTON_ASSET = require('@/assets/sounds/hint button press.mp3');
 const OTHER_BUTTON_ASSET = require('@/assets/sounds/other button press.mp3');
 const UNDERSTOOD_BUTTON_ASSET = require('@/assets/sounds/understood button press.mp3');
-const SCANNING_RADAR_ASSET = require('@/assets/sounds/scanning_radar.wav');
+// Seamless loop (no fade in/out inside the file): the old scanning_radar.wav was a single
+// 3.4s whoosh fading 3%->100%->3%, so looping it pulsed. Fades are done in code.
+const SCANNING_RADAR_ASSET = require('@/assets/sounds/scanning_loop.wav');
 const ANALYSIS_COMPLETE_ASSET = require('@/assets/sounds/analysis_complete.wav');
 const STEP_POP_ASSET = require('@/assets/sounds/step_pop.wav');
 const MAYA_WELCOME_ASSET = require('@/assets/sounds/maya-welcome.wav');
@@ -67,9 +69,7 @@ const DAILY_GOAL_AUDIO_ASSETS: Record<string, any> = {
 let audioCtx: AudioContext | null = null;
 /** Every scanning whoosh still sounding on web (repeats overlap), so stop can fade them all. */
 const activeWhooshVoices = new Set<{ sources: AudioScheduledSourceNode[]; gains: GainNode[] }>();
-let scanningRepeatTimer: ReturnType<typeof setInterval> | null = null;
 let nativeScanningFadeTimer: ReturnType<typeof setInterval> | null = null;
-const SCANNING_REPEAT_MS = 3200; // whoosh is 3.4s long, so repeats overlap its fade-out
 let activeNativeScanningPlayer: any = null;
 
 interface VoicePlayerHandle {
@@ -787,35 +787,52 @@ export function playScanningSound(): void {
   if (Platform.OS !== 'web') {
     try {
       const player = createAudioPlayer(SCANNING_RADAR_ASSET);
-      player.volume = 0.45;
-      // Loop for as long as the analyzing screen waits (analysis + first-card voice can take
-      // 20s+); stopScanningSound() fades it out.
+      // Seamless loop for as long as the analyzing screen waits (analysis + first-card voice
+      // can take 20s+). Fade in once here; stopScanningSound() fades it out.
       player.loop = true;
+      player.volume = 0;
       player.play();
       activeNativeScanningPlayer = player;
+      const target = 0.45;
+      let step = 0;
+      if (nativeScanningFadeTimer) clearInterval(nativeScanningFadeTimer);
+      nativeScanningFadeTimer = setInterval(() => {
+        step++;
+        if (activeNativeScanningPlayer !== player) {
+          if (nativeScanningFadeTimer) clearInterval(nativeScanningFadeTimer);
+          nativeScanningFadeTimer = null;
+          return;
+        }
+        try { player.volume = Math.min(target, (target * step) / 15); } catch {}
+        if (step >= 15) {
+          if (nativeScanningFadeTimer) clearInterval(nativeScanningFadeTimer);
+          nativeScanningFadeTimer = null;
+        }
+      }, 40); // 15 x 40ms = 0.6s fade-in
     } catch (err) {
       console.warn('[sound-service] Native playScanningSound error:', err);
     }
     return;
   }
 
-  // Web Audio API dynamic synthesis, repeated until stopScanningSound()
-  playWhooshVoice(1);
-  scanningRepeatTimer = setInterval(() => playWhooshVoice(0.6), SCANNING_REPEAT_MS);
+  // Web Audio API: one continuous, gapless scanning bed until stopScanningSound().
+  // (The old version re-triggered a 3.4s whoosh with its own fade-in every 3.2s, which
+  // pulsed audibly.) Looped noise + slow LFOs: fades in once, then holds steady.
+  playContinuousScanning();
 }
 
-function playWhooshVoice(level: number): void {
+function playContinuousScanning(): void {
   const ctx = getAudioContext();
   if (!ctx) return;
 
   try {
-    const duration = 3.4;
-    const sampleRate = ctx.sampleRate;
-    const bufferSize = Math.floor(sampleRate * duration);
-    const buffer = ctx.createBuffer(1, bufferSize, sampleRate);
+    const now = ctx.currentTime;
+    const loopSeconds = 4;
+    const bufferSize = Math.floor(ctx.sampleRate * loopSeconds);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
 
-    // Warm, organic filtered noise
+    // Warm pink-ish noise (looped; noise has no audible seam)
     let b0 = 0, b1 = 0, b2 = 0;
     for (let i = 0; i < bufferSize; i++) {
       const white = Math.random() * 2 - 1;
@@ -824,52 +841,49 @@ function playWhooshVoice(level: number): void {
       b2 = 0.96900 * b2 + white * 0.1538520;
       data[i] = (b0 + b1 + b2) * 0.35;
     }
-
     const noise = ctx.createBufferSource();
     noise.buffer = buffer;
+    noise.loop = true;
 
-    // Resonant bandpass filter: sweeps smoothly 260Hz -> 850Hz -> 320Hz
+    // Bandpass that sweeps slowly and continuously 300..800 Hz (LFO, no restarts)
     const filter = ctx.createBiquadFilter();
     filter.type = 'bandpass';
     filter.Q.value = 1.4;
+    filter.frequency.value = 550;
+    const sweepLfo = ctx.createOscillator();
+    sweepLfo.frequency.value = 1 / 6; // one sweep every 6s
+    const sweepDepth = ctx.createGain();
+    sweepDepth.gain.value = 250;
+    sweepLfo.connect(sweepDepth);
+    sweepDepth.connect(filter.frequency);
 
-    const now = ctx.currentTime;
-    filter.frequency.setValueAtTime(260, now);
-    filter.frequency.exponentialRampToValueAtTime(850, now + 1.7);
-    filter.frequency.exponentialRampToValueAtTime(320, now + duration);
-
-    // Audible gain envelope
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.exponentialRampToValueAtTime(0.42 * level, now + 0.6);
-    gain.gain.exponentialRampToValueAtTime(0.48 * level, now + 1.8);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-    // Subtle ethereal glass shimmer harmonic
+    // Soft glass shimmer, its pitch drifting with the same slow LFO
     const shimmerOsc = ctx.createOscillator();
-    const shimmerGain = ctx.createGain();
     shimmerOsc.type = 'sine';
-    shimmerOsc.frequency.setValueAtTime(880, now);
-    shimmerOsc.frequency.exponentialRampToValueAtTime(1174, now + 1.7);
-    shimmerOsc.frequency.exponentialRampToValueAtTime(880, now + duration);
+    shimmerOsc.frequency.value = 1027;
+    const shimmerDepth = ctx.createGain();
+    shimmerDepth.gain.value = 147;
+    sweepLfo.connect(shimmerDepth);
+    shimmerDepth.connect(shimmerOsc.frequency);
+    const shimmerGain = ctx.createGain();
+    shimmerGain.gain.value = 0.05;
 
-    shimmerGain.gain.setValueAtTime(0.001, now);
-    shimmerGain.gain.exponentialRampToValueAtTime(0.08 * level, now + 0.8);
-    shimmerGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    // Master: fade in ONCE, then hold steady
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.linearRampToValueAtTime(0.42, now + 0.8);
 
     noise.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-
+    filter.connect(master);
     shimmerOsc.connect(shimmerGain);
-    shimmerGain.connect(ctx.destination);
+    shimmerGain.connect(master);
+    master.connect(ctx.destination);
 
     noise.start(now);
+    sweepLfo.start(now);
     shimmerOsc.start(now);
-    noise.stop(now + duration);
-    shimmerOsc.stop(now + duration);
 
-    const voice = { sources: [noise, shimmerOsc] as AudioScheduledSourceNode[], gains: [gain, shimmerGain] };
+    const voice = { sources: [noise, sweepLfo, shimmerOsc] as AudioScheduledSourceNode[], gains: [master] };
     activeWhooshVoices.add(voice);
     noise.onended = () => activeWhooshVoices.delete(voice);
   } catch (err) {
@@ -881,11 +895,6 @@ function playWhooshVoice(level: number): void {
  * Stop active scanning sound across Native and Web
  */
 export function stopScanningSound(fadeMs: number = 120): void {
-  if (scanningRepeatTimer) {
-    clearInterval(scanningRepeatTimer);
-    scanningRepeatTimer = null;
-  }
-
   // Mobile Native: step the volume down, then release the player
   if (Platform.OS !== 'web' && activeNativeScanningPlayer) {
     const player = activeNativeScanningPlayer;
