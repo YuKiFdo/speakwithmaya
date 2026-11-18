@@ -50,6 +50,8 @@ const DEFAULT_MAINTENANCE: MaintenanceConfig = {
   estimatedEndTime: '15 minutes',
 };
 
+const SMS_TRACKED_LINK = 'https://app.speakwithmaya.com/';
+
 const SMS_PRESETS = [
   {
     id: 'back_online',
@@ -91,7 +93,8 @@ export default function AdminMaintenanceScreen() {
   const [specificNumbersText, setSpecificNumbersText] = useState('');
   const [smsMessage, setSmsMessage] = useState('');
   // Tracked link + template variables ({{name}}, {{first_name}}, {{link}})
-  const [smsLink, setSmsLink] = useState('');
+  // Tracked links always point to the app home; each recipient gets their own ?r=<token>
+  const [includeLink, setIncludeLink] = useState(false);
   const [campaignName, setCampaignName] = useState('');
   const [previewName, setPreviewName] = useState('Nimal Perera');
   const [reportRefreshKey, setReportRefreshKey] = useState(0);
@@ -378,7 +381,7 @@ export default function AdminMaintenanceScreen() {
           audience: 'specific',
           phoneNumbers: [testNumber.trim()],
           message: smsMessage.trim(),
-          ...(smsLink.trim() ? { linkUrl: smsLink.trim(), campaignName: `${campaignName.trim() || 'Test'} (test)` } : {}),
+          ...(includeLink ? { linkUrl: SMS_TRACKED_LINK, campaignName: `${campaignName.trim() || 'Test'} (test)` } : {}),
         }),
       });
 
@@ -470,7 +473,7 @@ export default function AdminMaintenanceScreen() {
           audience,
           phoneNumbers: targetNumbers,
           message: smsMessage.trim(),
-          ...(smsLink.trim() ? { linkUrl: smsLink.trim(), campaignName: campaignName.trim() || undefined } : {}),
+          ...(includeLink ? { linkUrl: SMS_TRACKED_LINK, campaignName: campaignName.trim() || undefined } : {}),
         }),
       });
 
@@ -539,22 +542,11 @@ export default function AdminMaintenanceScreen() {
   // SMS character calculation
   // Preview exactly what one recipient receives (same renderer as the backend). The sample
   // link has the real length (8-char token), so the SMS part count is accurate.
-  const sampleLink = (() => {
-    const raw = smsLink.trim();
-    if (!raw) return null;
-    try {
-      const u = new URL(raw);
-      u.searchParams.set('r', 'Ab3xK9mQ');
-      return u.toString();
-    } catch {
-      return raw;
-    }
-  })();
+  const sampleLink = includeLink ? `${SMS_TRACKED_LINK}?r=Ab3xK9mQ` : null; // real length
   const smsPreview = renderSmsTemplate(smsMessage, { name: previewName, link: sampleLink });
   const smsCount = countSmsSegments(smsPreview);
   const charCount = smsCount.chars;
   const smsSegments = smsCount.segments;
-  const smsLinkInvalid = Boolean(smsLink.trim()) && !/^https:\/\/(app\.|www\.)?speakwithmaya\.com(\/|$)/i.test(smsLink.trim());
 
   const insertSmsVariable = (token: string) => {
     const { start, end } = smsSelectionRef.current;
@@ -1326,23 +1318,22 @@ export default function AdminMaintenanceScreen() {
                     {'{{first_name|there}}'} uses {'"there"'} when a user has no name. Without {'{{link}}'}, the link is added at the end.
                   </Text>
 
-                  {/* Tracked link (optional) */}
+                  {/* Tracked link (optional, always the app home) */}
                   <View style={styles.smsLinkRow}>
-                    <View style={{ flex: 1.4 }}>
-                      <Text style={styles.fieldLabel}>Tracked link (optional):</Text>
-                      <TextInput
-                        style={[styles.textInput, smsLinkInvalid && { borderColor: '#DC2626' }]}
-                        value={smsLink}
-                        onChangeText={setSmsLink}
-                        placeholder="https://app.speakwithmaya.com/"
-                        placeholderTextColor="#94A3B8"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                      />
-                      {smsLinkInvalid && (
-                        <Text style={[styles.smsHelpText, { color: '#DC2626' }]}>Must start with https://app.speakwithmaya.com</Text>
-                      )}
-                    </View>
+                    <Pressable
+                      onPress={() => setIncludeLink((v) => !v)}
+                      style={({ pressed }) => [styles.smsLinkToggle, includeLink && styles.smsLinkToggleOn, pressed && { opacity: 0.85 }]}
+                      accessibilityRole="switch"
+                      accessibilityState={{ checked: includeLink }}
+                    >
+                      <View style={[styles.smsToggleTrack, includeLink && styles.smsToggleTrackOn]}>
+                        <View style={[styles.smsToggleKnob, includeLink && styles.smsToggleKnobOn]} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.smsLinkToggleTitle}>Include tracked link</Text>
+                        <Text style={styles.smsHelpText}>{SMS_TRACKED_LINK} · unique per user, clicks are counted</Text>
+                      </View>
+                    </Pressable>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.fieldLabel}>Campaign name:</Text>
                       <TextInput
@@ -1420,10 +1411,10 @@ export default function AdminMaintenanceScreen() {
                       style={({ pressed }) => [
                         styles.broadcastSubmitBtn,
                         pressed && { opacity: 0.88, transform: [{ scale: 0.99 }] },
-                        (isBroadcasting || !smsMessage.trim() || smsLinkInvalid) && { opacity: 0.5 },
+                        (isBroadcasting || !smsMessage.trim()) && { opacity: 0.5 },
                       ]}
                       onPress={handleBroadcastSms}
-                      disabled={isBroadcasting || !smsMessage.trim() || smsLinkInvalid}
+                      disabled={isBroadcasting || !smsMessage.trim()}
                     >
                       {isBroadcasting ? (
                         <ActivityIndicator size="small" color="#FFFFFF" />
@@ -2194,6 +2185,47 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     color: '#64748B',
     marginTop: 6,
+  },
+  smsLinkToggle: {
+    flex: 1.4,
+    minWidth: 240,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+  },
+  smsLinkToggleOn: {
+    borderColor: '#5EEAD4',
+    backgroundColor: '#F0FDFA',
+  },
+  smsLinkToggleTitle: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 13.5,
+    color: '#0F172A',
+  },
+  smsToggleTrack: {
+    width: 40,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#CBD5E1',
+    padding: 3,
+    justifyContent: 'center',
+  },
+  smsToggleTrackOn: {
+    backgroundColor: '#0d9488',
+  },
+  smsToggleKnob: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+  },
+  smsToggleKnobOn: {
+    alignSelf: 'flex-end',
   },
   smsLinkRow: {
     flexDirection: 'row',
