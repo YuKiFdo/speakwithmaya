@@ -2257,7 +2257,10 @@ export class AuthService {
     };
     let totalSeconds = 0;
     const sessionsByDay = new Map<string, number>();
+    // Whole-table loops: yield regularly so live calls keep flowing while this runs
+    let rowsSinceYield = 0;
     for (const s of (sessions || []) as any[]) {
+      if (++rowsSinceYield % 500 === 0) await new Promise((r) => setImmediate(r));
       const a = get(s.user_id);
       a.sessions += 1;
       a.seconds += s.duration_seconds || 0;
@@ -2276,12 +2279,14 @@ export class AuthService {
       if (k) sessionsByDay.set(k, (sessionsByDay.get(k) || 0) + 1);
     }
     for (const l of (ledger || []) as any[]) {
+      if (++rowsSinceYield % 500 === 0) await new Promise((r) => setImmediate(r));
       const a = get(l.user_id);
       a.tokens += l.total_tokens || 0;
       a.costLkr += Number(l.cost_lkr || 0);
       a.costUsd += Number(l.cost_usd || 0);
     }
     for (const p of (progress || []) as any[]) {
+      if (++rowsSinceYield % 500 === 0) await new Promise((r) => setImmediate(r));
       if (p.status === 'completed' || p.is_passed) get(p.user_id).completed += 1;
     }
     for (const a of byUser.values()) a.avgScore = a.scoreN > 0 ? a.scoreSum / a.scoreN : null;
@@ -2367,7 +2372,10 @@ export class AuthService {
       });
 
       // Build enriched user cards
-      let enrichedUsers = allProfiles.map((p) => {
+      // Built in slices that yield to the event loop: this ran synchronously over every
+      // profile and, with CPU steal on the VPS, blocked live calls for up to ~20s whenever
+      // the admin Users page was open (load + 60s refresh).
+      const enrichUser = (p: any) => {
         const act = activity.byUser.get(p.id) || EMPTY_USER_ACTIVITY;
         const activeSub = subByUser.get(p.id);
 
@@ -2484,7 +2492,12 @@ export class AuthService {
             subscriptionStatus: activeSub ? activeSub.status : (p.plan_status || 'FREE'),
           },
         };
-      });
+      };
+      let enrichedUsers: ReturnType<typeof enrichUser>[] = [];
+      for (let i = 0; i < allProfiles.length; i++) {
+        if (i > 0 && i % 100 === 0) await new Promise((r) => setImmediate(r));
+        enrichedUsers.push(enrichUser(allProfiles[i]));
+      }
 
       // Apply Filters
       if (query?.search) {
