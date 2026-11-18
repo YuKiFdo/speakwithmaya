@@ -68,5 +68,16 @@ await build({
 });
 if (ENTRY === 'dist/main.js') fs.renameSync('dist/main.js', 'dist/main.unbundled.js');
 fs.renameSync(TMP_OUT, 'dist/main.js');
+
+// The Piper worker is loaded with new URL('./piper-inference.worker.js', import.meta.url).
+// Inside the bundle import.meta.url is dist/main.js, so the worker must sit next to it.
+// Without this copy PiperWorkerClient.isAvailable() was false and ONNX inference ran
+// synchronously on the main event loop (seconds-long stalls for every TTS request).
+// The worker only imports node builtins and onnxruntime-*, so a plain copy is enough.
+const WORKER_SRC = 'dist/sessions/piper-inference.worker.js';
+if (!fs.existsSync(WORKER_SRC)) {
+  throw new Error(`${WORKER_SRC} missing: run nest build before bundling`);
+}
+fs.copyFileSync(WORKER_SRC, 'dist/piper-inference.worker.js');
 fs.rmSync('dist/main.bundle.js', { force: true });
 console.log('Bundled into dist/main.js (original entry kept as dist/main.unbundled.js)');
