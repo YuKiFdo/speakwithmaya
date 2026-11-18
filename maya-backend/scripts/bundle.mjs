@@ -8,6 +8,14 @@
 // emitDecoratorMetadata support does not matter. Native / data-file / optional packages stay
 // external and are loaded from node_modules at runtime as before.
 import { build } from 'esbuild';
+import fs from 'node:fs';
+
+// PM2's `startOrReload` keeps the script path of an already-running app, so pointing PM2 at
+// a new file never took effect. Instead the bundle REPLACES dist/main.js; the original tsc
+// entry is kept as dist/main.unbundled.js (it still imports ./app.module.js etc. from dist/).
+// Re-running the script bundles from main.unbundled.js, so it is idempotent.
+const ENTRY = fs.existsSync('dist/main.unbundled.js') ? 'dist/main.unbundled.js' : 'dist/main.js';
+const TMP_OUT = 'dist/main.bundle.tmp.js';
 
 const external = [
   // native add-ons and packages that read their own files at runtime
@@ -35,8 +43,8 @@ const external = [
 ];
 
 await build({
-  entryPoints: ['dist/main.js'],
-  outfile: 'dist/main.bundle.js',
+  entryPoints: [ENTRY],
+  outfile: TMP_OUT,
   bundle: true,
   platform: 'node',
   target: 'node22',
@@ -58,4 +66,7 @@ await build({
     ].join('\n'),
   },
 });
-console.log('Bundled dist/main.bundle.js');
+if (ENTRY === 'dist/main.js') fs.renameSync('dist/main.js', 'dist/main.unbundled.js');
+fs.renameSync(TMP_OUT, 'dist/main.js');
+fs.rmSync('dist/main.bundle.js', { force: true });
+console.log('Bundled into dist/main.js (original entry kept as dist/main.unbundled.js)');
