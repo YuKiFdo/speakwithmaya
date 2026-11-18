@@ -14,16 +14,35 @@ export interface R2Config {
   accountId: string;
   accessKeyId: string;
   secretAccessKey: string;
+  /**
+   * Single physical R2 bucket. When set, every logical bucket ("session-recordings",
+   * "roadmap-audio") is stored as a key prefix inside it, so `<publicUrl>/<logical>/<path>`
+   * maps 1:1 to the object key. An R2 custom domain serves exactly one bucket, so this is
+   * what makes public URLs work for more than one logical bucket.
+   */
   bucketName?: string;
   publicUrl?: string;
 }
 
 export class R2BucketClient {
+  /** Physical R2 bucket that receives the requests. */
+  private readonly physicalBucket: string;
+  /** Key prefix inside the physical bucket ('' when each logical bucket is its own R2 bucket). */
+  private readonly keyPrefix: string;
+
   constructor(
     private readonly s3Client: S3Client,
     private readonly bucketName: string,
     private readonly publicBaseUrl: string,
-  ) {}
+    sharedBucket?: string,
+  ) {
+    this.physicalBucket = sharedBucket || bucketName;
+    this.keyPrefix = sharedBucket ? `${bucketName}/` : '';
+  }
+
+  private key(filePath: string): string {
+    return this.keyPrefix + filePath.replace(/^\/+/, '');
+  }
 
   async upload(
     filePath: string,
@@ -40,8 +59,8 @@ export class R2BucketClient {
 
       await this.s3Client.send(
         new PutObjectCommand({
-          Bucket: this.bucketName,
-          Key: normalizedPath,
+          Bucket: this.physicalBucket,
+          Key: this.key(normalizedPath),
           Body: buf,
           ContentType: options?.contentType || 'audio/wav',
         }),
@@ -49,7 +68,7 @@ export class R2BucketClient {
 
       return { data: { path: normalizedPath }, error: null };
     } catch (err: any) {
-      logger.error(`[CloudflareR2] Upload failed (${this.bucketName}/${filePath}): ${err?.message}`);
+      logger.error(`[CloudflareR2] Upload failed (${this.physicalBucket}/${this.key(filePath)}): ${err?.message}`);
       return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
     }
   }
@@ -74,10 +93,11 @@ export class R2BucketClient {
     folderPrefix?: string,
   ): Promise<{ data: Array<{ name: string }> | null; error: Error | null }> {
     try {
-      const cleanPrefix = folderPrefix ? `${folderPrefix.replace(/^\/+|\/+$/g, '')}/` : '';
+      const folder = folderPrefix ? `${folderPrefix.replace(/^\/+|\/+$/g, '')}/` : '';
+      const cleanPrefix = this.keyPrefix + folder;
       const response = await this.s3Client.send(
         new ListObjectsV2Command({
-          Bucket: this.bucketName,
+          Bucket: this.physicalBucket,
           Prefix: cleanPrefix,
           Delimiter: '/',
         }),
@@ -121,8 +141,8 @@ export class R2BucketClient {
       const normalizedPath = filePath.replace(/^\/+/, '');
       const response = await this.s3Client.send(
         new GetObjectCommand({
-          Bucket: this.bucketName,
-          Key: normalizedPath,
+          Bucket: this.physicalBucket,
+          Key: this.key(normalizedPath),
         }),
       );
 
@@ -148,8 +168,10 @@ export class R2BucketClient {
 export class CloudflareR2StorageAdapter {
   private readonly s3Client: S3Client;
   private readonly publicBaseUrl: string;
+  private readonly sharedBucket?: string;
 
   constructor(config: R2Config) {
+    this.sharedBucket = config.bucketName || undefined;
     this.s3Client = new S3Client({
       region: 'auto',
       endpoint: `https://${config.accountId}.r2.cloudflarestorage.com`,
@@ -163,6 +185,14 @@ export class CloudflareR2StorageAdapter {
   }
 
   async listBuckets(): Promise<{ data: Array<{ id: string; name: string }>; error: Error | null }> {
+    // Shared-bucket mode: logical buckets are prefixes and always "exist". Object-scoped R2
+    // tokens cannot list or create buckets, so do not call the bucket-level API at all.
+    if (this.sharedBucket) {
+      return {
+        data: ['session-recordings', 'roadmap-audio'].map((name) => ({ id: name, name })),
+        error: null,
+      };
+    }
     try {
       const response = await this.s3Client.send(new ListBucketsCommand({}));
       const buckets = (response.Buckets || []).map((b) => ({
@@ -179,6 +209,7 @@ export class CloudflareR2StorageAdapter {
     name: string,
     _options?: { public?: boolean },
   ): Promise<{ data: { name: string } | null; error: Error | null }> {
+    if (this.sharedBucket) return { data: { name }, error: null };
     try {
       await this.s3Client.send(new CreateBucketCommand({ Bucket: name }));
       return { data: { name }, error: null };
@@ -187,12 +218,16 @@ export class CloudflareR2StorageAdapter {
       if (err?.name === 'BucketAlreadyExists' || err?.name === 'BucketAlreadyOwnedByYou') {
         return { data: { name }, error: null };
       }
+      logger.error(
+        `[CloudflareR2] Could not create bucket "${name}": ${err?.message}. ` +
+          `Create it in the Cloudflare dashboard, or set R2_BUCKET to use one shared bucket.`,
+      );
       return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
     }
   }
 
   from(bucketName: string): R2BucketClient {
-    return new R2BucketClient(this.s3Client, bucketName, this.publicBaseUrl);
+    return new R2BucketClient(this.s3Client, bucketName, this.publicBaseUrl, this.sharedBucket);
   }
 }
 
@@ -214,6 +249,7 @@ export function attachR2StorageIfConfigured(supabaseClient: any): boolean {
       accountId,
       accessKeyId,
       secretAccessKey,
+      bucketName: process.env.R2_BUCKET?.trim() || undefined,
       publicUrl: process.env.R2_PUBLIC_URL || process.env.EXPO_PUBLIC_R2_URL || 'https://media.speakwithmaya.com',
     });
 
@@ -223,7 +259,10 @@ export function attachR2StorageIfConfigured(supabaseClient: any): boolean {
       configurable: true,
     });
 
-    logger.log(`Attached Cloudflare R2 Storage adapter for account ${accountId.slice(0, 6)}...`);
+    logger.log(
+      `Attached Cloudflare R2 Storage adapter for account ${accountId.slice(0, 6)}... ` +
+        (process.env.R2_BUCKET ? `(shared bucket "${process.env.R2_BUCKET.trim()}")` : '(one R2 bucket per logical bucket)'),
+    );
     return true;
   } catch (err: any) {
     logger.warn(`Failed to initialize Cloudflare R2 Storage adapter: ${err?.message}`);
