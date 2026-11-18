@@ -649,7 +649,7 @@ export default function AdminUsageScreen() {
               {/* 1. AI Minutes Today */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>AI Minutes Today</Text>
-                {!!data ? (
+                {!!data && !loading ? (
                   <Text style={[styles.metricValue, { color: '#0f172a' }]}>
                     {data?.stats?.minutesToday !== undefined
                       ? data.stats.minutesToday.toLocaleString()
@@ -663,7 +663,7 @@ export default function AdminUsageScreen() {
               {/* 2. AI Minutes This Month */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>AI Minutes This Month</Text>
-                {!!data ? (
+                {!!data && !loading ? (
                   <Text style={[styles.metricValue, { color: '#0d9488' }]}>
                     {data?.stats?.minutesThisMonth !== undefined
                       ? data.stats.minutesThisMonth.toLocaleString()
@@ -677,7 +677,7 @@ export default function AdminUsageScreen() {
               {/* 3. AI Sessions */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>AI Sessions</Text>
-                {!!data ? (
+                {!!data && !loading ? (
                   <Text style={[styles.metricValue, { color: '#2563eb' }]}>
                     {data?.stats?.totalSessions !== undefined
                       ? data.stats.totalSessions.toLocaleString()
@@ -691,7 +691,7 @@ export default function AdminUsageScreen() {
               {/* 4. Hints Used */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Hints Used</Text>
-                {!!data ? (
+                {!!data && !loading ? (
                   <Text style={[styles.metricValue, { color: '#8b5cf6' }]}>
                     {data?.stats?.totalHintsUsed !== undefined
                       ? data.stats.totalHintsUsed.toLocaleString()
@@ -700,7 +700,7 @@ export default function AdminUsageScreen() {
                 ) : (
                   <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
                 )}
-                {!!data ? (
+                {!!data && !loading ? (
                   <Text style={styles.metricSubText}>
                     Spend: LKR {(data?.stats?.totalHintCostLkr || 0).toFixed(2)}
                   </Text>
@@ -712,7 +712,7 @@ export default function AdminUsageScreen() {
               {/* 5. Total AI Cost (Voice + Hints) */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Total AI Cost</Text>
-                {!!data ? (
+                {!!data && !loading ? (
                   <Text style={[styles.metricValue, { color: '#ea580c' }]}>
                     {data?.stats?.grandTotalCostLkr !== undefined
                       ? `LKR ${data.stats.grandTotalCostLkr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -723,7 +723,7 @@ export default function AdminUsageScreen() {
                 ) : (
                   <Skeleton width="55%" height={26} borderRadius={6} style={{ marginVertical: 4 }} />
                 )}
-                {!!data ? (
+                {!!data && !loading ? (
                   <Text style={styles.metricSubText}>
                     Voice: LKR {(data?.stats?.totalCostLkr || 0).toFixed(2)} | Hints: LKR {(data?.stats?.totalHintCostLkr || 0).toFixed(2)}
                   </Text>
@@ -735,7 +735,7 @@ export default function AdminUsageScreen() {
               {/* 6. Avg Cost Per Min */}
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Avg Cost Per Min</Text>
-                {!!data ? (
+                {!!data && !loading ? (
                   <Text style={[styles.metricValue, { color: '#7c3aed' }]}>
                     {data?.stats?.avgCostPerMin !== undefined && data.stats.avgCostPerMin > 0
                       ? `LKR ${Number(data.stats.avgCostPerMin).toFixed(2)}`
@@ -854,7 +854,7 @@ export default function AdminUsageScreen() {
                     },
                   })}
               >
-                {loading && !data ? (
+                {loading ? (
                   <View style={styles.chartLoading}>
                     <ActivityIndicator size="small" color="#0d9488" />
                   </View>
@@ -1098,7 +1098,7 @@ export default function AdminUsageScreen() {
                   </View>
 
                   {/* Table Body */}
-                  {loading && !data ? (
+                  {loading ? (
                     <View style={styles.tableLoadingRow}>
                       <ActivityIndicator size="small" color="#0d9488" />
                       <Text style={styles.tableLoadingText}>Loading usage records from database...</Text>
