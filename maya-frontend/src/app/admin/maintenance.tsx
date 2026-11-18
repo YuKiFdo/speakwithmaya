@@ -19,6 +19,8 @@ import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminAuthStore } from '@/services/store/admin-auth-store';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import { SmsCampaignReport } from '@/components/admin/SmsCampaignReport';
+import { renderSmsTemplate, smsSegments as countSmsSegments } from '@/utils/sms-template';
 
 type MainSectionTab = 'maintenance' | 'sms';
 type SmsAudience = 'all' | 'paid' | 'nonpaid' | 'specific';
@@ -88,6 +90,12 @@ export default function AdminMaintenanceScreen() {
   const [loadingAudienceCount, setLoadingAudienceCount] = useState(false);
   const [specificNumbersText, setSpecificNumbersText] = useState('');
   const [smsMessage, setSmsMessage] = useState('');
+  // Tracked link + template variables ({{name}}, {{first_name}}, {{link}})
+  const [smsLink, setSmsLink] = useState('');
+  const [campaignName, setCampaignName] = useState('');
+  const [previewName, setPreviewName] = useState('Nimal Perera');
+  const [reportRefreshKey, setReportRefreshKey] = useState(0);
+  const smsSelectionRef = React.useRef<{ start: number; end: number }>({ start: 0, end: 0 });
   const [testNumber, setTestNumber] = useState('');
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
@@ -370,6 +378,7 @@ export default function AdminMaintenanceScreen() {
           audience: 'specific',
           phoneNumbers: [testNumber.trim()],
           message: smsMessage.trim(),
+          ...(smsLink.trim() ? { linkUrl: smsLink.trim(), campaignName: `${campaignName.trim() || 'Test'} (test)` } : {}),
         }),
       });
 
@@ -461,6 +470,7 @@ export default function AdminMaintenanceScreen() {
           audience,
           phoneNumbers: targetNumbers,
           message: smsMessage.trim(),
+          ...(smsLink.trim() ? { linkUrl: smsLink.trim(), campaignName: campaignName.trim() || undefined } : {}),
         }),
       });
 
@@ -490,6 +500,7 @@ export default function AdminMaintenanceScreen() {
 
               if (jobStatus.status === 'completed' || jobStatus.status === 'failed') {
                 isDone = true;
+                setReportRefreshKey((k) => k + 1); // show the new campaign in the click report
                 if (jobStatus.status === 'completed') {
                   await mayaAlert.success(
                     `Broadcast completed!\n\n• Successfully Sent: ${jobStatus.totalSent}\n• Failed: ${jobStatus.totalFailed}\n• Total Targeted: ${jobStatus.totalTargeted}`,
@@ -526,8 +537,35 @@ export default function AdminMaintenanceScreen() {
   };
 
   // SMS character calculation
-  const charCount = smsMessage.length;
-  const smsSegments = charCount === 0 ? 0 : Math.ceil(charCount / 160);
+  // Preview exactly what one recipient receives (same renderer as the backend). The sample
+  // link has the real length (8-char token), so the SMS part count is accurate.
+  const sampleLink = (() => {
+    const raw = smsLink.trim();
+    if (!raw) return null;
+    try {
+      const u = new URL(raw);
+      u.searchParams.set('r', 'Ab3xK9mQ');
+      return u.toString();
+    } catch {
+      return raw;
+    }
+  })();
+  const smsPreview = renderSmsTemplate(smsMessage, { name: previewName, link: sampleLink });
+  const smsCount = countSmsSegments(smsPreview);
+  const charCount = smsCount.chars;
+  const smsSegments = smsCount.segments;
+  const smsLinkInvalid = Boolean(smsLink.trim()) && !/^https:\/\/(app\.|www\.)?speakwithmaya\.com(\/|$)/i.test(smsLink.trim());
+
+  const insertSmsVariable = (token: string) => {
+    const { start, end } = smsSelectionRef.current;
+    const before = smsMessage.slice(0, start);
+    const after = smsMessage.slice(end);
+    const pad = before && !/\s$/.test(before) ? ' ' : '';
+    const next = `${before}${pad}${token}${after}`;
+    setSmsMessage(next);
+    const caret = (before + pad + token).length;
+    smsSelectionRef.current = { start: caret, end: caret };
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1223,7 +1261,7 @@ export default function AdminMaintenanceScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.cardTitle}>2. Compose Broadcast Message</Text>
                       <Text style={styles.cardSubtitle}>
-                        Craft your announcement. Standard GSM charges apply per 160 characters.
+                        Use variables to personalise each SMS. 160 chars per part (70 if it contains Sinhala/Tamil or emoji).
                       </Text>
                     </View>
 
@@ -1231,10 +1269,11 @@ export default function AdminMaintenanceScreen() {
                       <Text
                         style={[
                           styles.charCounterText,
-                          charCount > 160 && { color: '#B45309' },
+                          smsSegments > 1 && { color: '#B45309' },
                         ]}
                       >
-                        {charCount} / 160 chars ({smsSegments} {smsSegments === 1 ? 'part' : 'parts'})
+                        {charCount} chars · {smsSegments} SMS {smsSegments === 1 ? 'part' : 'parts'}
+                        {smsCount.unicode ? ' · Unicode (70/part)' : ''}
                       </Text>
                     </View>
                   </View>
@@ -1258,10 +1297,89 @@ export default function AdminMaintenanceScreen() {
                     style={[styles.textInput, styles.textArea, { minHeight: 110 }]}
                     value={smsMessage}
                     onChangeText={setSmsMessage}
+                    onSelectionChange={(e) => {
+                      smsSelectionRef.current = e.nativeEvent.selection;
+                    }}
                     multiline
-                    placeholder="Type your SMS message here..."
+                    placeholder="Hi {{first_name|there}}, your next lesson is ready! {{link}}"
                     placeholderTextColor="#94A3B8"
                   />
+
+                  {/* Variables: inserted at the cursor */}
+                  <View style={styles.presetsRow}>
+                    <Text style={styles.presetsLabel}>Insert:</Text>
+                    {[
+                      { token: '{{first_name|there}}', label: 'First name' },
+                      { token: '{{name}}', label: 'Full name' },
+                      { token: '{{link}}', label: 'Tracked link' },
+                    ].map((v) => (
+                      <Pressable
+                        key={v.token}
+                        style={({ pressed }) => [styles.presetPill, pressed && { opacity: 0.75 }]}
+                        onPress={() => insertSmsVariable(v.token)}
+                      >
+                        <Text style={styles.presetPillText}>+ {v.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Text style={styles.smsHelpText}>
+                    {'{{first_name|there}}'} uses {'"there"'} when a user has no name. Without {'{{link}}'}, the link is added at the end.
+                  </Text>
+
+                  {/* Tracked link (optional) */}
+                  <View style={styles.smsLinkRow}>
+                    <View style={{ flex: 1.4 }}>
+                      <Text style={styles.fieldLabel}>Tracked link (optional):</Text>
+                      <TextInput
+                        style={[styles.textInput, smsLinkInvalid && { borderColor: '#DC2626' }]}
+                        value={smsLink}
+                        onChangeText={setSmsLink}
+                        placeholder="https://app.speakwithmaya.com/"
+                        placeholderTextColor="#94A3B8"
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      {smsLinkInvalid && (
+                        <Text style={[styles.smsHelpText, { color: '#DC2626' }]}>Must start with https://app.speakwithmaya.com</Text>
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.fieldLabel}>Campaign name:</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        value={campaignName}
+                        onChangeText={setCampaignName}
+                        placeholder="e.g. November comeback"
+                        placeholderTextColor="#94A3B8"
+                      />
+                    </View>
+                  </View>
+
+                  {/* Live preview: what one recipient receives */}
+                  <View style={styles.smsPreviewBox}>
+                    <View style={styles.smsPreviewHeader}>
+                      <Text style={styles.fieldLabel}>Preview as:</Text>
+                      <TextInput
+                        style={[styles.textInput, styles.smsPreviewNameInput]}
+                        value={previewName}
+                        onChangeText={setPreviewName}
+                        placeholder="(user without a name)"
+                        placeholderTextColor="#94A3B8"
+                      />
+                    </View>
+                    <View style={styles.smsPhone}>
+                      <Text style={styles.smsPhoneSender}>SpeakWithMaya</Text>
+                      <View style={styles.smsBubble}>
+                        <Text style={styles.smsBubbleText}>
+                          {smsPreview || 'Your message preview appears here.'}
+                        </Text>
+                      </View>
+                      <Text style={styles.smsPhoneMeta}>
+                        {charCount} chars · {smsSegments} SMS {smsSegments === 1 ? 'part' : 'parts'} per user
+                        {sampleLink ? ' · each user gets their own link' : ''}
+                      </Text>
+                    </View>
+                  </View>
 
                   {/* Test Send Row */}
                   <View style={styles.testSendRow}>
@@ -1302,10 +1420,10 @@ export default function AdminMaintenanceScreen() {
                       style={({ pressed }) => [
                         styles.broadcastSubmitBtn,
                         pressed && { opacity: 0.88, transform: [{ scale: 0.99 }] },
-                        (isBroadcasting || !smsMessage.trim()) && { opacity: 0.5 },
+                        (isBroadcasting || !smsMessage.trim() || smsLinkInvalid) && { opacity: 0.5 },
                       ]}
                       onPress={handleBroadcastSms}
-                      disabled={isBroadcasting || !smsMessage.trim()}
+                      disabled={isBroadcasting || !smsMessage.trim() || smsLinkInvalid}
                     >
                       {isBroadcasting ? (
                         <ActivityIndicator size="small" color="#FFFFFF" />
@@ -1335,6 +1453,9 @@ export default function AdminMaintenanceScreen() {
                     </View>
                   )}
                 </View>
+
+                {/* Tracked-link click report */}
+                <SmsCampaignReport authHeaders={getAuthHeaders} refreshKey={reportRefreshKey} />
               </View>
             )}
           </ScrollView>
@@ -2067,6 +2188,75 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     color: '#334155',
     ...fontStyle('inter', 'medium'),
+  },
+  smsHelpText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11.5,
+    color: '#64748B',
+    marginTop: 6,
+  },
+  smsLinkRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 14,
+  },
+  smsPreviewBox: {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  smsPreviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  smsPreviewNameInput: {
+    flex: 1,
+    paddingVertical: 6,
+  },
+  smsPhone: {
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 14,
+  },
+  smsPhoneSender: {
+    ...fontStyle('inter', 'bold'),
+    fontSize: 12,
+    color: '#475569',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  smsBubble: {
+    alignSelf: 'flex-start',
+    maxWidth: '92%',
+    backgroundColor: '#E9E9EB',
+    borderRadius: 18,
+    borderBottomLeftRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  smsBubbleText: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 14,
+    lineHeight: 19,
+    color: '#0F172A',
+  },
+  smsPhoneMeta: {
+    ...fontStyle('inter', 'regular'),
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 10,
+    textAlign: 'center',
   },
   testSendRow: {
     marginTop: 14,

@@ -11,6 +11,7 @@ import {
   Min,
   Max,
   ValidateNested,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -675,6 +676,21 @@ export class BroadcastSmsDto {
   @IsOptional()
   @IsArray()
   phoneNumbers?: string[];
+
+  /**
+   * Optional tracked link appended to each SMS. Must be an app.speakwithmaya.com URL: each
+   * recipient gets it with a unique ?r=<token> so clicks can be counted per user.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  linkUrl?: string;
+
+  /** Campaign label shown in the admin click report (defaults to the date). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  campaignName?: string;
 }
 
 

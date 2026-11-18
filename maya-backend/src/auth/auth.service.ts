@@ -11,6 +11,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import * as crypto from 'crypto';
+import { renderSmsTemplate } from './sms/sms-template.js';
 import {
   SendOtpDto,
   VerifyOtpDto,
@@ -5372,7 +5373,13 @@ export class AuthService {
    * Admin: Broadcast targeted SMS to users as a background job.
    * Returns immediately with { jobId, totalTargeted } to prevent holding HTTP requests open.
    */
-  async broadcastSms(dto: { audience: 'all' | 'paid' | 'nonpaid' | 'specific'; message: string; phoneNumbers?: string[] }) {
+  async broadcastSms(dto: {
+    audience: 'all' | 'paid' | 'nonpaid' | 'specific';
+    message: string;
+    phoneNumbers?: string[];
+    linkUrl?: string;
+    campaignName?: string;
+  }) {
     if (!dto.message || !dto.message.trim()) {
       throw new BadRequestException('SMS message content cannot be empty.');
     }
@@ -5417,6 +5424,12 @@ export class AuthService {
     }
 
     const recipients = Array.from(phoneSet);
+    // Personalization ({{name}}, {{first_name}}) and click tracking both need phone -> user
+    const needsProfiles = /\{\{/.test(cleanMessage) || Boolean(dto.linkUrl);
+    const profileByPhone = needsProfiles ? await this.loadSmsProfilesByPhone() : new Map<string, { id: string; name: string }>();
+    const tracking = dto.linkUrl
+      ? await this.prepareSmsCampaign(dto, recipients, cleanMessage, profileByPhone)
+      : null;
     if (recipients.length === 0) {
       return {
         success: true,
@@ -5450,7 +5463,12 @@ export class AuthService {
         await Promise.all(
           chunk.map(async (phone) => {
             try {
-              const res = await this.smsProvider.sendRawMessage(phone, cleanMessage);
+              // With a link: each recipient gets their own tracked URL (?r=<token>)
+              const text = renderSmsTemplate(cleanMessage, {
+                name: profileByPhone.get(phone)?.name,
+                link: tracking ? tracking.linkFor(phone) : null,
+              });
+              const res = await this.smsProvider.sendRawMessage(phone, text);
               if (res.success) {
                 job.totalSent++;
               } else {
@@ -5471,6 +5489,7 @@ export class AuthService {
 
       job.status = 'completed';
       job.completedAt = new Date().toISOString();
+      if (tracking) await tracking.finish(job.totalSent, job.totalFailed, job.failedNumbers);
       job.message = `Broadcast finished. Successfully sent to ${job.totalSent} recipient(s)${job.totalFailed > 0 ? `, ${job.totalFailed} failed` : ''}.`;
       this.logger.log(`[broadcastSms] Job ${jobId} finished. Sent: ${job.totalSent}, Failed: ${job.totalFailed}`);
 
@@ -5498,5 +5517,253 @@ export class AuthService {
    */
   getBroadcastSmsJob(jobId: string): BroadcastSmsJob | null {
     return this.smsBroadcastJobs.get(jobId) || null;
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // SMS campaign click tracking (migration 024). Each recipient's SMS carries their own
+  // ?r=<token>; the web app reports the click (POST /v1/track/sms-click) when it opens.
+  // ---------------------------------------------------------------------------------------
+
+  private static readonly SMS_LINK_HOSTS = ['app.speakwithmaya.com', 'speakwithmaya.com', 'www.speakwithmaya.com'];
+  private static readonly SMS_TOKEN_RE = /^[A-Za-z0-9]{8}$/;
+
+  private static newSmsToken(): string {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'; // no 0/O/1/l/I
+    const bytes = crypto.randomBytes(8);
+    let out = '';
+    for (const b of bytes) out += alphabet[b % alphabet.length];
+    return out;
+  }
+
+  private static isMissingTableError(err: any): boolean {
+    const m = String(err?.message || '');
+    return err?.code === '42P01' || err?.code === 'PGRST205' || /relation .* does not exist|Could not find the table/i.test(m);
+  }
+
+  /**
+   * Validates the link, creates the campaign + one token per recipient, and returns how to
+   * build each recipient's link. If migration 024 is not applied, the link is still sent
+   * (untracked) so broadcasts never break.
+   */
+  private async prepareSmsCampaign(
+    dto: { audience: string; linkUrl?: string; campaignName?: string },
+    recipients: string[],
+    message: string,
+    profileByPhone: Map<string, { id: string; name: string }>,
+  ): Promise<{
+    linkFor: (phone: string) => string;
+    finish: (sent: number, failed: number, failedPhones: string[]) => Promise<void>;
+  } | null> {
+    let base: URL;
+    try {
+      base = new URL(String(dto.linkUrl).trim());
+    } catch {
+      throw new BadRequestException('Link must be a full URL, e.g. https://app.speakwithmaya.com/');
+    }
+    if (base.protocol !== 'https:' || !AuthService.SMS_LINK_HOSTS.includes(base.hostname)) {
+      throw new BadRequestException(`Tracked links must point to https://${AuthService.SMS_LINK_HOSTS[0]}`);
+    }
+    if (recipients.length === 0) return null;
+
+    const tokenByPhone = new Map<string, string>();
+    for (const phone of recipients) tokenByPhone.set(phone, AuthService.newSmsToken());
+    const linkFor = (phone: string) => {
+      const u = new URL(base.toString());
+      u.searchParams.set('r', tokenByPhone.get(phone)!);
+      return u.toString();
+    };
+    const untracked = { linkFor: () => base.toString(), finish: async () => {} };
+    if (!this.supabase) return untracked;
+
+
+    const name =
+      (dto.campaignName || '').trim() || `SMS ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+    const { data: campaign, error } = await this.supabase
+      .from('sms_campaigns')
+      .insert({ name, message, link_url: base.toString(), audience: dto.audience, recipients: recipients.length })
+      .select('id')
+      .single();
+    if (error || !campaign) {
+      if (AuthService.isMissingTableError(error)) {
+        this.logger.warn('[smsCampaign] Migration 024 not applied: sending the link without click tracking');
+        return untracked;
+      }
+      throw new BadRequestException(`Could not create SMS campaign: ${error?.message}`);
+    }
+
+    const rows = recipients.map((phone) => ({
+      token: tokenByPhone.get(phone)!,
+      campaign_id: campaign.id,
+      user_id: profileByPhone.get(phone)?.id || null,
+      phone,
+    }));
+    for (let i = 0; i < rows.length; i += 500) {
+      const { error: insErr } = await this.supabase.from('sms_campaign_recipients').insert(rows.slice(i, i + 500));
+      if (insErr) throw new BadRequestException(`Could not save campaign recipients: ${insErr.message}`);
+    }
+
+    return {
+      linkFor,
+      finish: async (sent, failed, failedPhones) => {
+        try {
+          await this.supabase.from('sms_campaigns').update({ sent, failed }).eq('id', campaign.id);
+          await this.supabase.from('sms_campaign_recipients').update({ sent_ok: true }).eq('campaign_id', campaign.id);
+          const failedTokens = failedPhones.map((p) => tokenByPhone.get(p)).filter(Boolean) as string[];
+          for (let i = 0; i < failedTokens.length; i += 500) {
+            await this.supabase
+              .from('sms_campaign_recipients')
+              .update({ sent_ok: false })
+              .in('token', failedTokens.slice(i, i + 500));
+          }
+        } catch (e: any) {
+          this.logger.warn(`[smsCampaign] Could not finalize campaign ${campaign.id}: ${e?.message}`);
+        }
+      },
+    };
+  }
+
+  /** normalized phone -> { user id, display name } for personalization and tracking. */
+  private async loadSmsProfilesByPhone(): Promise<Map<string, { id: string; name: string }>> {
+    const out = new Map<string, { id: string; name: string }>();
+    if (!this.supabase) return out;
+    const { data: profiles } = await this.supabase
+      .from('profiles')
+      .select('id, phone_number, display_name')
+      .not('phone_number', 'is', null);
+    for (const p of (profiles || []) as any[]) {
+      const norm = this.normalizePhoneNumber(p.phone_number);
+      if (norm) out.set(norm, { id: p.id, name: p.display_name || '' });
+    }
+    return out;
+  }
+
+  /** Public: records a click on a tracked SMS link. Unknown tokens are ignored. */
+  async recordSmsClick(token: string): Promise<{ ok: boolean }> {
+    if (!this.supabase || !AuthService.SMS_TOKEN_RE.test(String(token || ''))) return { ok: false };
+    const { data, error } = await this.supabase.rpc('record_sms_click', { p_token: token });
+    if (error) {
+      if (!AuthService.isMissingTableError(error)) this.logger.warn(`[smsCampaign] click record failed: ${error.message}`);
+      return { ok: false };
+    }
+    return { ok: data === true };
+  }
+
+  /** Admin: campaigns with sent / clicked / practised-after-click counts (newest first). */
+  async getSmsCampaigns() {
+    if (!this.supabase) return { migrationApplied: false, campaigns: [] };
+    const { data: campaigns, error } = await this.supabase
+      .from('sms_campaigns')
+      .select('id, name, message, link_url, audience, recipients, sent, failed, created_at')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) {
+      if (AuthService.isMissingTableError(error)) return { migrationApplied: false, campaigns: [] };
+      throw new InternalServerErrorException(error.message);
+    }
+    const ids = (campaigns || []).map((c: any) => c.id);
+    const stats = new Map<string, { clicked: number; clicks: number; practised: number }>();
+    if (ids.length) {
+      const { data: clicked } = await this.supabase
+        .from('sms_campaign_recipients')
+        .select('campaign_id, user_id, click_count, first_clicked_at')
+        .in('campaign_id', ids)
+        .not('first_clicked_at', 'is', null);
+      const practised = await this.practisedAfterClick((clicked || []) as any[]);
+      for (const r of (clicked || []) as any[]) {
+        const st = stats.get(r.campaign_id) || { clicked: 0, clicks: 0, practised: 0 };
+        st.clicked++;
+        st.clicks += r.click_count || 0;
+        if (r.user_id && practised.has(`${r.campaign_id}:${r.user_id}`)) st.practised++;
+        stats.set(r.campaign_id, st);
+      }
+    }
+    return {
+      migrationApplied: true,
+      campaigns: (campaigns || []).map((c: any) => {
+        const st = stats.get(c.id) || { clicked: 0, clicks: 0, practised: 0 };
+        return {
+          id: c.id,
+          name: c.name,
+          message: c.message,
+          linkUrl: c.link_url,
+          audience: c.audience,
+          recipients: c.recipients,
+          sent: c.sent,
+          failed: c.failed,
+          createdAt: c.created_at,
+          uniqueClicks: st.clicked,
+          totalClicks: st.clicks,
+          practisedAfterClick: st.practised,
+          clickRate: c.sent > 0 ? Math.round((st.clicked / c.sent) * 1000) / 10 : 0,
+        };
+      }),
+    };
+  }
+
+  /** Admin: per-recipient detail for one campaign (who clicked, when, practised after). */
+  async getSmsCampaignRecipients(campaignId: string) {
+    if (!this.supabase) return { recipients: [] };
+    const { data: rows, error } = await this.supabase
+      .from('sms_campaign_recipients')
+      .select('campaign_id, user_id, phone, sent_ok, click_count, first_clicked_at, last_clicked_at')
+      .eq('campaign_id', campaignId)
+      .order('first_clicked_at', { ascending: false, nullsFirst: false })
+      .limit(5000);
+    if (error) throw new InternalServerErrorException(error.message);
+    const list = (rows || []) as any[];
+    const userIds = [...new Set(list.map((r) => r.user_id).filter(Boolean))] as string[];
+    const names = new Map<string, string>();
+    for (let i = 0; i < userIds.length; i += 500) {
+      const { data: profs } = await this.supabase
+        .from('profiles')
+        .select('id, display_name')
+        .in('id', userIds.slice(i, i + 500));
+      for (const p of (profs || []) as any[]) names.set(p.id, p.display_name || '');
+    }
+    const practised = await this.practisedAfterClick(list.filter((r) => r.first_clicked_at));
+    return {
+      recipients: list.map((r) => ({
+        userId: r.user_id,
+        name: (r.user_id && names.get(r.user_id)) || null,
+        phone: r.phone ? `${'*'.repeat(Math.max(0, r.phone.length - 4))}${r.phone.slice(-4)}` : null,
+        sentOk: r.sent_ok,
+        clicks: r.click_count,
+        firstClickedAt: r.first_clicked_at,
+        lastClickedAt: r.last_clicked_at,
+        practisedAfterClick: Boolean(r.user_id && practised.has(`${r.campaign_id}:${r.user_id}`)),
+      })),
+    };
+  }
+
+  /** "<campaignId>:<userId>" for clickers who started a practice session after clicking. */
+  private async practisedAfterClick(
+    clicked: Array<{ campaign_id: string; user_id: string | null; first_clicked_at: string | null }>,
+  ): Promise<Set<string>> {
+    const out = new Set<string>();
+    const withUser = clicked.filter((r) => r.user_id && r.first_clicked_at);
+    if (!withUser.length || !this.supabase) return out;
+    const userIds = [...new Set(withUser.map((r) => r.user_id!))];
+    const earliest = withUser.reduce(
+      (m, r) => (r.first_clicked_at! < m ? r.first_clicked_at! : m),
+      withUser[0].first_clicked_at!,
+    );
+    const sessionTimes = new Map<string, string[]>();
+    for (let i = 0; i < userIds.length; i += 500) {
+      const { data: sess } = await this.supabase
+        .from('sessions')
+        .select('user_id, created_at')
+        .in('user_id', userIds.slice(i, i + 500))
+        .gte('created_at', earliest);
+      for (const s of (sess || []) as any[]) {
+        const times = sessionTimes.get(s.user_id) || [];
+        times.push(s.created_at);
+        sessionTimes.set(s.user_id, times);
+      }
+    }
+    for (const r of withUser) {
+      const after = (sessionTimes.get(r.user_id!) || []).some((t) => new Date(t) >= new Date(r.first_clicked_at!));
+      if (after) out.add(`${r.campaign_id}:${r.user_id}`);
+    }
+    return out;
   }
 }

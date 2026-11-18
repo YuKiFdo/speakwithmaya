@@ -505,4 +505,31 @@ export class AuthController {
     }
     return job;
   }
+
+  /**
+   * Public: the web app reports a tracked SMS link open (?r=<token>). Tokens are random
+   * 8-char codes (~10^14 space); unknown tokens are ignored.
+   */
+  @Post('track/sms-click')
+  async trackSmsClick(@Body() body: { token?: string }) {
+    return this.authService.recordSmsClick(String(body?.token || ''));
+  }
+
+  /**
+   * Admin: SMS campaigns with sent / unique clicks / practised-after-click.
+   */
+  @Get('admin/sms-campaigns')
+  @UseGuards(AdminGuard)
+  async getSmsCampaigns() {
+    return this.authService.getSmsCampaigns();
+  }
+
+  /**
+   * Admin: per-recipient click detail for one SMS campaign.
+   */
+  @Get('admin/sms-campaigns/:id')
+  @UseGuards(AdminGuard)
+  async getSmsCampaignRecipients(@Param('id') id: string) {
+    return this.authService.getSmsCampaignRecipients(id);
+  }
 }

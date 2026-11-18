@@ -36,6 +36,7 @@ import { Ionicons, Feather, MaterialIcons, MaterialCommunityIcons } from '@expo/
 import { useRouteGuard } from '@/hooks/useRouteGuard';
 import { OnboardingStore } from '@/services/store/onboarding-store';
 import { syncAppConfigAudioSettings } from '@/services/sound/sound-service';
+import { reportSmsLinkClick } from '@/utils/sms-click';
 if (Platform.OS === 'web' && typeof console !== 'undefined') {
   const originalWarn = console.warn;
   console.warn = (...args: any[]) => {
@@ -84,6 +85,11 @@ function WebDocumentTitle() {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
+  // Tracked SMS link (?r=<token>): report the click once, then strip it from the URL
+  useEffect(() => {
+    reportSmsLinkClick();
+  }, []);
 
   // On Web, Google Fonts (Outfit & Inter) are loaded via high-speed WOFF2 CDN in +html.tsx
   // Only native platforms (iOS/Android) need the heavy bundled TTF files from @expo-google-fonts.
