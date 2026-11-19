@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import * as crypto from 'crypto';
 import { renderSmsTemplate } from './sms/sms-template.js';
+import { hasActivePaidSubscription, trialEndStatus } from '../payments/paid-status.js';
 import {
   SendOtpDto,
   VerifyOtpDto,
@@ -822,7 +823,9 @@ export class AuthService {
         telcoProvider: userProfile.telco_provider || null,
         telcoStatus: userProfile.telco_status || (hasTelcoSub ? 'ACTIVE' : null),
         hasTelcoSubscription: hasTelcoSub,
-        isSubscriptionLocked: isTelcoLocked || userProfile.plan_status === 'expired',
+        // An ended campaign Pro Pass is 'expired' on the Starter tier: a normal Starter user, not locked
+        isSubscriptionLocked:
+          isTelcoLocked || (userProfile.plan_status === 'expired' && userProfile.plan_tier !== 'starter'),
         isGracePeriodActive: false,
         gracePeriodEndDate: null,
       },
@@ -1587,14 +1590,7 @@ export class AuthService {
     // Auto-heal: If user is on Pro with an active promo code/pass but plan_status was 'active', ensure it's marked as 'trialing'
     if (data.plan_tier === 'pro' && data.plan_status === 'active' && data.active_promo_code) {
       try {
-        const { data: sub } = await this.supabase
-          .from('subscriptions')
-          .select('id, status')
-          .eq('user_id', userId)
-          .eq('status', 'active')
-          .maybeSingle();
-
-        if (!sub) {
+        if (!(await this.hasActivePaidSubscription(userId))) {
           data.plan_status = 'trialing';
           this.supabase
             .from('profiles')
@@ -1614,17 +1610,29 @@ export class AuthService {
       data.minutes_reset_at &&
       new Date(data.minutes_reset_at) <= new Date()
     ) {
-      data.plan_tier = 'starter';
-      data.plan_status = 'expired';
-      this.supabase
-        .from('profiles')
-        .update({
-          plan_tier: 'starter',
-          plan_status: 'expired',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId)
-        .then(() => {});
+      if (await this.hasActivePaidSubscription(userId)) {
+        // Bought Pro while a pass was active: never downgrade a paying user
+        data.plan_status = 'active';
+        data.active_promo_code = null;
+        await this.supabase
+          .from('profiles')
+          .update({ plan_status: 'active', active_promo_code: null, updated_at: new Date().toISOString() })
+          .eq('id', userId);
+      } else {
+        // Pass ended: back to Starter. Telco subscribers stay 'active' (their telco Starter sub continues).
+        const endStatus = trialEndStatus(data);
+        data.plan_tier = 'starter';
+        data.plan_status = endStatus;
+        this.supabase
+          .from('profiles')
+          .update({
+            plan_tier: 'starter',
+            plan_status: endStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', userId)
+          .then(() => {});
+      }
     }
 
     const profile = await this.checkAndResetMonthlyQuota(data as any as UserProfileData);
@@ -1675,6 +1683,10 @@ export class AuthService {
     profile.grace_period_end = gracePeriodEnd;
 
     return profile;
+  }
+
+  private hasActivePaidSubscription(userId: string): Promise<boolean> {
+    return hasActivePaidSubscription(this.supabase, userId);
   }
 
   async isTestAccount(profile: UserProfileData): Promise<boolean> {
@@ -1846,6 +1858,7 @@ export class AuthService {
     const updates = {
       plan_tier: dto.planTier,
       plan_status: 'active',
+      active_promo_code: null, // a bought plan is never a Pro Pass trial
       billing_cycle: dto.billingCycle || 'monthly',
       monthly_minutes_allowance: allowance,
       minutes_balance: allowance + existingAddOn, // Credit new monthly tier allowance + retain existing add-on minutes

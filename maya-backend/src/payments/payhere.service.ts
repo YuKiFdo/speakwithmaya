@@ -598,6 +598,7 @@ export class PayHereService {
             .update({
               plan_tier: planTier,
               plan_status: 'active',
+              active_promo_code: null, // bought plan, not a Pro Pass trial
               billing_cycle: isQuarterly ? 'quarterly' : 'monthly',
               monthly_minutes_allowance: allowance,
               minutes_balance: allowance + retainedAddOn,
@@ -869,6 +870,7 @@ export class PayHereService {
           .update({
             plan_tier: planTier,
             plan_status: 'active',
+            active_promo_code: null, // bought plan, not a Pro Pass trial
             billing_cycle: isQuarterlySub ? 'quarterly' : 'monthly',
             monthly_minutes_allowance: minutesAllowance,
             minutes_balance: minutesAllowance + retainedAddOn,
@@ -1797,6 +1799,7 @@ export class PayHereService {
         .update({
           plan_tier: normalizedPlanTier,
           plan_status: 'active',
+          active_promo_code: null, // bought plan, not a Pro Pass trial
           billing_cycle: isQuarterly ? 'quarterly' : 'monthly',
           monthly_minutes_allowance: allowance,
           minutes_balance: newBalance,
@@ -2811,6 +2814,7 @@ export class PayHereService {
       .update({
         plan_tier: planTier,
         plan_status: 'active',
+        active_promo_code: null, // bought plan, not a Pro Pass trial
         billing_cycle: isQuarterly ? 'quarterly' : 'monthly',
         monthly_minutes_allowance: allowance,
         minutes_balance: allowance + recovAddOn,

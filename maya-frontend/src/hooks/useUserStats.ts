@@ -441,7 +441,8 @@ export function useUserStats(): UserStats {
       isSubscriptionLocked: Boolean(
         user?.isSubscriptionLocked ||
         (user?.hasTelcoSubscription && user?.telcoStatus === 'UNSUBSCRIBED') ||
-        user?.planStatus === 'expired'
+        // Ended Pro Pass learners are back on Starter: show them as normal Starter, not locked
+        (user?.planStatus === 'expired' && user?.planTier !== 'starter')
       ),
       isGracePeriodActive: Boolean(user?.isGracePeriodActive),
       gracePeriodEndDate: user?.gracePeriodEndDate || null,

@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { PayHereService } from './payhere.service.js';
+import { hasActivePaidSubscription, trialEndStatus } from './paid-status.js';
 
 export interface ReconciliationReport {
   timestamp: string;
@@ -81,7 +82,7 @@ export class SubscriptionReconciliationService {
     const now = new Date();
     const { data: ended, error } = await this.supabase
       .from('profiles')
-      .select('id, add_on_minutes_balance')
+      .select('id, add_on_minutes_balance, telco_subscriber_id, plan_status')
       .eq('plan_status', 'trialing')
       .lte('minutes_reset_at', now.toISOString())
       .limit(500);
@@ -94,11 +95,21 @@ export class SubscriptionReconciliationService {
 
     let expired = 0;
     for (const p of ended) {
+      if (await hasActivePaidSubscription(this.supabase, p.id)) {
+        // Bought Pro while the pass was running: keep them on their paid plan
+        await this.supabase
+          .from('profiles')
+          .update({ plan_status: 'active', active_promo_code: null, updated_at: now.toISOString() })
+          .eq('id', p.id)
+          .eq('plan_status', 'trialing');
+        this.logger.log(`[TrialExpiry] skipped paying user ${p.id} (active PayHere subscription)`);
+        continue;
+      }
       const { error: updErr } = await this.supabase
         .from('profiles')
         .update({
           plan_tier: 'starter',
-          plan_status: 'expired',
+          plan_status: trialEndStatus(p), // telco subscribers stay 'active' on their telco Starter
           billing_cycle: 'daily',
           monthly_minutes_allowance: 5,
           minutes_balance: 5 + (p.add_on_minutes_balance || 0),
