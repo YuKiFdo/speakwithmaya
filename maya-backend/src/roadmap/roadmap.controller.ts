@@ -15,6 +15,7 @@ import {
   UseGuards,
   ValidationPipe,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { RoadmapService } from './roadmap.service.js';
@@ -239,11 +240,15 @@ export class RoadmapController {
       throw new UnauthorizedException('Authentication required to view roadmap progress');
     }
 
-    const [progress, leaderboardData] = await Promise.all([
+    const [progress, leaderboardData, totalXp, lastSeenXp] = await Promise.all([
       this.roadmapService.getUserProgress(userId),
       this.authService.getPublicLeaderboard(userId, 'all_time'),
+      // Fresh per-user XP: the leaderboard is cached for 5 min, so right after a call it lagged
+      this.authService.getUserTotalXp(userId).catch(() => null),
+      this.roadmapService.getLastSeenXp(userId),
     ]);
     const completedItems = progress.filter((p) => p.status === 'completed' || p.isPassed);
+    const xp = totalXp ?? leaderboardData.myEntry?.xp ?? 0;
     return {
       userId,
       progress,
@@ -253,9 +258,29 @@ export class RoadmapController {
       rank: leaderboardData.myEntry?.rank ?? null,
       totalParticipants: leaderboardData.totalParticipants || 1,
       minutesConsumed: leaderboardData.myEntry?.minutesConsumed ?? 0,
-      totalXp: leaderboardData.myEntry?.xp ?? 0,
-      xp: leaderboardData.myEntry?.xp ?? 0,
+      totalXp: xp,
+      xp,
+      /** XP total already celebrated on the dashboard (null = never set). */
+      lastSeenXp,
     };
+  }
+
+  // 9a-2. Mark the learner's current XP as "seen" (dashboard XP fill plays once, on every device)
+  @Post('roadmap/xp-seen')
+  async markXpSeen(@Body() body: { xp?: number }, @Headers('authorization') authHeader?: string) {
+    let userId: string | undefined;
+    if (authHeader) {
+      try {
+        userId = this.authService.validateAuthToken(authHeader);
+      } catch {}
+    }
+    if (!userId) throw new UnauthorizedException('Authentication required');
+    const xp = Math.floor(Number(body?.xp));
+    if (!Number.isFinite(xp) || xp < 0 || xp > 10_000_000) {
+      throw new BadRequestException('xp must be a non-negative number');
+    }
+    await this.roadmapService.setLastSeenXp(userId, xp);
+    return { ok: true, lastSeenXp: xp };
   }
 
   // 9b. Leaderboard: Get ranked learners by XP and practice minutes consumed

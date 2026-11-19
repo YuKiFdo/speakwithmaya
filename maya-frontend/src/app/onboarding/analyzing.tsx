@@ -680,7 +680,24 @@ export default function AnalyzingScreen() {
                         ? (WEB_SPIN_STYLE as any)
                         : { transform: [{ rotate: stepSpinRotate }] },
                     ]}
-                  />
+                  >
+                    {/* A real SVG arc: even thickness and round caps. The old ring used coloured
+                        border sides, which browsers taper where they meet transparent sides,
+                        so it looked thin at one end, thick at the other and off-centre. */}
+                    <Svg width={54} height={54}>
+                      <Circle cx={27} cy={27} r={25} stroke="#E0F2FE" strokeWidth={2.5} fill="none" />
+                      <Circle
+                        cx={27}
+                        cy={27}
+                        r={25}
+                        stroke="#0284C7"
+                        strokeWidth={2.5}
+                        strokeLinecap="round"
+                        fill="none"
+                        strokeDasharray={`${2 * Math.PI * 25 * 0.3} ${2 * Math.PI * 25}`}
+                      />
+                    </Svg>
+                  </Animated.View>
                 )}
                 <Animated.View
                   style={[
@@ -903,11 +920,6 @@ const styles = StyleSheet.create({
     left: 0,
     width: 54,
     height: 54,
-    borderRadius: 27,
-    borderWidth: 2.5,
-    borderColor: 'transparent',
-    borderTopColor: '#0284C7',
-    borderRightColor: '#7DD3FC',
   },
   stepTextWrapper: {
     flex: 1,

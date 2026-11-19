@@ -840,6 +840,24 @@ INSTRUCTIONS:
   /**
    * Computes leaderboard rankings across all learners based on XP earned and practice minutes consumed.
    */
+  /** XP total already celebrated on the dashboard; null if never set or column missing (before 028). */
+  async getLastSeenXp(userId: string): Promise<number | null> {
+    if (!this.supabase) return null;
+    try {
+      const { data, error } = await this.supabase.from('profiles').select('last_seen_xp').eq('id', userId).maybeSingle();
+      if (error || !data || data.last_seen_xp === null || data.last_seen_xp === undefined) return null;
+      return Number(data.last_seen_xp);
+    } catch {
+      return null;
+    }
+  }
+
+  async setLastSeenXp(userId: string, xp: number): Promise<void> {
+    if (!this.supabase) return;
+    const { error } = await this.supabase.from('profiles').update({ last_seen_xp: xp }).eq('id', userId);
+    if (error) this.logger.warn(`[XP] setLastSeenXp failed for ${userId}: ${error.message}`);
+  }
+
   /** XP ledger rows (streak bonus etc.). Empty if the table is missing (before migration 027). */
   private async fetchXpEventRows(): Promise<Array<{ user_id: string; amount: number; created_at?: string }>> {
     if (!this.supabase) return [];
@@ -1057,6 +1075,15 @@ INSTRUCTIONS:
         for (const s of sessionRows) {
           if (!s.user_id) continue;
           const ts = new Date(s.created_at || 0).getTime();
+          // Practice XP: same rule as finishSession / the leaderboard (>= 30s -> max(1, floor(min)) x 5)
+          const dur = Number(s.duration_seconds) || 0;
+          if (s.status === 'completed' && !s.roadmap_level_id && dur >= 30) {
+            const practiceXp = Math.max(1, Math.floor(dur / 60)) * 5;
+            allTimeXpByUser.set(s.user_id, (allTimeXpByUser.get(s.user_id) || 0) + practiceXp);
+            if (cutoffMs === 0 || ts >= cutoffMs) {
+              xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + practiceXp);
+            }
+          }
           if (cutoffMs === 0 || ts >= cutoffMs) {
             sessionSecondsByUser.set(
               s.user_id,
@@ -1096,8 +1123,10 @@ INSTRUCTIONS:
         const balance = Number(p.minutes_balance ?? allowance);
         const quotaMinutesUsed = Math.max(0, allowance - balance);
         const minutesConsumed = Math.max(sessionMinutes, quotaMinutesUsed);
+        // Ranking still rewards minutes practised, but the XP shown is the real XP
+        // (roadmap levels + 5 XP per practice minute + XP ledger), same as every other screen.
         const compositeScore = periodXp + minutesConsumed * 10;
-        const displayXp = periodXp + minutesConsumed * 10;
+        const displayXp = periodXp;
         const levelNumber = Math.max(1, Math.floor(Math.max(allTimeXp, periodXp) / 500) + 1);
         const avatarUrl = (p as any).avatar_url || null;
         const rawName = (p.display_name || '').trim();

@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
+import { Image as ExpoImage } from 'expo-image';
 import { fontStyle } from '@/theme/fonts';
 import { triggerHaptic } from '@/utils/haptics-audio';
 import { playRewardSound } from '@/services/sound/sound-service';
 
 /** Short reward "pop" + haptic. Pops are brief so they don't leak into the mic as speech. */
-function rewardFeedback(kind: 'xp' | 'streak' | 'milestone', haptic: 'light' | 'medium') {
+function rewardFeedback(kind: 'xp' | 'streak' | 'milestone' | 'charge', haptic: 'light' | 'medium') {
   try {
     playRewardSound(kind);
   } catch {}
@@ -22,7 +23,10 @@ const STREAK_MIN = 3;
 const STREAK_XP = 2;
 const STREAK_CAP = 20;
 const STREAK_MILESTONES = [3, 5, 10];
-const MILESTONE_MS = 1300;
+/** Phase 1: the fiery edge glow fills up (with the charge sound). */
+const MILESTONE_FILL_MS = 900;
+/** Whole milestone: fill + card on screen. */
+const MILESTONE_MS = MILESTONE_FILL_MS + 1800;
 
 export interface XpGain {
   id: number;
@@ -116,35 +120,67 @@ export function useCallRewards(a: UseCallRewardsArgs) {
     passedRef.current = a.passedPoints;
   }, [a.passedPoints, a.totalPoints]);
 
-  // Play queued milestones one at a time, only while Maya is quiet.
-  // The hide timer lives in a ref: setting `milestone` re-runs this effect, and an effect
-  // cleanup would cancel the timer, leaving the overlay on screen forever.
+  // Play queued milestones one at a time, in the pause AFTER Maya's reply.
+  // A streak is counted when Maya's reply text starts arriving, a moment before her voice,
+  // so "not speaking right now" is not enough: wait until she has spoken and then gone quiet
+  // (or 5s with no reply at all), plus a short pause.
+  // Timers live in refs: setting `milestone` re-runs this effect, and an effect cleanup
+  // would cancel them, leaving the overlay on screen forever.
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const soundTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sawMayaSpeakRef = useRef(false);
+  const queuedAtRef = useRef(0);
+  const [quietTick, setQuietTick] = useState(0);
+
+  useEffect(() => {
+    if (queueRef.current.length === 0) return;
+    if (!queuedAtRef.current) queuedAtRef.current = Date.now();
+    if (a.isMayaSpeaking) sawMayaSpeakRef.current = true;
+  }, [a.isMayaSpeaking, queueTick]);
+
   useEffect(() => {
     if (milestone || a.isMayaSpeaking || a.blocked || a.paused || queueRef.current.length === 0) return;
-    const next = queueRef.current.shift()!;
-    a.suppressMicFor?.(MILESTONE_MS + 300);
-    rewardFeedback('milestone', 'medium');
-    setMilestone(next);
-    hideTimerRef.current = setTimeout(() => {
-      hideTimerRef.current = null;
-      setMilestone(null);
-    }, MILESTONE_MS);
+    const waitedLong = queuedAtRef.current > 0 && Date.now() - queuedAtRef.current > 5000;
+    if (!sawMayaSpeakRef.current && !waitedLong) {
+      // Maya's voice has not started yet: check again shortly
+      const t = setTimeout(() => setQuietTick((x) => x + 1), 500);
+      return () => clearTimeout(t);
+    }
+    // Maya finished: give the room a short pause, then play (cancelled if she speaks again)
+    const t = setTimeout(() => {
+      const next = queueRef.current.shift();
+      if (!next) return;
+      sawMayaSpeakRef.current = false;
+      queuedAtRef.current = queueRef.current.length > 0 ? Date.now() : 0;
+      a.suppressMicFor?.(MILESTONE_MS + 300);
+      // Phase 1: fiery edge glow fills up with the "charge" sound; phase 2: card + level-up sound
+      rewardFeedback('charge', 'light');
+      soundTimerRef.current = setTimeout(() => rewardFeedback('milestone', 'medium'), MILESTONE_FILL_MS);
+      setMilestone(next);
+      hideTimerRef.current = setTimeout(() => {
+        hideTimerRef.current = null;
+        setMilestone(null);
+      }, MILESTONE_MS);
+    }, 500);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [a.isMayaSpeaking, a.blocked, a.paused, milestone, queueTick]);
+  }, [a.isMayaSpeaking, a.blocked, a.paused, milestone, queueTick, quietTick]);
 
   // A popup opened mid-milestone: hide it at once (queued ones wait). Call wrapping up: drop them.
   useEffect(() => {
     if (a.paused) queueRef.current = [];
     if ((a.blocked || a.paused) && milestone) {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      if (soundTimerRef.current) clearTimeout(soundTimerRef.current);
       hideTimerRef.current = null;
+      soundTimerRef.current = null;
       setMilestone(null);
     }
   }, [a.blocked, a.paused, milestone]);
   useEffect(
     () => () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      if (soundTimerRef.current) clearTimeout(soundTimerRef.current);
     },
     [],
   );
@@ -245,34 +281,59 @@ export function StreakChip({ streak }: { streak: number }) {
 /*  Milestone moment: orange edge glow + big emoji, ~1.3s, full screen        */
 /* -------------------------------------------------------------------------- */
 
+const FIRE_ANIMATED = require('@/assets/images/fire-animated.webp');
+
 export function MilestoneOverlay({ milestone }: { milestone: Milestone | null }) {
   const useNative = Platform.OS !== 'web';
   const reduceMotion = useReduceMotion();
-  const glow = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.4)).current;
+  const layer = useRef(new Animated.Value(0)).current;
+  const fill = useRef(new Animated.Value(0)).current; // edges fill up 0 -> 1
+  const scale = useRef(new Animated.Value(0)).current;
   const [shown, setShown] = useState<Milestone | null>(null);
 
   useEffect(() => {
     if (milestone) {
       setShown(milestone);
-      glow.setValue(0);
-      scale.setValue(reduceMotion ? 1 : 0.4);
-      Animated.parallel([
-        Animated.timing(glow, { toValue: 1, duration: 220, useNativeDriver: useNative }),
-        Animated.spring(scale, { toValue: 1, tension: 120, friction: 6, useNativeDriver: useNative }),
+      layer.setValue(1);
+      fill.setValue(reduceMotion ? 1 : 0);
+      scale.setValue(0);
+      Animated.sequence([
+        // Phase 1: fiery glow climbs up the edges (charge sound plays alongside)
+        Animated.timing(fill, {
+          toValue: 1,
+          duration: reduceMotion ? 0 : MILESTONE_FILL_MS,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: false, // animates height
+        }),
+        // Phase 2: the card bursts in
+        Animated.spring(scale, { toValue: 1, tension: 140, friction: 6, useNativeDriver: false }),
       ]).start();
     } else if (shown) {
-      Animated.timing(glow, { toValue: 0, duration: 260, useNativeDriver: useNative }).start(() => setShown(null));
+      Animated.timing(layer, { toValue: 0, duration: 280, useNativeDriver: useNative }).start(() => setShown(null));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [milestone]);
 
   if (!shown) return null;
+  const sideHeight = fill.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+  const topOpacity = fill.interpolate({ inputRange: [0, 0.85, 1], outputRange: [0, 0, 1] });
+  const bottomOpacity = fill.interpolate({ inputRange: [0, 0.15], outputRange: [0, 1], extrapolate: 'clamp' });
+  const isFire = shown.emoji === '\u{1F525}';
+
   return (
-    <Animated.View pointerEvents="none" style={[styles.milestoneLayer, { opacity: glow }]}>
-      <View style={styles.edgeGlow} />
-      <Animated.View style={[styles.milestoneCard, { transform: [{ scale }] }]}>
-        <Text style={styles.milestoneEmoji}>{shown.emoji}</Text>
+    <Animated.View pointerEvents="none" style={[styles.milestoneLayer, { opacity: layer }]}>
+      {/* Fiery edges: bottom lights first, sides climb, top lights when full */}
+      <Animated.View style={[styles.flameEdge, styles.flameBottom, { opacity: bottomOpacity }]} />
+      <Animated.View style={[styles.flameEdge, styles.flameLeft, { height: sideHeight }]} />
+      <Animated.View style={[styles.flameEdge, styles.flameRight, { height: sideHeight }]} />
+      <Animated.View style={[styles.flameEdge, styles.flameTop, { opacity: topOpacity }]} />
+
+      <Animated.View style={[styles.milestoneCard, { opacity: scale, transform: [{ scale }] }]}>
+        {isFire ? (
+          <ExpoImage source={FIRE_ANIMATED} style={styles.fireImage} contentFit="contain" autoplay />
+        ) : (
+          <Text style={styles.milestoneEmoji}>{shown.emoji}</Text>
+        )}
         <Text style={styles.milestoneTitle}>{shown.title}</Text>
       </Animated.View>
     </Animated.View>
@@ -366,15 +427,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  edgeGlow: {
-    ...StyleSheet.absoluteFill,
-    borderWidth: 10,
-    borderColor: 'rgba(249, 115, 22, 0.45)',
+  flameEdge: {
+    position: 'absolute',
+    backgroundColor: 'rgba(249, 115, 22, 0.55)',
     ...Platform.select({
-      web: { boxShadow: 'inset 0 0 60px 10px rgba(249, 115, 22, 0.45)' } as any,
-      default: {},
+      web: { boxShadow: '0 0 28px 14px rgba(251, 146, 60, 0.75)' } as any,
+      default: { shadowColor: '#F97316', shadowOpacity: 0.9, shadowRadius: 18, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
     }),
   },
+  flameBottom: { left: 0, right: 0, bottom: 0, height: 12 },
+  flameLeft: { left: 0, bottom: 0, width: 12 },
+  flameRight: { right: 0, bottom: 0, width: 12 },
+  flameTop: { left: 0, right: 0, top: 0, height: 12 },
+  fireImage: { width: 96, height: 96 },
   milestoneCard: {
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.92)',

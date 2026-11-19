@@ -48,6 +48,24 @@ export interface UserStats {
 
   // Actions
   refreshStats: () => Promise<void>;
+  /**
+   * Latest server XP + the total already celebrated (profiles.last_seen_xp). In memory only,
+   * never from the device cache, so a stale cache can never replay the dashboard XP fill.
+   */
+  xpSnapshot: XpSnapshot | null;
+}
+
+export interface XpSnapshot {
+  totalXp: number;
+  /** null = never set on this account (first time: set silently, no animation). */
+  lastSeenXp: number | null;
+}
+
+let serverXpSnapshot: XpSnapshot | null = null;
+
+/** Called right when the dashboard starts the XP fill, so it can never play twice. */
+export function markXpSeenLocally(xp: number) {
+  if (serverXpSnapshot) serverXpSnapshot = { ...serverXpSnapshot, lastSeenXp: xp };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,6 +318,10 @@ export function useUserStats(): UserStats {
             }
             if (typeof data.totalXp === 'number') {
               serverTotalXp = data.totalXp;
+              serverXpSnapshot = {
+                totalXp: data.totalXp,
+                lastSeenXp: typeof data.lastSeenXp === 'number' ? data.lastSeenXp : null,
+              };
             } else if (typeof data.xp === 'number') {
               serverTotalXp = data.xp;
             }
@@ -463,5 +485,6 @@ export function useUserStats(): UserStats {
     memberSinceText,
     dailyGoalDisplay,
     refreshStats,
+    xpSnapshot: serverXpSnapshot,
   };
 }

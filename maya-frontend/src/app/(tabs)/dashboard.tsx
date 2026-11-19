@@ -41,6 +41,7 @@ import { paymentApi } from '@/services/payment/payment-api';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { OutageApologyBanner } from '@/components/ui/OutageApologyBanner';
 import { ProPassExpiredModal } from '@/components/modals/ProPassExpiredModal';
+import { useXpCelebration, XpGainBurst } from '@/components/dashboard/xp-celebration';
 import { promotionsApi } from '@/services/promotions/promotions-api';
 import { AppStorage } from '@/services/storage/storage-adapter';
 
@@ -269,6 +270,7 @@ export default function DashboardScreen() {
 
   const store = useOnboardingStore();
   const stats = useUserStats();
+  const xpCelebration = useXpCelebration(stats.xpSnapshot, stats.refreshStats);
   const user = store.user;
   const displayName = stats.displayName || params.name || '';
   const minutesBalance = stats.minutesBalance;
@@ -668,6 +670,8 @@ export default function DashboardScreen() {
             pinned
             isTrialing={stats.isTrialing}
             onLevelPress={() => setActivePopup('level-up')}
+            xpLabel={xpCelebration.xpLabel ?? stats.xpLabel}
+            progress={xpCelebration.progress ?? stats.progress}
           />
 
           {/* DESKTOP FIXED TOP BAR (PINNED) */}
@@ -675,8 +679,8 @@ export default function DashboardScreen() {
             title={`Hello, ${displayName}! 👋`}
             subtitle="Ready to practice English today?"
             levelLabel={stats.levelLabel}
-            xpLabel={stats.xpLabel}
-            progress={stats.progress}
+            xpLabel={xpCelebration.xpLabel ?? stats.xpLabel}
+            progress={xpCelebration.progress ?? stats.progress}
             isPro={isPro}
             isTrialing={stats.isTrialing}
             planTier={stats.planTier}
@@ -1171,6 +1175,9 @@ export default function DashboardScreen() {
           }}
         />
       </View>
+
+      {/* New XP since last visit: the top bar fills up and "+N XP" glows once (all devices) */}
+      <XpGainBurst celebration={xpCelebration} />
     </SafeAreaView>
   );
 }

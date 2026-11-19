@@ -22,6 +22,7 @@ const STEP_POP_ASSET = require('@/assets/sounds/step_pop.wav');
 const REWARD_XP_ASSET = require('@/assets/sounds/reward_xp.wav');
 const REWARD_STREAK_ASSET = require('@/assets/sounds/reward_streak.wav');
 const REWARD_MILESTONE_ASSET = require('@/assets/sounds/reward_milestone.wav');
+const REWARD_CHARGE_ASSET = require('@/assets/sounds/reward_charge.wav');
 const MAYA_WELCOME_ASSET = require('@/assets/sounds/maya-welcome.wav');
 const MAYA_NAME_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-name.wav');
 const MAYA_PHONE_PROMPT_ASSET = require('@/assets/sounds/maya-onboarding-phone.wav');
@@ -724,11 +725,17 @@ export function playCallConnectedSound(onEnded?: () => void): void {
  * In-call reward sounds. Kept short and soft so they never leak into the mic as speech
  * (milestones also mute the mic while they play, see call-rewards.tsx).
  */
-export function playRewardSound(kind: 'xp' | 'streak' | 'milestone'): void {
+export function playRewardSound(kind: 'xp' | 'streak' | 'milestone' | 'charge'): void {
   const asset =
-    kind === 'milestone' ? REWARD_MILESTONE_ASSET : kind === 'streak' ? REWARD_STREAK_ASSET : REWARD_XP_ASSET;
-  const volume = kind === 'milestone' ? 0.6 : 0.45;
-  playSoundAsset(asset, volume, undefined, undefined, kind === 'milestone' ? 1300 : 600);
+    kind === 'milestone'
+      ? REWARD_MILESTONE_ASSET
+      : kind === 'charge'
+        ? REWARD_CHARGE_ASSET
+        : kind === 'streak'
+          ? REWARD_STREAK_ASSET
+          : REWARD_XP_ASSET;
+  const volume = kind === 'milestone' || kind === 'charge' ? 0.6 : 0.45;
+  playSoundAsset(asset, volume, undefined, undefined, kind === 'milestone' ? 1300 : kind === 'charge' ? 1000 : 600);
 }
 
 export function playGoodJobSound(): void {

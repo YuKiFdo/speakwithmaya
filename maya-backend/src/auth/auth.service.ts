@@ -1685,6 +1685,41 @@ export class AuthService {
     return profile;
   }
 
+  /**
+   * One learner's all-time XP, computed fresh (not from the 5-minute leaderboard cache) with the
+   * SAME rules as the leaderboard: roadmap levels (once per level) + practice calls
+   * (>= 30s: max(1, floor(min)) x 5) + XP ledger (streak bonus etc.).
+   */
+  async getUserTotalXp(userId: string): Promise<number> {
+    if (!this.supabase || !userId) return 0;
+    const [progressRes, sessionsRes, eventsRes] = await Promise.all([
+      this.supabase
+        .from('user_roadmap_progress')
+        .select('id, roadmap_level_id, level_number, status, is_passed, xp_earned')
+        .eq('user_id', userId),
+      this.supabase.from('sessions').select('duration_seconds, roadmap_level_id').eq('user_id', userId),
+      this.supabase.from('xp_events').select('amount').eq('user_id', userId),
+    ]);
+
+    let xp = 0;
+    const levels = new Set<string>();
+    for (const row of progressRes.data || []) {
+      if (!(row.status === 'completed' || row.is_passed)) continue;
+      const key = String(row.roadmap_level_id || row.level_number || row.id || '');
+      if (levels.has(key)) continue;
+      levels.add(key);
+      xp += typeof row.xp_earned === 'number' ? row.xp_earned : Number(row.xp_earned) || 0;
+    }
+    for (const s of sessionsRes.data || []) {
+      const dur = Number(s.duration_seconds) || 0;
+      if (!s.roadmap_level_id && dur >= 30) xp += Math.max(1, Math.floor(dur / 60)) * 5;
+    }
+    if (!eventsRes.error) {
+      for (const ev of eventsRes.data || []) xp += Number(ev.amount) || 0;
+    }
+    return xp;
+  }
+
   private hasActivePaidSubscription(userId: string): Promise<boolean> {
     return hasActivePaidSubscription(this.supabase, userId);
   }
