@@ -34,6 +34,8 @@ interface ClientSessionState {
   /** Encoded base64 Opus packets waiting to be sent as one batch. */
   opusBatch: string[];
   opusEncoder?: any;
+  /** Decodes client mic Opus (16kHz mono) back to PCM; set when the client advertised supportsUplinkOpus. */
+  uplinkOpusDecoder?: any;
   opusPcmBuffer: Buffer;
   userAudioChunks: Buffer[];
   currentUserTurnAudioChunks: Buffer[];
@@ -546,6 +548,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       state.opusEncoder = null;
+      state.uplinkOpusDecoder = null;
       state.opusPcmBuffer = Buffer.alloc(0);
 
       if (!isSupersededReconnect) {
@@ -921,6 +924,25 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           }
         }
 
+        // Uplink Opus: client compresses mic audio (~32 kbps instead of 256 kbps PCM). Only enabled when we
+        // can decode it; the 'ready' message tells the client, and it keeps sending raw PCM until then.
+        state.uplinkOpusDecoder = null;
+        if (message.supportsUplinkOpus) {
+          try {
+            if (!OpusEncoderClass) {
+              const mod = await import('@discordjs/opus').catch(() => null);
+              if (mod) OpusEncoderClass = mod.OpusEncoder || mod.default?.OpusEncoder || mod.default || mod;
+            }
+            if (OpusEncoderClass) {
+              state.uplinkOpusDecoder = new OpusEncoderClass(16000, 1);
+              this.addSessionLog(state, 'uplink_opus_enabled');
+            }
+          } catch (e: any) {
+            this.logger.warn(`[${state.sessionId}] Failed to initialize uplink Opus decoder: ${e?.message}`);
+            state.uplinkOpusDecoder = null;
+          }
+        }
+
         this.addSessionLog(state, 'start_session', `topic=${dto.topic || 'General'} lang=${dto.languageMode || 'english'}`);
         await this.initGeminiLiveSession(client, state, dto);
         break;
@@ -1067,9 +1089,39 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  private async handleAudioChunk(client: WebSocket, buffer: Buffer) {
+  /** Binary frames starting with this magic carry Opus: 'OPU1' then repeated [u16BE length][packet]. */
+  private static readonly UPLINK_OPUS_MAGIC = Buffer.from('OPU1', 'ascii');
+
+  private decodeUplinkOpus(state: ClientSessionState, frame: Buffer): Buffer | null {
+    if (!state.uplinkOpusDecoder) return null;
+    const pcmParts: Buffer[] = [];
+    let offset = LiveGateway.UPLINK_OPUS_MAGIC.length;
+    while (offset + 2 <= frame.length) {
+      const len = frame.readUInt16BE(offset);
+      offset += 2;
+      if (len === 0 || offset + len > frame.length) break;
+      try {
+        pcmParts.push(state.uplinkOpusDecoder.decode(frame.subarray(offset, offset + len)));
+      } catch (e: any) {
+        this.addSessionLog(state, 'uplink_opus_decode_error', e?.message);
+      }
+      offset += len;
+    }
+    return pcmParts.length > 0 ? Buffer.concat(pcmParts) : null;
+  }
+
+  private async handleAudioChunk(client: WebSocket, rawBuffer: Buffer) {
     const state = this.clients.get(client);
     if (!state) return;
+
+    let buffer: Buffer | null = rawBuffer;
+    if (
+      rawBuffer.length > LiveGateway.UPLINK_OPUS_MAGIC.length &&
+      rawBuffer.subarray(0, LiveGateway.UPLINK_OPUS_MAGIC.length).equals(LiveGateway.UPLINK_OPUS_MAGIC)
+    ) {
+      buffer = this.decodeUplinkOpus(state, rawBuffer);
+      if (!buffer) return;
+    }
 
     if (buffer && buffer.length > 0) {
       state.userAudioChunks.push(buffer);
@@ -1307,6 +1359,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         type: 'ready',
         model: this.liveModel,
         voiceName,
+        uplinkOpus: !!state.uplinkOpusDecoder,
       }));
 
       // If roadmap curriculum session with practice points (and not in custom scenario mode), proactively prime Task 0 on client

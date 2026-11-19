@@ -148,7 +148,8 @@ export class WebAudioCapture implements IAudioCapture {
               this.callbacks?.onVoiceEnd?.();
             }
 
-            if (preRollBuffer.length >= 2) {
+            // ~320ms pre-roll (4 x 80ms) so first syllables reach Gemini before activityStart's speech
+            if (preRollBuffer.length >= 4) {
               preRollBuffer.shift();
             }
             preRollBuffer.push(chunk);

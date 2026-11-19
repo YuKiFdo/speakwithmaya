@@ -19,6 +19,19 @@ if (typeof window !== 'undefined' && !(window as any).Buffer) {
 // Backpressure threshold for client audio upload: 64 KB
 const CLIENT_BACKPRESSURE_THRESHOLD = 64 * 1024;
 
+// Uplink Opus: 20ms frames of 16kHz mono PCM, ~32 kbps (vs 256 kbps raw PCM). Wire format understood by
+// the gateway: 'OPU1' magic, then repeated [u16BE length][packet].
+const UPLINK_SAMPLE_RATE = 16000;
+const UPLINK_FRAME_SAMPLES = 320;
+const UPLINK_BITRATE = 32000;
+const UPLINK_OPUS_MAGIC = [0x4f, 0x50, 0x55, 0x31]; // 'OPU1'
+
+// Replay: keep the learner's speech that Maya hasn't answered yet (up to 15s) and resend it on a fresh
+// connection, so words spoken during a drop (or into a dead socket before it was detected) aren't lost.
+const REPLAY_MAX_BYTES = UPLINK_SAMPLE_RATE * 2 * 15;
+
+type ReplayItem = { kind: 'audio'; pcm: ArrayBuffer; sentGen: number } | { kind: 'end'; sentGen: number };
+
 export class ServerLiveTransport implements ILiveTransport {
   private ws: WebSocket | null = null;
   private callbacks: LiveTransportCallbacks = {};
@@ -37,6 +50,15 @@ export class ServerLiveTransport implements ILiveTransport {
   private opusDecoder: any = null;
   private pingInterval: any = null;
   private inboundAudioChunksCount: number = 0;
+  private opusEncoder: any = null;
+  /** True once the current connection's 'ready' confirmed the server can decode uplink Opus. */
+  private uplinkOpus: boolean = false;
+  private encodeRemainder: Int16Array = new Int16Array(0);
+  /** Incremented per connect(); readyGen is the generation whose 'ready' has arrived. */
+  private connectionGen: number = 0;
+  private readyGen: number = -1;
+  private replayLog: ReplayItem[] = [];
+  private replayAudioBytes: number = 0;
 
   constructor(backendWsUrl?: string) {
     this.backendWsUrl = backendWsUrl ?? getBackendWsUrl('/live-session');
@@ -59,6 +81,24 @@ export class ServerLiveTransport implements ILiveTransport {
     } catch (e: any) {
       console.warn(`[${getLogTimestamp()}] ⚠️ [ServerLiveTransport:${this.clientSessionId}] Opus decoder unavailable, using raw PCM fallback:`, e?.message);
       this.opusDecoder = null;
+    }
+
+    // Fresh uplink encoder per connection (the server creates a fresh decoder per socket)
+    this.connectionGen++;
+    this.uplinkOpus = false;
+    this.encodeRemainder = new Int16Array(0);
+    if (this.opusEncoder) {
+      try {
+        this.opusEncoder.delete?.();
+      } catch {}
+    }
+    try {
+      const OpusScript = require('opusscript');
+      this.opusEncoder = new OpusScript(UPLINK_SAMPLE_RATE, 1, OpusScript.Application.VOIP, { wasm: false });
+      this.opusEncoder.setBitrate(UPLINK_BITRATE);
+    } catch (e: any) {
+      console.warn(`[${getLogTimestamp()}] ⚠️ [ServerLiveTransport:${this.clientSessionId}] Opus encoder unavailable, mic stays raw PCM:`, e?.message);
+      this.opusEncoder = null;
     }
 
     try {
@@ -109,6 +149,7 @@ export class ServerLiveTransport implements ILiveTransport {
             accessToken: OnboardingStore.getState().accessToken || config.token || undefined,
             supportsOpus: !!this.opusDecoder,
             supportsOpusBatch: !!this.opusDecoder,
+            supportsUplinkOpus: !!this.opusEncoder,
             options: config.sessionOptions || {
               languageMode: config.languageMode,
               sinhalaStyle: config.sinhalaStyle,
@@ -208,8 +249,138 @@ export class ServerLiveTransport implements ILiveTransport {
     }
   }
 
+  /** Audio may only go out once this connection's Gemini session is ready (the server drops it before). */
+  private canSendAudioNow(): boolean {
+    return this.isOpen && !!this.ws && this.ws.readyState === WebSocket.OPEN && this.readyGen === this.connectionGen;
+  }
+
   sendAudioChunk(pcm16: ArrayBuffer): void {
-    if (!this.isOpen || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!pcm16 || pcm16.byteLength === 0) return;
+    const item: ReplayItem = { kind: 'audio', pcm: pcm16.slice(0), sentGen: -1 };
+    this.replayLog.push(item);
+    this.replayAudioBytes += pcm16.byteLength;
+    this.trimReplayLog();
+    if (this.canSendAudioNow()) {
+      this.transmitAudio(pcm16);
+      item.sentGen = this.connectionGen;
+    }
+  }
+
+  sendEndOfTurn(): void {
+    // Only meaningful if there is unanswered speech after the last end marker
+    const last = this.replayLog[this.replayLog.length - 1];
+    if (!last || last.kind !== 'audio') return;
+    const item: ReplayItem = { kind: 'end', sentGen: -1 };
+    this.replayLog.push(item);
+    if (this.canSendAudioNow()) {
+      this.transmitEndOfTurn();
+      item.sentGen = this.connectionGen;
+    } else {
+      console.log(`[${getLogTimestamp()}] 📦 [ServerLiveTransport:${this.clientSessionId}] Turn ended while offline - will resend after reconnect`);
+    }
+  }
+
+  private trimReplayLog(): void {
+    while (this.replayAudioBytes > REPLAY_MAX_BYTES && this.replayLog.length > 0) {
+      const dropped = this.replayLog.shift()!;
+      if (dropped.kind === 'audio') this.replayAudioBytes -= dropped.pcm.byteLength;
+    }
+  }
+
+  /** Maya started answering: everything up to the last completed user turn has been received. */
+  private acknowledgeUserTurns(): void {
+    let lastEnd = -1;
+    for (let i = this.replayLog.length - 1; i >= 0; i--) {
+      if (this.replayLog[i].kind === 'end') {
+        lastEnd = i;
+        break;
+      }
+    }
+    if (lastEnd < 0) return;
+    const removed = this.replayLog.splice(0, lastEnd + 1);
+    for (const r of removed) {
+      if (r.kind === 'audio') this.replayAudioBytes -= r.pcm.byteLength;
+    }
+  }
+
+  /** Send everything this connection hasn't received yet (buffered while offline, or lost with the old socket). */
+  private flushReplayLog(): void {
+    let audioMs = 0;
+    let turns = 0;
+    for (const item of this.replayLog) {
+      if (item.sentGen === this.connectionGen) continue;
+      if (item.kind === 'audio') {
+        this.transmitAudio(item.pcm);
+        audioMs += (item.pcm.byteLength / 2 / UPLINK_SAMPLE_RATE) * 1000;
+      } else {
+        this.transmitEndOfTurn();
+        turns++;
+      }
+      item.sentGen = this.connectionGen;
+    }
+    if (audioMs > 0 || turns > 0) {
+      console.log(
+        `[${getLogTimestamp()}] 🔁 [ServerLiveTransport:${this.clientSessionId}] Replayed ${Math.round(audioMs)}ms of unanswered speech (${turns} completed turn(s)) on the new connection`,
+      );
+    }
+  }
+
+  private transmitEndOfTurn(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.flushEncoder();
+    try {
+      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport:${this.clientSessionId}] User speech ended - signaling turn_complete to server`);
+      this.ws.send(JSON.stringify({ type: 'turn_complete' }));
+    } catch (err: any) {
+      console.error(`[ServerLiveTransport:${this.clientSessionId}] Send end-of-turn error:`, err);
+    }
+  }
+
+  /** Encode whole 20ms frames to Opus; carries the leftover samples to the next chunk. */
+  private encodeOpusFrames(samples: Int16Array): Uint8Array[] {
+    const merged = new Int16Array(this.encodeRemainder.length + samples.length);
+    merged.set(this.encodeRemainder, 0);
+    merged.set(samples, this.encodeRemainder.length);
+    const packets: Uint8Array[] = [];
+    let offset = 0;
+    while (offset + UPLINK_FRAME_SAMPLES <= merged.length) {
+      const frame = Buffer.from(merged.buffer, merged.byteOffset + offset * 2, UPLINK_FRAME_SAMPLES * 2);
+      const packet = this.opusEncoder.encode(frame, UPLINK_FRAME_SAMPLES);
+      packets.push(new Uint8Array(packet.buffer, packet.byteOffset, packet.length).slice());
+      offset += UPLINK_FRAME_SAMPLES;
+    }
+    this.encodeRemainder = merged.slice(offset);
+    return packets;
+  }
+
+  private sendOpusPackets(packets: Uint8Array[]): void {
+    if (packets.length === 0 || !this.ws) return;
+    let total = UPLINK_OPUS_MAGIC.length;
+    for (const p of packets) total += 2 + p.length;
+    const out = new Uint8Array(total);
+    out.set(UPLINK_OPUS_MAGIC, 0);
+    let pos = UPLINK_OPUS_MAGIC.length;
+    for (const p of packets) {
+      out[pos] = (p.length >> 8) & 0xff;
+      out[pos + 1] = p.length & 0xff;
+      out.set(p, pos + 2);
+      pos += 2 + p.length;
+    }
+    this.ws.send(out.buffer);
+  }
+
+  /** Pad and send the last partial frame so the end of the learner's sentence isn't clipped. */
+  private flushEncoder(): void {
+    if (!this.uplinkOpus || !this.opusEncoder || this.encodeRemainder.length === 0) return;
+    try {
+      const padded = new Int16Array(UPLINK_FRAME_SAMPLES - this.encodeRemainder.length);
+      this.sendOpusPackets(this.encodeOpusFrames(padded));
+    } catch {}
+    this.encodeRemainder = new Int16Array(0);
+  }
+
+  private transmitAudio(pcm16: ArrayBuffer): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     try {
       // Backpressure check on outgoing mic audio: detect slow upload pipe
       const buffered = this.ws.bufferedAmount || 0;
@@ -222,24 +393,21 @@ export class ServerLiveTransport implements ILiveTransport {
         }
       }
 
+      if (this.uplinkOpus && this.opusEncoder) {
+        try {
+          this.sendOpusPackets(this.encodeOpusFrames(new Int16Array(pcm16)));
+          return;
+        } catch (encErr: any) {
+          // Encoder failure: fall back to raw PCM for the rest of this connection
+          console.warn(`[ServerLiveTransport:${this.clientSessionId}] Opus encode failed, falling back to PCM:`, encErr?.message);
+          this.uplinkOpus = false;
+          this.encodeRemainder = new Int16Array(0);
+        }
+      }
       // Send raw binary PCM audio buffer directly to NestJS gateway
       this.ws.send(pcm16);
     } catch (err: any) {
       console.error(`[ServerLiveTransport:${this.clientSessionId}] Send audio error:`, err);
-    }
-  }
-
-  sendEndOfTurn(): void {
-    if (!this.isOpen || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    try {
-      console.log(`[${getLogTimestamp()}] 🚀 [ServerLiveTransport:${this.clientSessionId}] User speech ended - signaling turn_complete to server`);
-      this.ws.send(
-        JSON.stringify({
-          type: 'turn_complete',
-        }),
-      );
-    } catch (err: any) {
-      console.error(`[ServerLiveTransport:${this.clientSessionId}] Send end-of-turn error:`, err);
     }
   }
 
@@ -308,6 +476,18 @@ export class ServerLiveTransport implements ILiveTransport {
 
   close(reason?: string): void {
     this.isOpen = false;
+    this.readyGen = -1;
+    // Keep unanswered speech across an internal reconnect; a real end of call discards it
+    if (reason !== 'client_reconnecting') {
+      this.replayLog = [];
+      this.replayAudioBytes = 0;
+    }
+    if (this.opusEncoder) {
+      try {
+        this.opusEncoder.delete?.();
+      } catch {}
+      this.opusEncoder = null;
+    }
     if (this.ws) {
       try {
         const closeReason = reason ? String(reason).slice(0, 120) : 'User closed session';
@@ -340,7 +520,13 @@ export class ServerLiveTransport implements ILiveTransport {
   private handleServerMessage(msg: any): void {
     switch (msg.type) {
       case 'ready':
-        console.log(`[${getLogTimestamp()}] 🤖 [ServerLiveTransport:${this.clientSessionId}] Gemini session ready via Backend (Model: ${msg.model})`);
+        this.readyGen = this.connectionGen;
+        this.uplinkOpus = !!msg.uplinkOpus && !!this.opusEncoder;
+        this.encodeRemainder = new Int16Array(0);
+        console.log(
+          `[${getLogTimestamp()}] 🤖 [ServerLiveTransport:${this.clientSessionId}] Gemini session ready via Backend (Model: ${msg.model}, mic: ${this.uplinkOpus ? 'Opus 32kbps' : 'PCM'})`,
+        );
+        this.flushReplayLog();
         break;
 
       case 'latency':
@@ -388,6 +574,7 @@ export class ServerLiveTransport implements ILiveTransport {
         const packets: string[] = Array.isArray(msg.packets) ? msg.packets : msg.data ? [msg.data] : [];
         if (packets.length > 0 && this.opusDecoder) {
           this.hasModelSpokenThisTurn = true;
+          this.acknowledgeUserTurns();
           for (const packet of packets) {
             this.inboundAudioChunksCount++;
             if (this.inboundAudioChunksCount <= 3 || this.inboundAudioChunksCount % 15 === 0) {
@@ -418,6 +605,7 @@ export class ServerLiveTransport implements ILiveTransport {
       case 'audio':
         if (msg.data) {
           this.hasModelSpokenThisTurn = true;
+          this.acknowledgeUserTurns();
           this.inboundAudioChunksCount++;
           if (this.inboundAudioChunksCount <= 3 || this.inboundAudioChunksCount % 15 === 0) {
             console.log(`[${getLogTimestamp()}] 🔊 [ServerLiveTransport:${this.clientSessionId}] Received raw audio chunk #${this.inboundAudioChunksCount} (${msg.data.length} chars)`);
@@ -429,6 +617,7 @@ export class ServerLiveTransport implements ILiveTransport {
       case 'output_transcript':
         if (msg.text) {
           this.hasModelSpokenThisTurn = true;
+          this.acknowledgeUserTurns();
           this.modelTranscriptAccumulator += msg.text;
           console.log(`[${getLogTimestamp()}] 💬 [ServerLiveTransport:${this.clientSessionId}] Output transcript chunk: "${msg.text}"`);
           this.callbacks.onOutputTranscript?.(msg.text);

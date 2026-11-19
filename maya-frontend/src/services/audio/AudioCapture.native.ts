@@ -142,8 +142,8 @@ export class NativeAudioCapture implements IAudioCapture {
             speechChunkCount = 0;
           }
 
-          // Maintain a 2-chunk pre-roll queue (~200ms)
-          if (preRollBuffer.length >= 2) {
+          // Maintain a 3-chunk pre-roll queue (~300ms)
+          if (preRollBuffer.length >= 3) {
             preRollBuffer.shift();
           }
           preRollBuffer.push(copy);
