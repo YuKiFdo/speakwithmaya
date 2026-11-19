@@ -153,8 +153,8 @@ jobs:
             export FRONTEND_IMAGE=\"$IMAGE_TAG\"
             # Retry the pull: GHCR downloads over the VPS IPv6 route sometimes get connection reset by peer
             for attempt in 1 2 3 4; do
-              # timeout: a stalled download (seen hanging 20+ min) counts as a failed attempt
-              if timeout 300 docker compose pull --quiet maya-frontend; then break; fi
+              # timeout: unpacking layers on the CPU-starved VPS can take 5+ min; a truly stuck pull still fails after 20 min
+              if timeout 1200 docker compose pull --quiet maya-frontend; then break; fi
               if [ \"\$attempt\" = 4 ]; then echo \"Image pull failed after 4 attempts\"; exit 1; fi
               echo \"Image pull failed (attempt \$attempt), retrying in \$((attempt * 10))s...\"
               sleep \$((attempt * 10))
