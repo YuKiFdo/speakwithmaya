@@ -141,6 +141,19 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   const sessionIdRef = useRef<string>(`session-${Date.now()}`);
   const currentModelTextRef = useRef<string>('');
   const currentUserTextRef = useRef<string>('');
+  // "You said" bubble: the learner's last finished sentence (id changes per turn so it re-animates)
+  const [lastUserUtterance, setLastUserUtterance] = useState<{ id: number; text: string } | null>(null);
+  const userUtteranceIdRef = useRef(0);
+  const showUserUtterance = useCallback((text: string) => {
+    const clean = text.trim();
+    // Skip placeholders and single-word noise ("um", "ok") that ASR sometimes returns
+    if (!clean || clean.startsWith('(') || clean.split(/\s+/).length < 2) return;
+    setLastUserUtterance((prev) => {
+      if (prev && prev.text === clean) return prev;
+      userUtteranceIdRef.current += 1;
+      return { id: userUtteranceIdRef.current, text: clean };
+    });
+  }, []);
   const activeRoleRef = useRef<'user' | 'model' | null>(null);
   const currentUserTurnPcmChunksRef = useRef<ArrayBuffer[]>([]);
   const lastUserTurnAudioUrlRef = useRef<string>('');
@@ -488,7 +501,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             isMutedRef.current ||
             isModelSpeakingRef.current ||
             isConcludingRef.current ||
-            statusRef.current === 'reconnecting' ||
+            // While reconnecting, the server transport keeps listening and buffers speech for replay
+            (!USE_SERVER_LIVE && statusRef.current === 'reconnecting') ||
             statusRef.current === 'ended' ||
             isFirstGreetingPendingRef.current ||
             Date.now() < echoHangoverUntilRef.current
@@ -500,13 +514,14 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             isMutedRef.current ||
             isConcludingRef.current ||
             isInitialGreetingHeldRef.current ||
-            statusRef.current === 'reconnecting' ||
+            (!USE_SERVER_LIVE && statusRef.current === 'reconnecting') ||
             statusRef.current === 'ended' ||
             isFirstGreetingPendingRef.current ||
             isModelSpeakingRef.current ||
             Date.now() < echoHangoverUntilRef.current;
 
-          if (!isBlocked && transportRef.current.isConnected()) {
+          // Server transport buffers speech while offline and replays it after reconnect
+          if (!isBlocked && (USE_SERVER_LIVE || transportRef.current.isConnected())) {
             userChunksSentRef.current++;
             // 16kHz PCM 16-bit mono = 32,000 bytes per second
             userSpeakingSecondsRef.current += (pcm16.byteLength / 32000);
@@ -520,14 +535,14 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             isMutedRef.current ||
             isConcludingRef.current ||
             isInitialGreetingHeldRef.current ||
-            statusRef.current === 'reconnecting' ||
+            (!USE_SERVER_LIVE && statusRef.current === 'reconnecting') ||
             statusRef.current === 'ended' ||
             isFirstGreetingPendingRef.current ||
             isModelSpeakingRef.current ||
             Date.now() < echoHangoverUntilRef.current;
 
           // Require >= 4 chunks (~320ms of genuine speech) so small noise spikes don't trigger turn completion
-          if (!isBlocked && userChunksSentRef.current >= 4 && transportRef.current.isConnected()) {
+          if (!isBlocked && userChunksSentRef.current >= 4 && (USE_SERVER_LIVE || transportRef.current.isConnected())) {
             if (currentUserTurnPcmChunksRef.current.length > 0) {
               const wavUrl = createWavBlobUrlFromPcm(currentUserTurnPcmChunksRef.current, 16000);
               lastUserTurnAudioUrlRef.current = wavUrl;
@@ -862,6 +877,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
                   });
                   lastUserTurnAudioUrlRef.current = '';
                 }
+                showUserUtterance(textToPush);
                 currentUserTextRef.current = '';
               }
               activeRoleRef.current = 'model';
@@ -900,6 +916,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               }
               activeRoleRef.current = 'user';
               currentUserTextRef.current = '';
+              setLastUserUtterance(null); // learner is speaking again: hide the previous "you said"
             }
 
             // Smoothly accumulate incoming student speech chunks
@@ -940,6 +957,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
                 });
                 lastUserTurnAudioUrlRef.current = '';
               }
+              showUserUtterance(userTurnText);
               currentUserTextRef.current = '';
             }
 
@@ -1530,7 +1548,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     // 3. Assemble Post-Call Session & Mission Report
     const isGeneral = !options.roadmapLevelId;
     const practiceMins = Math.max(1, Math.floor(secs / 60));
-    const generalPracticeXp = !isVeryShortSession && passed ? Math.max(5, practiceMins * 5) : 0;
+    // Same rule as the server (sessions.service finishSession): >= 30s -> max(1, floor(min)) x 5 XP
+    const generalPracticeXp = secs >= 30 ? Math.max(5, practiceMins * 5) : 0;
     const xpEarned = isRoadmap
       ? (passed ? 100 : (!isVeryShortSession ? 25 : 0))
       : generalPracticeXp;
@@ -1650,6 +1669,20 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           const finishData = await finishRes.json().catch(() => null);
           if (!options.isIntroCall && finishData && typeof finishData.remainingMinutes === 'number') {
             OnboardingStore.updateMinutesBalance(finishData.remainingMinutes);
+          }
+          // Server-authoritative streak bonus (hint-free turns) joins the report's XP
+          const bonus = Number(finishData?.streakBonusXp) || 0;
+          if (bonus > 0) {
+            setMissionReport((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    streakBonusXp: bonus,
+                    longestStreak: Number(finishData?.longestStreak) || 0,
+                    xpEarned: (prev.xpEarned || 0) + bonus,
+                  }
+                : prev,
+            );
           }
         }
       } catch (err) {
@@ -1884,6 +1917,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     releaseGreeting,
     suppressMicFor,
     speechSync: speechSyncRef.current,
+    lastUserUtterance,
   };
 }
 

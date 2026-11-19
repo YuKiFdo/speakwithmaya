@@ -840,6 +840,17 @@ INSTRUCTIONS:
   /**
    * Computes leaderboard rankings across all learners based on XP earned and practice minutes consumed.
    */
+  /** XP ledger rows (streak bonus etc.). Empty if the table is missing (before migration 027). */
+  private async fetchXpEventRows(): Promise<Array<{ user_id: string; amount: number; created_at?: string }>> {
+    if (!this.supabase) return [];
+    try {
+      const { data, error } = await this.supabase.from('xp_events').select('user_id, amount, created_at');
+      return error || !Array.isArray(data) ? [] : data;
+    } catch {
+      return [];
+    }
+  }
+
   async getUserRankAndLeaderboard(userId: string): Promise<{
     rank: number | null;
     totalParticipants: number;
@@ -873,6 +884,11 @@ INSTRUCTIONS:
       }
 
       const xpByUser = new Map<string, number>();
+      // Event XP (streak bonus etc.) from the XP ledger
+      for (const ev of await this.fetchXpEventRows()) {
+        if (!ev.user_id) continue;
+        xpByUser.set(ev.user_id, (xpByUser.get(ev.user_id) || 0) + (Number(ev.amount) || 0));
+      }
       const completedLevelsByUser = new Map<string, Set<string>>();
 
       if (Array.isArray(progressRows)) {
@@ -1058,6 +1074,17 @@ INSTRUCTIONS:
               }
             }
           }
+        }
+      }
+
+      // Event XP (streak bonus etc.) from the XP ledger
+      for (const ev of await this.fetchXpEventRows()) {
+        if (!ev.user_id) continue;
+        const amount = Number(ev.amount) || 0;
+        allTimeXpByUser.set(ev.user_id, (allTimeXpByUser.get(ev.user_id) || 0) + amount);
+        const ts = new Date(ev.created_at || 0).getTime();
+        if (cutoffMs === 0 || ts >= cutoffMs) {
+          xpByUser.set(ev.user_id, (xpByUser.get(ev.user_id) || 0) + amount);
         }
       }
 

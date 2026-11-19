@@ -10,6 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { BoundedMap } from '../common/bounded-map.js';
+import { computeStreakBonus } from './xp-rules.js';
 import { PiperWorkerClient, PiperSegment } from './piper-worker-client.js';
 
 const execFileAsync = promisify(execFile);
@@ -184,6 +185,8 @@ export class SessionsService {
   private readonly recentDiagnostics = new Map<string, SessionDiagnosticsRecord>();
   private readonly translationCache = new BoundedMap<string, string>(2000);
   private readonly hintCache = new BoundedMap<string, { hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number }>(2000);
+  /** When each hint was requested (ms), per session: a hint breaks the learner's hint-free streak. */
+  private readonly sessionHintTimes = new BoundedMap<string, number[]>(2000);
   private readonly sessionHintUsage = new BoundedMap<string, { count: number; totalTokens: number; costUsd: number; costLkr: number; generatedKeys?: Set<string> }>(2000);
 
   private get storageProviderLabel(): string {
@@ -2268,6 +2271,7 @@ ${memoryPart}`;
     }
     let remainingMinutes: number = 10;
     let awardedXp: number = 0;
+    let streakBonus = { bonusXp: 0, longestStreak: 0 };
 
     const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sessionId);
     const userAudioUrl = rec?.userAudioUrl || this.recordingEndpointUrl(validSessionId, 'user');
@@ -2341,6 +2345,14 @@ ${memoryPart}`;
               }
             }
             this.logger.log(`[SessionsService] 🔁 Upgraded early-finalized session ${validSessionId}: ${prevDuration}s → ${newDuration}s, tokens → ${newTokens}`);
+            // The session continued after the early finalize: re-check the streak with the full turns
+            const fullTurns = this.getAuthoritativeTurns(validSessionId);
+            streakBonus = await this.awardStreakBonus(
+              validSessionId,
+              resolvedUserId,
+              fullTurns && fullTurns.length > 0 ? fullTurns : turns,
+              Boolean(dto.isIntroCall),
+            );
             existingLedger.duration_seconds = newDuration;
             existingLedger.total_tokens = newTokens;
             if (useNewCost) {
@@ -2388,6 +2400,8 @@ ${memoryPart}`;
               costUsd: existingLedger.cost_usd || costUsd,
               costLkr: existingLedger.cost_lkr || costLkr,
             },
+            streakBonusXp: streakBonus.bonusXp,
+            longestStreak: streakBonus.longestStreak,
             recordings: {
               userAudioUrl,
               modelAudioUrl,
@@ -2553,6 +2567,9 @@ ${memoryPart}`;
           cost_lkr: costLkr,
           duration_seconds: durationSeconds,
         });
+
+        // 4b. Streak bonus XP (hint-free turns), stored in the XP ledger
+        streakBonus = await this.awardStreakBonus(validSessionId, resolvedUserId, turnsToUse, Boolean(dto.isIntroCall));
 
         // 5. If this session was for a roadmap level, record progress in user_roadmap_progress
         const activeInfo = this.activeSessions.get(sessionId);
@@ -2766,7 +2783,56 @@ ${memoryPart}`;
       correctionsRecorded: grammarCorrections?.length || 0,
       scores: scores || { overall: 85, fluency: 84, grammar: 82, pronunciation: 86 },
       xpEarned: awardedXp,
+      streakBonusXp: streakBonus.bonusXp,
+      longestStreak: streakBonus.longestStreak,
     };
+  }
+
+  /**
+   * Streak bonus XP for a finished session, stored once in xp_events (unique per session+source).
+   * Safe to call more than once (reconnect / HTTP finish + socket auto-finalize): a later call with
+   * more turns can only raise the stored amount, never lower or duplicate it.
+   */
+  private async awardStreakBonus(
+    sessionId: string,
+    userId: string | undefined,
+    turns: Array<{ role: string; text?: string; timestamp?: string }> | undefined,
+    isIntroCall: boolean,
+  ): Promise<{ bonusXp: number; longestStreak: number }> {
+    const result = computeStreakBonus(turns, this.sessionHintTimes.get(sessionId), { isIntroCall });
+    if (!this.supabase || !userId || result.bonusXp <= 0) {
+      return { bonusXp: result.bonusXp, longestStreak: result.longestStreak };
+    }
+    try {
+      const { data: existing } = await this.supabase
+        .from('xp_events')
+        .select('id, amount')
+        .eq('session_id', sessionId)
+        .eq('source', 'streak_bonus')
+        .maybeSingle();
+      if (!existing) {
+        const { error } = await this.supabase.from('xp_events').insert({
+          user_id: userId,
+          session_id: sessionId,
+          source: 'streak_bonus',
+          amount: result.bonusXp,
+          meta: { longestStreak: result.longestStreak, streakTurns: result.streakTurns },
+        });
+        // 23505 = a concurrent finalize inserted first; that row stands
+        if (error && error.code !== '23505') {
+          this.logger.warn(`[XP] streak bonus insert failed for ${sessionId}: ${error.message}`);
+        }
+      } else if (result.bonusXp > (existing.amount || 0)) {
+        await this.supabase
+          .from('xp_events')
+          .update({ amount: result.bonusXp, meta: { longestStreak: result.longestStreak, streakTurns: result.streakTurns } })
+          .eq('id', existing.id);
+      }
+      this.logger.log(`[XP] Streak bonus +${result.bonusXp} XP (best streak ${result.longestStreak}) for session ${sessionId}`);
+    } catch (e: any) {
+      this.logger.warn(`[XP] streak bonus failed for ${sessionId}: ${e?.message}`);
+    }
+    return { bonusXp: result.bonusXp, longestStreak: result.longestStreak };
   }
 
   /**
@@ -4169,6 +4235,14 @@ STRICT SCRIPT RULES:
         costUsd: 0,
         costLkr: 0,
       };
+    }
+
+    // Record every hint request (cached or not) for the streak rule
+    if (dto.sessionId) {
+      const hintSid = toValidUuid(dto.sessionId);
+      const times = this.sessionHintTimes.get(hintSid) || [];
+      times.push(Date.now());
+      this.sessionHintTimes.set(hintSid, times);
     }
 
     const norm = question.toLowerCase().replace(/[?!.,]/g, '').trim();

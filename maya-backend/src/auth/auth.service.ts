@@ -4474,17 +4474,17 @@ export class AuthService {
    * Raw rows behind every leaderboard period. Weekly / monthly / all-time used to each read the
    * same three whole tables; now they share one read per TTL window (single-flight).
    */
-  private leaderboardRaw: { timestamp: number; data: { profiles: any[]; progressRows: any[]; sessionRows: any[] } } | null = null;
-  private leaderboardRawInFlight: Promise<{ profiles: any[]; progressRows: any[]; sessionRows: any[] }> | null = null;
+  private leaderboardRaw: { timestamp: number; data: { profiles: any[]; progressRows: any[]; sessionRows: any[]; xpEventRows: any[] } } | null = null;
+  private leaderboardRawInFlight: Promise<{ profiles: any[]; progressRows: any[]; sessionRows: any[]; xpEventRows: any[] }> | null = null;
 
-  private async fetchLeaderboardRaw(): Promise<{ profiles: any[]; progressRows: any[]; sessionRows: any[] }> {
+  private async fetchLeaderboardRaw(): Promise<{ profiles: any[]; progressRows: any[]; sessionRows: any[]; xpEventRows: any[] }> {
     if (this.leaderboardRaw && Date.now() - this.leaderboardRaw.timestamp < AuthService.LEADERBOARD_CACHE_TTL_MS) {
       return this.leaderboardRaw.data;
     }
     if (this.leaderboardRawInFlight) return this.leaderboardRawInFlight;
 
     this.leaderboardRawInFlight = (async () => {
-      const [profilesRes, progressRes, sessionsRes] = await Promise.all([
+      const [profilesRes, progressRes, sessionsRes, xpEventsRes] = await Promise.all([
         this.supabase
           .from('profiles')
           .select('id, display_name, phone_number, avatar_url, created_at, monthly_minutes_allowance, add_on_minutes_balance, minutes_balance')
@@ -4495,6 +4495,8 @@ export class AuthService {
         this.supabase
           .from('sessions')
           .select('user_id, duration_seconds, created_at, roadmap_level_id'),
+        // Event XP (streak bonus). Optional: before migration 027 the table does not exist.
+        this.supabase.from('xp_events').select('user_id, amount, created_at'),
       ]);
       const err = profilesRes.error || progressRes.error || sessionsRes.error;
       if (err) {
@@ -4506,6 +4508,7 @@ export class AuthService {
         profiles: profilesRes.data || [],
         progressRows: progressRes.data || [],
         sessionRows: sessionsRes.data || [],
+        xpEventRows: (xpEventsRes.error ? [] : xpEventsRes.data) || [],
       };
       this.leaderboardRaw = { timestamp: Date.now(), data };
       return data;
@@ -4532,7 +4535,7 @@ export class AuthService {
             ? now - 30 * 24 * 60 * 60 * 1000
             : 0;
 
-      const { profiles, progressRows, sessionRows } = await this.fetchLeaderboardRaw();
+      const { profiles, progressRows, sessionRows, xpEventRows } = await this.fetchLeaderboardRaw();
 
       const allProfiles = Array.isArray(profiles) ? profiles : [];
       const xpByUser = new Map<string, number>();
@@ -4602,6 +4605,17 @@ export class AuthService {
               xpByUser.set(s.user_id, (xpByUser.get(s.user_id) || 0) + normalXp);
             }
           }
+        }
+      }
+
+      // Event XP (streak bonus etc.) from the XP ledger
+      for (const ev of Array.isArray(xpEventRows) ? xpEventRows : []) {
+        if (!ev.user_id) continue;
+        const amount = Number(ev.amount) || 0;
+        allTimeXpByUser.set(ev.user_id, (allTimeXpByUser.get(ev.user_id) || 0) + amount);
+        const ts = ev.created_at ? new Date(ev.created_at).getTime() : now;
+        if (cutoffMs === 0 || ts >= cutoffMs) {
+          xpByUser.set(ev.user_id, (xpByUser.get(ev.user_id) || 0) + amount);
         }
       }
 

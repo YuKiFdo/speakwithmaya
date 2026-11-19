@@ -21,6 +21,8 @@ import {
   GrammarFeedbackModal,
 } from '@/components/call/grammar-feedback-modal';
 import { ConversationDisplay } from '@/components/call/conversation-display';
+import { useCallRewards, MilestoneOverlay, StreakChip, GoalRing, XpCounter } from '@/components/call/call-rewards';
+import { ConfettiOverlay } from '@/components/ui/confetti';
 import { useConnectionMonitor } from '@/hooks/useConnectionMonitor';
 import { fontStyle } from '@/theme/fonts';
 
@@ -853,6 +855,29 @@ export default function CallScreen() {
 
   const [showForceEndPopup, setShowForceEndPopup] = useState(false);
 
+  // In-call rewards (mirror the server XP rules: per-minute practice XP, hint-free streak bonus).
+  // Milestones never cover a popup: they wait until every modal on this screen is closed.
+  const rewardsBlocked =
+    liveCall.feedbackVisible ||
+    liveCall.isPermissionModalVisible ||
+    showForceEndPopup ||
+    showHintLimitPopup ||
+    guideStepIndex !== null;
+  const passedPracticePoints = Array.from(liveCall.testScores.values()).filter((s) => s.passed).length;
+  const rewards = useCallRewards({
+    secondsElapsed: liveCall.secondsElapsed,
+    earnsMinuteXp: !isIntro && !effectiveRoadmapLevelId,
+    streakEnabled: !isIntro,
+    lastUserUtterance: liveCall.lastUserUtterance,
+    hintsUsedCount: hintsUsedCountRef.current,
+    passedPoints: passedPracticePoints,
+    totalPoints: effectiveRoadmapLevelId ? parsedPracticePoints.length : 0,
+    paused: isWrappingUp,
+    isMayaSpeaking: liveCall.status === 'speaking',
+    suppressMicFor: liveCall.suppressMicFor,
+    blocked: rewardsBlocked,
+  });
+
   const handleHangup = () => {
     if (isIntro) {
       if (isIntroEndCallLocked) {
@@ -946,7 +971,12 @@ export default function CallScreen() {
           feedbackEnglish: liveCall.missionReport.feedbackEnglish || '',
           userSentencesCount: String(liveCall.missionReport.userSentencesCount || ''),
           hintsUsedCount: String(liveCall.missionReport.hintsUsedCount ?? hintsHistoryRef.current.length),
-          xpEarned: String(liveCall.missionReport.xpEarned || ''),
+          // The server's finish reply (with the streak bonus) usually arrives after we navigate,
+          // so add the in-call streak bonus here unless the report already includes it.
+          xpEarned: String(
+            (liveCall.missionReport.xpEarned || 0) +
+              (liveCall.missionReport.streakBonusXp ? 0 : rewards.streakBonusXp),
+          ),
           isGeneralChat: String(Boolean(liveCall.missionReport.isGeneralChat)),
           isIntro: String(isIntro),
         },
@@ -1054,14 +1084,16 @@ export default function CallScreen() {
                 </Pressable>
 
                 <View style={styles.mobileHeaderInfo}>
-                  <View style={styles.avatarWrapperMobile}>
-                    <Image
-                      source={require('@/assets/images/maya-avatar.png')}
-                      style={styles.avatarImage}
-                      resizeMode="cover"
-                      accessibilityLabel="Maya"
-                    />
-                  </View>
+                  <GoalRing size={52} progress={rewards.goalProgress}>
+                    <View style={styles.avatarWrapperMobile}>
+                      <Image
+                        source={require('@/assets/images/maya-avatar.png')}
+                        style={styles.avatarImage}
+                        resizeMode="cover"
+                        accessibilityLabel="Maya"
+                      />
+                    </View>
+                  </GoalRing>
 
                   <View style={styles.headerTexts}>
                     <Text style={styles.mayaNameMobile}>Maya</Text>
@@ -1083,6 +1115,10 @@ export default function CallScreen() {
                         {formatTime(displayedElapsed)}{' '}
                         <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
                       </Text>
+                    </View>
+                    <View style={styles.rewardHud}>
+                      <StreakChip streak={rewards.streak} />
+                      <XpCounter sessionXp={rewards.sessionXp} gain={rewards.gain} />
                     </View>
                     <Text
                       style={[
@@ -1130,14 +1166,16 @@ export default function CallScreen() {
               {/* On Desktop: Centered Avatar & Maya Status */}
               {isWebOrDesktop && (
                 <View style={styles.desktopAvatarCard}>
-                  <View style={styles.avatarWrapperDesktop}>
-                    <Image
-                      source={require('@/assets/images/maya-avatar.png')}
-                      style={styles.avatarImage}
-                      resizeMode="cover"
-                      accessibilityLabel="Maya"
-                    />
-                  </View>
+                  <GoalRing size={88} progress={rewards.goalProgress}>
+                    <View style={styles.avatarWrapperDesktop}>
+                      <Image
+                        source={require('@/assets/images/maya-avatar.png')}
+                        style={styles.avatarImage}
+                        resizeMode="cover"
+                        accessibilityLabel="Maya"
+                      />
+                    </View>
+                  </GoalRing>
 
                   <View style={styles.desktopInfoTexts}>
                     <Text style={styles.mayaNameDesktop}>Maya</Text>
@@ -1159,6 +1197,10 @@ export default function CallScreen() {
                         {formatTime(displayedElapsed)}{' '}
                         <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
                       </Text>
+                    </View>
+                    <View style={styles.rewardHud}>
+                      <StreakChip streak={rewards.streak} />
+                      <XpCounter sessionXp={rewards.sessionXp} gain={rewards.gain} />
                     </View>
                     <Text
                       style={[
@@ -1237,7 +1279,10 @@ export default function CallScreen() {
 
               {/* Conversation Display with Multi-Turn History */}
               <ConversationDisplay
-                previousText={liveCall.previousSubtitles}
+                previousText={
+                  liveCall.lastUserUtterance ? `You: ${liveCall.lastUserUtterance.text}` : liveCall.previousSubtitles
+                }
+                previousIsUser={!!liveCall.lastUserUtterance}
                 currentText={
                   isIntro && guideStepIndex !== null && !liveCall.subtitles
                     ? "Hi! I'm Maya. Let's have a quick conversation in English. Don't worry about making mistakes. I'm here to help you!"
@@ -1257,7 +1302,6 @@ export default function CallScreen() {
                 speechSync={liveCall.speechSync}
                 turnId={liveCall.speechSync.getTurnSeq()}
               />
-
               {/* Hint Suggestion Card */}
               {isHintVisible && (!!hintData || isHintLoading) && (
                 <View style={styles.hintCardWrapper}>
@@ -1397,6 +1441,10 @@ export default function CallScreen() {
           isDesktop={isWebOrDesktop}
         />
       )}
+
+      {/* Floating "+5 XP" / streak rewards and practice-point confetti (top layer, above everything) */}
+      <MilestoneOverlay milestone={rewards.milestone} />
+      {rewards.milestone && <ConfettiOverlay key={rewards.milestone.id} count={40} duration={1800} />}
     </SafeAreaView>
   );
 }
@@ -1544,6 +1592,11 @@ const styles = StyleSheet.create({
     gap: 12,
     flex: 1,
     marginLeft: 16,
+  },
+  rewardHud: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   avatarWrapperMobile: {
     width: 52,

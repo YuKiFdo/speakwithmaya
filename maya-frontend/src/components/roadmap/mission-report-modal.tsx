@@ -26,6 +26,9 @@ export interface MissionObjectiveResult {
 }
 
 export interface MissionReportData {
+  /** Server streak bonus (hint-free turns), already included in xpEarned. */
+  streakBonusXp?: number;
+  longestStreak?: number;
   roadmapLevelId: string;
   levelNumber?: number;
   levelTitle?: string;
@@ -281,7 +284,11 @@ export function MissionReportModal({
                   </View>
                   <View style={styles.statTexts}>
                     <Text style={styles.statValueBold}>+{xpEarned} XP</Text>
-                    <Text style={styles.statLabelMuted}>Earned today</Text>
+                    <Text style={styles.statLabelMuted}>
+                      {report.streakBonusXp
+                        ? `🔥 Streak bonus +${report.streakBonusXp} · best ${report.longestStreak || 0}`
+                        : 'Earned today'}
+                    </Text>
                   </View>
                 </View>
               </View>

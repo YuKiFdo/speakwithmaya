@@ -120,7 +120,8 @@ export default function AnalyzingScreen() {
   // Staggered cascade entrance animations for the 4 step rows
   const stepFadeAnims = useRef(ANALYSIS_STEPS.map(() => new Animated.Value(0))).current;
 
-  // "Processing" micro-animation for the step currently in progress: a spinning arc around
+  // "Processing" micro-animation for the step currently in progress (native: Animated rotate;
+  // web: CSS keyframes, see WEB_SPIN_STYLE): a spinning arc around
   // its icon plus a gentle icon pulse, so it is clear which step is working right now.
   const [stepSpinAnim] = useState(() => new Animated.Value(0));
   const [stepPulseAnim] = useState(() => new Animated.Value(0));
@@ -670,7 +671,15 @@ export default function AnalyzingScreen() {
                 {isCurrent && (
                   <Animated.View
                     pointerEvents="none"
-                    style={[styles.stepSpinnerRing, { transform: [{ rotate: stepSpinRotate }] }]}
+                    style={[
+                      styles.stepSpinnerRing,
+                      // Web: a CSS keyframe spin runs on the browser's compositor, so it stays
+                      // smooth while this screen is busy loading the analysis (JS-driven
+                      // rotation stuttered and looked stuck on phones).
+                      Platform.OS === 'web'
+                        ? (WEB_SPIN_STYLE as any)
+                        : { transform: [{ rotate: stepSpinRotate }] },
+                    ]}
                   />
                 )}
                 <Animated.View
@@ -752,6 +761,14 @@ export default function AnalyzingScreen() {
     </SafeAreaView>
   );
 }
+
+// react-native-web turns these into a CSS @keyframes animation (compositor-driven, smooth)
+const WEB_SPIN_STYLE = {
+  animationKeyframes: [{ '0%': { transform: [{ rotate: '0deg' }] }, '100%': { transform: [{ rotate: '360deg' }] } }],
+  animationDuration: '1100ms',
+  animationTimingFunction: 'linear',
+  animationIterationCount: 'infinite',
+};
 
 const styles = StyleSheet.create({
   safeArea: {

@@ -15,6 +15,7 @@ import {
   Platform,
   ScrollView,
   useWindowDimensions,
+  AccessibilityInfo,
 } from 'react-native';
 import { fontStyle } from '@/theme/fonts';
 import { TranslationToggleButton } from './translation-toggle-button';
@@ -23,6 +24,8 @@ import type { SpeechSyncSource } from '@/utils/speech-sync';
 
 interface ConversationDisplayProps {
   previousText?: string;
+  /** The line above is the learner's own sentence ("You: ..."), shown in purple. */
+  previousIsUser?: boolean;
   currentText: string;
   isSpeaking: boolean;
   isWebOrDesktop?: boolean;
@@ -81,9 +84,11 @@ const MIN_DELAY = 270;
 const MAX_DELAY = 520;
 const FLUSH_DELAY = 90; // after Maya stops talking, finish remaining words quickly
 const SPEAKING_GRACE_MS = 800; // ignore short "speaking" -> "listening" flickers
-const NEWEST_WORD_COLOR = '#64748B'; // set to '#0F172A' to disable the "typing" shade
 const TEXT_COLOR = '#0F172A';
-const HIDDEN_TEXT_COLOR = 'rgba(15, 23, 42, 0.01)';
+// Words not yet spoken are hidden (layout still reserved, so nothing jumps) and fade in as Maya says them
+const UPCOMING_OPACITY = 0;
+const WORD_IN_MS = 170;
+const CURRENT_WORD_BG = 'rgba(37, 99, 235, 0.10)';
 
 // Phones can enlarge text in system settings (Android "Font size", iOS "Larger Text").
 // Cap it so the layout cannot grow past the box and clip.
@@ -120,12 +125,93 @@ function isContinuation(prev: string[], next: string[]): boolean {
 
 const EMPTY_WORDS: string[] = [];
 
+/** Respects the OS "reduce motion" setting: no slides/scales, words switch instantly. */
+function useReduceMotion(): boolean {
+  const [reduce, setReduce] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    AccessibilityInfo.isReduceMotionEnabled?.()
+      .then((v) => alive && setReduce(!!v))
+      .catch(() => {});
+    const sub = AccessibilityInfo.addEventListener?.('reduceMotionChanged', (v: boolean) => setReduce(!!v));
+    return () => {
+      alive = false;
+      sub?.remove?.();
+    };
+  }, []);
+  return reduce;
+}
+
+type WordState = 'upcoming' | 'current' | 'spoken';
+
+/**
+ * One word of Maya's reply. Every word is laid out from the start (no layout jump);
+ * when the voice reaches it, it fades from faint to full and rises a few pixels.
+ */
+const RevealWord = React.memo(function RevealWord({
+  word,
+  state,
+  fontSize,
+  lineHeight,
+  isDesktop,
+  reduceMotion,
+  useNative,
+}: {
+  word: string;
+  state: WordState;
+  fontSize: number;
+  lineHeight: number;
+  isDesktop: boolean;
+  reduceMotion: boolean;
+  useNative: boolean;
+}) {
+  const revealed = state !== 'upcoming';
+  const progress = useRef(new Animated.Value(revealed ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (reduceMotion) {
+      progress.setValue(revealed ? 1 : 0);
+      return;
+    }
+    Animated.timing(progress, {
+      toValue: revealed ? 1 : 0,
+      duration: revealed ? WORD_IN_MS : 0,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: useNative,
+    }).start();
+  }, [revealed, reduceMotion, progress, useNative]);
+
+  const opacity = progress.interpolate({ inputRange: [0, 1], outputRange: [UPCOMING_OPACITY, 1] });
+  const translateY = reduceMotion
+    ? 0
+    : progress.interpolate({ inputRange: [0, 1], outputRange: [4, 0] });
+
+  return (
+    <Animated.View
+      style={[
+        styles.wordBox,
+        { marginRight: fontSize * 0.14 },
+        state === 'current' && styles.wordBoxCurrent,
+        { opacity, transform: [{ translateY }] },
+      ]}
+    >
+      <Text
+        maxFontSizeMultiplier={MAX_FONT_SCALE}
+        style={[styles.promptText, { fontSize, lineHeight }, isDesktop && styles.promptTextDesktop]}
+      >
+        {word}
+      </Text>
+    </Animated.View>
+  );
+});
+
 /* -------------------------------------------------------------------------- */
 /*  Component                                                                 */
 /* -------------------------------------------------------------------------- */
 
 function ConversationDisplayComponent({
   previousText,
+  previousIsUser = false,
   currentText,
   isSpeaking,
   isWebOrDesktop = false,
@@ -341,43 +427,69 @@ function ConversationDisplayComponent({
 
   /* -------------------------------- Animations ----------------------------- */
 
-  // Whole-turn fade-in (opacity on a View works natively, unlike nested Text)
+  const reduceMotion = useReduceMotion();
+
+  // New turn: fades in and rises from 8px below (opacity/transform on a View run natively)
   const turnFade = useRef(new Animated.Value(0)).current;
+  const turnSlide = useRef(new Animated.Value(0)).current;
   useLayoutEffect(() => {
     turnFade.setValue(0);
-    Animated.timing(turnFade, {
-      toValue: 1,
-      duration: 180,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: useNative,
-    }).start();
-  }, [turnKey, turnFade, useNative]);
+    turnSlide.setValue(reduceMotion ? 0 : 8);
+    Animated.parallel([
+      Animated.timing(turnFade, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: useNative,
+      }),
+      Animated.spring(turnSlide, {
+        toValue: 0,
+        tension: 90,
+        friction: 11,
+        useNativeDriver: useNative,
+      }),
+    ]).start();
+  }, [turnKey, turnFade, turnSlide, useNative, reduceMotion]);
 
-  // Previous turn glide
+  // Previous turn: the finished reply "shrinks up" into the faded line above the new one
   const prevFadeAnim = useRef(new Animated.Value(0.5)).current;
   const prevSlideAnim = useRef(new Animated.Value(0)).current;
+  const prevScaleAnim = useRef(new Animated.Value(1)).current;
   const prevTextRef = useRef<string>(previousText || '');
   useLayoutEffect(() => {
     if (previousText && previousText !== prevTextRef.current) {
       prevTextRef.current = previousText;
-      prevFadeAnim.setValue(0.85);
-      prevSlideAnim.setValue(8);
+      if (reduceMotion) {
+        prevFadeAnim.setValue(0.5);
+        prevSlideAnim.setValue(0);
+        prevScaleAnim.setValue(1);
+        return;
+      }
+      prevFadeAnim.setValue(0.9);
+      prevSlideAnim.setValue(22);
+      prevScaleAnim.setValue(1.12);
       Animated.parallel([
         Animated.timing(prevFadeAnim, {
           toValue: 0.5,
-          duration: 420,
+          duration: 380,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: useNative,
         }),
-        Animated.timing(prevSlideAnim, {
+        Animated.spring(prevSlideAnim, {
           toValue: 0,
-          duration: 420,
-          easing: Easing.out(Easing.cubic),
+          tension: 80,
+          friction: 12,
+          useNativeDriver: useNative,
+        }),
+        Animated.spring(prevScaleAnim, {
+          toValue: 1,
+          tension: 80,
+          friction: 12,
           useNativeDriver: useNative,
         }),
       ]).start();
     }
-  }, [previousText, prevFadeAnim, prevSlideAnim, useNative]);
+  }, [previousText, prevFadeAnim, prevSlideAnim, prevScaleAnim, useNative, reduceMotion]);
 
   // Translation text fade-in
   const translationAnim = useRef(new Animated.Value(0)).current;
@@ -422,17 +534,8 @@ function ConversationDisplayComponent({
 
   /* --------------------------------- Segments ------------------------------ */
 
-  // The WHOLE sentence is always rendered so the layout never changes while
-  // words appear. Unrevealed words are simply transparent.
-  const { settled, latest, rest } = useMemo(() => {
-    const n = Math.min(count, shownWords.length);
-    if (n <= 0) return { settled: '', latest: '', rest: shownWords.join(' ') };
-    return {
-      settled: n > 1 ? shownWords.slice(0, n - 1).join(' ') + ' ' : '',
-      latest: shownWords[n - 1],
-      rest: n < shownWords.length ? ' ' + shownWords.slice(n).join(' ') : '',
-    };
-  }, [shownWords, count]);
+  // The WHOLE sentence is always laid out so nothing moves while words appear.
+  const revealedCount = Math.min(count, shownWords.length);
 
   if (shownWords.length === 0) return null;
 
@@ -473,14 +576,21 @@ function ConversationDisplayComponent({
           <Animated.View
             style={[
               styles.previousWrapper,
-              { opacity: prevFadeAnim, transform: [{ translateY: prevSlideAnim }] },
+              {
+                opacity: prevFadeAnim,
+                transform: [{ translateY: prevSlideAnim }, { scale: prevScaleAnim }],
+              },
             ]}
           >
             <Text
               numberOfLines={2}
               ellipsizeMode="tail"
               maxFontSizeMultiplier={MAX_FONT_SCALE}
-              style={[styles.previousText, isWebOrDesktop && styles.previousTextDesktop]}
+              style={[
+                styles.previousText,
+                isWebOrDesktop && styles.previousTextDesktop,
+                previousIsUser && styles.previousTextUser,
+              ]}
             >
               {previousText}
             </Text>
@@ -489,29 +599,40 @@ function ConversationDisplayComponent({
 
         {/* Current turn */}
         <Animated.View
-          style={[styles.currentWrapper, { opacity: turnFade }]}
+          style={[styles.currentWrapper, { opacity: turnFade, transform: [{ translateY: turnSlide }] }]}
           onLayout={(e) => {
             wrapperY.current = e.nativeEvent.layout.y;
           }}
         >
-          <Text
-            maxFontSizeMultiplier={MAX_FONT_SCALE}
-            style={[
-              styles.promptText,
-              { fontSize, lineHeight },
-              isWebOrDesktop && styles.promptTextDesktop,
-            ]}
+          <View
+            key={turnKey}
+            accessible
+            accessibilityLabel={fullRawText}
+            style={styles.wordsRow}
             onLayout={(e) => {
               promptY.current = e.nativeEvent.layout.y;
               promptH.current = e.nativeEvent.layout.height;
             }}
           >
-            {settled}
-            <Text style={{ color: isRevealing ? NEWEST_WORD_COLOR : TEXT_COLOR }}>
-              {latest}
-            </Text>
-            <Text style={styles.hiddenText}>{rest}</Text>
-          </Text>
+            {shownWords.map((w, i) => (
+              <RevealWord
+                key={i}
+                word={w}
+                state={
+                  i < revealedCount - 1 || (i === revealedCount - 1 && !isRevealing)
+                    ? 'spoken'
+                    : i === revealedCount - 1
+                      ? 'current'
+                      : 'upcoming'
+                }
+                fontSize={fontSize}
+                lineHeight={lineHeight}
+                isDesktop={isWebOrDesktop}
+                reduceMotion={reduceMotion}
+                useNative={useNative}
+              />
+            ))}
+          </View>
 
           {isTranslationVisible && !!translationText && (
             <Animated.Text
@@ -580,6 +701,9 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     textAlign: 'center',
   },
+  previousTextUser: {
+    color: '#7C3AED',
+  },
   previousTextDesktop: {
     fontSize: 17,
     lineHeight: 25,
@@ -597,12 +721,19 @@ const styles = StyleSheet.create({
   promptTextDesktop: {
     letterSpacing: -0.5,
   },
-  // NOT 'transparent': on the Android/iOS New Architecture (Fabric) a nested Text whose
-  // colour has alpha 0 is treated as "no colour set" and inherits the parent's dark
-  // colour, so the whole sentence appeared at once. A 1%-alpha colour is invisible
-  // but counts as a real colour on every platform.
-  hiddenText: {
-    color: HIDDEN_TEXT_COLOR,
+  wordsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Every word gets the same padding so the "current word" pill never shifts the layout
+  wordBox: {
+    paddingHorizontal: 2,
+    borderRadius: 8,
+  },
+  wordBoxCurrent: {
+    backgroundColor: CURRENT_WORD_BG,
   },
   sinhalaTranslationText: {
     ...fontStyle('inter', 'regular'),
