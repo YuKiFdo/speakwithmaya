@@ -19,6 +19,7 @@ import {
 } from './dto/user-roadmap-progress.dto.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
+import { computeXpByUser, levelForXp, practiceXp, XP_RULES } from '../common/xp-calculator.js';
 
 export interface RoadmapLevelEntity {
   id: string;
@@ -954,6 +955,17 @@ INSTRUCTIONS:
         }
       }
 
+      // XP totals from the single shared calculator (same numbers as the dashboard and leaderboards)
+      {
+        const calc = computeXpByUser({
+          progressRows: progressRows || [],
+          sessionRows: sessionRows || [],
+          xpEventRows: await this.fetchXpEventRows(),
+        });
+        xpByUser.clear();
+        calc.allTime.forEach((v, k) => xpByUser.set(k, v));
+      }
+
       const ranked = allProfiles.map((p: any) => {
         const xp = xpByUser.get(p.id) || 0;
         const sessionMinutes = Math.round((sessionSecondsByUser.get(p.id) || 0) / 60);
@@ -1115,6 +1127,18 @@ INSTRUCTIONS:
         }
       }
 
+      // XP totals from the single shared calculator (same numbers as the dashboard and rank)
+      {
+        const calc = computeXpByUser(
+          { progressRows: progressRows || [], sessionRows: sessionRows || [], xpEventRows: await this.fetchXpEventRows() },
+          cutoffMs,
+        );
+        xpByUser.clear();
+        allTimeXpByUser.clear();
+        calc.period.forEach((v, k) => xpByUser.set(k, v));
+        calc.allTime.forEach((v, k) => allTimeXpByUser.set(k, v));
+      }
+
       const entries = allProfiles.map((p: any) => {
         const periodXp = xpByUser.get(p.id) || 0;
         const allTimeXp = allTimeXpByUser.get(p.id) || periodXp;
@@ -1127,7 +1151,7 @@ INSTRUCTIONS:
         // (roadmap levels + 5 XP per practice minute + XP ledger), same as every other screen.
         const compositeScore = periodXp + minutesConsumed * 10;
         const displayXp = periodXp;
-        const levelNumber = Math.max(1, Math.floor(Math.max(allTimeXp, periodXp) / 500) + 1);
+        const levelNumber = levelForXp(Math.max(allTimeXp, periodXp));
         const avatarUrl = (p as any).avatar_url || null;
         const rawName = (p.display_name || '').trim();
         const fallbackPhone = p.phone_number
@@ -1181,6 +1205,22 @@ INSTRUCTIONS:
     }
   }
 
+  /** True when the user has already passed this roadmap level. */
+  async hasPassedLevel(userId: string, roadmapLevelId: string): Promise<boolean> {
+    if (!this.supabase || !userId || !roadmapLevelId) return false;
+    try {
+      const { data } = await this.supabase
+        .from('user_roadmap_progress')
+        .select('status, is_passed')
+        .eq('user_id', userId)
+        .eq('roadmap_level_id', roadmapLevelId)
+        .maybeSingle();
+      return Boolean(data && (data.status === 'completed' || data.is_passed));
+    } catch {
+      return false;
+    }
+  }
+
   async recordUserProgress(
     userId: string,
     dto: RecordUserRoadmapProgressDto,
@@ -1217,6 +1257,20 @@ INSTRUCTIONS:
 
         if (!levelExists) {
           this.logger.debug?.(`[RoadmapService] Level ${record.roadmapLevelId} not found in roadmap_levels table; skipping user_roadmap_progress DB upsert.`);
+          return record;
+        }
+
+        // Never downgrade: a level that is already passed stays passed (with its XP) when a later
+        // attempt fails. Only a new pass (or a higher score) updates it.
+        const { data: existingRow } = await this.supabase
+          .from('user_roadmap_progress')
+          .select('status, is_passed, score_percent')
+          .eq('user_id', record.userId)
+          .eq('roadmap_level_id', record.roadmapLevelId)
+          .maybeSingle();
+        const existingPassed = Boolean(existingRow && (existingRow.status === 'completed' || existingRow.is_passed));
+        if (existingPassed && (!record.isPassed || (Number(record.scorePercent) || 0) <= (Number(existingRow!.score_percent) || 0))) {
+          this.logger.log(`[RoadmapService] Level ${record.roadmapLevelId} already passed by ${record.userId}; keeping the passed record`);
           return record;
         }
 

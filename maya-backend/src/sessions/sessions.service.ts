@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { BoundedMap } from '../common/bounded-map.js';
 import { acceptClientStreakBonus, computeStreakBonus, STREAK_RULES } from './xp-rules.js';
+import { practiceXp, XP_RULES } from '../common/xp-calculator.js';
 import { PiperWorkerClient, PiperSegment } from './piper-worker-client.js';
 
 const execFileAsync = promisify(execFile);
@@ -2577,7 +2578,8 @@ ${memoryPart}`;
         const roadmapLevelId = activeInfo?.roadmapLevelId || (dto as any).roadmapLevelId;
         awardedXp = 0;
         awardedXp = 0;
-        if (roadmapLevelId && this.roadmapService) {
+        // 'practice-*' ids are practice topics, not roadmap levels: they earn practice XP
+        if (roadmapLevelId && !String(roadmapLevelId).startsWith('practice-') && this.roadmapService) {
           try {
             const overallScore = resolvedScores.overall ?? 75;
             let passingScorePercent = 70;
@@ -2597,9 +2599,14 @@ ${memoryPart}`;
             const userTurnsCount = turnsToUse ? turnsToUse.filter((t: any) => t.role === 'user').length : 0;
             const meetsTurnRequirement = userTurnsCount >= 3 || durationSeconds >= 45;
             const isPassed = overallScore >= passingScorePercent && meetsTurnRequirement;
-            awardedXp = isPassed ? 100 : 25;
+            // Was this level already passed before this call? (decides first pass vs replay)
+            const alreadyPassed = resolvedUserId
+              ? await this.roadmapService.hasPassedLevel(resolvedUserId, roadmapLevelId)
+              : false;
+            awardedXp = 0;
 
             if (resolvedUserId) {
+              // Progress never downgrades: a passed level stays passed (guarded in recordUserProgress)
               await this.roadmapService.recordUserProgress(resolvedUserId, {
                 roadmapLevelId,
                 levelNumber,
@@ -2607,8 +2614,24 @@ ${memoryPart}`;
                 scorePercent: overallScore,
                 isPassed,
                 status: isPassed ? 'completed' : 'in_progress',
-                xpEarned: awardedXp,
+                xpEarned: isPassed ? XP_RULES.levelPassXp : 0,
               });
+              if (alreadyPassed) {
+                // Replaying a passed level: earns practice XP (5 per minute) instead of nothing
+                awardedXp = await this.awardXpEvent(validSessionId, resolvedUserId, 'roadmap_replay', practiceXp(durationSeconds), {
+                  roadmapLevelId,
+                });
+              } else if (isPassed) {
+                awardedXp = XP_RULES.levelPassXp;
+              } else if (meetsTurnRequirement) {
+                // A genuine failed attempt: +25, at most 3 rewarded attempts per level
+                const priorAttempts = await this.countXpEvents(resolvedUserId, 'roadmap_attempt', roadmapLevelId);
+                if (priorAttempts < XP_RULES.maxRewardedAttemptsPerLevel) {
+                  awardedXp = await this.awardXpEvent(validSessionId, resolvedUserId, 'roadmap_attempt', XP_RULES.attemptXp, {
+                    roadmapLevelId,
+                  });
+                }
+              }
               this.logger.log(`[Roadmap Progress] Recorded completion for user ${resolvedUserId}, level ${roadmapLevelId}, session ${sessionId}, passed: ${isPassed} (score: ${overallScore}%, target: ${passingScorePercent}%, userTurns: ${userTurnsCount})`);
             }
           } catch (progressErr: any) {
@@ -2617,8 +2640,9 @@ ${memoryPart}`;
         } else if (resolvedUserId && durationSeconds >= 30) {
           // Award XP for normal practice sessions (e.g. general chat, workplace, casual conversation): 5 XP per 1 minute practiced
           try {
+            // Stored implicitly: the session row's duration IS the practice XP (shared calculator)
             const practiceMinutes = Math.max(1, Math.floor(durationSeconds / 60));
-            awardedXp = Math.max(5, practiceMinutes * 5);
+            awardedXp = practiceXp(durationSeconds);
             this.logger.log(`[Practice XP] Awarded ${awardedXp} XP (${practiceMinutes} min practiced @ 5 XP/min) for user ${resolvedUserId}, session ${validSessionId}`);
           } catch (xpErr: any) {
             this.logger.warn(`Failed to record practice session XP: ${xpErr?.message}`);
@@ -2787,6 +2811,57 @@ ${memoryPart}`;
       streakBonusXp: streakBonus.bonusXp,
       longestStreak: streakBonus.longestStreak,
     };
+  }
+
+  /**
+   * Stores one XP ledger award for a session (unique per session + source, so a second finalize
+   * never doubles it). Returns the amount that now stands for this session.
+   */
+  private async awardXpEvent(
+    sessionId: string,
+    userId: string,
+    source: string,
+    amount: number,
+    meta: Record<string, unknown> = {},
+  ): Promise<number> {
+    if (!this.supabase || !userId || amount <= 0) return 0;
+    try {
+      const { data: existing } = await this.supabase
+        .from('xp_events')
+        .select('id, amount')
+        .eq('session_id', sessionId)
+        .eq('source', source)
+        .maybeSingle();
+      if (existing) return Number(existing.amount) || 0;
+      const { error } = await this.supabase
+        .from('xp_events')
+        .insert({ user_id: userId, session_id: sessionId, source, amount, meta });
+      if (error && error.code !== '23505') {
+        this.logger.warn(`[XP] ${source} award failed for ${sessionId}: ${error.message}`);
+        return 0;
+      }
+      this.logger.log(`[XP] ${source} +${amount} XP for session ${sessionId}`);
+      return amount;
+    } catch (e: any) {
+      this.logger.warn(`[XP] ${source} award failed for ${sessionId}: ${e?.message}`);
+      return 0;
+    }
+  }
+
+  /** How many `source` awards this user already has for a roadmap level. */
+  private async countXpEvents(userId: string, source: string, roadmapLevelId: string): Promise<number> {
+    if (!this.supabase) return 0;
+    try {
+      const { count } = await this.supabase
+        .from('xp_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('source', source)
+        .contains('meta', { roadmapLevelId });
+      return count || 0;
+    } catch {
+      return 0;
+    }
   }
 
   /**

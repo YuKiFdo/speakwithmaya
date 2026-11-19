@@ -38,6 +38,7 @@ import { TelcoSubscriptionService } from './sms/telco-subscription.service.js';
 import type { UpdateAppConfigDto } from './dto/auth.dto.js';
 import { isMissingFunctionError } from '../common/supabase-rpc.js';
 import { paginateArray, pageWindow, readPage, type PageRequest } from '../common/pagination.js';
+import { computeXpByUser, levelForXp, practiceXp, XP_RULES } from '../common/xp-calculator.js';
 
 export interface UserProfileData {
   id: string;
@@ -1705,9 +1706,8 @@ export class AuthService {
   }
 
   /**
-   * One learner's all-time XP, computed fresh (not from the 5-minute leaderboard cache) with the
-   * SAME rules as the leaderboard: roadmap levels (once per level) + practice calls
-   * (>= 30s: max(1, floor(min)) x 5) + XP ledger (streak bonus etc.).
+   * One learner's all-time XP, computed fresh (not from the 5-minute leaderboard cache) through
+   * the shared XP calculator (common/xp-calculator.ts), so it matches rank and leaderboards.
    */
   async getUserTotalXp(userId: string): Promise<number> {
     if (!this.supabase || !userId) return 0;
@@ -1720,23 +1720,17 @@ export class AuthService {
       this.supabase.from('xp_events').select('amount').eq('user_id', userId),
     ]);
 
-    let xp = 0;
-    const levels = new Set<string>();
-    for (const row of progressRes.data || []) {
-      if (!(row.status === 'completed' || row.is_passed)) continue;
-      const key = String(row.roadmap_level_id || row.level_number || row.id || '');
-      if (levels.has(key)) continue;
-      levels.add(key);
-      xp += typeof row.xp_earned === 'number' ? row.xp_earned : Number(row.xp_earned) || 0;
-    }
-    for (const s of sessionsRes.data || []) {
-      const dur = Number(s.duration_seconds) || 0;
-      if (!s.roadmap_level_id && dur >= 30) xp += Math.max(1, Math.floor(dur / 60)) * 5;
-    }
-    if (!eventsRes.error) {
-      for (const ev of eventsRes.data || []) xp += Number(ev.amount) || 0;
-    }
-    return xp;
+    return (
+      computeXpByUser(
+        {
+          progressRows: progressRes.data || [],
+          sessionRows: sessionsRes.data || [],
+          xpEventRows: eventsRes.error ? [] : eventsRes.data || [],
+        },
+        0,
+        userId,
+      ).allTime.get(userId) || 0
+    );
   }
 
   private hasActivePaidSubscription(userId: string): Promise<boolean> {
@@ -5004,6 +4998,15 @@ export class AuthService {
         }
       }
 
+      // XP totals from the single shared calculator (same numbers as the dashboard and rank)
+      {
+        const calc = computeXpByUser({ progressRows, sessionRows, xpEventRows }, cutoffMs);
+        xpByUser.clear();
+        allTimeXpByUser.clear();
+        calc.period.forEach((v, k) => xpByUser.set(k, v));
+        calc.allTime.forEach((v, k) => allTimeXpByUser.set(k, v));
+      }
+
       const entries = allProfiles.map((p: any) => {
         const dbPeriodXp = xpByUser.get(p.id) || 0;
         const dbAllTimeXp = allTimeXpByUser.get(p.id) || dbPeriodXp;
@@ -5012,7 +5015,7 @@ export class AuthService {
         const balance = Number(p.minutes_balance ?? allowance);
         const quotaMinutesUsed = Math.max(0, allowance - balance);
         const minutesConsumed = Math.max(sessionMinutes, quotaMinutesUsed);
-        const levelNumber = Math.max(1, Math.floor(dbAllTimeXp / 500) + 1);
+        const levelNumber = levelForXp(dbAllTimeXp);
         const avatarUrl = (p as any).avatar_url || null;
         const rawName = (p.display_name || '').trim();
         const fallbackPhone = p.phone_number
