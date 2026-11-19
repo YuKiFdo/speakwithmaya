@@ -27,6 +27,7 @@ import { useConnectionMonitor } from '@/hooks/useConnectionMonitor';
 import { fontStyle } from '@/theme/fonts';
 
 import { useLiveCall } from '@/hooks/useLiveCall';
+import { startConnectingTone } from '@/services/sound/sound-service';
 import { ConnectingView } from '@/components/call/connecting-view';
 import { ContextualCallGuide } from '@/components/call/contextual-call-guide';
 import { BeaconRing } from '@/components/call/beacon-ring';
@@ -688,14 +689,41 @@ export default function CallScreen() {
   const mountTimeRef = useRef(Date.now());
   const [isVisualConnected, setIsVisualConnected] = useState(false);
 
+  // Soft connecting tone while the "Connecting to Maya..." screen is up
+  const stopConnectingToneRef = useRef<((fadeMs?: number) => void) | null>(null);
+  useEffect(() => {
+    stopConnectingToneRef.current = startConnectingTone();
+    return () => stopConnectingToneRef.current?.(0);
+  }, []);
+
+  // Wait for Maya's voice, not just the connection. If her greeting is slow, give up waiting
+  // after GREETING_WAIT_MAX_MS so the screen never looks stuck.
+  const GREETING_WAIT_MAX_MS = 8000;
+  const [greetingWaitExpired, setGreetingWaitExpired] = useState(false);
+  const connectedAtRef = useRef<number | null>(null);
+  const callIsUp = liveCall.isConnected || (liveCall.status !== 'connecting' && liveCall.status !== 'idle');
+  useEffect(() => {
+    if (!callIsUp || connectedAtRef.current) return;
+    connectedAtRef.current = Date.now();
+    const t = setTimeout(() => setGreetingWaitExpired(true), GREETING_WAIT_MAX_MS);
+    transitionTimersRef.current.push(t);
+  }, [callIsUp]);
+
   // Orchestrate the smooth ConnectingView -> CallScreen transition
   useEffect(() => {
     const isNowConnected =
       liveCall.isConnected ||
       (liveCall.status !== 'connecting' && liveCall.status !== 'idle');
+    // Maya's greeting audio has arrived (or we stopped waiting for it)
+    const voiceReady = Boolean(liveCall.greetingReady) || greetingWaitExpired;
 
-    if (isNowConnected && !hasTransitionedRef.current) {
+    if (isNowConnected && voiceReady && !hasTransitionedRef.current) {
       hasTransitionedRef.current = true;
+      if (connectedAtRef.current) {
+        console.log(
+          `[call.tsx] ⏱️ Greeting ${liveCall.greetingReady ? 'ready' : 'NOT ready (timeout)'} ${Date.now() - connectedAtRef.current}ms after connect`,
+        );
+      }
       console.log('[call.tsx] 📞 Call established in background. Ensuring user has enough time to read tips...');
 
       // Calculate elapsed time in Connecting screen:
@@ -705,12 +733,16 @@ export default function CallScreen() {
       const waitBeforeConnected = Math.max(0, minTipsReadingTime - elapsed);
 
       const connectTimer = setTimeout(() => {
-        // Now switch visual to "Connected!"
+        // Now switch visual to "Connected!": fade the connecting tone out, then the chime
         setIsVisualConnected(true);
+        stopConnectingToneRef.current?.(260);
 
-        try {
-          playCallConnectedSound();
-        } catch {}
+        const chimeTimer = setTimeout(() => {
+          try {
+            playCallConnectedSound();
+          } catch {}
+        }, 220);
+        transitionTimersRef.current.push(chimeTimer);
 
         // Right after showing "Connected!" (brief 400ms flash), open the curtain into the call
         const handoffTimer = setTimeout(() => {
@@ -762,7 +794,7 @@ export default function CallScreen() {
               }
             }
           });
-        }, 420); // Quick transition right after showing Connected
+        }, 520); // Right after "Connected!" + chime; Maya's buffered greeting starts as the screen settles
 
         transitionTimersRef.current.push(handoffTimer);
       }, waitBeforeConnected);
@@ -772,6 +804,8 @@ export default function CallScreen() {
   }, [
     liveCall.isConnected,
     liveCall.status,
+    liveCall.greetingReady,
+    greetingWaitExpired,
     isIntro,
     connectingFadeAnim,
     connectingScaleAnim,

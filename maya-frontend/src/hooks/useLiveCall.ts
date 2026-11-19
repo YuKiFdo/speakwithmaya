@@ -94,6 +94,9 @@ interface UseLiveCallOptions {
   streakBonusXp?: () => number;
 }
 
+/** Buffered greeting audio needed before the call screen appears (see greetingReady). */
+const GREETING_READY_MS = 400;
+
 export function useLiveCall(options: UseLiveCallOptions = {}) {
   const [status, setStatus] = useState<CallStatus>('idle');
   const [secondsElapsed, setSecondsElapsed] = useState<number>(0);
@@ -116,6 +119,18 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
   // Connection gate and greeting audio hold
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  /**
+   * Maya's opening greeting has started arriving (about 0.4 s buffered, or the whole greeting if
+   * shorter). The call screen waits for this before appearing, so Maya speaks right away instead
+   * of 2-4 s of silence after "Connected".
+   */
+  const [greetingReady, setGreetingReady] = useState<boolean>(false);
+  const greetingBufferedMsRef = useRef(0);
+  const markGreetingBuffered = (ms: number) => {
+    if (greetingBufferedMsRef.current >= GREETING_READY_MS) return;
+    greetingBufferedMsRef.current += ms;
+    if (greetingBufferedMsRef.current >= GREETING_READY_MS) setGreetingReady(true);
+  };
   const isInitialGreetingHeldRef = useRef<boolean>(true);
   const isInitialGreetingTurnCompleteRef = useRef<boolean>(false);
   const initialGreetingBufferRef = useRef<
@@ -416,6 +431,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         isFirstGreetingPendingRef.current = true;
         isInitialGreetingHeldRef.current = true;
         isInitialGreetingTurnCompleteRef.current = false;
+        greetingBufferedMsRef.current = 0;
+        setGreetingReady(false);
         initialGreetingBufferRef.current = [];
         initialGreetingTranscriptRef.current = '';
         greetingAudioChunksCountRef.current = 0;
@@ -745,6 +762,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             // If greeting chime is still playing, buffer initial greeting audio
             if (isInitialGreetingHeldRef.current) {
               initialGreetingBufferRef.current.push({ type: 'samples', data: samples });
+              markGreetingBuffered((samples.length / 24000) * 1000);
               return;
             }
 
@@ -798,6 +816,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             // If greeting chime is still playing, buffer initial greeting audio
             if (isInitialGreetingHeldRef.current) {
               initialGreetingBufferRef.current.push({ type: 'chunk', data: base64 });
+              // 16-bit PCM at 24 kHz: bytes / 2 = samples
+              markGreetingBuffered((Math.floor((base64.length * 3) / 4) / 2 / 24000) * 1000);
               return;
             }
 
@@ -932,6 +952,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           onTurnComplete: (data?: { userText?: string; modelText?: string }) => {
             if (isInitialGreetingHeldRef.current) {
               isInitialGreetingTurnCompleteRef.current = true;
+              // A very short greeting is complete before reaching the threshold: it is ready
+              setGreetingReady(true);
               if (data?.modelText && !initialGreetingTranscriptRef.current) {
                 initialGreetingTranscriptRef.current = data.modelText;
               }
@@ -1921,6 +1943,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     turns: turnsRef.current,
     isConnected,
     releaseGreeting,
+    greetingReady,
     suppressMicFor,
     speechSync: speechSyncRef.current,
     lastUserUtterance,

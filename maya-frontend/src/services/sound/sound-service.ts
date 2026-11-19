@@ -9,6 +9,7 @@ import { getBackendBaseUrl } from '@/utils/backend-url';
 
 // Audio Assets
 const CALL_CONNECTED_ASSET = require('@/assets/sounds/call-connected.mp3');
+const CONNECTING_AMBIENT_ASSET = require('@/assets/sounds/connecting-ambient.wav');
 const GOOD_JOB_ASSET = require('@/assets/sounds/good job.mp3');
 const HINT_BUTTON_ASSET = require('@/assets/sounds/hint button press.mp3');
 const OTHER_BUTTON_ASSET = require('@/assets/sounds/other button press.mp3');
@@ -697,6 +698,76 @@ export function playSoundAsset(
   if (onEnded) {
     setTimeout(notifyEnded, 1500);
   }
+}
+
+/**
+ * Soft looping "sonar ping" while a call connects (connecting-ambient.wav: one gentle ping every
+ * 2 s, 4 s seamless loop).
+ * Quiet on purpose (calm, not a ringtone). Returns stop(fadeMs): fades out, then releases the
+ * player. While it plays the mic is kept suppressed so the tone can never be heard as speech.
+ * If playback is blocked (browser autoplay policy) it simply stays silent.
+ */
+export function startConnectingTone(volume = 0.18): (fadeMs?: number) => void {
+  let stopped = false;
+  let player: any = null;
+  let micTimer: ReturnType<typeof setInterval> | null = null;
+  const setVol = (v: number) => {
+    try {
+      if (player) player.volume = Math.max(0, Math.min(1, v));
+    } catch {}
+  };
+  const release = () => {
+    if (micTimer) clearInterval(micTimer);
+    micTimer = null;
+    try {
+      player?.pause();
+    } catch {}
+    if (Platform.OS !== 'web') {
+      try {
+        player?.remove?.();
+      } catch {}
+    }
+    player = null;
+  };
+
+  try {
+    if (Platform.OS !== 'web') {
+      player = createAudioPlayer(CONNECTING_AMBIENT_ASSET);
+      player.loop = true;
+    } else if (typeof window !== 'undefined') {
+      const uri = getAssetUri(CONNECTING_AMBIENT_ASSET);
+      if (uri) {
+        player = new Audio(uri);
+        player.loop = true;
+      }
+    }
+    if (player) {
+      setVol(volume);
+      const p = player.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+      suppressMicDuringSound(1300);
+      micTimer = setInterval(() => suppressMicDuringSound(1300), 1000);
+    }
+  } catch (err) {
+    console.warn('[sound-service] connecting tone failed:', err);
+    release();
+  }
+
+  return (fadeMs = 300) => {
+    if (stopped) return;
+    stopped = true;
+    if (!player) return release();
+    const steps = Math.max(1, Math.round(fadeMs / 30));
+    let i = 0;
+    const fade = setInterval(() => {
+      i += 1;
+      setVol(volume * (1 - i / steps));
+      if (i >= steps) {
+        clearInterval(fade);
+        release();
+      }
+    }, 30);
+  };
 }
 
 /**
