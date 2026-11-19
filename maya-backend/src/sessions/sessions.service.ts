@@ -1,3 +1,4 @@
+import { paginateArray, pageWindow, readPage, type PageRequest } from '../common/pagination.js';
 import { Injectable, Logger, UnauthorizedException, HttpException, HttpStatus, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -10,7 +11,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { BoundedMap } from '../common/bounded-map.js';
-import { computeStreakBonus } from './xp-rules.js';
+import { acceptClientStreakBonus, computeStreakBonus, STREAK_RULES } from './xp-rules.js';
 import { PiperWorkerClient, PiperSegment } from './piper-worker-client.js';
 
 const execFileAsync = promisify(execFile);
@@ -2569,7 +2570,7 @@ ${memoryPart}`;
         });
 
         // 4b. Streak bonus XP (hint-free turns), stored in the XP ledger
-        streakBonus = await this.awardStreakBonus(validSessionId, resolvedUserId, turnsToUse, Boolean(dto.isIntroCall));
+        streakBonus = await this.awardStreakBonus(validSessionId, resolvedUserId, turnsToUse, Boolean(dto.isIntroCall), dto.clientStreakBonusXp);
 
         // 5. If this session was for a roadmap level, record progress in user_roadmap_progress
         const activeInfo = this.activeSessions.get(sessionId);
@@ -2798,8 +2799,16 @@ ${memoryPart}`;
     userId: string | undefined,
     turns: Array<{ role: string; text?: string; timestamp?: string }> | undefined,
     isIntroCall: boolean,
+    clientBonusXp?: number,
   ): Promise<{ bonusXp: number; longestStreak: number }> {
-    const result = computeStreakBonus(turns, this.sessionHintTimes.get(sessionId), { isIntroCall });
+    const result = { ...computeStreakBonus(turns, this.sessionHintTimes.get(sessionId), { isIntroCall }) };
+    // The call screen awards streak XP live; the stored transcript can split/merge turns
+    // differently, so accept the in-call amount when the transcript makes it possible.
+    const accepted = acceptClientStreakBonus(clientBonusXp, turns, isIntroCall);
+    if (accepted > result.bonusXp) {
+      result.bonusXp = accepted;
+      result.streakTurns = Math.max(result.streakTurns, Math.ceil(accepted / STREAK_RULES.xpPerTurn));
+    }
     if (!this.supabase || !userId || result.bonusXp <= 0) {
       return { bonusXp: result.bonusXp, longestStreak: result.longestStreak };
     }
@@ -3039,6 +3048,327 @@ ${memoryPart}`;
 
   private sessionCountsRpcMissing = false;
 
+  /**
+   * Maps joined usage_ledger rows (with sessions + profiles) to admin usage records, including
+   * per-session turn / correction counts. `codeTotal` / `codeOffset` keep the SM-xxxxx session
+   * codes stable when rows come one page at a time.
+   */
+  private async buildUsageRecords(uniqueLedgerEntries: any[], codeTotal?: number, codeOffset = 0): Promise<UsageRecord[]> {
+    if (!this.supabase) return [];
+    // Fetch turn counts and correction counts for visible sessions in parallel
+    const sessionIds = uniqueLedgerEntries.map((l: any) => l.session_id).filter(Boolean);
+    const turnsCountMap = new Map<string, number>();
+    const correctionsCountMap = new Map<string, number>();
+
+    const targetSessionIds = sessionIds.slice(0, 100);
+    // Preferred: per-session counts computed in SQL (migration 021) instead of downloading
+    // every turn and correction row for 100 sessions just to count them.
+    let countsDone = false;
+    if (targetSessionIds.length > 0 && !this.sessionCountsRpcMissing) {
+      const { data: counts, error: countsErr } = await this.supabase.rpc('admin_session_counts', {
+        session_ids: targetSessionIds,
+      });
+      if (!countsErr && Array.isArray(counts)) {
+        for (const c of counts as any[]) {
+          turnsCountMap.set(c.session_id, Number(c.turns || 0));
+          correctionsCountMap.set(c.session_id, Number(c.corrections || 0));
+        }
+        countsDone = true;
+      } else if (isMissingFunctionError(countsErr)) {
+        this.sessionCountsRpcMissing = true;
+        this.logger.warn('[AdminUsage] admin_session_counts not found; counting rows in Node. Apply 021_admin_aggregates_and_indexes.sql.');
+      }
+    }
+    if (!countsDone && targetSessionIds.length > 0) {
+      const [turnsRes, corrRes] = await Promise.all([
+        this.supabase
+          .from('session_turns')
+          .select('session_id')
+          .in('session_id', targetSessionIds),
+        this.supabase
+          .from('grammar_corrections')
+          .select('session_id')
+          .in('session_id', targetSessionIds),
+      ]);
+
+      turnsRes.data?.forEach((t: any) => {
+        turnsCountMap.set(t.session_id, (turnsCountMap.get(t.session_id) || 0) + 1);
+      });
+      corrRes.data?.forEach((c: any) => {
+        correctionsCountMap.set(c.session_id, (correctionsCountMap.get(c.session_id) || 0) + 1);
+      });
+    }
+
+    return uniqueLedgerEntries.map((row: any, idx: number) => {
+      const sess = row.sessions;
+      const prof = sess?.profiles;
+      const userName = prof?.display_name || sess?.user_name || DEFAULT_LEARNER_NAME;
+      const sessionNum = 10480 + (codeTotal ?? uniqueLedgerEntries.length) - codeOffset - idx;
+      const sessionCode = `SM-${sessionNum}`;
+      const durationSec = row.duration_seconds || sess?.duration_seconds || 0;
+      const durationFormatted = `${(durationSec / 60).toFixed(1)}m`;
+
+      const dateObj = new Date(row.created_at || sess?.created_at || Date.now());
+      const displayDate = formatSriLankaDisplayDate(dateObj);
+
+      const inputTokens = (row.audio_in_tokens || 0) + (row.text_in_tokens || 0);
+      const outputTokens = (row.audio_out_tokens || 0) + (row.text_out_tokens || 0);
+      const totalTokens = row.total_tokens || (inputTokens + outputTokens);
+
+      return {
+        id: row.session_id,
+        sessionCode,
+        timestamp: dateObj.toISOString(),
+        displayDate,
+        user: {
+          name: userName,
+          initials: 'TF',
+          color: '#0d9488',
+        },
+        model: this.liveModel,
+        durationSeconds: durationSec,
+        durationFormatted,
+        inputTokens,
+        audioInTokens: row.audio_in_tokens || 0,
+        textInTokens: row.text_in_tokens || 0,
+        outputTokens,
+        totalTokens,
+        costUsd: Number(Number(row.cost_usd || 0).toFixed(6)),
+        costLkr: Number(Number(row.cost_lkr || 0).toFixed(2)),
+        costPerMinLkr: durationSec > 0 ? Number(((row.cost_lkr || 0) / (durationSec / 60)).toFixed(2)) : 0,
+        costPerMinUsd: durationSec > 0 ? Number(((row.cost_usd || 0) / (durationSec / 60)).toFixed(4)) : 0,
+        hintsUsedCount: this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).count,
+        hintTokens: this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).tokens,
+        hintCostUsd: Number(this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).costUsd.toFixed(6)),
+        hintCostLkr: Number(this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).costLkr.toFixed(2)),
+        totalWithHintsLkr: Number((Number(row.cost_lkr || 0) + this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).costLkr).toFixed(2)),
+        status: ((sess?.status === 'completed' ? 'Success' : 'In Progress') as 'Success' | 'In Progress'),
+        turnsCount: turnsCountMap.get(row.session_id) || 0,
+        correctionsCount: correctionsCountMap.get(row.session_id) || 0,
+        scores: {
+          overall: sess?.overall_score ?? 85,
+          fluency: sess?.fluency_score ?? 84,
+          grammar: sess?.grammar_score ?? 82,
+          pronunciation: sess?.pronunciation_score ?? 86,
+        },
+        userRating: sess?.user_rating ?? null,
+        userFeedback: sess?.user_feedback ?? null,
+        topic: sess?.topic || 'Speaking Practice',
+        languageMode: sess?.language_mode || this.activeSessions.get(row.session_id)?.languageMode || 'sinhala',
+        sinhalaStyle: sess?.sinhala_style || this.activeSessions.get(row.session_id)?.sinhalaStyle || 'balanced',
+      };
+    });
+  }
+
+  /** Joined ledger + session + profile columns used by the admin usage records. */
+  private usageLedgerSelect(): string {
+    return `
+            id,
+            session_id,
+            user_id,
+            audio_in_tokens,
+            audio_out_tokens,
+            text_in_tokens,
+            text_out_tokens,
+            total_tokens,
+            cost_usd,
+            cost_lkr,
+            duration_seconds,
+            created_at,
+            sessions (
+              id,
+              topic,
+              status,
+              duration_seconds,
+              overall_score,
+              fluency_score,
+              grammar_score,
+              pronunciation_score,
+              user_rating,
+              user_feedback,
+              created_at,
+              hints_used_count,${this.sessionExtraColsMissing ? '' : ' hint_tokens, hint_cost_usd, hint_cost_lkr, language_mode, sinhala_style,'}
+              profiles (
+                id,
+                display_name,
+                phone_number
+              )
+            )
+          `;
+  }
+
+  private usagePageRpcMissing = false;
+
+  /**
+   * Admin AI Usage, paged on the server (default 10 rows). Filters, de-duplication, exact
+   * totals and chart buckets run in Postgres (admin_usage_page, migration 029); only the
+   * visible page of sessions is loaded with full details. Falls back to the legacy path.
+   */
+  async getUsagePage(query: QueryUsageDto): Promise<any> {
+    const req = readPage(query?.page, query?.pageSize);
+    const range = query?.range || '30d';
+    const search = String(query?.search || '').trim().replace(/[%,()*\\]/g, ' ').slice(0, 80);
+    const statusRaw = (query?.status || '').toLowerCase().trim();
+    const status = statusRaw === 'success' || statusRaw === 'in progress' ? statusRaw : null;
+    const modelFilter = (query?.model || '').toLowerCase().trim();
+
+    const todayKey = getSriLankaDateKey(new Date());
+    let customFrom: string | null = null;
+    let customTo: string | null = null;
+    if (range === 'custom' && query?.from) {
+      customFrom = query.from;
+      customTo = query.to && query.to >= query.from ? query.to : todayKey;
+      if (customTo > todayKey) customTo = todayKey;
+      const maxFrom = new Date(new Date(`${customTo}T00:00:00+05:30`).getTime() - 91 * 86_400_000);
+      if (new Date(`${customFrom}T00:00:00+05:30`) < maxFrom) customFrom = getSriLankaDateKey(maxFrom);
+    }
+    let fromTs: Date;
+    let toTs = new Date(Date.now() + 60_000);
+    if (range === 'today') fromTs = new Date(`${todayKey}T00:00:00+05:30`);
+    else if (customFrom && customTo) {
+      fromTs = new Date(`${customFrom}T00:00:00+05:30`);
+      toTs = new Date(new Date(`${customTo}T00:00:00+05:30`).getTime() + 86_400_000);
+    } else if (range === '7d') fromTs = new Date(Date.now() - 7 * 86_400_000);
+    else fromTs = new Date(Date.now() - 30 * 86_400_000);
+
+    const emptyStats = (n: number) => n === 0;
+    const modelMismatch =
+      modelFilter && modelFilter !== 'all' && modelFilter !== 'all models' && !this.liveModel.toLowerCase().includes(modelFilter);
+
+    if (!this.supabase || this.usagePageRpcMissing) return this.legacyUsagePage(query, req);
+
+    const cacheKey = `page_${fromTs.toISOString().slice(0, 13)}_${toTs.toISOString().slice(0, 13)}_${range}_${search}_${status}_${modelFilter}_${req.page}_${req.pageSize}`;
+    const cached = this.usageCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 60000) return cached.data;
+
+    const call = (offset: number) =>
+      this.supabase!.rpc('admin_usage_page', {
+        p_from: fromTs.toISOString(),
+        p_to: toTs.toISOString(),
+        p_search: search || null,
+        p_status: status,
+        p_offset: offset,
+        p_limit: req.pageSize,
+      });
+    const first = await call((req.page - 1) * req.pageSize);
+    if (first.error || !first.data) {
+      if (isMissingFunctionError(first.error)) this.usagePageRpcMissing = true;
+      this.logger.warn(`[AdminUsage] admin_usage_page unavailable: ${first.error?.message}`);
+      return this.legacyUsagePage(query, req);
+    }
+    let data: any = first.data;
+    const total = modelMismatch ? 0 : Number(data.total || 0);
+    let win = pageWindow(req, total);
+    if (!modelMismatch && win.pagination.page !== req.page) {
+      const again = await call(win.from);
+      if (!again.error && again.data) data = again.data;
+    }
+
+    // Full details for just the visible page
+    let sessions: UsageRecord[] = [];
+    const ids: string[] = modelMismatch ? [] : (data.ids || []);
+    if (ids.length) {
+      const { data: rows, error } = await this.supabase
+        .from('usage_ledger')
+        .select(this.usageLedgerSelect())
+        .in('id', ids);
+      if (error) this.logger.error(`[AdminUsage] page rows failed: ${error.message}`);
+      const byId = new Map(((rows || []) as any[]).map((r) => [r.id, r]));
+      const ordered = ids.map((id) => byId.get(id)).filter(Boolean);
+      sessions = await this.buildUsageRecords(ordered, total, win.from);
+    }
+
+    // Chart buckets (same labels / slots as before), from SQL aggregates over the whole range
+    const zero = { tokens: 0, minutes: 0, costLkr: 0, costUsd: 0, sessionsCount: 0 };
+    const toPoint = (b: any) => ({
+      tokens: Number(b?.tokens || 0),
+      minutes: Number(b?.minutes || 0),
+      costLkr: Number(Number(b?.lkr || 0).toFixed(2)),
+      costUsd: Number(Number(b?.usd || 0).toFixed(4)),
+      sessionsCount: Number(b?.n || 0),
+    });
+    const dailyUsage: any[] = [];
+    if (range === 'today') {
+      const slots = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00'];
+      const acc = new Map(slots.map((sl) => [sl, { ...zero }]));
+      for (const h of modelMismatch ? [] : (data.by_hour || []) as any[]) {
+        const hour = Number(h.hour);
+        let closest = slots[0];
+        let minDiff = 24;
+        for (const sl of slots) {
+          const diff = Math.abs(hour - parseInt(sl, 10));
+          if (diff < minDiff) {
+            minDiff = diff;
+            closest = sl;
+          }
+        }
+        const cur = acc.get(closest)!;
+        const pt = toPoint(h);
+        cur.tokens += pt.tokens;
+        cur.minutes += pt.minutes;
+        cur.costLkr = Number((cur.costLkr + pt.costLkr).toFixed(2));
+        cur.costUsd = Number((cur.costUsd + pt.costUsd).toFixed(4));
+        cur.sessionsCount += pt.sessionsCount;
+      }
+      slots.forEach((sl) => dailyUsage.push({ date: sl, ...acc.get(sl)! }));
+    } else {
+      const byDay = new Map<string, any>();
+      for (const d of modelMismatch ? [] : (data.by_day || []) as any[]) byDay.set(String(d.day).slice(0, 10), d);
+      const days: { key: string; label: string }[] = [];
+      if (customFrom && customTo) {
+        const endMs = new Date(`${customTo}T12:00:00+05:30`).getTime();
+        for (let t = new Date(`${customFrom}T12:00:00+05:30`).getTime(); t <= endMs; t += 86_400_000) {
+          const d = new Date(t);
+          const key = getSriLankaDateKey(d);
+          days.push({ key, label: key === todayKey ? 'Today' : getSriLankaDateLabel(d) });
+        }
+      } else {
+        const n = range === '7d' ? 7 : 30;
+        for (let i = n - 1; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          days.push({ key: getSriLankaDateKey(d), label: i === 0 ? 'Today' : getSriLankaDateLabel(d) });
+        }
+      }
+      days.forEach((d) => dailyUsage.push({ date: d.label, ...(byDay.has(d.key) ? toPoint(byDay.get(d.key)) : zero) }));
+    }
+
+    const t = modelMismatch ? {} : data.totals || {};
+    const totalCostLkr = Number(Number(t.cost_lkr || 0).toFixed(2));
+    const totalHintCostLkr = Number(Number(t.hint_cost_lkr || 0).toFixed(2));
+    const seconds = Number(t.seconds || 0);
+    const totalMinutes = Math.max(1, Math.round(seconds / 60));
+    const avgCostPerMin = Number((totalCostLkr / totalMinutes).toFixed(2));
+    const payload = {
+      dailyUsage,
+      sessions,
+      stats: {
+        totalTokens: Number(t.tokens || 0),
+        totalCostLkr,
+        totalCostUsd: Number(Number(t.cost_usd || 0).toFixed(4)),
+        totalHintsUsed: Number(t.hints || 0),
+        totalHintCostLkr,
+        totalHintCostUsd: Number(Number(t.hint_cost_usd || 0).toFixed(4)),
+        grandTotalCostLkr: Number((totalCostLkr + totalHintCostLkr).toFixed(2)),
+        totalSessions: total,
+        avgDurationMinutes: total > 0 ? Number((Math.round(seconds / total) / 60).toFixed(1)) : 0,
+        minutesToday: Math.round(Number(t.seconds_today || 0) / 60),
+        minutesThisMonth: Math.round(Number(t.seconds_month || 0) / 60),
+        avgCostPerMin: emptyStats(total) || totalCostLkr <= 0 ? 0 : avgCostPerMin,
+      },
+      pagination: win.pagination,
+    };
+    this.usageCache.set(cacheKey, { timestamp: Date.now(), data: payload });
+    return payload;
+  }
+
+  /** Fallback when migration 029 is missing: legacy whole-range build, sliced to one page. */
+  private async legacyUsagePage(query: QueryUsageDto, req: PageRequest) {
+    const full = await this.getUsageData(query);
+    const paged = paginateArray(full.sessions || [], req);
+    return { ...full, sessions: paged.items, pagination: paged.pagination };
+  }
+
   async getUsageData(query: QueryUsageDto): Promise<any> {
     const range = query?.range || '30d';
     const search = (query?.search || '').toLowerCase().trim();
@@ -3081,39 +3411,7 @@ ${memoryPart}`;
       try {
         let queryBuilder = this.supabase
           .from('usage_ledger')
-          .select(`
-            id,
-            session_id,
-            user_id,
-            audio_in_tokens,
-            audio_out_tokens,
-            text_in_tokens,
-            text_out_tokens,
-            total_tokens,
-            cost_usd,
-            cost_lkr,
-            duration_seconds,
-            created_at,
-            sessions (
-              id,
-              topic,
-              status,
-              duration_seconds,
-              overall_score,
-              fluency_score,
-              grammar_score,
-              pronunciation_score,
-              user_rating,
-              user_feedback,
-              created_at,
-              hints_used_count,${this.sessionExtraColsMissing ? '' : ' hint_tokens, hint_cost_usd, hint_cost_lkr, language_mode, sinhala_style,'}
-              profiles (
-                id,
-                display_name,
-                phone_number
-              )
-            )
-          `)
+          .select(this.usageLedgerSelect())
           .order('created_at', { ascending: false });
 
         // Database date range indexing
@@ -3156,109 +3454,7 @@ ${memoryPart}`;
             return true;
           });
 
-          // Fetch turn counts and correction counts for visible sessions in parallel
-          const sessionIds = uniqueLedgerEntries.map((l: any) => l.session_id).filter(Boolean);
-          const turnsCountMap = new Map<string, number>();
-          const correctionsCountMap = new Map<string, number>();
-
-          const targetSessionIds = sessionIds.slice(0, 100);
-          // Preferred: per-session counts computed in SQL (migration 021) instead of downloading
-          // every turn and correction row for 100 sessions just to count them.
-          let countsDone = false;
-          if (targetSessionIds.length > 0 && !this.sessionCountsRpcMissing) {
-            const { data: counts, error: countsErr } = await this.supabase.rpc('admin_session_counts', {
-              session_ids: targetSessionIds,
-            });
-            if (!countsErr && Array.isArray(counts)) {
-              for (const c of counts as any[]) {
-                turnsCountMap.set(c.session_id, Number(c.turns || 0));
-                correctionsCountMap.set(c.session_id, Number(c.corrections || 0));
-              }
-              countsDone = true;
-            } else if (isMissingFunctionError(countsErr)) {
-              this.sessionCountsRpcMissing = true;
-              this.logger.warn('[AdminUsage] admin_session_counts not found; counting rows in Node. Apply 021_admin_aggregates_and_indexes.sql.');
-            }
-          }
-          if (!countsDone && targetSessionIds.length > 0) {
-            const [turnsRes, corrRes] = await Promise.all([
-              this.supabase
-                .from('session_turns')
-                .select('session_id')
-                .in('session_id', targetSessionIds),
-              this.supabase
-                .from('grammar_corrections')
-                .select('session_id')
-                .in('session_id', targetSessionIds),
-            ]);
-
-            turnsRes.data?.forEach((t: any) => {
-              turnsCountMap.set(t.session_id, (turnsCountMap.get(t.session_id) || 0) + 1);
-            });
-            corrRes.data?.forEach((c: any) => {
-              correctionsCountMap.set(c.session_id, (correctionsCountMap.get(c.session_id) || 0) + 1);
-            });
-          }
-
-          records = uniqueLedgerEntries.map((row: any, idx: number) => {
-            const sess = row.sessions;
-            const prof = sess?.profiles;
-            const userName = prof?.display_name || sess?.user_name || DEFAULT_LEARNER_NAME;
-            const sessionNum = 10480 + (uniqueLedgerEntries.length - idx);
-            const sessionCode = `SM-${sessionNum}`;
-            const durationSec = row.duration_seconds || sess?.duration_seconds || 0;
-            const durationFormatted = `${(durationSec / 60).toFixed(1)}m`;
-
-            const dateObj = new Date(row.created_at || sess?.created_at || Date.now());
-            const displayDate = formatSriLankaDisplayDate(dateObj);
-
-            const inputTokens = (row.audio_in_tokens || 0) + (row.text_in_tokens || 0);
-            const outputTokens = (row.audio_out_tokens || 0) + (row.text_out_tokens || 0);
-            const totalTokens = row.total_tokens || (inputTokens + outputTokens);
-
-            return {
-              id: row.session_id,
-              sessionCode,
-              timestamp: dateObj.toISOString(),
-              displayDate,
-              user: {
-                name: userName,
-                initials: 'TF',
-                color: '#0d9488',
-              },
-              model: this.liveModel,
-              durationSeconds: durationSec,
-              durationFormatted,
-              inputTokens,
-              audioInTokens: row.audio_in_tokens || 0,
-              textInTokens: row.text_in_tokens || 0,
-              outputTokens,
-              totalTokens,
-              costUsd: Number(Number(row.cost_usd || 0).toFixed(6)),
-              costLkr: Number(Number(row.cost_lkr || 0).toFixed(2)),
-              costPerMinLkr: durationSec > 0 ? Number(((row.cost_lkr || 0) / (durationSec / 60)).toFixed(2)) : 0,
-              costPerMinUsd: durationSec > 0 ? Number(((row.cost_usd || 0) / (durationSec / 60)).toFixed(4)) : 0,
-              hintsUsedCount: this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).count,
-              hintTokens: this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).tokens,
-              hintCostUsd: Number(this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).costUsd.toFixed(6)),
-              hintCostLkr: Number(this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).costLkr.toFixed(2)),
-              totalWithHintsLkr: Number((Number(row.cost_lkr || 0) + this.sessionHintTotals(sess, row.session_id, toValidUuid(row.session_id)).costLkr).toFixed(2)),
-              status: ((sess?.status === 'completed' ? 'Success' : 'In Progress') as 'Success' | 'In Progress'),
-              turnsCount: turnsCountMap.get(row.session_id) || 0,
-              correctionsCount: correctionsCountMap.get(row.session_id) || 0,
-              scores: {
-                overall: sess?.overall_score ?? 85,
-                fluency: sess?.fluency_score ?? 84,
-                grammar: sess?.grammar_score ?? 82,
-                pronunciation: sess?.pronunciation_score ?? 86,
-              },
-              userRating: sess?.user_rating ?? null,
-              userFeedback: sess?.user_feedback ?? null,
-              topic: sess?.topic || 'Speaking Practice',
-              languageMode: sess?.language_mode || this.activeSessions.get(row.session_id)?.languageMode || 'sinhala',
-              sinhalaStyle: sess?.sinhala_style || this.activeSessions.get(row.session_id)?.sinhalaStyle || 'balanced',
-            };
-          });
+          records = await this.buildUsageRecords(uniqueLedgerEntries);
         }
       } catch (e: unknown) {
         this.logger.error(`Error querying usage from Supabase: ${e instanceof Error ? e.message : String(e)}`);
@@ -3457,7 +3653,7 @@ ${memoryPart}`;
     // 1. Fetch session with profiles
     const { data: sess, error: sErr } = await this.supabase
       .from('sessions')
-      .select('*, profiles(*)')
+      .select('*, profiles(display_name)')
       .eq('id', sessionId)
       .maybeSingle();
 

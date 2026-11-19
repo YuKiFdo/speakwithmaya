@@ -44,6 +44,8 @@ export interface XpCelebration {
 export function useXpCelebration(
   snapshot: XpSnapshot | null,
   refreshStats?: () => Promise<void>,
+  /** Only celebrate while the dashboard is on screen (it stays mounted under the call). */
+  isFocused = true,
 ): XpCelebration {
   const [state, setState] = useState<XpCelebration>({ gain: 0, levelUpTo: null, runId: 0 });
   const runRef = useRef(0);
@@ -55,8 +57,14 @@ export function useXpCelebration(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Each time the dashboard comes back into view, pick up XP awarded meanwhile
   useEffect(() => {
-    if (!snapshot) return;
+    if (isFocused) refreshStats?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFocused]);
+
+  useEffect(() => {
+    if (!snapshot || !isFocused) return;
     const { totalXp, lastSeenXp } = snapshot;
     if (lastSeenXp === null || totalXp < lastSeenXp) {
       markXpSeenLocally(totalXp);
@@ -98,8 +106,11 @@ export function useXpCelebration(
     tick();
     return () => {
       if (frame) clearTimeout(frame);
+      // Interrupted (stats refreshed / screen left): drop the animated override so the top bar
+      // shows the real total instead of freezing on an in-between value (e.g. 110 of 115)
+      setState((st) => (st.runId === runId ? { ...st, progress: undefined, xpLabel: undefined } : st));
     };
-  }, [snapshot?.totalXp, snapshot?.lastSeenXp]);
+  }, [snapshot?.totalXp, snapshot?.lastSeenXp, isFocused]);
 
   return state;
 }

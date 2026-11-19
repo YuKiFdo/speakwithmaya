@@ -37,7 +37,7 @@ import { IdeamartSmsProvider } from './sms/ideamart-sms.provider.js';
 import { TelcoSubscriptionService } from './sms/telco-subscription.service.js';
 import type { UpdateAppConfigDto } from './dto/auth.dto.js';
 import { isMissingFunctionError } from '../common/supabase-rpc.js';
-import { paginateArray, type PageRequest } from '../common/pagination.js';
+import { paginateArray, pageWindow, readPage, type PageRequest } from '../common/pagination.js';
 
 export interface UserProfileData {
   id: string;
@@ -159,6 +159,25 @@ const DEFAULT_APP_CONFIG: AppConfigData = {
 
 // Built once: toLocaleDateString({ timeZone }) / new Intl.DateTimeFormat cost ~80-100us per call.
 const SL_DATE_KEY_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Colombo' });
+
+/** Raw dashboard counts (real learners only), from SQL or the legacy Node path. */
+interface AnalyticsCounts {
+  totalUsers: number;
+  level: Record<string, number>;
+  goal: Record<string, number>;
+  tier: Record<string, number>;
+  status: Record<string, number>;
+  daily: Record<string, number>;
+  employment: Record<string, number>;
+  lang: Record<string, number>;
+  sessions: number;
+  seconds: number;
+  tokens: number;
+  lkr: number;
+  usd: number;
+  regsByDay: Record<string, number>;
+  sessionsByDay: Record<string, number>;
+}
 
 interface UserActivityTotals {
   sessions: number;
@@ -2112,8 +2131,214 @@ export class AuthService {
    * - neither: returns all users (backward compatible).
    * Banner `stats` are always computed over all users; `stats.filteredCount` is the filtered total.
    */
+  /**
+   * Admin: users with a phone number, for the SMS broadcast picker. One narrow query instead
+   * of building the full admin users dataset (all profiles + sessions + ledger aggregates).
+   */
+  async getAdminSmsRecipients() {
+    const users: any[] = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await this.supabase
+        .from('profiles')
+        .select('id, display_name, phone_number, email, avatar_url, plan_tier, plan_status')
+        .not('phone_number', 'is', null)
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error) {
+        this.logger.error(`getAdminSmsRecipients failed: ${error.message}`);
+        break;
+      }
+      for (const p of data || []) {
+        if (!p.phone_number || String(p.phone_number).trim().length < 7) continue;
+        users.push({
+          id: p.id,
+          displayName: p.display_name || 'Unnamed Student',
+          phoneNumber: p.phone_number,
+          email: p.email || null,
+          avatarUrl: p.avatar_url || null,
+          planTier: (p.plan_tier || 'starter').toLowerCase(),
+          planStatus: (p.plan_status || 'active').toLowerCase(),
+        });
+      }
+      if (!data || data.length < PAGE) break;
+    }
+    return { users };
+  }
+
+  /** Sanitises a search term for a PostgREST `or()` ilike filter (strips , ( ) * % \). */
+  private static searchTerm(raw?: string | null): string {
+    return String(raw || '').trim().replace(/[,()*%\\]/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
+  }
+
+  private adminPagedUsersRpcMissing = false;
+
+  /**
+   * Admin users list, paged on the server: filters, search, ordering and LIMIT/OFFSET run in
+   * Postgres and only the requested page of profiles (default 10) is enriched, using activity
+   * totals for just those users. Falls back to the cached whole-dataset path on error.
+   */
   async getAdminUsers(query?: AdminUsersQueryDto) {
     this.noteAdminView();
+    const req = readPage(query?.page, query?.pageSize, query?.limit);
+    if (!this.adminPagedUsersRpcMissing) {
+      try {
+        return await this.getAdminUsersPage(query, req);
+      } catch (err: any) {
+        this.logger.warn(`[AdminUsers] paged query failed, using dataset fallback: ${err?.message}`);
+      }
+    }
+    return this.getAdminUsersFromDataset(query, req);
+  }
+
+  private async getAdminUsersPage(query: AdminUsersQueryDto | undefined, req: PageRequest) {
+    const build = (from: number, to: number) => {
+      let q: any = this.supabase
+        .from('profiles')
+        .select(this.adminUsersProfileCols.join(', '), { count: 'exact' });
+      const term = AuthService.searchTerm(query?.search);
+      if (term) {
+        const ors = ['display_name', 'phone_number', 'email', 'goal'].map((c) => `${c}.ilike.%${term}%`);
+        if (/^[0-9a-f-]{36}$/i.test(term)) ors.push(`id.eq.${term}`);
+        q = q.or(ors.join(','));
+      }
+      // Missing values default to starter / Intermediate / active in the cards, so they match too.
+      const eqOrDefault = (col: string, val: string | undefined, dflt: string) => {
+        if (!val || val === 'ALL') return;
+        const v = AuthService.searchTerm(val);
+        q = v.toLowerCase() === dflt.toLowerCase() ? q.or(`${col}.ilike.${v},${col}.is.null`) : q.ilike(col, v);
+      };
+      eqOrDefault('plan_tier', query?.tier, 'starter');
+      eqOrDefault('level', query?.level, 'Intermediate');
+      eqOrDefault('plan_status', query?.status, 'active');
+      return q.order('created_at', { ascending: false }).range(from, to);
+    };
+
+    let win = pageWindow(req, Number.MAX_SAFE_INTEGER);
+    let res: any = await build(win.from, win.to);
+    if (res.error) throw new Error(res.error.message);
+    const total = res.count || 0;
+    win = pageWindow(req, total);
+    if ((res.data || []).length === 0 && total > 0 && req.page > win.pagination.page) {
+      // Requested page past the end: clamp to the last page
+      res = await build(win.from, win.to);
+      if (res.error) throw new Error(res.error.message);
+    }
+    const profiles = (res.data || []) as any[];
+    const ids = profiles.map((p) => p.id);
+
+    const [testAccounts, appConfig, activityRes, subsRes, verifRes] = await Promise.all([
+      this.getTestAccounts().catch(() => [] as TestAccountItem[]),
+      this.getAppConfig(),
+      ids.length
+        ? this.supabase.rpc('admin_user_activity_for', { user_ids: ids })
+        : Promise.resolve({ data: [], error: null } as any),
+      ids.length
+        ? this.supabase
+            .from('subscriptions')
+            .select('id, user_id, plan_tier, status, amount_lkr, next_billing_date, payhere_subscription_id, updated_at')
+            .in('user_id', ids)
+        : Promise.resolve({ data: [] } as any),
+      this.supabase
+        .from('phone_verifications')
+        .select('phone_number, otp_hash, verified_at, created_at')
+        .eq('is_verified', true)
+        .like('otp_hash', 'TELCO:%')
+        .order('created_at', { ascending: false }),
+    ]);
+    if (activityRes.error) {
+      if (/function|does not exist|schema cache/i.test(activityRes.error.message || '')) {
+        this.adminPagedUsersRpcMissing = true;
+      }
+      throw new Error(`admin_user_activity_for: ${activityRes.error.message}`);
+    }
+
+    const byUser = new Map<string, UserActivityTotals>();
+    for (const r of (activityRes.data || []) as any[]) {
+      byUser.set(r.user_id, {
+        sessions: Number(r.total_sessions || 0),
+        seconds: Number(r.total_seconds || 0),
+        avgScore: r.avg_score == null ? null : Number(r.avg_score),
+        lastAt: r.last_session_at || null,
+        intro:
+          r.intro_duration != null || r.intro_status != null
+            ? { topic: 'intro', duration_seconds: Number(r.intro_duration || 0), status: r.intro_status }
+            : null,
+        tokens: Number(r.total_tokens || 0),
+        costLkr: Number(r.total_cost_lkr || 0),
+        costUsd: Number(r.total_cost_usd || 0),
+        completed: Number(r.progress_completed || 0),
+      });
+    }
+    const { enrichUser } = this.buildAdminUserEnricher({
+      testAccounts: testAccounts || [],
+      appConfig,
+      activityByUser: byUser,
+      subs: subsRes.data || [],
+      telcoVerifs: verifRes.data || [],
+    });
+    return {
+      stats: { filteredCount: total },
+      users: profiles.map((p) => enrichUser(p)),
+      pagination: win.pagination,
+    };
+  }
+
+  /**
+   * Admin Users KPI banner. Preferred: admin_users_summary() (migration 029), a single
+   * aggregate query. Fallback: the cached whole-dataset stats.
+   */
+  private adminUsersSummaryRpcMissing = false;
+  async getAdminUsersStats() {
+    this.noteAdminView();
+    if (!this.adminUsersSummaryRpcMissing) {
+      const testAccounts = await this.getTestAccounts().catch(() => [] as TestAccountItem[]);
+      const testDigits = [
+        ...new Set((testAccounts || []).map((t) => (t.phoneNumber || '').replace(/\D/g, '')).filter(Boolean)),
+      ];
+      const { data, error } = await this.supabase.rpc('admin_users_summary', { test_digits: testDigits });
+      if (!error && data) {
+        const todayKey = SL_DATE_KEY_FMT.format(new Date());
+        const trend = (rows: any[]) =>
+          (rows || []).map((r: any) => {
+            const date = String(r.day).slice(0, 10);
+            const label =
+              date === todayKey
+                ? 'Today'
+                : new Date(`${date}T12:00:00+05:30`).toLocaleDateString('en-US', {
+                    weekday: 'short',
+                    timeZone: 'Asia/Colombo',
+                  });
+            return { date, label, count: Number(r.count || 0) };
+          });
+        const registrationTrend = trend(data.registrations);
+        const sessionTrend = trend(data.sessions);
+        return {
+          stats: {
+            totalUsers: Number(data.total_users || 0),
+            activePaidCount: Number(data.active_paid || 0),
+            starterCount: Number(data.starter || 0),
+            testAccountsCount: Number(data.test_accounts || 0),
+            totalMinutesConsumed: Math.round(Number(data.total_seconds || 0) / 60),
+            todayRegisteredCount: registrationTrend.find((d) => d.date === todayKey)?.count || 0,
+            todaySessionsCount: sessionTrend.find((d) => d.date === todayKey)?.count || 0,
+            registrationTrend,
+            sessionTrend,
+          },
+        };
+      }
+      if (error && /function|does not exist|schema cache/i.test(error.message || '')) {
+        this.adminUsersSummaryRpcMissing = true;
+      }
+      this.logger.warn(`[AdminUsers] admin_users_summary unavailable: ${error?.message}`);
+    }
+    const res = await this.getAdminUsersFromDataset(undefined, readPage(1, 1));
+    const { filteredCount: _ignored, ...stats } = res.stats as any;
+    return { stats };
+  }
+
+  /** Legacy path: whole dataset built in Node (cached), filtered and paged in memory. */
+  private async getAdminUsersFromDataset(query: AdminUsersQueryDto | undefined, req: PageRequest) {
     // Stale-while-revalidate: the dataset aggregates whole tables (all profiles, sessions,
     // ledger, subscriptions, progress), so after the TTL the previous result is served
     // immediately while ONE background rebuild runs. Only the very first load (or the first
@@ -2161,20 +2386,11 @@ export class AuthService {
       users = users.filter((u) => u.planStatus.toLowerCase() === query.status!.toLowerCase());
     }
 
-    const total = users.length;
-    const parsedLimit = parseInt(query?.limit || '', 10);
-    const parsedPage = parseInt(query?.page || '', 10);
-    const hasPage = Number.isFinite(parsedPage) && parsedPage > 0;
-    const hasLimit = Number.isFinite(parsedLimit) && parsedLimit > 0;
-    const pageSize = Math.min(1000, hasLimit ? parsedLimit : hasPage ? 12 : total || 1);
-    const totalPages = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
-    const page = hasPage ? Math.min(parsedPage, totalPages) : 1;
-    const pageUsers = hasPage || hasLimit ? users.slice((page - 1) * pageSize, page * pageSize) : users;
-
+    const paged = paginateArray(users, req);
     return {
-      stats: { ...dataset.stats, filteredCount: total },
-      users: pageUsers,
-      pagination: { page, pageSize, total, totalPages },
+      stats: { ...dataset.stats, filteredCount: users.length },
+      users: paged.items,
+      pagination: paged.pagination,
     };
   }
 
@@ -2342,6 +2558,188 @@ export class AuthService {
     return { byUser, totalSeconds, sessionsByDay };
   }
 
+  /**
+   * Builds the per-user admin card (test-account rule, PayHere / telco subscription detection,
+   * aggregated stats). Shared by the full dataset (stats/fallback) and the paged users list,
+   * so both produce identical cards.
+   */
+  private buildAdminUserEnricher(ctx: {
+    testAccounts: TestAccountItem[];
+    appConfig: Record<string, any>;
+    activityByUser: Map<string, UserActivityTotals>;
+    subs: any[];
+    telcoVerifs: any[];
+  }) {
+    const registeredTestAccounts = ctx.testAccounts;
+    const appConfig = ctx.appConfig;
+    const activity = { byUser: ctx.activityByUser };
+    const subs = ctx.subs;
+    const telcoVerifs = ctx.telcoVerifs;
+    const testPhoneDigitsSet = new Set<string>(
+      (registeredTestAccounts || [])
+        .map((t) => (t.phoneNumber || '').replace(/\D/g, ''))
+        .filter(Boolean),
+    );
+
+    const isTestProfile = (p: UserProfileData): boolean => {
+      const digits = (p.phone_number || '').replace(/\D/g, '');
+      if (digits && testPhoneDigitsSet.has(digits)) return true;
+      if ((p.monthly_minutes_allowance || 0) >= 9000 || (p.minutes_balance || 0) >= 9000) return true;
+      return false;
+    };
+
+    // Index verified TELCO OTP records by normalized digits
+    const telcoVerifByDigits = new Map<string, { provider: 'ideamart' | 'mspace'; verifiedAt: string; referenceNo: string }>();
+    for (const v of telcoVerifs || []) {
+      const digits = String(v.phone_number || '').replace(/\D/g, '');
+      if (!digits) continue;
+      const parts = String(v.otp_hash || '').split(':');
+      const prov = (parts[1] === 'mspace' ? 'mspace' : 'ideamart') as 'ideamart' | 'mspace';
+      const refNo = parts.slice(2).join(':');
+      if (!telcoVerifByDigits.has(digits)) {
+        telcoVerifByDigits.set(digits, {
+          provider: prov,
+          verifiedAt: v.verified_at || v.created_at,
+          referenceNo: refNo,
+        });
+      }
+    }
+    const isTelcoGatewayActive = appConfig.smsGateway === 'ideamart' || appConfig.smsGateway === 'mspace';
+
+    // Map subscriptions by user_id
+    const subByUser = new Map<string, any>();
+    (subs || []).forEach((s: any) => {
+      // Pick the active or most recent subscription
+      if (!subByUser.has(s.user_id) || s.status === 'ACTIVE') {
+        subByUser.set(s.user_id, s);
+      }
+    });
+
+    // Build enriched user cards
+    // Built in slices that yield to the event loop: this ran synchronously over every
+    // profile and, with CPU steal on the VPS, blocked live calls for up to ~20s whenever
+    // the admin Users page was open (load + 60s refresh).
+    const enrichUser = (p: any) => {
+      const act = activity.byUser.get(p.id) || EMPTY_USER_ACTIVITY;
+      const activeSub = subByUser.get(p.id);
+
+      const totalPracticedSeconds = act.seconds;
+      const avgOverallScore = act.avgScore != null ? Math.round(act.avgScore) : (p.baseline_fluency_score || 0);
+
+      // Only the latest intro/onboarding call matters for the status resolver
+      const onboardingInfo = this.resolveOnboardingCallStatus(p, act.intro ? [act.intro] : []);
+      const email = (p as any).email || null;
+      const avatarUrl = (p as any).avatar_url || null;
+      const isTestAccount = isTestProfile(p);
+
+      // Determine active subscription state for non-test accounts
+      const hasActivePayhereSub =
+        !isTestAccount &&
+        Boolean(
+          (activeSub && (activeSub.status === 'ACTIVE' || activeSub.status === 'PAST_DUE')) ||
+          (p.plan_tier && p.plan_tier !== 'starter' && p.plan_status === 'active'),
+        );
+      const payherePlanTier = hasActivePayhereSub
+        ? activeSub?.plan_tier || (p.plan_tier !== 'starter' ? p.plan_tier : 'pro')
+        : null;
+      const payhereSubscriptionId = hasActivePayhereSub
+        ? activeSub?.payhere_subscription_id || activeSub?.id || null
+        : null;
+
+      const digits = String(p.phone_number || '').replace(/\D/g, '');
+      const verif = digits ? telcoVerifByDigits.get(digits) : undefined;
+      const hasExplicitTelco = Boolean(
+        p.telco_subscriber_id ||
+        p.telco_provider ||
+        verif,
+      );
+      const isImplicitTelcoDailyStarter =
+        isTelcoGatewayActive &&
+        (p.billing_cycle === 'daily' || p.plan_tier === 'starter') &&
+        !hasActivePayhereSub;
+      const isTelcoCancelledOrUpgraded =
+        hasActivePayhereSub ||
+        p.plan_status === 'canceled' ||
+        p.plan_status === 'expired';
+
+      const hasActiveTelcoSub =
+        !isTestAccount &&
+        Boolean(
+          ((hasExplicitTelco || isImplicitTelcoDailyStarter) && !isTelcoCancelledOrUpgraded) ||
+          (p.telco_subscriber_id && p.plan_status !== 'canceled' && p.plan_status !== 'expired'),
+        );
+
+      const detectedProvider: 'ideamart' | 'mspace' =
+        (p.telco_provider as any) ||
+        verif?.provider ||
+        this.telcoService.detectProvider(p.phone_number);
+      const telcoOperatorName =
+        !isTestAccount && (hasActiveTelcoSub || hasExplicitTelco)
+          ? this.getTelcoOperatorLabel(p.phone_number, detectedProvider)
+          : null;
+      const activeSubscriptionType: 'payhere' | 'telco' | 'none' = hasActivePayhereSub
+        ? 'payhere'
+        : hasActiveTelcoSub
+          ? 'telco'
+          : 'none';
+
+      return {
+        id: p.id,
+        phoneNumber: p.phone_number,
+        displayName: p.display_name || 'Anonymous Student',
+        email,
+        avatarUrl,
+        level: p.level || 'Intermediate',
+        goal: p.goal || 'General Fluency',
+        challenge: p.challenge || 'Vocabulary & Hesitation',
+        planTier: p.plan_tier || 'starter',
+        planStatus: p.plan_status || 'active',
+        billingCycle: p.billing_cycle || 'monthly',
+        minutesBalance: p.minutes_balance ?? 10,
+        monthlyMinutesAllowance: p.monthly_minutes_allowance ?? 10,
+        addOnMinutesBalance: p.add_on_minutes_balance ?? 0,
+        minutesResetAt: p.minutes_reset_at,
+        nativeLanguage: p.native_language || 'sinhala',
+        employmentStatus: p.employment_status,
+        dailyGoalMinutes: p.daily_goal_minutes ?? 10,
+        isTestAccount,
+        hasActiveTelcoSub,
+        telcoProvider: hasActiveTelcoSub ? detectedProvider : null,
+        telcoOperatorName,
+        hasActivePayhereSub,
+        payherePlanTier,
+        payhereSubscriptionId,
+        activeSubscriptionType,
+        baselineScores: {
+          overall: Math.round(((p.baseline_fluency_score || 0) + (p.baseline_grammar_score || 0) + (p.baseline_pronunciation_score || 0)) / 3) || 75,
+          fluency: p.baseline_fluency_score || 70,
+          grammar: p.baseline_grammar_score || 70,
+          pronunciation: p.baseline_pronunciation_score || 70,
+        },
+        lastActiveStep: p.last_active_step,
+        onboardingCompletedAt: p.onboarding_completed_at,
+        onboardingCallStatus: onboardingInfo.status,
+        onboardingCallStatusLabel: onboardingInfo.label,
+        onboardingCallDuration: onboardingInfo.duration,
+        createdAt: p.created_at,
+        updatedAt: p.updated_at,
+        // Aggregated Metrics
+        stats: {
+          totalSessions: act.sessions,
+          totalPracticedMinutes: Math.round(totalPracticedSeconds / 60),
+          totalTokens: act.tokens,
+          totalCostLkr: Number(act.costLkr.toFixed(2)),
+          totalCostUsd: Number(act.costUsd.toFixed(4)),
+          avgScore: avgOverallScore,
+          completedLevelsCount: act.completed,
+          lastSessionDate: act.lastAt,
+          subscriptionStatus: activeSub ? activeSub.status : (p.plan_status || 'FREE'),
+        },
+      };
+    };
+    return { enrichUser, isTestProfile, subByUser };
+  }
+
   private async computeAdminUsersDataset(query?: AdminUsersQueryDto) {
     if (!this.supabase) {
       throw new InternalServerErrorException('Supabase database client not configured.');
@@ -2380,168 +2778,13 @@ export class AuthService {
 
       const allProfiles = (profiles || []) as any as UserProfileData[];
 
-      const testPhoneDigitsSet = new Set<string>(
-        (registeredTestAccounts || [])
-          .map((t) => (t.phoneNumber || '').replace(/\D/g, ''))
-          .filter(Boolean),
-      );
-
-      const isTestProfile = (p: UserProfileData): boolean => {
-        const digits = (p.phone_number || '').replace(/\D/g, '');
-        if (digits && testPhoneDigitsSet.has(digits)) return true;
-        if ((p.monthly_minutes_allowance || 0) >= 9000 || (p.minutes_balance || 0) >= 9000) return true;
-        return false;
-      };
-
-      // Index verified TELCO OTP records by normalized digits
-      const telcoVerifByDigits = new Map<string, { provider: 'ideamart' | 'mspace'; verifiedAt: string; referenceNo: string }>();
-      for (const v of telcoVerifs || []) {
-        const digits = String(v.phone_number || '').replace(/\D/g, '');
-        if (!digits) continue;
-        const parts = String(v.otp_hash || '').split(':');
-        const prov = (parts[1] === 'mspace' ? 'mspace' : 'ideamart') as 'ideamart' | 'mspace';
-        const refNo = parts.slice(2).join(':');
-        if (!telcoVerifByDigits.has(digits)) {
-          telcoVerifByDigits.set(digits, {
-            provider: prov,
-            verifiedAt: v.verified_at || v.created_at,
-            referenceNo: refNo,
-          });
-        }
-      }
-      const isTelcoGatewayActive = appConfig.smsGateway === 'ideamart' || appConfig.smsGateway === 'mspace';
-
-      // Map subscriptions by user_id
-      const subByUser = new Map<string, any>();
-      (subs || []).forEach((s: any) => {
-        // Pick the active or most recent subscription
-        if (!subByUser.has(s.user_id) || s.status === 'ACTIVE') {
-          subByUser.set(s.user_id, s);
-        }
+      const { enrichUser, isTestProfile, subByUser } = this.buildAdminUserEnricher({
+        testAccounts: registeredTestAccounts || [],
+        appConfig,
+        activityByUser: activity.byUser,
+        subs: subs || [],
+        telcoVerifs: telcoVerifs || [],
       });
-
-      // Build enriched user cards
-      // Built in slices that yield to the event loop: this ran synchronously over every
-      // profile and, with CPU steal on the VPS, blocked live calls for up to ~20s whenever
-      // the admin Users page was open (load + 60s refresh).
-      const enrichUser = (p: any) => {
-        const act = activity.byUser.get(p.id) || EMPTY_USER_ACTIVITY;
-        const activeSub = subByUser.get(p.id);
-
-        const totalPracticedSeconds = act.seconds;
-        const avgOverallScore = act.avgScore != null ? Math.round(act.avgScore) : (p.baseline_fluency_score || 0);
-
-        // Only the latest intro/onboarding call matters for the status resolver
-        const onboardingInfo = this.resolveOnboardingCallStatus(p, act.intro ? [act.intro] : []);
-        const email = (p as any).email || null;
-        const avatarUrl = (p as any).avatar_url || null;
-        const isTestAccount = isTestProfile(p);
-
-        // Determine active subscription state for non-test accounts
-        const hasActivePayhereSub =
-          !isTestAccount &&
-          Boolean(
-            (activeSub && (activeSub.status === 'ACTIVE' || activeSub.status === 'PAST_DUE')) ||
-            (p.plan_tier && p.plan_tier !== 'starter' && p.plan_status === 'active'),
-          );
-        const payherePlanTier = hasActivePayhereSub
-          ? activeSub?.plan_tier || (p.plan_tier !== 'starter' ? p.plan_tier : 'pro')
-          : null;
-        const payhereSubscriptionId = hasActivePayhereSub
-          ? activeSub?.payhere_subscription_id || activeSub?.id || null
-          : null;
-
-        const digits = String(p.phone_number || '').replace(/\D/g, '');
-        const verif = digits ? telcoVerifByDigits.get(digits) : undefined;
-        const hasExplicitTelco = Boolean(
-          p.telco_subscriber_id ||
-          p.telco_provider ||
-          verif,
-        );
-        const isImplicitTelcoDailyStarter =
-          isTelcoGatewayActive &&
-          (p.billing_cycle === 'daily' || p.plan_tier === 'starter') &&
-          !hasActivePayhereSub;
-        const isTelcoCancelledOrUpgraded =
-          hasActivePayhereSub ||
-          p.plan_status === 'canceled' ||
-          p.plan_status === 'expired';
-
-        const hasActiveTelcoSub =
-          !isTestAccount &&
-          Boolean(
-            ((hasExplicitTelco || isImplicitTelcoDailyStarter) && !isTelcoCancelledOrUpgraded) ||
-            (p.telco_subscriber_id && p.plan_status !== 'canceled' && p.plan_status !== 'expired'),
-          );
-
-        const detectedProvider: 'ideamart' | 'mspace' =
-          (p.telco_provider as any) ||
-          verif?.provider ||
-          this.telcoService.detectProvider(p.phone_number);
-        const telcoOperatorName =
-          !isTestAccount && (hasActiveTelcoSub || hasExplicitTelco)
-            ? this.getTelcoOperatorLabel(p.phone_number, detectedProvider)
-            : null;
-        const activeSubscriptionType: 'payhere' | 'telco' | 'none' = hasActivePayhereSub
-          ? 'payhere'
-          : hasActiveTelcoSub
-            ? 'telco'
-            : 'none';
-
-        return {
-          id: p.id,
-          phoneNumber: p.phone_number,
-          displayName: p.display_name || 'Anonymous Student',
-          email,
-          avatarUrl,
-          level: p.level || 'Intermediate',
-          goal: p.goal || 'General Fluency',
-          challenge: p.challenge || 'Vocabulary & Hesitation',
-          planTier: p.plan_tier || 'starter',
-          planStatus: p.plan_status || 'active',
-          billingCycle: p.billing_cycle || 'monthly',
-          minutesBalance: p.minutes_balance ?? 10,
-          monthlyMinutesAllowance: p.monthly_minutes_allowance ?? 10,
-          addOnMinutesBalance: p.add_on_minutes_balance ?? 0,
-          minutesResetAt: p.minutes_reset_at,
-          nativeLanguage: p.native_language || 'sinhala',
-          employmentStatus: p.employment_status,
-          dailyGoalMinutes: p.daily_goal_minutes ?? 10,
-          isTestAccount,
-          hasActiveTelcoSub,
-          telcoProvider: hasActiveTelcoSub ? detectedProvider : null,
-          telcoOperatorName,
-          hasActivePayhereSub,
-          payherePlanTier,
-          payhereSubscriptionId,
-          activeSubscriptionType,
-          baselineScores: {
-            overall: Math.round(((p.baseline_fluency_score || 0) + (p.baseline_grammar_score || 0) + (p.baseline_pronunciation_score || 0)) / 3) || 75,
-            fluency: p.baseline_fluency_score || 70,
-            grammar: p.baseline_grammar_score || 70,
-            pronunciation: p.baseline_pronunciation_score || 70,
-          },
-          lastActiveStep: p.last_active_step,
-          onboardingCompletedAt: p.onboarding_completed_at,
-          onboardingCallStatus: onboardingInfo.status,
-          onboardingCallStatusLabel: onboardingInfo.label,
-          onboardingCallDuration: onboardingInfo.duration,
-          createdAt: p.created_at,
-          updatedAt: p.updated_at,
-          // Aggregated Metrics
-          stats: {
-            totalSessions: act.sessions,
-            totalPracticedMinutes: Math.round(totalPracticedSeconds / 60),
-            totalTokens: act.tokens,
-            totalCostLkr: Number(act.costLkr.toFixed(2)),
-            totalCostUsd: Number(act.costUsd.toFixed(4)),
-            avgScore: avgOverallScore,
-            completedLevelsCount: act.completed,
-            lastSessionDate: act.lastAt,
-            subscriptionStatus: activeSub ? activeSub.status : (p.plan_status || 'FREE'),
-          },
-        };
-      };
       let enrichedUsers: ReturnType<typeof enrichUser>[] = [];
       for (let i = 0; i < allProfiles.length; i++) {
         if (i > 0 && i % 100 === 0) await new Promise((r) => setImmediate(r));
@@ -2840,7 +3083,240 @@ export class AuthService {
     return { byUser, userDays: [...dayCounts.values()] };
   }
 
+  /** Turns analytics counts into the dashboard response (labels, colours, percentages, trends). */
+  private buildAnalyticsOverview(c: AnalyticsCounts) {
+    const totalUsers = c.totalUsers;
+    const calcPct = (cnt: number, tot: number) => (tot > 0 ? Number(((cnt / tot) * 100).toFixed(1)) : 0);
+    const n = (m: Record<string, number>, k: string) => Number(m[k] || 0);
+
+    // 1. Language Coaching Modes
+    const totalLangSelections = Object.values(c.lang).reduce((a, b) => a + Number(b || 0), 0);
+    const sinhalaSupportCount = n(c.lang, 'sinhala_support');
+    const englishOnlyCount = n(c.lang, 'english_only');
+    const deepGuidanceCount = n(c.lang, 'deep_guidance');
+    const languageModes = {
+      totalSelections: totalLangSelections,
+      breakdown: [
+        {
+          key: 'sinhala_support',
+          label: 'Sinhala Support',
+          sinhalaLabel: 'සිංහල සහාය',
+          description: 'Speaks mostly English, but explains grammar rules and hard words in Sinhala',
+          count: sinhalaSupportCount,
+          percentage: calcPct(sinhalaSupportCount, totalLangSelections),
+          color: '#0d9488',
+        },
+        {
+          key: 'english_only',
+          label: 'English Only',
+          sinhalaLabel: 'ඉංග්‍රීසි පමණි',
+          description: 'Speaks 100% in English without using Sinhala (for learners who want full English)',
+          count: englishOnlyCount,
+          percentage: calcPct(englishOnlyCount, totalLangSelections),
+          color: '#3b82f6',
+        },
+        {
+          key: 'deep_guidance',
+          label: 'Deep Guidance',
+          sinhalaLabel: 'සම්පූර්ණ මඟපෙන්වීම',
+          description: 'Sentence-by-sentence help with Sinhala translations (for beginners who need extra help)',
+          count: deepGuidanceCount,
+          percentage: calcPct(deepGuidanceCount, totalLangSelections),
+          color: '#8b5cf6',
+        },
+      ],
+    };
+
+    // 2. English Proficiency Levels
+    const levelDefs = [
+      { key: 'beginner', label: 'Beginner', tag: 'Basic English', description: 'Knows basic words, struggles to make complete sentences', color: '#10b981' },
+      { key: 'intermediate', label: 'Intermediate', tag: 'Everyday English', description: 'Can speak simple sentences, needs practice to speak smoothly', color: '#0ea5e9' },
+      { key: 'upper-intermediate', label: 'Upper-Intermediate', tag: 'Good English', description: 'Speaks comfortably, wants to speak naturally without pauses', color: '#8b5cf6' },
+      { key: 'advanced', label: 'Advanced', tag: 'Fluent English', description: 'Speaks fluently, polishing professional vocabulary and accent', color: '#f59e0b' },
+    ];
+    const levels = {
+      breakdown: levelDefs.map((d) => ({
+        key: d.key,
+        label: d.label,
+        tag: d.tag,
+        description: d.description,
+        count: n(c.level, d.key),
+        percentage: calcPct(n(c.level, d.key), totalUsers),
+        color: d.color,
+      })),
+    };
+
+    // 3. Primary Learning Goals
+    const goalDefs = [
+      { key: 'speak-confidently', label: 'Speak Confidently', icon: 'mic', description: 'Stop hesitating and speak English naturally' },
+      { key: 'better-job', label: 'Better Job / Career', icon: 'briefcase', description: 'Job interviews, office meetings & promotions' },
+      { key: 'work-abroad', label: 'Work or Study Abroad', icon: 'globe', description: 'Visa interviews, living or studying in another country' },
+      { key: 'exams', label: 'Exams & IELTS', icon: 'award', description: 'IELTS speaking, PTE, or school/university exams' },
+      { key: 'travel', label: 'Travel & Daily Life', icon: 'compass', description: 'Trips overseas, hotels & everyday conversations' },
+    ];
+    const goalsBreakdown = goalDefs.map((gd) => ({
+      ...gd,
+      count: n(c.goal, gd.key),
+      percentage: calcPct(n(c.goal, gd.key), totalUsers),
+    }));
+    const unsetGoalsCount = n(c.goal, 'unset');
+    if (unsetGoalsCount > 0) {
+      goalsBreakdown.push({
+        key: 'unset',
+        label: 'Not Specified',
+        icon: 'help-circle',
+        description: 'Learners who skipped goal selection during signup',
+        count: unsetGoalsCount,
+        percentage: calcPct(unsetGoalsCount, totalUsers),
+      });
+    }
+
+    // 4. Subscription Plans & Statuses
+    const plans = {
+      tiers: [
+        { tier: 'starter', label: 'Free / Starter', color: '#64748b' },
+        { tier: 'pro', label: 'Pro Plan', color: '#0d9488' },
+        { tier: 'basic', label: 'Basic Plan', color: '#3b82f6' },
+      ].map((t) => ({ tier: t.tier, label: t.label, count: n(c.tier, t.tier), percentage: calcPct(n(c.tier, t.tier), totalUsers), color: t.color })),
+      statuses: [
+        { status: 'active', label: 'Active Users', color: '#10b981' },
+        { status: 'canceled', label: 'Canceled / Inactive', color: '#ef4444' },
+      ].map((st) => ({
+        status: st.status,
+        label: st.label,
+        count: n(c.status, st.status),
+        percentage: calcPct(n(c.status, st.status), totalUsers),
+        color: st.color,
+      })),
+    };
+
+    // 5. Daily Commitment
+    const dailyCommitment = {
+      breakdown: [5, 10, 15, 30].map((m) => ({
+        minutes: m,
+        label: `${m} min/day`,
+        count: n(c.daily, String(m)),
+        percentage: calcPct(n(c.daily, String(m)), totalUsers),
+      })),
+    };
+
+    // 6. Employment Status
+    const employmentLabels: Record<string, string> = {
+      'full-time': 'Working Full-Time',
+      student: 'Student / University',
+      other: 'Freelancers / Other',
+      'looking-for-job': 'Looking for a Job',
+      'part-time': 'Working Part-Time',
+      unset: 'Not Specified',
+    };
+    const employment = {
+      breakdown: Object.keys(employmentLabels).map((key) => ({
+        key,
+        label: employmentLabels[key],
+        count: n(c.employment, key),
+        percentage: calcPct(n(c.employment, key), totalUsers),
+      })),
+    };
+
+    // 8. 14-Day trends (Sri Lanka time)
+    const todaySlKey = SL_DATE_KEY_FMT.format(new Date());
+    const days14 = Array.from({ length: 14 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (13 - i));
+      const dateKey = SL_DATE_KEY_FMT.format(d);
+      const dayLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Colombo' });
+      const weekday = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'Asia/Colombo' });
+      const isToday = i === 13;
+      return {
+        date: dateKey,
+        dayLabel: isToday ? 'Today' : `${weekday} ${dayLabel}`,
+        shortLabel: isToday ? 'Today' : dayLabel,
+        registrations: Number(c.regsByDay[dateKey] || 0),
+        sessions: Number(c.sessionsByDay[dateKey] || 0),
+        isToday,
+      };
+    });
+    const newUsersLast7Days = days14.slice(7).reduce((acc, d) => acc + d.registrations, 0);
+
+    return {
+      kpis: {
+        totalUsers,
+        activeSubscriptions: n(c.status, 'active'),
+        totalPracticeMinutes: Math.round(c.seconds / 60),
+        totalSessions: c.sessions,
+        avgSessionDurationSeconds: c.sessions > 0 ? Math.round(c.seconds / c.sessions) : 0,
+        totalCostLkr: Number(c.lkr.toFixed(2)),
+        totalCostUsd: Number(c.usd.toFixed(2)),
+        totalTokens: c.tokens,
+        newUsersLast7Days,
+        newUsersToday: Number(c.regsByDay[todaySlKey] || 0),
+      },
+      languageModes,
+      levels,
+      goals: { breakdown: goalsBreakdown },
+      plans,
+      dailyCommitment,
+      employment,
+      trends: { days14 },
+    };
+  }
+
+  private analyticsSummaryRpcMissing = false;
+
+  /** Preferred: every count from one SQL aggregate (admin_analytics_summary, migration 029). */
+  private async fetchAnalyticsCountsRpc(): Promise<AnalyticsCounts | null> {
+    if (this.analyticsSummaryRpcMissing || !this.supabase) return null;
+    const testAccounts = await this.getTestAccounts().catch(() => [] as TestAccountItem[]);
+    const testIds = [...new Set((testAccounts || []).map((t) => t.id).filter((id) => /^[0-9a-f-]{36}$/i.test(id || '')))];
+    const testDigits = [
+      ...new Set((testAccounts || []).map((t) => (t.phoneNumber || '').replace(/\D/g, '')).filter(Boolean)),
+    ];
+    const { data, error } = await this.supabase.rpc('admin_analytics_summary', {
+      test_ids: testIds,
+      test_digits: testDigits,
+    });
+    if (error || !data) {
+      if (error && /function|does not exist|schema cache/i.test(error.message || '')) {
+        this.analyticsSummaryRpcMissing = true;
+      }
+      this.logger.warn(`[Analytics] admin_analytics_summary unavailable: ${error?.message}`);
+      return null;
+    }
+    const counts = (data.counts || {}) as Record<string, Record<string, number>>;
+    const byDay = (rows: any[]) => {
+      const out: Record<string, number> = {};
+      for (const r of rows || []) out[String(r.day).slice(0, 10)] = Number(r.count || 0);
+      return out;
+    };
+    return {
+      totalUsers: Number(data.total_users || 0),
+      level: counts.level || {},
+      goal: counts.goal || {},
+      tier: counts.tier || {},
+      status: counts.status || {},
+      daily: counts.daily || {},
+      employment: counts.employment || {},
+      lang: counts.lang || {},
+      sessions: Number(data.sessions_total || 0),
+      seconds: Number(data.seconds_total || 0),
+      tokens: Number(data.ledger?.tokens || 0),
+      lkr: Number(data.ledger?.lkr || 0),
+      usd: Number(data.ledger?.usd || 0),
+      regsByDay: byDay(data.registrations),
+      sessionsByDay: byDay(data.sessions),
+    };
+  }
+
   private async computeAdminAnalyticsOverview() {
+    if (!this.supabase) {
+      throw new InternalServerErrorException('Supabase database client not configured.');
+    }
+    const counts = (await this.fetchAnalyticsCountsRpc()) ?? (await this.computeAnalyticsCountsLegacy());
+    return this.buildAnalyticsOverview(counts);
+  }
+
+  /** Legacy fallback: counts computed in Node from whole-table reads. */
+  private async computeAnalyticsCountsLegacy(): Promise<AnalyticsCounts> {
     if (!this.supabase) {
       throw new InternalServerErrorException('Supabase database client not configured.');
     }
@@ -2915,340 +3391,51 @@ export class AuthService {
         }
       });
 
-      let sinhalaSupportCount = 0;
-      let englishOnlyCount = 0;
-      let deepGuidanceCount = 0;
-      let otherModeCount = 0;
-
-      userLangModeMap.forEach((mode) => {
-        if (mode === 'sinhala_support') sinhalaSupportCount++;
-        else if (mode === 'english_only') englishOnlyCount++;
-        else if (mode === 'deep_guidance') deepGuidanceCount++;
-        else otherModeCount++;
-      });
-
-      const totalLangSelections = userLangModeMap.size;
-      const calcPct = (cnt: number, tot: number) => (tot > 0 ? Number(((cnt / tot) * 100).toFixed(1)) : 0);
-
-      const languageModes = {
-        totalSelections: totalLangSelections,
-        breakdown: [
-          {
-            key: 'sinhala_support',
-            label: 'Sinhala Support',
-            sinhalaLabel: 'සිංහල සහාය',
-            description: 'Speaks mostly English, but explains grammar rules and hard words in Sinhala',
-            count: sinhalaSupportCount,
-            percentage: calcPct(sinhalaSupportCount, totalLangSelections),
-            color: '#0d9488', // teal
-          },
-          {
-            key: 'english_only',
-            label: 'English Only',
-            sinhalaLabel: 'ඉංග්‍රීසි පමණි',
-            description: 'Speaks 100% in English without using Sinhala (for learners who want full English)',
-            count: englishOnlyCount,
-            percentage: calcPct(englishOnlyCount, totalLangSelections),
-            color: '#3b82f6', // blue
-          },
-          {
-            key: 'deep_guidance',
-            label: 'Deep Guidance',
-            sinhalaLabel: 'සම්පූර්ණ මඟපෙන්වීම',
-            description: 'Sentence-by-sentence help with Sinhala translations (for beginners who need extra help)',
-            count: deepGuidanceCount,
-            percentage: calcPct(deepGuidanceCount, totalLangSelections),
-            color: '#8b5cf6', // purple
-          },
-        ],
+      const bump = (m: Record<string, number>, k: string) => {
+        m[k] = (m[k] || 0) + 1;
       };
-
-      // 2. English Proficiency Levels (calculated strictly on real learners)
-      const rawLevelsCount: Record<string, number> = {
-        beginner: 0,
-        intermediate: 0,
-        'upper-intermediate': 0,
-        advanced: 0,
-        unset: 0,
+      const c: AnalyticsCounts = {
+        totalUsers: realProfiles.length,
+        level: {},
+        goal: {},
+        tier: {},
+        status: {},
+        daily: {},
+        employment: {},
+        lang: {},
+        sessions: 0,
+        seconds: 0,
+        tokens: 0,
+        lkr: 0,
+        usd: 0,
+        regsByDay: {},
+        sessionsByDay: {},
       };
-
-      realProfiles.forEach((p) => {
-        const lvl = (p.level || '').trim().toLowerCase();
-        if (lvl === 'beginner') rawLevelsCount.beginner++;
-        else if (lvl === 'intermediate') rawLevelsCount.intermediate++;
-        else if (lvl === 'upper-intermediate') rawLevelsCount['upper-intermediate']++;
-        else if (lvl === 'advanced') rawLevelsCount.advanced++;
-        else rawLevelsCount.unset++;
-      });
-
-      const levels = {
-        breakdown: [
-          {
-            key: 'beginner',
-            label: 'Beginner',
-            tag: 'Basic English',
-            description: 'Knows basic words, struggles to make complete sentences',
-            count: rawLevelsCount.beginner,
-            percentage: calcPct(rawLevelsCount.beginner, totalUsers),
-            color: '#10b981',
-          },
-          {
-            key: 'intermediate',
-            label: 'Intermediate',
-            tag: 'Everyday English',
-            description: 'Can speak simple sentences, needs practice to speak smoothly',
-            count: rawLevelsCount.intermediate,
-            percentage: calcPct(rawLevelsCount.intermediate, totalUsers),
-            color: '#0ea5e9',
-          },
-          {
-            key: 'upper-intermediate',
-            label: 'Upper-Intermediate',
-            tag: 'Good English',
-            description: 'Speaks comfortably, wants to speak naturally without pauses',
-            count: rawLevelsCount['upper-intermediate'],
-            percentage: calcPct(rawLevelsCount['upper-intermediate'], totalUsers),
-            color: '#8b5cf6',
-          },
-          {
-            key: 'advanced',
-            label: 'Advanced',
-            tag: 'Fluent English',
-            description: 'Speaks fluently, polishing professional vocabulary and accent',
-            count: rawLevelsCount.advanced,
-            percentage: calcPct(rawLevelsCount.advanced, totalUsers),
-            color: '#f59e0b',
-          },
-        ],
-      };
-
-      // 3. Primary Learning Goals (real learners only)
-      const rawGoalsCount: Record<string, number> = {};
-      realProfiles.forEach((p) => {
-        const g = (p.goal || 'unset').trim().toLowerCase();
-        rawGoalsCount[g] = (rawGoalsCount[g] || 0) + 1;
-      });
-
-      const goalDefs = [
-        { key: 'speak-confidently', label: 'Speak Confidently', icon: 'mic', description: 'Stop hesitating and speak English naturally' },
-        { key: 'better-job', label: 'Better Job / Career', icon: 'briefcase', description: 'Job interviews, office meetings & promotions' },
-        { key: 'work-abroad', label: 'Work or Study Abroad', icon: 'globe', description: 'Visa interviews, living or studying in another country' },
-        { key: 'exams', label: 'Exams & IELTS', icon: 'award', description: 'IELTS speaking, PTE, or school/university exams' },
-        { key: 'travel', label: 'Travel & Daily Life', icon: 'compass', description: 'Trips overseas, hotels & everyday conversations' },
-      ];
-
-      const goalsBreakdown = goalDefs.map((gd) => {
-        const cnt = rawGoalsCount[gd.key] || 0;
-        return {
-          ...gd,
-          count: cnt,
-          percentage: calcPct(cnt, totalUsers),
-        };
-      });
-
-      const unsetGoalsCount = rawGoalsCount['unset'] || 0;
-      if (unsetGoalsCount > 0) {
-        goalsBreakdown.push({
-          key: 'unset',
-          label: 'Not Specified',
-          icon: 'help-circle',
-          description: 'Learners who skipped goal selection during signup',
-          count: unsetGoalsCount,
-          percentage: calcPct(unsetGoalsCount, totalUsers),
-        });
-      }
-
-      // 4. Subscription Plans & Statuses (real learners only)
-      const rawTiersCount: Record<string, number> = {};
-      const rawStatusesCount: Record<string, number> = {};
-      realProfiles.forEach((p) => {
-        const t = (p.plan_tier || 'starter').trim().toLowerCase();
-        rawTiersCount[t] = (rawTiersCount[t] || 0) + 1;
-        const s = (p.plan_status || 'active').trim().toLowerCase();
-        rawStatusesCount[s] = (rawStatusesCount[s] || 0) + 1;
-      });
-
-      const plans = {
-        tiers: [
-          {
-            tier: 'starter',
-            label: 'Free / Starter',
-            count: rawTiersCount['starter'] || 0,
-            percentage: calcPct(rawTiersCount['starter'] || 0, totalUsers),
-            color: '#64748b',
-          },
-          {
-            tier: 'pro',
-            label: 'Pro Plan',
-            count: rawTiersCount['pro'] || 0,
-            percentage: calcPct(rawTiersCount['pro'] || 0, totalUsers),
-            color: '#0d9488',
-          },
-          {
-            tier: 'basic',
-            label: 'Basic Plan',
-            count: rawTiersCount['basic'] || 0,
-            percentage: calcPct(rawTiersCount['basic'] || 0, totalUsers),
-            color: '#3b82f6',
-          },
-        ],
-        statuses: [
-          {
-            status: 'active',
-            label: 'Active Users',
-            count: rawStatusesCount['active'] || 0,
-            percentage: calcPct(rawStatusesCount['active'] || 0, totalUsers),
-            color: '#10b981',
-          },
-          {
-            status: 'canceled',
-            label: 'Canceled / Inactive',
-            count: rawStatusesCount['canceled'] || 0,
-            percentage: calcPct(rawStatusesCount['canceled'] || 0, totalUsers),
-            color: '#ef4444',
-          },
-        ],
-      };
-
-      // 5. Daily Commitment (real learners only)
-      const rawDailyCount: Record<number, number> = { 5: 0, 10: 0, 15: 0, 30: 0 };
-      realProfiles.forEach((p) => {
+      userLangModeMap.forEach((mode) => bump(c.lang, mode));
+      for (const p of realProfiles) {
+        bump(c.level, (p.level || '').trim().toLowerCase());
+        bump(c.goal, (p.goal || 'unset').trim().toLowerCase());
+        bump(c.tier, (p.plan_tier || 'starter').trim().toLowerCase());
+        bump(c.status, (p.plan_status || 'active').trim().toLowerCase());
         const mins = Number(p.daily_goal_minutes) || 5;
-        if (rawDailyCount[mins] !== undefined) {
-          rawDailyCount[mins]++;
-        } else {
-          rawDailyCount[5]++;
-        }
-      });
-
-      const dailyCommitment = {
-        breakdown: [
-          { minutes: 5, label: '5 min/day', count: rawDailyCount[5], percentage: calcPct(rawDailyCount[5], totalUsers) },
-          { minutes: 10, label: '10 min/day', count: rawDailyCount[10], percentage: calcPct(rawDailyCount[10], totalUsers) },
-          { minutes: 15, label: '15 min/day', count: rawDailyCount[15], percentage: calcPct(rawDailyCount[15], totalUsers) },
-          { minutes: 30, label: '30 min/day', count: rawDailyCount[30], percentage: calcPct(rawDailyCount[30], totalUsers) },
-        ],
-      };
-
-      // 6. Employment Status (real learners only)
-      const rawEmploymentCount: Record<string, number> = {};
-      realProfiles.forEach((p) => {
-        const emp = (p.employment_status || 'unset').trim().toLowerCase();
-        rawEmploymentCount[emp] = (rawEmploymentCount[emp] || 0) + 1;
-      });
-
-      const employmentLabels: Record<string, string> = {
-        'full-time': 'Working Full-Time',
-        student: 'Student / University',
-        other: 'Freelancers / Other',
-        'looking-for-job': 'Looking for a Job',
-        'part-time': 'Working Part-Time',
-        unset: 'Not Specified',
-      };
-
-      const employment = {
-        breakdown: Object.keys(employmentLabels).map((key) => {
-          const cnt = rawEmploymentCount[key] || 0;
-          return {
-            key,
-            label: employmentLabels[key],
-            count: cnt,
-            percentage: calcPct(cnt, totalUsers),
-          };
-        }),
-      };
-
-      // 7. KPIs & Usage Calculations (real sessions only)
-      let totalDurationSecs = 0;
-      let totalSessionCount = 0;
-      let totalCostLkr = 0;
-      let totalCostUsd = 0;
-      let totalTokens = 0;
-
+        bump(c.daily, [5, 10, 15, 30].includes(mins) ? String(mins) : '5');
+        bump(c.employment, (p.employment_status || 'unset').trim().toLowerCase());
+        const k = p.created_at ? SL_DATE_KEY_FMT.format(new Date(p.created_at)) : '';
+        if (k) bump(c.regsByDay, k);
+      }
       for (const [userId, t] of activity.byUser) {
         if (!realUserIdSet.has(userId)) continue;
-        totalDurationSecs += t.seconds;
-        totalSessionCount += t.sessions;
-        totalCostLkr += t.costLkr;
-        totalCostUsd += t.costUsd;
-        totalTokens += t.tokens;
+        c.seconds += t.seconds;
+        c.sessions += t.sessions;
+        c.lkr += t.costLkr;
+        c.usd += t.costUsd;
+        c.tokens += t.tokens;
       }
-
-      // 8. 14-Day Growth and Session Activity Trends (Sri Lanka Timezone, real users only)
-      const slDateStr = (dateInput?: string | Date | null): string => {
-        if (!dateInput) return '';
-        const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
-        return isNaN(d.getTime()) ? '' : SL_DATE_KEY_FMT.format(d);
-      };
-
-      const past14Days = Array.from({ length: 14 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - (13 - i));
-        const dateKey = slDateStr(d);
-        const dayLabel = d.toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          timeZone: 'Asia/Colombo',
-        });
-        const weekday = d.toLocaleDateString('en-US', {
-          weekday: 'short',
-          timeZone: 'Asia/Colombo',
-        });
-        return { dateKey, dayLabel, weekday, isToday: i === 13 };
-      });
-
-      const todaySlKey = slDateStr(new Date());
-
-      const realRegsByDay = new Map<string, number>();
-      for (const p of realProfiles) {
-        const k = slDateStr(p.created_at);
-        if (k) realRegsByDay.set(k, (realRegsByDay.get(k) || 0) + 1);
-      }
-      const realSessionsByDay = new Map<string, number>();
       for (const d of activity.userDays) {
         if (!realUserIdSet.has(d.userId)) continue;
-        realSessionsByDay.set(d.day, (realSessionsByDay.get(d.day) || 0) + d.sessions);
+        c.sessionsByDay[d.day] = (c.sessionsByDay[d.day] || 0) + d.sessions;
       }
-
-      const days14 = past14Days.map(({ dateKey, dayLabel, weekday, isToday }) => {
-        const registrations = realRegsByDay.get(dateKey) || 0;
-        const sessionCount = realSessionsByDay.get(dateKey) || 0;
-        return {
-          date: dateKey,
-          dayLabel: isToday ? 'Today' : `${weekday} ${dayLabel}`,
-          shortLabel: isToday ? 'Today' : dayLabel,
-          registrations,
-          sessions: sessionCount,
-          isToday,
-        };
-      });
-
-      const newUsersLast7Days = days14.slice(7).reduce((acc, d) => acc + d.registrations, 0);
-      const newUsersToday = realRegsByDay.get(todaySlKey) || 0;
-
-      return {
-        kpis: {
-          totalUsers,
-          activeSubscriptions: rawStatusesCount['active'] || 0,
-          totalPracticeMinutes: Math.round(totalDurationSecs / 60),
-          totalSessions: totalSessionCount,
-          avgSessionDurationSeconds: totalSessionCount > 0 ? Math.round(totalDurationSecs / totalSessionCount) : 0,
-          totalCostLkr: Number(totalCostLkr.toFixed(2)),
-          totalCostUsd: Number(totalCostUsd.toFixed(2)),
-          totalTokens,
-          newUsersLast7Days,
-          newUsersToday,
-        },
-        languageModes,
-        levels,
-        goals: { breakdown: goalsBreakdown },
-        plans,
-        dailyCommitment,
-        employment,
-        trends: {
-          days14,
-        },
-      };
+      return c;
     } catch (err: any) {
       this.logger.error(`Error in getAdminAnalyticsOverview: ${err?.message}`);
       throw new InternalServerErrorException(err?.message || 'Failed to generate admin analytics overview.');
@@ -4241,25 +4428,188 @@ export class AuthService {
     return map;
   }
 
-  async getAdminComplaints(pageReq?: PageRequest | null) {
-    const { data: tableRows, error } = await this.supabase
-      .from('user_complaints')
-      .select('*')
-      .order('created_at', { ascending: false });
+  private adminComplaintsRpcMissing = false;
 
+  /**
+   * Admin complaints, filtered / searched / sorted / paged in Postgres
+   * (admin_complaints_page, migration 029). Falls back to the count + range query.
+   */
+  async getAdminComplaintsPage(req: PageRequest, f: { status?: string; search?: string; sort?: string }) {
+    const status = f.status === 'open' || f.status === 'resolved' ? f.status : null;
+    const sort = f.sort === 'oldest' ? 'oldest' : 'newest';
+    if (!this.adminComplaintsRpcMissing) {
+      const first = await this.supabase.rpc('admin_complaints_page', {
+        p_status: status,
+        p_search: AuthService.searchTerm(f.search) || null,
+        p_sort: sort,
+        p_offset: (req.page - 1) * req.pageSize,
+        p_limit: req.pageSize,
+      });
+      let data: any = first.data;
+      if (!first.error && data) {
+        let win = pageWindow(req, Number(data.total || 0));
+        if (win.pagination.page !== req.page) {
+          // Past the last page: fetch the clamped page
+          const again = await this.supabase.rpc('admin_complaints_page', {
+            p_status: status,
+            p_search: AuthService.searchTerm(f.search) || null,
+            p_sort: sort,
+            p_offset: win.from,
+            p_limit: req.pageSize,
+          });
+          if (!again.error && again.data) data = again.data;
+          win = pageWindow(req, Number(data.total || 0));
+        }
+        const st = data.stats || {};
+        return {
+          stats: {
+            total: Number(st.total || 0),
+            open: Number(st.open || 0),
+            resolved: Number(st.resolved || 0),
+            oldestOpenAt: st.oldest_open_at || null,
+          },
+          complaints: ((data.rows || []) as any[]).map((row) => ({
+            id: row.id,
+            userId: row.user_id,
+            displayName: row.display_name || 'Anonymous Student',
+            phoneNumber: row.phone_number || 'No phone',
+            email: row.email || null,
+            avatarUrl: row.avatar_url || null,
+            planTier: row.plan_tier || 'starter',
+            level: row.level || 'Intermediate',
+            message: row.message,
+            status: (row.status || 'open') as 'open' | 'resolved',
+            createdAt: row.created_at || new Date().toISOString(),
+            updatedAt: row.updated_at || row.created_at || new Date().toISOString(),
+          })),
+          pagination: win.pagination,
+        };
+      }
+      if (first.error && /function|does not exist|schema cache/i.test(first.error.message || '')) {
+        this.adminComplaintsRpcMissing = true;
+      }
+      this.logger.warn(`[AdminComplaints] admin_complaints_page unavailable: ${first.error?.message}`);
+    }
+    return this.getAdminComplaints(req);
+  }
+
+  private adminReviewsRpcMissing = false;
+
+  /**
+   * Admin session reviews, filtered / searched / sorted / paged in Postgres together with the
+   * dashboard stats (admin_reviews_page, migration 029). Falls back to the legacy in-memory path.
+   */
+  async getAdminSessionReviewsPage(
+    req: PageRequest,
+    f: { star?: string; content?: string; search?: string; sort?: string },
+  ) {
+    const starNum = Number(f.star);
+    const star = Number.isInteger(starNum) && starNum >= 1 && starNum <= 5 ? starNum : null;
+    const content = f.content === 'WITH_COMMENT' || f.content === 'RATING_ONLY' ? f.content : null;
+    const sort = ['oldest', 'highest', 'lowest'].includes(f.sort || '') ? f.sort : 'newest';
+    if (!this.adminReviewsRpcMissing) {
+      const call = (offset: number) =>
+        this.supabase.rpc('admin_reviews_page', {
+          p_star: star,
+          p_content: content,
+          p_search: AuthService.searchTerm(f.search) || null,
+          p_sort: sort,
+          p_offset: offset,
+          p_limit: req.pageSize,
+        });
+      const first = await call((req.page - 1) * req.pageSize);
+      let data: any = first.data;
+      if (!first.error && data) {
+        let win = pageWindow(req, Number(data.total || 0));
+        if (win.pagination.page !== req.page) {
+          const again = await call(win.from);
+          if (!again.error && again.data) data = again.data;
+          win = pageWindow(req, Number(data.total || 0));
+        }
+        const st = data.stats || {};
+        const total = Number(st.total || 0);
+        const withComment = Number(st.with_comment || 0);
+        const sc = st.star_counts || {};
+        const last7Avg = st.last7_avg == null ? null : Number(st.last7_avg);
+        const prev7Avg = st.prev7_avg == null ? null : Number(st.prev7_avg);
+        return {
+          stats: {
+            totalReviews: total,
+            avgRating: Number(st.avg_rating || 0),
+            commentsCount: withComment,
+            withoutCommentsCount: total - withComment,
+            starCounts: { 5: Number(sc['5'] || 0), 4: Number(sc['4'] || 0), 3: Number(sc['3'] || 0), 2: Number(sc['2'] || 0), 1: Number(sc['1'] || 0) },
+            last7Count: Number(st.last7_count || 0),
+            avgDelta: last7Avg != null && prev7Avg != null ? last7Avg - prev7Avg : null,
+            days: ((st.days || []) as any[]).map((d) => ({
+              day: String(d.day).slice(0, 10),
+              count: Number(d.count || 0),
+              avg: Number(d.avg || 0),
+            })),
+          },
+          reviews: ((data.rows || []) as any[]).map((row) => ({
+            id: row.id,
+            sessionId: row.id,
+            userId: row.user_id,
+            displayName: row.display_name || 'Anonymous Student',
+            phoneNumber: row.phone_number || 'No phone',
+            email: row.email || null,
+            avatarUrl: row.avatar_url || null,
+            planTier: row.plan_tier || 'starter',
+            level: row.level || 'Intermediate',
+            topic: row.topic || 'Speaking Practice',
+            durationSeconds: row.duration_seconds || 0,
+            overallScore: row.overall_score || 0,
+            rating: Number(row.rating) || 5,
+            feedback: row.feedback || null,
+            createdAt: row.created_at || new Date().toISOString(),
+          })),
+          pagination: win.pagination,
+        };
+      }
+      if (first.error && /function|does not exist|schema cache/i.test(first.error.message || '')) {
+        this.adminReviewsRpcMissing = true;
+      }
+      this.logger.warn(`[AdminReviews] admin_reviews_page unavailable: ${first.error?.message}`);
+    }
+    return this.getAdminSessionReviews(req);
+  }
+
+  async getAdminComplaints(pageReq?: PageRequest | null) {
+    // Counts are done in the database (head-only count queries) and only the requested page
+    // of rows is downloaded, instead of reading the whole table to count/paginate in Node.
+    const countQ = () => this.supabase.from('user_complaints').select('id', { count: 'exact', head: true });
+    const [totalRes, resolvedRes] = await Promise.all([countQ(), countQ().eq('status', 'resolved')]);
+    const totalCount = totalRes.count || 0;
+    const resolvedCount = resolvedRes.count || 0;
+    // Rows with a null status are treated as open, so open = total - resolved.
+    const openCount = Math.max(0, totalCount - resolvedCount);
+
+    const cols = 'id, user_id, display_name, phone_number, email, avatar_url, plan_tier, message, status, created_at, updated_at';
+    let pagination: { page: number; pageSize: number; total: number; totalPages: number } | undefined;
+    let rowsQ = this.supabase.from('user_complaints').select(cols).order('created_at', { ascending: false });
+    if (pageReq) {
+      const totalPages = Math.max(1, Math.ceil(totalCount / pageReq.pageSize));
+      const page = Math.min(pageReq.page, totalPages);
+      const start = (page - 1) * pageReq.pageSize;
+      rowsQ = rowsQ.range(start, start + pageReq.pageSize - 1);
+      pagination = { page, pageSize: pageReq.pageSize, total: totalCount, totalPages };
+    }
+    let { data: tableRows, error } = await rowsQ;
+    if (error) {
+      // Older databases may lack some optional columns: fall back to select('*')
+      let fb = this.supabase.from('user_complaints').select('*').order('created_at', { ascending: false });
+      if (pagination) {
+        const start = (pagination.page - 1) * pagination.pageSize;
+        fb = fb.range(start, start + pagination.pageSize - 1);
+      }
+      ({ data: tableRows, error } = await fb);
+    }
     if (error) {
       this.logger.error(`Failed to query user_complaints: ${error.message}`);
     }
 
-    const allRows = ((tableRows || []) as any[]).sort(
-      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
-    );
-    const openCount = allRows.filter((r) => (r.status || 'open') === 'open').length;
-    const resolvedCount = allRows.filter((r) => r.status === 'resolved').length;
-
-    // Page first, then look up only the profiles shown on this page (previously the whole
-    // profiles table was downloaded on every request just to show names).
-    const paged = pageReq ? paginateArray(allRows, pageReq) : { items: allRows, pagination: undefined };
+    const paged = { items: (tableRows || []) as any[], pagination };
     const profileMap = await this.fetchDisplayProfiles(paged.items.map((r) => r.user_id));
 
     const complaints = paged.items
@@ -4284,7 +4634,7 @@ export class AuthService {
 
     return {
       stats: {
-        total: allRows.length,
+        total: totalCount,
         open: openCount,
         resolved: resolvedCount,
       },
@@ -4991,27 +5341,25 @@ export class AuthService {
    */
   async getAdminPromotionsOverview() {
     try {
+      // Only user_id is needed for the distinct-user count (was user_id + created_at).
       const { data: comebackEvents } = await this.supabase
         .from('onboarding_events')
-        .select('user_id, created_at')
+        .select('user_id')
         .eq('event_name', 'user_comeback');
 
       const uniqueComebackUsers = new Set(comebackEvents?.map((e: any) => e.user_id) || []);
       const totalComebacks = uniqueComebackUsers.size;
 
-      let claimsList: any[] = [];
-      const { data: dbClaims, error: claimsErr } = await this.supabase
-        .from('promotion_claims')
-        .select('*')
-        .order('claimed_at', { ascending: false });
-
-      if (!claimsErr && dbClaims) {
-        claimsList = dbClaims;
-      }
-
-      const totalClaims = claimsList.length;
-      const starterProPassClaims = claimsList.filter((c) => c.reward_type === 'pro_pass').length;
-      const paidBonusClaims = claimsList.filter((c) => c.reward_type === 'bonus_minutes').length;
+      // Head-only count queries instead of downloading every claim row to count in Node.
+      const claimCount = () => this.supabase.from('promotion_claims').select('id', { count: 'exact', head: true });
+      const [allRes, proPassRes, bonusRes] = await Promise.all([
+        claimCount(),
+        claimCount().eq('reward_type', 'pro_pass'),
+        claimCount().eq('reward_type', 'bonus_minutes'),
+      ]);
+      const totalClaims = allRes.count || 0;
+      const starterProPassClaims = proPassRes.count || 0;
+      const paidBonusClaims = bonusRes.count || 0;
 
       const campaigns = [
         {
@@ -5049,7 +5397,7 @@ export class AuthService {
   async getAdminPromotionClaims(query: AdminPromotionClaimsQueryDto = {}) {
     try {
       const page = Math.max(1, Number(query.page || 1));
-      const limit = Math.min(100, Math.max(1, Number(query.limit || 25)));
+      const limit = Math.min(100, Math.max(1, Number((query as any).pageSize || query.limit || 10)));
       const offset = (page - 1) * limit;
 
       let claims: any[] = [];
@@ -5061,6 +5409,20 @@ export class AuthService {
 
       if (query.promoCode) {
         req = req.eq('promo_code', query.promoCode.trim().toLowerCase());
+      }
+
+      // Server-side search: promo code / tier on the claim, or the claimant's name / phone
+      const term = AuthService.searchTerm(query.search);
+      if (term) {
+        const { data: matchUsers } = await this.supabase
+          .from('profiles')
+          .select('id')
+          .or(`display_name.ilike.%${term}%,phone_number.ilike.%${term}%`)
+          .limit(500);
+        const ors = [`promo_code.ilike.%${term}%`, `original_tier.ilike.%${term}%`];
+        const ids = ((matchUsers || []) as any[]).map((u) => u.id);
+        if (ids.length) ors.push(`user_id.in.(${ids.join(',')})`);
+        req = req.or(ors.join(','));
       }
 
       req = req.order('claimed_at', { ascending: false }).range(offset, offset + limit - 1);
@@ -5104,16 +5466,18 @@ export class AuthService {
         };
       });
 
+      const totalPages = Math.max(1, Math.ceil(total / limit));
       return {
         data: enriched,
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit),
+        totalPages,
+        pagination: { page, pageSize: limit, total, totalPages },
       };
     } catch (err: any) {
       this.logger.error(`getAdminPromotionClaims error: ${err?.message}`);
-      return { data: [], total: 0, page: 1, limit: 25, totalPages: 0 };
+      return { data: [], total: 0, page: 1, limit: 10, totalPages: 1, pagination: { page: 1, pageSize: 10, total: 0, totalPages: 1 } };
     }
   }
 
@@ -5711,13 +6075,15 @@ export class AuthService {
   }
 
   /** Admin: campaigns with sent / clicked / practised-after-click counts (newest first). */
-  async getSmsCampaigns() {
-    if (!this.supabase) return { migrationApplied: false, campaigns: [] };
+  async getSmsCampaigns(req: PageRequest = readPage()) {
+    if (!this.supabase) return { migrationApplied: false, campaigns: [], pagination: pageWindow(req, 0).pagination };
+    const { count: total } = await this.supabase.from('sms_campaigns').select('id', { count: 'exact', head: true });
+    const win = pageWindow(req, total || 0);
     const { data: campaigns, error } = await this.supabase
       .from('sms_campaigns')
       .select('id, name, message, link_url, audience, recipients, sent, failed, created_at')
       .order('created_at', { ascending: false })
-      .limit(50);
+      .range(win.from, win.to);
     if (error) {
       if (AuthService.isMissingTableError(error)) return { migrationApplied: false, campaigns: [] };
       throw new InternalServerErrorException(error.message);
@@ -5741,6 +6107,7 @@ export class AuthService {
     }
     return {
       migrationApplied: true,
+      pagination: win.pagination,
       campaigns: (campaigns || []).map((c: any) => {
         const st = stats.get(c.id) || { clicked: 0, clicks: 0, practised: 0 };
         return {
@@ -5763,14 +6130,20 @@ export class AuthService {
   }
 
   /** Admin: per-recipient detail for one campaign (who clicked, when, practised after). */
-  async getSmsCampaignRecipients(campaignId: string) {
-    if (!this.supabase) return { recipients: [] };
+  async getSmsCampaignRecipients(campaignId: string, req: PageRequest = readPage()) {
+    if (!this.supabase) return { recipients: [], pagination: pageWindow(req, 0).pagination };
+    const { count: total } = await this.supabase
+      .from('sms_campaign_recipients')
+      .select('campaign_id', { count: 'exact', head: true })
+      .eq('campaign_id', campaignId);
+    const win = pageWindow(req, total || 0);
     const { data: rows, error } = await this.supabase
       .from('sms_campaign_recipients')
       .select('campaign_id, user_id, phone, sent_ok, click_count, first_clicked_at, last_clicked_at')
       .eq('campaign_id', campaignId)
       .order('first_clicked_at', { ascending: false, nullsFirst: false })
-      .limit(5000);
+      .order('phone', { ascending: true })
+      .range(win.from, win.to);
     if (error) throw new InternalServerErrorException(error.message);
     const list = (rows || []) as any[];
     const userIds = [...new Set(list.map((r) => r.user_id).filter(Boolean))] as string[];
@@ -5784,6 +6157,7 @@ export class AuthService {
     }
     const practised = await this.practisedAfterClick(list.filter((r) => r.first_clicked_at));
     return {
+      pagination: win.pagination,
       recipients: list.map((r) => ({
         userId: r.user_id,
         name: (r.user_id && names.get(r.user_id)) || null,

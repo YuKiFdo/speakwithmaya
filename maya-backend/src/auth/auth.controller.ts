@@ -19,7 +19,7 @@ import { AuthService, type UserProfileData } from './auth.service.js';
 import { AuthGuard } from './guards/auth.guard.js';
 import { AdminGuard } from './guards/admin.guard.js';
 import { GetUser } from './decorators/get-user.decorator.js';
-import { parsePageRequest } from '../common/pagination.js';
+import { paginateArray, parsePageRequest, readPage } from '../common/pagination.js';
 
 const backgroundLogger = new Logger('AuthControllerBackground');
 
@@ -203,6 +203,22 @@ export class AuthController {
   }
 
   /**
+   * Admin: Lightweight list of users with a phone number, for the SMS broadcast recipient
+   * picker. Declared before admin/users/:id so the path is not captured as an id.
+   */
+  @Get('admin/users/stats')
+  @UseGuards(AdminGuard)
+  async getAdminUsersStats() {
+    return this.authService.getAdminUsersStats();
+  }
+
+  @Get('admin/users/sms-recipients')
+  @UseGuards(AdminGuard)
+  async getAdminSmsRecipients() {
+    return this.authService.getAdminSmsRecipients();
+  }
+
+  /**
    * Admin: Get comprehensive personalized user profile with sessions and learning stats
    */
   @Get('admin/users/:id')
@@ -266,8 +282,12 @@ export class AuthController {
    */
   @Get('admin/test-accounts')
   @UseGuards(AdminGuard)
-  async getTestAccounts() {
-    return this.authService.getTestAccounts();
+  async getTestAccounts(@Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    const all = await this.authService.getTestAccounts();
+    // Without ?page the plain array is returned (older clients); with it, one server page
+    if (page === undefined) return all;
+    const paged = paginateArray(all, readPage(page, pageSize));
+    return { items: paged.items, pagination: paged.pagination };
   }
 
   /**
@@ -330,9 +350,16 @@ export class AuthController {
    */
   @Get('admin/complaints')
   @UseGuards(AdminGuard)
-  async getAdminComplaints(@Query('page') page?: string, @Query('limit') limit?: string) {
-    // Paging happens in the service so profiles are fetched only for the visible rows
-    return this.authService.getAdminComplaints(parsePageRequest(page, limit));
+  async getAdminComplaints(
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('sort') sort?: string,
+  ) {
+    // Filtering, search, sort and paging all run in the database (default 10 per page)
+    return this.authService.getAdminComplaintsPage(readPage(page, pageSize, limit), { status, search, sort });
   }
 
   /**
@@ -362,9 +389,17 @@ export class AuthController {
    */
   @Get('admin/session-reviews')
   @UseGuards(AdminGuard)
-  async getAdminSessionReviews(@Query('page') page?: string, @Query('limit') limit?: string) {
-    // Paging happens in the service so profiles are fetched only for the visible rows
-    return this.authService.getAdminSessionReviews(parsePageRequest(page, limit));
+  async getAdminSessionReviews(
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('limit') limit?: string,
+    @Query('star') star?: string,
+    @Query('content') content?: string,
+    @Query('search') search?: string,
+    @Query('sort') sort?: string,
+  ) {
+    // Filtering, search, sort and paging all run in the database (default 10 per page)
+    return this.authService.getAdminSessionReviewsPage(readPage(page, pageSize, limit), { star, content, search, sort });
   }
 
   /**
@@ -520,8 +555,8 @@ export class AuthController {
    */
   @Get('admin/sms-campaigns')
   @UseGuards(AdminGuard)
-  async getSmsCampaigns() {
-    return this.authService.getSmsCampaigns();
+  async getSmsCampaigns(@Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.authService.getSmsCampaigns(readPage(page, pageSize));
   }
 
   /**
@@ -529,7 +564,11 @@ export class AuthController {
    */
   @Get('admin/sms-campaigns/:id')
   @UseGuards(AdminGuard)
-  async getSmsCampaignRecipients(@Param('id') id: string) {
-    return this.authService.getSmsCampaignRecipients(id);
+  async getSmsCampaignRecipients(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.authService.getSmsCampaignRecipients(id, readPage(page, pageSize));
   }
 }

@@ -248,6 +248,10 @@ export class AdminUsersQueryDto {
   @IsOptional()
   @IsString()
   page?: string;
+
+  @IsOptional()
+  @IsString()
+  pageSize?: string;
 }
 
 export class AdminUpdateUserDto {
@@ -493,6 +497,9 @@ export class AdminPromotionClaimsQueryDto {
 
   @IsOptional()
   limit?: number;
+
+  @IsOptional()
+  pageSize?: number;
 }
 
 export class CreatePromotionCampaignDto {

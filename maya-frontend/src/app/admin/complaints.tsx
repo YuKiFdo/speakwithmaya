@@ -16,6 +16,8 @@ import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { supabase } from '@/services/supabase';
+import { AdminPagination } from '@/components/admin/AdminPagination';
+import { useServerPaging } from '@/hooks/useServerPaging';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminTableSkeleton } from '@/components/ui/skeleton';
@@ -401,9 +403,26 @@ export default function AdminComplaintsScreen() {
   const [contentFilter, setContentFilter] = useState<ContentFilter>('ALL');
   const [starFilter, setStarFilter] = useState<StarFilter>('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('newest');
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  // "Show more" paging for complaints; resets automatically when filters/search/sort change
-  const [complaintsPaging, setComplaintsPaging] = useState({ key: '', count: PAGE_SIZE });
+  // Server-side paging, filtering, search and sort (default 10 per page)
+  const [debouncedReviewSearch, setDebouncedReviewSearch] = useState('');
+  const [debouncedComplaintSearch, setDebouncedComplaintSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedReviewSearch(reviewSearch.trim()), 350);
+    return () => clearTimeout(t);
+  }, [reviewSearch]);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedComplaintSearch(complaintSearch.trim()), 350);
+    return () => clearTimeout(t);
+  }, [complaintSearch]);
+  const reviewsPaging = useServerPaging(`${debouncedReviewSearch}|${contentFilter}|${starFilter}|${sortKey}`);
+  const complaintsPaging = useServerPaging(`${debouncedComplaintSearch}|${complaintFilter}|${complaintSort}`);
+  const [reviewStats, setReviewStats] = useState<any>(null);
+  const [complaintStats, setComplaintStats] = useState<{ total: number; open: number; resolved: number; oldestOpenAt: string | null }>({
+    total: 0,
+    open: 0,
+    resolved: 0,
+    oldestOpenAt: null,
+  });
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   /* ------------------------------- Data layer ------------------------------ */
@@ -412,89 +431,73 @@ export default function AdminComplaintsScreen() {
     setIsComplaintsLoading(true);
     setComplaintsError(null);
     try {
-      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/complaints`, { headers: adminHeaders() });
+      const qs = new URLSearchParams({
+        page: String(complaintsPaging.page),
+        pageSize: String(complaintsPaging.pageSize),
+        sort: complaintSort,
+      });
+      if (complaintFilter !== 'ALL') qs.set('status', complaintFilter);
+      if (debouncedComplaintSearch) qs.set('search', debouncedComplaintSearch);
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/complaints?${qs.toString()}`, { headers: adminHeaders() });
       if (!res.ok) throw new Error(`Server responded with ${res.status}`);
       const data = await res.json();
       setComplaints(Array.isArray(data.complaints) ? data.complaints : []);
+      complaintsPaging.applyMeta(data.pagination);
+      if (data.stats) {
+        setComplaintStats({
+          total: data.stats.total || 0,
+          open: data.stats.open || 0,
+          resolved: data.stats.resolved || 0,
+          oldestOpenAt: data.stats.oldestOpenAt || null,
+        });
+      }
     } catch (err: any) {
       console.warn('[AdminComplaints] Failed to load complaints:', err);
       setComplaintsError(err?.message || 'Failed to load complaints.');
     } finally {
       setIsComplaintsLoading(false);
     }
-  }, []);
+  }, [complaintsPaging.page, complaintsPaging.pageSize, complaintSort, complaintFilter, debouncedComplaintSearch]);
 
   const fetchReviews = useCallback(async () => {
     setIsReviewsLoading(true);
     try {
-      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/session-reviews`, { headers: adminHeaders() });
+      const qs = new URLSearchParams({
+        page: String(reviewsPaging.page),
+        pageSize: String(reviewsPaging.pageSize),
+        sort: sortKey,
+      });
+      if (starFilter !== 'ALL') qs.set('star', String(starFilter));
+      if (contentFilter !== 'ALL') qs.set('content', contentFilter);
+      if (debouncedReviewSearch) qs.set('search', debouncedReviewSearch);
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/session-reviews?${qs.toString()}`, {
+        headers: adminHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.reviews)) setReviews(data.reviews);
-        setIsReviewsLoading(false);
-        return;
-      }
-    } catch {
-      // fall through to Supabase fallback
-    }
-
-    try {
-      if (supabase) {
-        const [{ data: sessionRows }, { data: profiles }] = await Promise.all([
-          supabase
-            .from('sessions')
-            .select('id, user_id, topic, status, duration_seconds, overall_score, user_rating, user_feedback, summary, created_at, start_time')
-            .not('user_rating', 'is', null)
-            .order('created_at', { ascending: false }),
-          supabase.from('profiles').select('*'),
-        ]);
-
-        const profileMap = new Map<string, any>();
-        for (const p of profiles || []) profileMap.set(p.id, p);
-
-        const items: AdminSessionReviewItem[] = (sessionRows || []).map((row: any) => {
-          const prof = row.user_id ? profileMap.get(row.user_id) : null;
-          const feedback = row.user_feedback ? String(row.user_feedback).trim() : null;
-          return {
-            id: row.id,
-            sessionId: row.id,
-            userId: row.user_id,
-            displayName: prof?.display_name || 'Anonymous Student',
-            phoneNumber: prof?.phone_number || 'No phone',
-            email: prof?.email || null,
-            avatarUrl: prof?.avatar_url || null,
-            planTier: prof?.plan_tier || 'starter',
-            level: prof?.level || 'Intermediate',
-            topic: row.topic || 'Speaking Practice',
-            durationSeconds: row.duration_seconds || 0,
-            overallScore: row.overall_score || 0,
-            rating: Number(row.user_rating) || 5,
-            feedback: feedback && feedback.length > 0 ? feedback : null,
-            createdAt: row.created_at || row.start_time || new Date().toISOString(),
-          };
-        });
-        setReviews(items);
+        reviewsPaging.applyMeta(data.pagination);
+        if (data.stats) setReviewStats(data.stats);
       }
     } catch (err) {
-      console.warn('[AdminComplaints] Failed to load session reviews via fallback:', err);
+      console.warn('[AdminComplaints] Failed to load session reviews:', err);
     } finally {
       setIsReviewsLoading(false);
     }
-  }, []);
+  }, [reviewsPaging.page, reviewsPaging.pageSize, sortKey, starFilter, contentFilter, debouncedReviewSearch]);
 
   useEffect(() => {
     fetchComplaints();
+  }, [fetchComplaints]);
+
+  useEffect(() => {
     fetchReviews();
-  }, [fetchComplaints, fetchReviews]);
+  }, [fetchReviews]);
 
   useEffect(() => {
     setSidebarOpen(!isPhone);
   }, [isPhone]);
 
-  // Reset pagination whenever filters change
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [reviewSearch, contentFilter, starFilter, sortKey]);
 
   const handleRefresh = () => {
     fetchComplaints();
@@ -515,6 +518,7 @@ export default function AdminComplaintsScreen() {
         body: JSON.stringify({ status: nextStatus }),
       });
       if (!res.ok) throw new Error('failed');
+      fetchComplaints();
     } catch {
       // rollback
       setComplaints((prev) => prev.map((c) => (c.id === item.id ? { ...c, status: item.status } : c)));
@@ -538,7 +542,10 @@ export default function AdminComplaintsScreen() {
         method: 'DELETE',
         headers: adminHeaders(),
       });
-      if (res.ok) setComplaints((prev) => prev.filter((c) => c.id !== item.id));
+      if (res.ok) {
+        setComplaints((prev) => prev.filter((c) => c.id !== item.id));
+        fetchComplaints();
+      }
     } catch {}
   };
 
@@ -560,6 +567,7 @@ export default function AdminComplaintsScreen() {
       });
       if (res.ok) {
         setReviews((prev) => prev.filter((r) => r.id !== item.id));
+        fetchReviews();
         return;
       }
     } catch {}
@@ -575,100 +583,45 @@ export default function AdminComplaintsScreen() {
   /* ------------------------------ Derived: reviews ------------------------- */
 
   const rv = useMemo(() => {
-    const total = reviews.length;
-    const starCounts: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
-    let withComment = 0;
-    for (const r of reviews) {
-      const st = Math.min(5, Math.max(1, Math.round(r.rating)));
-      starCounts[st] += 1;
-      if (r.feedback) withComment += 1;
-    }
-    const avgRating = avg(reviews.map((r) => r.rating));
-    const positive = starCounts[5] + starCounts[4];
-    const neutral = starCounts[3];
-    const negative = starCounts[2] + starCounts[1];
-
-    const now = new Date();
-    const days: Array<{ label: string; full: string; key: string; count: number; avg: number }> = [];
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(now.getDate() - i);
-      days.push({
-        key: dayKey(d),
-        label: `${d.getDate()}/${d.getMonth() + 1}`,
-        full: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        count: 0,
-        avg: 0,
-      });
-    }
-    const sums: Record<string, number> = {};
-    for (const r of reviews) {
-      const k = dayKey(new Date(r.createdAt));
-      const slot = days.find((x) => x.key === k);
-      if (slot) {
-        slot.count += 1;
-        sums[k] = (sums[k] || 0) + r.rating;
-      }
-    }
-    days.forEach((d) => (d.avg = d.count ? sums[d.key] / d.count : 0));
-
-    const last7 = reviews.filter((r) => Date.now() - new Date(r.createdAt).getTime() < 7 * 86400000);
-    const prev7 = reviews.filter((r) => {
-      const age = Date.now() - new Date(r.createdAt).getTime();
-      return age >= 7 * 86400000 && age < 14 * 86400000;
+    const st = reviewStats || {};
+    const total: number = st.totalReviews || 0;
+    const starCounts: Record<number, number> = {
+      5: st.starCounts?.[5] || 0,
+      4: st.starCounts?.[4] || 0,
+      3: st.starCounts?.[3] || 0,
+      2: st.starCounts?.[2] || 0,
+      1: st.starCounts?.[1] || 0,
+    };
+    const withComment: number = st.commentsCount || 0;
+    const days = ((st.days || []) as Array<{ day: string; count: number; avg: number }>).map((d) => {
+      const dt = new Date(`${d.day}T12:00:00`);
+      return {
+        key: d.day,
+        label: `${dt.getDate()}/${dt.getMonth() + 1}`,
+        full: dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        count: d.count,
+        avg: d.avg,
+      };
     });
-    const avgDelta = last7.length && prev7.length ? avg(last7.map((r) => r.rating)) - avg(prev7.map((r) => r.rating)) : null;
-
-    const attention = reviews.filter((r) => Math.round(r.rating) <= 2).length;
-
     return {
       total,
       starCounts,
       withComment,
       withoutComment: total - withComment,
-      avgRating,
-      positive,
-      neutral,
-      negative,
+      avgRating: st.avgRating || 0,
+      positive: starCounts[5] + starCounts[4],
+      neutral: starCounts[3],
+      negative: starCounts[2] + starCounts[1],
       days,
-      last7Count: last7.length,
-      avgDelta,
-      attention,
+      last7Count: st.last7Count || 0,
+      avgDelta: st.avgDelta ?? null,
+      attention: starCounts[2] + starCounts[1],
       commentRate: total ? (withComment / total) * 100 : 0,
     };
-  }, [reviews]);
+  }, [reviewStats]);
 
-  const filteredReviews = useMemo(() => {
-    const q = reviewSearch.toLowerCase().trim();
-    const list = reviews.filter((r) => {
-      if (starFilter !== 'ALL' && Math.round(r.rating) !== starFilter) return false;
-      if (contentFilter === 'WITH_COMMENT' && !r.feedback) return false;
-      if (contentFilter === 'RATING_ONLY' && r.feedback) return false;
-      if (q) {
-        return (
-          (r.displayName || '').toLowerCase().includes(q) ||
-          (r.phoneNumber || '').toLowerCase().includes(q) ||
-          (r.topic || '').toLowerCase().includes(q) ||
-          (r.feedback || '').toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-    const t = (r: AdminSessionReviewItem) => new Date(r.createdAt).getTime();
-    list.sort((a, b) => {
-      switch (sortKey) {
-        case 'oldest':
-          return t(a) - t(b);
-        case 'highest':
-          return b.rating - a.rating || t(b) - t(a);
-        case 'lowest':
-          return a.rating - b.rating || t(b) - t(a);
-        default:
-          return t(b) - t(a);
-      }
-    });
-    return list;
-  }, [reviews, starFilter, contentFilter, reviewSearch, sortKey]);
+  // The server already filtered, sorted and paged these
+  const filteredReviews = reviews;
 
   const activeReviewFilters =
     (starFilter !== 'ALL' ? 1 : 0) + (contentFilter !== 'ALL' ? 1 : 0) + (reviewSearch.trim() ? 1 : 0);
@@ -682,49 +635,18 @@ export default function AdminComplaintsScreen() {
   /* ---------------------------- Derived: complaints ------------------------ */
 
   const cp = useMemo(() => {
-    const total = complaints.length;
-    const open = complaints.filter((c) => c.status !== 'resolved').length;
-    const resolved = total - open;
-    const oldestOpen = complaints
-      .filter((c) => c.status !== 'resolved' && c.createdAt)
-      .sort((a, b) => new Date(a.createdAt as any).getTime() - new Date(b.createdAt as any).getTime())[0];
+    const { total, open, resolved, oldestOpenAt } = complaintStats;
     return {
       total,
       open,
       resolved,
       rate: total ? (resolved / total) * 100 : 0,
-      oldestOpen,
+      oldestOpen: oldestOpenAt ? { createdAt: oldestOpenAt } : undefined,
     };
-  }, [complaints]);
+  }, [complaintStats]);
 
-  const filteredComplaints = useMemo(() => {
-    const q = complaintSearch.toLowerCase().trim();
-    const list = complaints.filter((c) => {
-      if (complaintFilter !== 'ALL') {
-        const isResolved = c.status === 'resolved';
-        if (complaintFilter === 'resolved' && !isResolved) return false;
-        if (complaintFilter === 'open' && isResolved) return false;
-      }
-      if (q) {
-        return (
-          (c.displayName || '').toLowerCase().includes(q) ||
-          (c.phoneNumber || '').toLowerCase().includes(q) ||
-          (c.email || '').toLowerCase().includes(q) ||
-          (c.message || '').toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-    const t = (c: AdminComplaintItem) => (c.createdAt ? new Date(c.createdAt as any).getTime() : 0);
-    list.sort((a, b) => (complaintSort === 'newest' ? t(b) - t(a) : t(a) - t(b)));
-    return list;
-  }, [complaints, complaintFilter, complaintSearch, complaintSort]);
-
-  const complaintsFilterKey = `${complaintFilter}|${complaintSearch}|${complaintSort}`;
-  const complaintsVisibleCount =
-    complaintsPaging.key === complaintsFilterKey ? complaintsPaging.count : PAGE_SIZE;
-  const showMoreComplaints = () =>
-    setComplaintsPaging({ key: complaintsFilterKey, count: complaintsVisibleCount + PAGE_SIZE });
+  // The server already filtered, sorted and paged these
+  const filteredComplaints = complaints;
 
   /* --------------------------------- Renders ------------------------------- */
 
@@ -747,7 +669,7 @@ export default function AdminComplaintsScreen() {
   );
 
   const renderReviews = () => {
-    const shown = filteredReviews.slice(0, visibleCount);
+    const shown = filteredReviews;
     const pct = (n: number) => (rv.total ? Math.round((n / rv.total) * 100) : 0);
 
     return (
@@ -896,15 +818,15 @@ export default function AdminComplaintsScreen() {
           <View style={s.listHeader}>
             <Text style={s.listTitle}>Student reviews</Text>
             <Text style={s.listSub}>
-              Showing {Math.min(visibleCount, filteredReviews.length)} of {filteredReviews.length}
-              {filteredReviews.length !== reviews.length ? ` (filtered from ${reviews.length})` : ''}
+              {reviewsPaging.meta.total} matching
+              {reviewsPaging.meta.total !== rv.total ? ` (of ${rv.total} total)` : ''}
             </Text>
           </View>
 
           {isReviewsLoading && reviews.length === 0 ? (
             <AdminTableSkeleton rows={5} />
           ) : filteredReviews.length === 0 ? (
-            reviews.length === 0 ? (
+            rv.total === 0 ? (
               <EmptyState icon="star" title="No reviews yet" text="When students rate their sessions, their ratings and comments will appear here." />
             ) : (
               <EmptyState
@@ -986,14 +908,16 @@ export default function AdminComplaintsScreen() {
                 );
               })}
 
-              {visibleCount < filteredReviews.length ? (
-                <Pressable onPress={() => setVisibleCount((v) => v + PAGE_SIZE)} style={s.moreBtn}>
-                  <Text style={s.moreBtnText}>
-                    Show {Math.min(PAGE_SIZE, filteredReviews.length - visibleCount)} more
-                  </Text>
-                  <Feather name="chevron-down" size={14} color={C.teal} />
-                </Pressable>
-              ) : null}
+              <AdminPagination
+                page={reviewsPaging.page}
+                pageSize={reviewsPaging.pageSize}
+                total={reviewsPaging.meta.total}
+                totalPages={reviewsPaging.meta.totalPages}
+                label="reviews"
+                disabled={isReviewsLoading}
+                onPageChange={reviewsPaging.setPage}
+                onPageSizeChange={reviewsPaging.setPageSize}
+              />
             </>
           )}
         </View>
@@ -1063,14 +987,15 @@ export default function AdminComplaintsScreen() {
         <View style={s.listHeader}>
           <Text style={s.listTitle}>Complaints & inquiries</Text>
           <Text style={s.listSub}>
-            Showing {filteredComplaints.length} of {complaints.length}
+            {complaintsPaging.meta.total} matching
+            {complaintsPaging.meta.total !== cp.total ? ` (of ${cp.total} total)` : ''}
           </Text>
         </View>
 
         {isComplaintsLoading && complaints.length === 0 ? (
           <AdminTableSkeleton rows={5} />
         ) : filteredComplaints.length === 0 ? (
-          complaints.length === 0 ? (
+          cp.total === 0 ? (
             <EmptyState icon="message-square" title="No complaints yet" text="When students send complaints or feedback from the Account screen, they will appear here." />
           ) : (
             <EmptyState
@@ -1088,7 +1013,7 @@ export default function AdminComplaintsScreen() {
           )
         ) : (
           <>
-          {filteredComplaints.slice(0, complaintsVisibleCount).map((c) => {
+          {filteredComplaints.map((c) => {
             const isResolved = c.status === 'resolved';
             return (
               <View key={c.id} style={[s.reviewRow, { borderLeftColor: isResolved ? C.green : C.red }]}>
@@ -1158,14 +1083,16 @@ export default function AdminComplaintsScreen() {
             );
           })}
 
-          {complaintsVisibleCount < filteredComplaints.length ? (
-            <Pressable onPress={showMoreComplaints} style={s.moreBtn}>
-              <Text style={s.moreBtnText}>
-                Show {Math.min(PAGE_SIZE, filteredComplaints.length - complaintsVisibleCount)} more
-              </Text>
-              <Feather name="chevron-down" size={14} color={C.teal} />
-            </Pressable>
-          ) : null}
+          <AdminPagination
+            page={complaintsPaging.page}
+            pageSize={complaintsPaging.pageSize}
+            total={complaintsPaging.meta.total}
+            totalPages={complaintsPaging.meta.totalPages}
+            label="complaints"
+            disabled={isComplaintsLoading}
+            onPageChange={complaintsPaging.setPage}
+            onPageSizeChange={complaintsPaging.setPageSize}
+          />
           </>
         )}
       </View>

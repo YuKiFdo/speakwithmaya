@@ -70,3 +70,27 @@ export function computeStreakBonus(
   const bonusXp = Math.min(rules.maxPerSession, rewardedTurns * rules.xpPerTurn);
   return { bonusXp, longestStreak: longest, streakTurns: rewardedTurns };
 }
+
+/**
+ * Validates the streak bonus the call screen showed live. Accepted only up to what the stored
+ * transcript allows: at most `xpPerTurn` for every real-speech learner turn after the first
+ * (minStreak - 1), rounded to whole streak turns, and never above `maxPerSession`.
+ */
+export function acceptClientStreakBonus(
+  clientBonusXp: number | undefined,
+  turns: XpTurn[] | undefined,
+  isIntroCall: boolean,
+  rules = STREAK_RULES,
+): number {
+  const claimed = Math.floor(Number(clientBonusXp) || 0);
+  if (isIntroCall || claimed <= 0 || !Array.isArray(turns)) return 0;
+  const realTurns = turns.filter((t) => {
+    if (t.role !== 'user') return false;
+    const text = (t.text || '').trim();
+    return text.split(/\s+/).filter(Boolean).length >= rules.minWords && !text.startsWith('(');
+  }).length;
+  const possibleTurns = Math.max(0, realTurns - (rules.minStreak - 1));
+  const maxXp = Math.min(rules.maxPerSession, possibleTurns * rules.xpPerTurn);
+  const wholeTurns = Math.floor(claimed / rules.xpPerTurn) * rules.xpPerTurn;
+  return Math.max(0, Math.min(wholeTurns, maxXp));
+}

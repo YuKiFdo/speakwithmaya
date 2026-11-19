@@ -214,6 +214,7 @@ class PromotionsApi {
     if (query.search) params.set('search', query.search);
     if (query.page) params.set('page', String(query.page));
     if (query.limit) params.set('limit', String(query.limit));
+    if ((query as any).pageSize) params.set('pageSize', String((query as any).pageSize));
 
     const res = await fetch(`${this.baseUrl}/v1/admin/promotions/claims?${params.toString()}`, {
       headers: this.getAdminHeaders(),

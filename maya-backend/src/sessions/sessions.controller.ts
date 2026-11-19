@@ -221,7 +221,7 @@ export class SessionsController {
   @UseGuards(AdminGuard)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async getUsage(@Query() query: QueryUsageDto) {
-    return this.sessionsService.getUsageData(query);
+    return this.sessionsService.getUsagePage(query);
   }
 
   @Get('admin/usage/sessions/:id')

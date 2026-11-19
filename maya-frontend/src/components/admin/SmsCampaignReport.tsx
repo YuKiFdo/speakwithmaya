@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView } from
 import { Feather } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { getBackendBaseUrl } from '@/utils/backend-url';
+import { AdminPagination } from '@/components/admin/AdminPagination';
+import { useServerPaging } from '@/hooks/useServerPaging';
 
 interface Campaign {
   id: string;
@@ -45,42 +47,61 @@ export function SmsCampaignReport({ authHeaders, refreshKey }: { authHeaders: ()
   const [openId, setOpenId] = useState<string | null>(null);
   const [recipients, setRecipients] = useState<Recipient[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Server-side paging (default 10): campaigns, and recipients of the expanded campaign
+  const campaignPaging = useServerPaging('');
+  const recipientPaging = useServerPaging(openId || '');
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/sms-campaigns`, { headers: authHeaders() });
+      const qs = new URLSearchParams({ page: String(campaignPaging.page), pageSize: String(campaignPaging.pageSize) });
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/sms-campaigns?${qs.toString()}`, { headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || 'Could not load campaigns');
       setMigrationApplied(data.migrationApplied !== false);
       setCampaigns(data.campaigns || []);
+      campaignPaging.applyMeta(data.pagination);
     } catch (e: any) {
       setError(e?.message || 'Could not load campaigns');
     } finally {
       setLoading(false);
     }
-  }, [authHeaders]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authHeaders, campaignPaging.page, campaignPaging.pageSize]);
 
   useEffect(() => {
     void load();
   }, [load, refreshKey]);
 
-  const toggle = async (id: string) => {
-    if (openId === id) {
-      setOpenId(null);
-      return;
-    }
-    setOpenId(id);
+  const toggle = (id: string) => {
     setRecipients(null);
-    try {
-      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/sms-campaigns/${id}`, { headers: authHeaders() });
-      const data = await res.json();
-      setRecipients(res.ok ? data.recipients || [] : []);
-    } catch {
-      setRecipients([]);
-    }
+    setOpenId((cur) => (cur === id ? null : id));
   };
+
+  // Load one page of recipients for the expanded campaign
+  useEffect(() => {
+    if (!openId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const qs = new URLSearchParams({ page: String(recipientPaging.page), pageSize: String(recipientPaging.pageSize) });
+        const res = await fetch(`${getBackendBaseUrl()}/v1/admin/sms-campaigns/${openId}?${qs.toString()}`, {
+          headers: authHeaders(),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        setRecipients(res.ok ? data.recipients || [] : []);
+        if (res.ok) recipientPaging.applyMeta(data.pagination);
+      } catch {
+        if (!cancelled) setRecipients([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId, recipientPaging.page, recipientPaging.pageSize]);
 
   return (
     <View style={s.card}>
@@ -92,7 +113,7 @@ export function SmsCampaignReport({ authHeaders, refreshKey }: { authHeaders: ()
           <Text style={s.title}>3. Link Click Report</Text>
           <Text style={s.subtitle}>Broadcasts sent with a tracked link: who clicked and who came back to practise.</Text>
         </View>
-        <Pressable onPress={load} style={({ pressed }) => [s.refreshBtn, pressed && { opacity: 0.7 }]}>
+        <Pressable onPress={() => load()} style={({ pressed }) => [s.refreshBtn, pressed && { opacity: 0.7 }]}>
           <Feather name="refresh-cw" size={14} color="#0d9488" />
         </Pressable>
       </View>
@@ -149,11 +170,38 @@ export function SmsCampaignReport({ authHeaders, refreshKey }: { authHeaders: ()
                     ))}
                   </ScrollView>
                 )}
+                <AdminPagination
+                  page={recipientPaging.page}
+                  pageSize={recipientPaging.pageSize}
+                  total={recipientPaging.meta.total}
+                  totalPages={recipientPaging.meta.totalPages}
+                  label="recipients"
+                  disabled={recipients === null}
+                  onPageChange={(p) => {
+                    setRecipients(null);
+                    recipientPaging.setPage(p);
+                  }}
+                  onPageSizeChange={(sz) => {
+                    setRecipients(null);
+                    recipientPaging.setPageSize(sz);
+                  }}
+                />
               </View>
             )}
           </View>
         ))
       )}
+      {!loading && migrationApplied && !error && campaignPaging.meta.total > 0 ? (
+        <AdminPagination
+          page={campaignPaging.page}
+          pageSize={campaignPaging.pageSize}
+          total={campaignPaging.meta.total}
+          totalPages={campaignPaging.meta.totalPages}
+          label="campaigns"
+          onPageChange={campaignPaging.setPage}
+          onPageSizeChange={campaignPaging.setPageSize}
+        />
+      ) : null}
     </View>
   );
 }

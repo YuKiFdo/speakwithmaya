@@ -4,6 +4,7 @@ import { useOnboardingStore, OnboardingStore } from '@/services/store/onboarding
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { fetchPracticeSessionSummaries } from '@/services/supabase';
 import { authService } from '@/services/auth/auth-service';
+import { onStatsChanged } from '@/services/stats-events';
 
 export interface UserStats {
   // Quota & Minutes
@@ -395,6 +396,9 @@ export function useUserStats(): UserStats {
 
     return inFlightRefreshPromise;
   }, [store.accessToken, user?.id]);
+
+  // Re-fetch the moment the server confirms new XP (call finished), on every mounted screen
+  useEffect(() => onStatsChanged(() => void refreshStats()), [refreshStats]);
 
   useEffect(() => {
     // Initial fetch on mount

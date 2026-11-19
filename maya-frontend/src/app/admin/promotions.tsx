@@ -17,6 +17,7 @@ import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
+import { AdminPagination } from '@/components/admin/AdminPagination';
 import { AdminTableSkeleton, Skeleton } from '@/components/ui/skeleton';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { getBackendBaseUrl } from '@/utils/backend-url';
@@ -112,6 +113,8 @@ export default function AdminPromotionsScreen() {
   const [claims, setClaims] = useState<PromotionClaim[]>([]);
   const [totalClaims, setTotalClaims] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCampaign, setSelectedCampaign] = useState<string>('ALL');
 
@@ -176,8 +179,9 @@ export default function AdminPromotionsScreen() {
         promotionsApi.getAdminPromotionClaims({
           promoCode: selectedCampaign === 'ALL' ? undefined : selectedCampaign,
           page,
-          limit: PAGE_SIZE,
-        }),
+          pageSize,
+          search: debouncedSearch || undefined,
+        } as any),
         promotionsApi.getCampaigns().catch(() => []),
       ]);
 
@@ -193,7 +197,7 @@ export default function AdminPromotionsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [page, selectedCampaign]);
+  }, [page, pageSize, selectedCampaign, debouncedSearch]);
 
   useEffect(() => {
     fetchData();
@@ -291,7 +295,16 @@ export default function AdminPromotionsScreen() {
     });
   }, [claims, searchQuery]);
 
-  const totalPages = Math.max(1, Math.ceil(totalClaims / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalClaims / pageSize));
+
+  // Search runs on the server (debounced); reset to page 1 when it changes
+  useEffect(() => {
+    const h = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim());
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(h);
+  }, [searchQuery]);
 
   const formatDate = (isoString?: string) => {
     if (!isoString) return '—';
@@ -586,30 +599,20 @@ export default function AdminPromotionsScreen() {
                     })
                   )}
 
-                  {/* Pagination controls */}
-                  <View style={styles.paginationRow}>
-                    <Text style={styles.paginationInfo}>
-                      Showing {filteredClaims.length} of {totalClaims} total claims (Page {page} of {totalPages})
-                    </Text>
-
-                    <View style={styles.pageButtons}>
-                      <Pressable
-                        disabled={page <= 1}
-                        style={[styles.pageBtn, page <= 1 && styles.pageBtnDisabled]}
-                        onPress={() => setPage((p) => Math.max(1, p - 1))}
-                      >
-                        <Feather name="chevron-left" size={16} color={page <= 1 ? '#cbd5e1' : '#0f172a'} />
-                      </Pressable>
-
-                      <Pressable
-                        disabled={page >= totalPages}
-                        style={[styles.pageBtn, page >= totalPages && styles.pageBtnDisabled]}
-                        onPress={() => setPage((p) => Math.min(totalPages, p + 1))}
-                      >
-                        <Feather name="chevron-right" size={16} color={page >= totalPages ? '#cbd5e1' : '#0f172a'} />
-                      </Pressable>
-                    </View>
-                  </View>
+                  {/* Pagination controls (server-side) */}
+                  <AdminPagination
+                    page={page}
+                    pageSize={pageSize}
+                    total={totalClaims}
+                    totalPages={totalPages}
+                    label="claims"
+                    disabled={refreshing}
+                    onPageChange={setPage}
+                    onPageSizeChange={(size) => {
+                      setPageSize(size);
+                      setPage(1);
+                    }}
+                  />
                 </View>
               </>
             ) : (

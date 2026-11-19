@@ -25,8 +25,8 @@ import {
   AdminSubscriptionsList,
 } from '@/services/payment/payhere-types';
 import { AdminTableSkeleton, Skeleton } from '@/components/ui/skeleton';
-import { ShowMoreButton } from '@/components/admin/ShowMoreButton';
-import { useShowMore } from '@/hooks/useShowMore';
+import { AdminPagination } from '@/components/admin/AdminPagination';
+import { useServerPaging } from '@/hooks/useServerPaging';
 import { mayaAlert } from '@/components/ui/alert-modal';
 
 type AdminViewTab = 'subscriptions' | 'telco' | 'renewals' | 'topups';
@@ -58,11 +58,6 @@ export default function AdminSubscriptionsScreen() {
   const [statsLoaded, setStatsLoaded] = useState(false);
   // Lazy tab loading: only the active tab's list is fetched; other tabs show counts until opened
   const [tabCounts, setTabCounts] = useState<{ subscriptions: number; telco: number; renewals: number; topups: number } | null>(null);
-  const [loadedLists, setLoadedLists] = useState<Record<AdminSubscriptionsList, boolean>>({
-    subscriptions: false,
-    telco: false,
-    orders: false,
-  });
   const activeTabRef = useRef<AdminViewTab>('subscriptions');
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -104,6 +99,13 @@ export default function AdminSubscriptionsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'ALL' | 'ACTIVE' | 'PAST_DUE' | 'CANCELLED'>('ALL');
   const [selectedTier, setSelectedTier] = useState<string>('ALL');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+  // One pager for the visible tab; resets to page 1 on tab / filter / search change
+  const listPaging = useServerPaging(`${activeTab}|${debouncedSearch}|${selectedStatus}|${selectedTier}|${selectedTelcoStatus}`);
 
   // Payments History Modal
   const [activeSubForPayments, setActiveSubForPayments] = useState<{
@@ -120,29 +122,21 @@ export default function AdminSubscriptionsScreen() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [isReconciling, setIsReconciling] = useState(false);
 
-  // Loads stats + counts and ONLY the list for `list` (defaults to the active tab).
-  // After an action, other tabs' lists are marked stale and refetched when opened.
-  const loadData = async (list: AdminSubscriptionsList = listForTab(activeTabRef.current)) => {
+  // Loads stats + tab counts and ONE server-paged page of the active tab's list.
+  const loadData = async () => {
+    const tab = activeTab;
+    const { page, pageSize } = listPaging;
+    const search = debouncedSearch;
+    const status = tab === 'telco' ? selectedTelcoStatus : tab === 'subscriptions' ? selectedStatus : 'ALL';
+    const tier = tab === 'subscriptions' ? selectedTier : 'ALL';
     setIsLoading(true);
     try {
-      const res = await paymentApi.getAdminSubscriptions([list]);
-      const included = res.included;
-      if (!included) {
-        // Older backend without ?include support: it returned every list
-        setSubscriptions(res.subscriptions || []);
-        setTelcoSubscriptions(res.telcoSubscriptions || []);
-        setOrders(res.orders || []);
-        setLoadedLists({ subscriptions: true, telco: true, orders: true });
-      } else {
-        if (included.includes('subscriptions')) setSubscriptions(res.subscriptions || []);
-        if (included.includes('telco')) setTelcoSubscriptions(res.telcoSubscriptions || []);
-        if (included.includes('orders')) setOrders(res.orders || []);
-        setLoadedLists({
-          subscriptions: included.includes('subscriptions'),
-          telco: included.includes('telco'),
-          orders: included.includes('orders'),
-        });
-      }
+      const res = await paymentApi.getAdminSubscriptionsPage({ list: tab, page, pageSize, search, status, tier });
+      const items = res.items || [];
+      if (tab === 'subscriptions') setSubscriptions(items);
+      else if (tab === 'telco') setTelcoSubscriptions(items);
+      else setOrders(items);
+      listPaging.applyMeta(res.pagination);
       if (res.counts) setTabCounts(res.counts);
       if (res.stats) {
         setStatsLoaded(true);
@@ -184,14 +178,11 @@ export default function AdminSubscriptionsScreen() {
     }
   };
 
-  // Fetch the active tab's list on mount and the first time each tab is opened
+  // Server-side paging: refetch when the tab, page, page size, filters or search change
   useEffect(() => {
-    const list = listForTab(activeTab);
-    if (!loadedLists[list]) {
-      loadData(list);
-    }
+    loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [activeTab, listPaging.page, listPaging.pageSize, debouncedSearch, selectedStatus, selectedTier, selectedTelcoStatus]);
 
   // Filtered Subscriptions
   const filteredSubscriptions = useMemo(() => {
@@ -316,11 +307,6 @@ export default function AdminSubscriptionsScreen() {
     });
   }, [orders, searchQuery]);
 
-  // Client-side "show more" paging (resets when search/filters change)
-  const subsPaged = useShowMore(filteredSubscriptions, `${selectedStatus}|${selectedTier}|${searchQuery}`);
-  const telcoPaged = useShowMore(filteredTelcoSubscriptions, `${selectedTelcoStatus}|${searchQuery}`);
-  const renewalsPaged = useShowMore(renewalOrders, searchQuery);
-  const topUpsPaged = useShowMore(topUpOrders, searchQuery);
 
   const handleOpenPaymentsModal = async (target: {
     id: string;
@@ -567,7 +553,7 @@ export default function AdminSubscriptionsScreen() {
                     activeTab === 'subscriptions' && styles.tabSelectorItemTextActive,
                   ]}
                 >
-                  Card Subscriptions ({loadedLists.subscriptions || !tabCounts ? subscriptions.length : tabCounts.subscriptions})
+                  Card Subscriptions ({tabCounts ? tabCounts.subscriptions : subscriptions.length})
                 </Text>
               </Pressable>
 
@@ -586,7 +572,7 @@ export default function AdminSubscriptionsScreen() {
                     activeTab === 'telco' && styles.tabSelectorItemTextActive,
                   ]}
                 >
-                  Telco Subscribers ({loadedLists.telco || !tabCounts ? telcoSubscriptions.length : tabCounts.telco})
+                  Telco Subscribers ({tabCounts ? tabCounts.telco : telcoSubscriptions.length})
                 </Text>
               </Pressable>
 
@@ -605,7 +591,7 @@ export default function AdminSubscriptionsScreen() {
                     activeTab === 'renewals' && styles.tabSelectorItemTextActive,
                   ]}
                 >
-                  Renewal Run History ({loadedLists.orders || !tabCounts ? renewalOrders.length : tabCounts.renewals})
+                  Renewal Run History ({tabCounts ? tabCounts.renewals : renewalOrders.length})
                 </Text>
               </Pressable>
 
@@ -624,7 +610,7 @@ export default function AdminSubscriptionsScreen() {
                     activeTab === 'topups' && styles.tabSelectorItemTextActive,
                   ]}
                 >
-                  Extra Minutes Top-Ups ({loadedLists.orders || !tabCounts ? topUpOrders.length : tabCounts.topups})
+                  Extra Minutes Top-Ups ({tabCounts ? tabCounts.topups : topUpOrders.length})
                 </Text>
               </Pressable>
             </View>
@@ -986,7 +972,7 @@ export default function AdminSubscriptionsScreen() {
                   </View>
                 ) : (
                   <>
-                    {subsPaged.visible.map((sub, index) => {
+                    {filteredSubscriptions.map((sub, index) => {
                     const isPastDue = sub.status === 'PAST_DUE';
                     const isActive = sub.status === 'ACTIVE';
                     const isCancelled = sub.status === 'CANCELLED';
@@ -1195,7 +1181,16 @@ export default function AdminSubscriptionsScreen() {
                       </View>
                     );
                   })}
-                    <ShowMoreButton shown={subsPaged.visible.length} total={subsPaged.total} nextBatch={subsPaged.nextBatch} onPress={subsPaged.showMore} />
+                    <AdminPagination
+                      page={listPaging.page}
+                      pageSize={listPaging.pageSize}
+                      total={listPaging.meta.total}
+                      totalPages={listPaging.meta.totalPages}
+                      label="subscriptions"
+                      disabled={isLoading}
+                      onPageChange={listPaging.setPage}
+                      onPageSizeChange={listPaging.setPageSize}
+                    />
                   </>
                 )}
                   </View>
@@ -1234,7 +1229,7 @@ export default function AdminSubscriptionsScreen() {
                       </View>
                     ) : (
                       <>
-                        {telcoPaged.visible.map((tSub, index) => {
+                        {filteredTelcoSubscriptions.map((tSub, index) => {
                         const isActive = tSub.status === 'ACTIVE';
                         const isUpgraded = tSub.status === 'UPGRADED';
                         const isActionLoading = actionLoadingId === tSub.id;
@@ -1440,7 +1435,16 @@ export default function AdminSubscriptionsScreen() {
                           </View>
                         );
                       })}
-                        <ShowMoreButton shown={telcoPaged.visible.length} total={telcoPaged.total} nextBatch={telcoPaged.nextBatch} onPress={telcoPaged.showMore} />
+                        <AdminPagination
+                      page={listPaging.page}
+                      pageSize={listPaging.pageSize}
+                      total={listPaging.meta.total}
+                      totalPages={listPaging.meta.totalPages}
+                      label="telco subscribers"
+                      disabled={isLoading}
+                      onPageChange={listPaging.setPage}
+                      onPageSizeChange={listPaging.setPageSize}
+                    />
                       </>
                     )}
                   </View>
@@ -1477,7 +1481,7 @@ export default function AdminSubscriptionsScreen() {
                   </View>
                 ) : (
                   <>
-                    {renewalsPaged.visible.map((ord, index) => {
+                    {renewalOrders.map((ord, index) => {
                     const isSuccess = ord.status === 'completed';
                     const isFailed = ord.status === 'failed';
                     const cardNum = ord.raw_payload?.card_no || ord.raw_payload?.card_masked || '';
@@ -1659,7 +1663,16 @@ export default function AdminSubscriptionsScreen() {
                       </View>
                     );
                   })}
-                    <ShowMoreButton shown={renewalsPaged.visible.length} total={renewalsPaged.total} nextBatch={renewalsPaged.nextBatch} onPress={renewalsPaged.showMore} />
+                    <AdminPagination
+                      page={listPaging.page}
+                      pageSize={listPaging.pageSize}
+                      total={listPaging.meta.total}
+                      totalPages={listPaging.meta.totalPages}
+                      label="renewals"
+                      disabled={isLoading}
+                      onPageChange={listPaging.setPage}
+                      onPageSizeChange={listPaging.setPageSize}
+                    />
                   </>
                 )}
                   </View>
@@ -1697,7 +1710,7 @@ export default function AdminSubscriptionsScreen() {
                   </View>
                 ) : (
                   <>
-                    {topUpsPaged.visible.map((ord, index) => {
+                    {topUpOrders.map((ord, index) => {
                     const isSuccess = ord.status === 'completed';
                     const pkgId = ord.add_on_package_id || 'Top-Up';
                     const pkgBadgeColor =
@@ -1845,7 +1858,16 @@ export default function AdminSubscriptionsScreen() {
                       </View>
                     );
                   })}
-                    <ShowMoreButton shown={topUpsPaged.visible.length} total={topUpsPaged.total} nextBatch={topUpsPaged.nextBatch} onPress={topUpsPaged.showMore} />
+                    <AdminPagination
+                      page={listPaging.page}
+                      pageSize={listPaging.pageSize}
+                      total={listPaging.meta.total}
+                      totalPages={listPaging.meta.totalPages}
+                      label="top-ups"
+                      disabled={isLoading}
+                      onPageChange={listPaging.setPage}
+                      onPageSizeChange={listPaging.setPageSize}
+                    />
                   </>
                 )}
                   </View>

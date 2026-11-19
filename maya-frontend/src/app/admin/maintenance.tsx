@@ -179,7 +179,7 @@ export default function AdminMaintenanceScreen() {
   const fetchRegisteredUsers = useCallback(async () => {
     try {
       setIsLoadingUsers(true);
-      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/users?limit=1000`, {
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/users/sms-recipients`, {
         headers: getAuthHeaders(),
       });
       if (res.ok) {

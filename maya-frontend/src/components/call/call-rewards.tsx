@@ -32,6 +32,14 @@ const STREAK_MILESTONES = [3, 5, 10];
 const MILESTONE_FILL_MS = 900;
 /** Whole milestone: fill + card on screen. */
 const MILESTONE_MS = MILESTONE_FILL_MS + 1800;
+/** Fire milestones only: the fire shrinks and flies to Maya's avatar ... */
+const FIRE_FLY_MS = 650;
+/** ... stays there with the streak count ... */
+const FIRE_DOCK_MS = 2600;
+/** ... and fades away. */
+const FIRE_FADE_MS = 450;
+/** XP toast: pop in, count up, hold, fade (hidden between gains). */
+const XP_TOAST_HOLD_MS = 2200;
 
 export interface XpGain {
   id: number;
@@ -42,7 +50,14 @@ export interface Milestone {
   id: number;
   emoji: string;
   title: string;
+  /** Short count shown next to the fire once it docks at Maya's avatar (streaks). */
+  badge?: string;
 }
+
+const isFireMilestone = (m: Milestone | null) => m?.emoji === '\u{1F525}';
+/** How long a milestone stays active (fire milestones also fly to Maya and dock there). */
+const milestoneDuration = (m: Milestone) =>
+  isFireMilestone(m) ? MILESTONE_MS + FIRE_FLY_MS + FIRE_DOCK_MS + FIRE_FADE_MS : MILESTONE_MS;
 
 interface UseCallRewardsArgs {
   secondsElapsed: number;
@@ -76,9 +91,9 @@ export function useCallRewards(a: UseCallRewardsArgs) {
     setSessionXp((x) => x + amount);
     setGain({ id: idRef.current, amount });
   };
-  const queueMilestone = (emoji: string, title: string) => {
+  const queueMilestone = (emoji: string, title: string, badge?: string) => {
     idRef.current += 1;
-    queueRef.current.push({ id: idRef.current, emoji, title });
+    queueRef.current.push({ id: idRef.current, emoji, title, badge });
     setQueueTick((t) => t + 1);
   };
 
@@ -103,15 +118,18 @@ export function useCallRewards(a: UseCallRewardsArgs) {
     const usedHint = a.hintsUsedCount > hintsAtLastTurn.current;
     hintsAtLastTurn.current = a.hintsUsedCount;
     if (!a.streakEnabled) return;
+    // Same rule as the server (xp-rules.ts): a turn counts only with real speech
+    const text = (u.text || '').trim();
+    const isRealSpeech = text.split(/\s+/).filter(Boolean).length >= 2 && !text.startsWith('(');
 
     setStreak((prev) => {
-      const next = usedHint ? 0 : prev + 1;
+      const next = usedHint || !isRealSpeech ? 0 : prev + 1;
       if (next >= STREAK_MIN && bonusRef.current < STREAK_CAP) {
         bonusRef.current = Math.min(STREAK_CAP, bonusRef.current + STREAK_XP);
         addXp(STREAK_XP);
         rewardFeedback('streak', 'light');
       }
-      if (STREAK_MILESTONES.includes(next)) queueMilestone('\u{1F525}', `${next} in a row!`);
+      if (STREAK_MILESTONES.includes(next)) queueMilestone('\u{1F525}', `${next} in a row!`, `${next}`);
       return next;
     });
   }, [a.lastUserUtterance, a.hintsUsedCount, a.streakEnabled]);
@@ -165,7 +183,7 @@ export function useCallRewards(a: UseCallRewardsArgs) {
       hideTimerRef.current = setTimeout(() => {
         hideTimerRef.current = null;
         setMilestone(null);
-      }, MILESTONE_MS);
+      }, milestoneDuration(next));
     }, 500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -212,34 +230,103 @@ function useReduceMotion() {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Header HUD: XP counter with a flying "+N" and a bounce                     */
+/*  XP toast: hidden normally; on a gain it pops in, counts up, then fades    */
 /* -------------------------------------------------------------------------- */
 
-export function XpCounter({ sessionXp, gain }: { sessionXp: number; gain: XpGain | null }) {
-  const useNative = Platform.OS !== 'web';
+/**
+ * Shows only when XP is earned: pops in, counts old -> new total with a floating "+N",
+ * holds, then fades out until the next gain. While `busy` (a milestone / the fire is on
+ * screen) gains wait and are shown together afterwards, so the two never compete.
+ */
+export function XpCounter({ sessionXp, gain, busy = false }: { sessionXp: number; gain: XpGain | null; busy?: boolean }) {
   const reduceMotion = useReduceMotion();
-  const bounce = useRef(new Animated.Value(1)).current;
+  const show = useRef(new Animated.Value(0)).current; // 0 hidden -> 1 visible
   const fly = useRef(new Animated.Value(0)).current;
+  const [visible, setVisible] = useState(false);
+  const [shownXp, setShownXp] = useState(0);
   const [flyLabel, setFlyLabel] = useState<string | null>(null);
+  const pendingRef = useRef(0);
+  const lastGainIdRef = useRef<number | null>(null);
+  const shownTotalRef = useRef(0);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [tick, setTick] = useState(0);
 
+  // Collect gains (they may arrive while busy)
   useEffect(() => {
-    if (!gain) return;
-    setFlyLabel(`+${gain.amount}`);
-    fly.setValue(0);
-    bounce.setValue(reduceMotion ? 1 : 1.25);
-    Animated.parallel([
-      Animated.spring(bounce, { toValue: 1, tension: 180, friction: 6, useNativeDriver: useNative }),
-      Animated.timing(fly, { toValue: 1, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: useNative }),
-    ]).start();
-  }, [gain, bounce, fly, useNative, reduceMotion]);
+    if (!gain || gain.id === lastGainIdRef.current) return;
+    lastGainIdRef.current = gain.id;
+    pendingRef.current += gain.amount;
+    setTick((t) => t + 1);
+  }, [gain]);
 
-  if (sessionXp <= 0 && !gain) return null;
+  // Play when there is something pending and nothing else is on screen
+  useEffect(() => {
+    if (busy || pendingRef.current <= 0) return;
+    const amount = pendingRef.current;
+    pendingRef.current = 0;
+    const from = sessionXp - amount >= 0 ? sessionXp - amount : shownTotalRef.current;
+    const to = sessionXp;
+    shownTotalRef.current = to;
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+
+    setVisible(true);
+    setFlyLabel(`+${amount}`);
+    setShownXp(from);
+    fly.setValue(0);
+    Animated.spring(show, { toValue: 1, tension: 160, friction: 7, useNativeDriver: false }).start();
+
+    // Count up from -> to (about 600ms), with the "+N" rising and fading
+    const steps = reduceMotion ? 1 : Math.min(12, Math.max(1, to - from));
+    for (let i = 1; i <= steps; i++) {
+      timersRef.current.push(
+        setTimeout(() => setShownXp(Math.round(from + ((to - from) * i) / steps)), 150 + (i * 450) / steps),
+      );
+    }
+    Animated.timing(fly, { toValue: 1, duration: 1000, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+
+    // Hold, then fade away until the next gain
+    timersRef.current.push(
+      setTimeout(() => {
+        Animated.timing(show, { toValue: 0, duration: 450, easing: Easing.in(Easing.quad), useNativeDriver: false }).start(
+          ({ finished }) => finished && setVisible(false),
+        );
+      }, XP_TOAST_HOLD_MS),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, tick]);
+
+  // Something else took the stage mid-toast: hide at once
+  useEffect(() => {
+    if (!busy || !visible) return;
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    Animated.timing(show, { toValue: 0, duration: 200, useNativeDriver: false }).start(() => setVisible(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy]);
+
+  useEffect(() => () => timersRef.current.forEach(clearTimeout), []);
+
+  if (!visible) return null;
   return (
     <View style={styles.hudRow}>
-      <Animated.View style={[styles.xpPill, { transform: [{ scale: bounce }] }]} accessibilityLabel={`${sessionXp} XP this call`}>
+      <Animated.View
+        style={[
+          styles.xpPill,
+          {
+            opacity: show,
+            transform: [
+              { scale: show.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 1 : 0.6, 1] }) },
+              { translateY: show.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 0 : 6, 0] }) },
+            ],
+          },
+        ]}
+        accessibilityLiveRegion="polite"
+        accessibilityLabel={`${shownXp} XP this call`}
+      >
         <View style={styles.chipRow}>
           <ExpoImage source={STAR_ANIMATED} style={styles.chipIcon} contentFit="contain" autoplay />
-          <Text style={styles.xpText}>{sessionXp} XP</Text>
+          <Text style={styles.xpText}>{shownXp} XP</Text>
         </View>
       </Animated.View>
       {flyLabel && (
@@ -248,8 +335,8 @@ export function XpCounter({ sessionXp, gain }: { sessionXp: number; gain: XpGain
           style={[
             styles.flyText,
             {
-              opacity: fly.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 1, 0] }),
-              transform: [{ translateY: fly.interpolate({ inputRange: [0, 1], outputRange: [6, reduceMotion ? 6 : -18] }) }],
+              opacity: fly.interpolate({ inputRange: [0, 0.15, 0.7, 1], outputRange: [0, 1, 1, 0] }),
+              transform: [{ translateY: fly.interpolate({ inputRange: [0, 1], outputRange: [6, reduceMotion ? 6 : -16] }) }],
             },
           ]}
         >
@@ -292,20 +379,64 @@ export function StreakChip({ streak }: { streak: number }) {
 /*  Milestone moment: orange edge glow + big emoji, ~1.3s, full screen        */
 /* -------------------------------------------------------------------------- */
 
-export function MilestoneOverlay({ milestone }: { milestone: Milestone | null }) {
+type Rect = { x: number; y: number; width: number; height: number };
+const measure = (node: any): Promise<Rect | null> =>
+  new Promise((resolve) => {
+    if (!node?.measureInWindow) return resolve(null);
+    try {
+      node.measureInWindow((x: number, y: number, width: number, height: number) =>
+        resolve(width || height ? { x, y, width, height } : null),
+      );
+    } catch {
+      resolve(null);
+    }
+  });
+
+/** Docked fire size at Maya's avatar (the card fire is 96px). */
+const DOCK_SIZE = 30;
+
+/**
+ * Milestone moment. Phase 1: fiery edges fill up. Phase 2: the card bursts in.
+ * Fire milestones then: the edges, card and title fade, the fire alone shrinks and flies to
+ * Maya's avatar (`targetRef`), stays there with the streak count for a few seconds, and fades.
+ */
+export function MilestoneOverlay({
+  milestone,
+  targetRef,
+}: {
+  milestone: Milestone | null;
+  /** Maya's avatar in the header: where the fire flies to. */
+  targetRef?: React.RefObject<View | null>;
+}) {
   const useNative = Platform.OS !== 'web';
   const reduceMotion = useReduceMotion();
   const layer = useRef(new Animated.Value(0)).current;
   const fill = useRef(new Animated.Value(0)).current; // edges fill up 0 -> 1
   const scale = useRef(new Animated.Value(0)).current;
+  const chrome = useRef(new Animated.Value(1)).current; // edges + card background + title
+  const flyX = useRef(new Animated.Value(0)).current;
+  const flyY = useRef(new Animated.Value(0)).current;
+  const flyScale = useRef(new Animated.Value(1)).current;
+  const dock = useRef(new Animated.Value(0)).current; // docked count badge
+  const rootRef = useRef<View>(null);
+  const fireRef = useRef<View>(null);
   const [shown, setShown] = useState<Milestone | null>(null);
+  const [dockPos, setDockPos] = useState<{ left: number; top: number } | null>(null);
+  const flyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (flyTimerRef.current) clearTimeout(flyTimerRef.current);
     if (milestone) {
       setShown(milestone);
+      setDockPos(null);
       layer.setValue(1);
       fill.setValue(reduceMotion ? 1 : 0);
       scale.setValue(0);
+      chrome.setValue(1);
+      flyX.setValue(0);
+      flyY.setValue(0);
+      flyScale.setValue(1);
+      dock.setValue(0);
       Animated.sequence([
         // Phase 1: fiery glow climbs up the edges (charge sound plays alongside)
         Animated.timing(fill, {
@@ -317,34 +448,101 @@ export function MilestoneOverlay({ milestone }: { milestone: Milestone | null })
         // Phase 2: the card bursts in
         Animated.spring(scale, { toValue: 1, tension: 140, friction: 6, useNativeDriver: false }),
       ]).start();
+
+      if (isFireMilestone(milestone)) {
+        // Phase 3: everything but the fire fades; the fire flies to Maya and docks there
+        flyTimerRef.current = setTimeout(async () => {
+          const [root, fire, target] = await Promise.all([
+            measure(rootRef.current),
+            measure(fireRef.current),
+            measure(targetRef?.current),
+          ]);
+          Animated.timing(chrome, { toValue: 0, duration: 300, useNativeDriver: false }).start();
+          if (!root || !fire || !target) {
+            // Avatar not measurable (e.g. off screen): just fade out in place
+            Animated.timing(flyScale, { toValue: 0.4, duration: FIRE_FLY_MS, useNativeDriver: false }).start();
+            return;
+          }
+          const k = DOCK_SIZE / fire.width;
+          // Dock on the avatar's top-right corner
+          const tx = target.x + target.width - DOCK_SIZE * 0.55;
+          const ty = target.y - DOCK_SIZE * 0.35;
+          const dx = tx + DOCK_SIZE / 2 - (fire.x + fire.width / 2);
+          const dy = ty + DOCK_SIZE / 2 - (fire.y + fire.height / 2);
+          setDockPos({ left: tx - root.x + DOCK_SIZE - 4, top: ty - root.y + DOCK_SIZE * 0.55 });
+          Animated.sequence([
+            Animated.parallel([
+              Animated.timing(flyX, { toValue: dx, duration: FIRE_FLY_MS, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
+              Animated.timing(flyY, { toValue: dy, duration: FIRE_FLY_MS, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
+              Animated.timing(flyScale, { toValue: k, duration: FIRE_FLY_MS, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
+            ]),
+            // Little landing bounce + the count appears
+            Animated.parallel([
+              Animated.sequence([
+                Animated.timing(flyScale, { toValue: k * 1.25, duration: 140, useNativeDriver: false }),
+                Animated.spring(flyScale, { toValue: k, tension: 180, friction: 6, useNativeDriver: false }),
+              ]),
+              Animated.spring(dock, { toValue: 1, tension: 160, friction: 7, useNativeDriver: false }),
+            ]),
+          ]).start();
+        }, reduceMotion ? 900 : MILESTONE_MS);
+      }
     } else if (shown) {
-      Animated.timing(layer, { toValue: 0, duration: 280, useNativeDriver: useNative }).start(() => setShown(null));
+      Animated.timing(layer, { toValue: 0, duration: isFireMilestone(shown) ? FIRE_FADE_MS : 280, useNativeDriver: useNative }).start(
+        () => setShown(null),
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [milestone]);
+
+  useEffect(() => () => {
+    if (flyTimerRef.current) clearTimeout(flyTimerRef.current);
+  }, []);
 
   if (!shown) return null;
   const sideHeight = fill.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
   const topOpacity = fill.interpolate({ inputRange: [0, 0.85, 1], outputRange: [0, 0, 1] });
   const bottomOpacity = fill.interpolate({ inputRange: [0, 0.15], outputRange: [0, 1], extrapolate: 'clamp' });
-  const isFire = shown.emoji === '\u{1F525}';
+  const isFire = isFireMilestone(shown);
 
   return (
-    <Animated.View pointerEvents="none" style={[styles.milestoneLayer, { opacity: layer }]}>
+    <Animated.View ref={rootRef} pointerEvents="none" style={[styles.milestoneLayer, { opacity: layer }]}>
       {/* Fiery edges: bottom lights first, sides climb, top lights when full */}
-      <Animated.View style={[styles.flameEdge, styles.flameBottom, { opacity: bottomOpacity }]} />
-      <Animated.View style={[styles.flameEdge, styles.flameLeft, { height: sideHeight }]} />
-      <Animated.View style={[styles.flameEdge, styles.flameRight, { height: sideHeight }]} />
-      <Animated.View style={[styles.flameEdge, styles.flameTop, { opacity: topOpacity }]} />
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: chrome }]}>
+        <Animated.View style={[styles.flameEdge, styles.flameBottom, { opacity: bottomOpacity }]} />
+        <Animated.View style={[styles.flameEdge, styles.flameLeft, { height: sideHeight }]} />
+        <Animated.View style={[styles.flameEdge, styles.flameRight, { height: sideHeight }]} />
+        <Animated.View style={[styles.flameEdge, styles.flameTop, { opacity: topOpacity }]} />
+      </Animated.View>
 
-      <Animated.View style={[styles.milestoneCard, { opacity: scale, transform: [{ scale }] }]}>
+      <Animated.View style={[styles.milestoneCardWrap, { opacity: scale, transform: [{ scale }] }]}>
+        {/* Card background + title fade separately so the fire can leave on its own */}
+        <Animated.View style={[styles.milestoneCardBg, { opacity: chrome }]} />
         {isFire ? (
-          <ExpoImage source={FIRE_ANIMATED_CARD} style={styles.fireImage} contentFit="contain" autoplay />
+          <Animated.View
+            ref={fireRef}
+            style={{ transform: [{ translateX: flyX }, { translateY: flyY }, { scale: flyScale }] }}
+          >
+            <ExpoImage source={FIRE_ANIMATED_CARD} style={styles.fireImage} contentFit="contain" autoplay />
+          </Animated.View>
         ) : (
           <Text style={styles.milestoneEmoji}>{shown.emoji}</Text>
         )}
-        <Text style={styles.milestoneTitle}>{shown.title}</Text>
+        <Animated.Text style={[styles.milestoneTitle, { opacity: chrome }]}>{shown.title}</Animated.Text>
       </Animated.View>
+
+      {/* Streak count next to the docked fire */}
+      {isFire && dockPos && shown.badge ? (
+        <Animated.View
+          style={[
+            styles.dockBadge,
+            { left: dockPos.left, top: dockPos.top, opacity: dock, transform: [{ scale: dock }] },
+          ]}
+          accessibilityLabel={`${shown.badge} in a row`}
+        >
+          <Text style={styles.dockBadgeText}>{shown.badge}</Text>
+        </Animated.View>
+      ) : null}
     </Animated.View>
   );
 }
@@ -451,12 +649,28 @@ const styles = StyleSheet.create({
   flameRight: { right: 0, bottom: 0, width: 12 },
   flameTop: { left: 0, right: 0, top: 0, height: 12 },
   fireImage: { width: 96, height: 96 },
-  milestoneCard: {
+  milestoneCardWrap: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-    borderRadius: 28,
     paddingHorizontal: 34,
     paddingVertical: 20,
+  },
+  dockBadge: {
+    position: 'absolute',
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    backgroundColor: '#EA580C',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dockBadgeText: { ...fontStyle('inter', 'bold'), fontSize: 10.5, color: '#FFFFFF', lineHeight: 13 },
+  milestoneCardBg: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderRadius: 28,
     ...Platform.select({
       web: { boxShadow: '0 20px 50px -10px rgba(249, 115, 22, 0.45)' } as any,
       default: { shadowColor: '#F97316', shadowOpacity: 0.35, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 },

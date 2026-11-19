@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import Svg, { Circle, Path, Defs, LinearGradient, Stop } from 'react-native-svg';
+import { StepSpinner } from '@/components/analysis/step-spinner';
 import { Ionicons, Feather, MaterialIcons } from '@expo/vector-icons';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
@@ -120,34 +121,22 @@ export default function AnalyzingScreen() {
   // Staggered cascade entrance animations for the 4 step rows
   const stepFadeAnims = useRef(ANALYSIS_STEPS.map(() => new Animated.Value(0))).current;
 
-  // "Processing" micro-animation for the step currently in progress (native: Animated rotate;
-  // web: CSS keyframes, see WEB_SPIN_STYLE): a spinning arc around
-  // its icon plus a gentle icon pulse, so it is clear which step is working right now.
-  const [stepSpinAnim] = useState(() => new Animated.Value(0));
+  // "Processing" micro-animation for the step currently in progress: a spinning arc around its
+  // icon (StepSpinner: CSS-animated <svg> on web, native-driver rotation on apps) plus a gentle
+  // icon pulse, so it is clear which step is working right now.
   const [stepPulseAnim] = useState(() => new Animated.Value(0));
   useEffect(() => {
-    const spin = Animated.loop(
-      Animated.timing(stepSpinAnim, {
-        toValue: 1,
-        duration: 1100,
-        easing: Easing.linear,
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-    );
     const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(stepPulseAnim, { toValue: 1, duration: 650, easing: Easing.inOut(Easing.quad), useNativeDriver: Platform.OS !== 'web' }),
         Animated.timing(stepPulseAnim, { toValue: 0, duration: 650, easing: Easing.inOut(Easing.quad), useNativeDriver: Platform.OS !== 'web' }),
       ]),
     );
-    spin.start();
     pulse.start();
     return () => {
-      spin.stop();
       pulse.stop();
     };
-  }, [stepSpinAnim, stepPulseAnim]);
-  const stepSpinRotate = stepSpinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  }, [stepPulseAnim]);
   const stepPulseScale = stepPulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] });
 
   const triggerCompleteJump = () => {
@@ -668,37 +657,8 @@ export default function AnalyzingScreen() {
                     a SIBLING inside a wrapper (not a child sticking out of the 48px circle), so
                     Android / mobile clipping of out-of-bounds children cannot hide it. */}
                 <View style={styles.iconWrap}>
-                {isCurrent && (
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[
-                      styles.stepSpinnerRing,
-                      // Web: a CSS keyframe spin runs on the browser's compositor, so it stays
-                      // smooth while this screen is busy loading the analysis (JS-driven
-                      // rotation stuttered and looked stuck on phones).
-                      Platform.OS === 'web'
-                        ? (WEB_SPIN_STYLE as any)
-                        : { transform: [{ rotate: stepSpinRotate }] },
-                    ]}
-                  >
-                    {/* A real SVG arc: even thickness and round caps. The old ring used coloured
-                        border sides, which browsers taper where they meet transparent sides,
-                        so it looked thin at one end, thick at the other and off-centre. */}
-                    <Svg width={54} height={54}>
-                      <Circle cx={27} cy={27} r={25} stroke="#E0F2FE" strokeWidth={2.5} fill="none" />
-                      <Circle
-                        cx={27}
-                        cy={27}
-                        r={25}
-                        stroke="#0284C7"
-                        strokeWidth={2.5}
-                        strokeLinecap="round"
-                        fill="none"
-                        strokeDasharray={`${2 * Math.PI * 25 * 0.3} ${2 * Math.PI * 25}`}
-                      />
-                    </Svg>
-                  </Animated.View>
-                )}
+                {/* Processing ring: CSS-animated <svg> on web, native-driver rotation on apps */}
+                {isCurrent && <StepSpinner />}
                 <Animated.View
                   style={[
                     styles.iconCircle,
@@ -779,13 +739,6 @@ export default function AnalyzingScreen() {
   );
 }
 
-// react-native-web turns these into a CSS @keyframes animation (compositor-driven, smooth)
-const WEB_SPIN_STYLE = {
-  animationKeyframes: [{ '0%': { transform: [{ rotate: '0deg' }] }, '100%': { transform: [{ rotate: '360deg' }] } }],
-  animationDuration: '1100ms',
-  animationTimingFunction: 'linear',
-  animationIterationCount: 'infinite',
-};
 
 const styles = StyleSheet.create({
   safeArea: {

@@ -20,6 +20,7 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
 import { AdminTopBar } from '@/components/admin/AdminTopBar';
+import { AdminPagination } from '@/components/admin/AdminPagination';
 import { AdminTableSkeleton, Skeleton } from '@/components/ui/skeleton';
 import { AdminSessionTranscriptAndPlayer } from '@/components/admin/AdminSessionTranscriptAndPlayer';
 
@@ -305,7 +306,7 @@ export default function AdminUsageScreen() {
   // Pagination States
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
-  const [showPageSizeMenu, setShowPageSizeMenu] = useState<boolean>(false);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   // Diagnostics & Logs Modal States
   const [activeLogsSession, setActiveLogsSession] = useState<SessionRecord | null>(null);
@@ -347,7 +348,9 @@ export default function AdminUsageScreen() {
       const baseUrl = getBackendBaseUrl();
       const params = new URLSearchParams({
         range: selectedRange,
-        search: searchQuery,
+        search: debouncedSearch,
+        page: String(currentPage),
+        pageSize: String(pageSize),
         status: selectedStatus === 'All Statuses' ? '' : selectedStatus,
         model: selectedModel === 'All Models' ? '' : selectedModel,
       });
@@ -359,7 +362,11 @@ export default function AdminUsageScreen() {
       const res = await fetch(`${baseUrl}/v1/admin/usage?${params.toString()}`);
       if (res.ok) {
         const json = await res.json();
-        if (seq === usageRequestSeq.current) setData(json);
+        if (seq === usageRequestSeq.current) {
+          setData(json);
+          // Adopt the server's clamped page (e.g. after the result set shrank)
+          if (json?.pagination?.page && json.pagination.page !== currentPage) setCurrentPage(json.pagination.page);
+        }
       }
     } catch (err) {
       console.warn('[AdminUsage] Error fetching usage logs:', err);
@@ -368,9 +375,10 @@ export default function AdminUsageScreen() {
     }
   };
 
+  // Server-side paging: every page / filter change asks the backend for just that page
   useEffect(() => {
     fetchUsageData();
-  }, [selectedRange, selectedStatus, selectedModel, customApplied]);
+  }, [selectedRange, selectedStatus, selectedModel, customApplied, debouncedSearch, currentPage, pageSize]);
 
   const applyCustomRange = () => {
     const re = /^\d{4}-\d{2}-\d{2}$/;
@@ -388,10 +396,10 @@ export default function AdminUsageScreen() {
     setCustomApplied({ from, to });
   };
 
-  // Debounced search trigger
+  // Debounced search (sent to the server)
   useEffect(() => {
     const handler = setTimeout(() => {
-      fetchUsageData();
+      setDebouncedSearch(searchQuery.trim());
     }, 350);
     return () => clearTimeout(handler);
   }, [searchQuery]);
@@ -427,32 +435,18 @@ export default function AdminUsageScreen() {
     fetchDiag();
   }, [activeLogsSession]);
 
-  // Comprehensive client-side search filtering
-  const filteredSessions = useMemo(() => {
-    if (!data?.sessions) return [];
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return data.sessions;
-    return data.sessions.filter((row) => {
-      const matchCode = (row.sessionCode || '').toLowerCase().includes(q);
-      const matchId = (row.id || '').toLowerCase().includes(q);
-      const matchUser = (row.user?.name || '').toLowerCase().includes(q);
-      const matchTopic = (row.topic || '').toLowerCase().includes(q);
-      const matchModel = (row.model || '').toLowerCase().includes(q);
-      const matchLang = (row.languageMode || '').toLowerCase().includes(q);
-      return matchCode || matchId || matchUser || matchTopic || matchModel || matchLang;
-    });
-  }, [data?.sessions, searchQuery]);
+  // The server already filtered and paged these sessions
+  const filteredSessions = data?.sessions || [];
+  const pagination = (data as any)?.pagination as { total: number; totalPages: number; page: number } | undefined;
 
   // Reset to page 1 when search or filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, selectedRange, selectedStatus, selectedModel, pageSize]);
+  }, [debouncedSearch, selectedRange, selectedStatus, selectedModel, customApplied, pageSize]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredSessions.length / pageSize));
-  const paginatedSessions = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredSessions.slice(start, start + pageSize);
-  }, [filteredSessions, currentPage, pageSize]);
+
+  const totalPages = Math.max(1, pagination?.totalPages || 1);
+  const paginatedSessions = filteredSessions;
 
   // Adjust sidebar on viewport resize
   useEffect(() => {
@@ -1297,115 +1291,20 @@ export default function AdminUsageScreen() {
                 </View>
               </ScrollView>
 
-              {/* Pagination Controls Footer */}
-              <View style={styles.paginationRow}>
-                <View style={styles.paginationInfoCol}>
-                  <Text style={styles.paginationInfoText}>
-                    Showing{' '}
-                    <Text style={styles.paginationInfoBold}>
-                      {filteredSessions.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
-                    </Text>{' '}
-                    to{' '}
-                    <Text style={styles.paginationInfoBold}>
-                      {Math.min(currentPage * pageSize, filteredSessions.length)}
-                    </Text>{' '}
-                    of <Text style={styles.paginationInfoBold}>{filteredSessions.length}</Text> sessions
-                  </Text>
-
-                  <View style={styles.pageSizeContainer}>
-                    <Text style={styles.pageSizeLabel}>Per page:</Text>
-                    <Pressable
-                      onPress={() => setShowPageSizeMenu(!showPageSizeMenu)}
-                      style={styles.pageSizeDropdownBtn}
-                    >
-                      <Text style={styles.pageSizeDropdownText}>{pageSize}</Text>
-                      <Feather name="chevron-down" size={13} color="#64748b" />
-                    </Pressable>
-                    {showPageSizeMenu && (
-                      <View style={styles.pageSizePopover}>
-                        {[10, 25, 50].map((sz) => (
-                          <Pressable
-                            key={sz}
-                            onPress={() => {
-                              setPageSize(sz);
-                              setShowPageSizeMenu(false);
-                              setCurrentPage(1);
-                            }}
-                            style={[
-                              styles.pageSizeOption,
-                              pageSize === sz && styles.pageSizeOptionActive,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.pageSizeOptionText,
-                                pageSize === sz && styles.pageSizeOptionTextActive,
-                              ]}
-                            >
-                              {sz}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                </View>
-
-                {/* Page Navigation */}
-                <View style={styles.pageNavControls}>
-                  <Pressable
-                    onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage <= 1}
-                    style={[styles.pageNavBtn, currentPage <= 1 && styles.pageNavBtnDisabled]}
-                  >
-                    <Feather name="chevron-left" size={15} color={currentPage <= 1 ? '#cbd5e1' : '#334155'} />
-                    <Text style={[styles.pageNavBtnText, currentPage <= 1 && styles.pageNavBtnTextDisabled]}>
-                      Prev
-                    </Text>
-                  </Pressable>
-
-                  <View style={styles.pageNumbersRow}>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1)
-                      .filter((p) => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
-                      .map((p, idx, arr) => {
-                        const prev = arr[idx - 1];
-                        const isGap = prev && p - prev > 1;
-                        return (
-                          <React.Fragment key={p}>
-                            {isGap && <Text style={styles.pageEllipsis}>...</Text>}
-                            <Pressable
-                              onPress={() => setCurrentPage(p)}
-                              style={[
-                                styles.pageNumberBtn,
-                                currentPage === p && styles.pageNumberBtnActive,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.pageNumberText,
-                                  currentPage === p && styles.pageNumberTextActive,
-                                ]}
-                              >
-                                {p}
-                              </Text>
-                            </Pressable>
-                          </React.Fragment>
-                        );
-                      })}
-                  </View>
-
-                  <Pressable
-                    onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={currentPage >= totalPages}
-                    style={[styles.pageNavBtn, currentPage >= totalPages && styles.pageNavBtnDisabled]}
-                  >
-                    <Text style={[styles.pageNavBtnText, currentPage >= totalPages && styles.pageNavBtnTextDisabled]}>
-                      Next
-                    </Text>
-                    <Feather name="chevron-right" size={15} color={currentPage >= totalPages ? '#cbd5e1' : '#334155'} />
-                  </Pressable>
-                </View>
-              </View>
+              {/* Pagination Controls Footer (server-side) */}
+              <AdminPagination
+                page={currentPage}
+                pageSize={pageSize}
+                total={pagination?.total ?? filteredSessions.length}
+                totalPages={totalPages}
+                label="sessions"
+                disabled={loading}
+                onPageChange={setCurrentPage}
+                onPageSizeChange={(size) => {
+                  setPageSize(size);
+                  setCurrentPage(1);
+                }}
+              />
             </View>
           </ScrollView>
         </View>

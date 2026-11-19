@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { notifyStatsChanged } from '@/services/stats-events';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { createAudioCapture } from '@/services/audio/AudioCapture';
@@ -89,6 +90,8 @@ interface UseLiveCallOptions {
     }>;
   };
   hintsUsedCount?: number | (() => number);
+  /** Streak bonus XP the learner saw during the call (server validates and caps it). */
+  streakBonusXp?: () => number;
 }
 
 export function useLiveCall(options: UseLiveCallOptions = {}) {
@@ -1659,6 +1662,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
             languageMode: options.languageMode || 'sinhala',
             sinhalaStyle: options.sinhalaStyle || 'balanced',
             hintsUsedCount: typeof options.hintsUsedCount === 'function' ? options.hintsUsedCount() : (options.hintsUsedCount ?? 0),
+            clientStreakBonusXp: options.streakBonusXp ? options.streakBonusXp() : 0,
             isIntroCall: Boolean(options.isIntroCall),
             roadmapLevelId: options.roadmapLevelId,
             levelNumber: options.levelNumber,
@@ -1667,6 +1671,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
         if (finishRes.ok) {
           const finishData = await finishRes.json().catch(() => null);
+          // XP is now stored on the server: refresh stats everywhere right away
+          notifyStatsChanged();
           if (!options.isIntroCall && finishData && typeof finishData.remainingMinutes === 'number') {
             OnboardingStore.updateMinutesBalance(finishData.remainingMinutes);
           }

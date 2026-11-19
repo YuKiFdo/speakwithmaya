@@ -267,6 +267,11 @@ export class FinishSessionDto {
   @IsNumber()
   hintsUsedCount?: number;
 
+  /** Streak bonus XP shown during the call; validated + capped on the server. */
+  @IsOptional()
+  @IsNumber()
+  clientStreakBonusXp?: number;
+
   @IsOptional()
   isIntroCall?: boolean;
 
@@ -333,6 +338,14 @@ export class QueryUsageDto {
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   to?: string;
+
+  @IsOptional()
+  @IsString()
+  page?: string;
+
+  @IsOptional()
+  @IsString()
+  pageSize?: string;
 }
 
 export class TranslateDto {

@@ -219,6 +219,35 @@ class PaymentApiService {
   /**
    * Admin: Update daily Telco subscription rate (e.g. LKR 12/day).
    */
+  /**
+   * Admin: stats + tab counts + ONE server-paged list (default 10 rows per page).
+   */
+  async getAdminSubscriptionsPage(opts: {
+    list: 'subscriptions' | 'telco' | 'renewals' | 'topups';
+    page: number;
+    pageSize: number;
+    search?: string;
+    status?: string;
+    tier?: string;
+  }): Promise<AdminSubscriptionsResponse & {
+    items: any[];
+    pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  }> {
+    const qs = new URLSearchParams({ list: opts.list, page: String(opts.page), pageSize: String(opts.pageSize) });
+    if (opts.search) qs.set('search', opts.search);
+    if (opts.status && opts.status !== 'ALL') qs.set('status', opts.status);
+    if (opts.tier && opts.tier !== 'ALL') qs.set('tier', opts.tier);
+    const res = await fetch(`${this.baseUrl}/v1/admin/subscriptions?${qs.toString()}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to fetch admin subscribers');
+    }
+    return data;
+  }
+
   async updateTelcoDailyRate(dailyPriceLkr: number): Promise<{
     success: boolean;
     telcoDailyPriceLkr: number;

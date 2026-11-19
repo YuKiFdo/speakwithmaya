@@ -11,7 +11,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Colors, Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
@@ -270,7 +270,8 @@ export default function DashboardScreen() {
 
   const store = useOnboardingStore();
   const stats = useUserStats();
-  const xpCelebration = useXpCelebration(stats.xpSnapshot, stats.refreshStats);
+  const isFocused = useIsFocused();
+  const xpCelebration = useXpCelebration(stats.xpSnapshot, stats.refreshStats, isFocused);
   const user = store.user;
   const displayName = stats.displayName || params.name || '';
   const minutesBalance = stats.minutesBalance;

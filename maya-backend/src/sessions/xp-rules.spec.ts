@@ -1,4 +1,4 @@
-import { computeStreakBonus, STREAK_RULES } from './xp-rules';
+import { acceptClientStreakBonus, computeStreakBonus, STREAK_RULES } from './xp-rules';
 
 const T0 = Date.parse('2026-11-19T10:00:00Z');
 const at = (s: number) => new Date(T0 + s * 1000).toISOString();
@@ -53,5 +53,35 @@ describe('computeStreakBonus', () => {
   it('handles empty input', () => {
     expect(computeStreakBonus(undefined, undefined).bonusXp).toBe(0);
     expect(computeStreakBonus([], []).bonusXp).toBe(0);
+  });
+});
+
+describe('acceptClientStreakBonus', () => {
+  const said = (text: string) => ({ role: 'user', text });
+  const maya = { role: 'model', text: 'ok' };
+  const turns = [said('I went to work'), maya, said('It was a busy day'), maya, said('Then I went home'), maya, said('I cooked dinner tonight')];
+
+  it('accepts the in-call amount when the transcript allows it', () => {
+    // 4 real turns -> streak from the 3rd turn -> at most 2 rewarded turns = 4 XP
+    expect(acceptClientStreakBonus(2, turns, false)).toBe(2);
+    expect(acceptClientStreakBonus(4, turns, false)).toBe(4);
+  });
+
+  it('caps a claim above what the transcript makes possible', () => {
+    expect(acceptClientStreakBonus(20, turns, false)).toBe(4);
+  });
+
+  it('ignores noise turns, intro calls and invalid claims', () => {
+    const noisy = [said('(unclear)'), said('um'), said('hello there'), said('yes I can')];
+    expect(acceptClientStreakBonus(2, noisy, false)).toBe(0);
+    expect(acceptClientStreakBonus(4, turns, true)).toBe(0);
+    expect(acceptClientStreakBonus(-6, turns, false)).toBe(0);
+    expect(acceptClientStreakBonus(3, turns, false)).toBe(2); // whole streak turns only
+    expect(acceptClientStreakBonus(undefined, turns, false)).toBe(0);
+  });
+
+  it('never exceeds the per-session maximum', () => {
+    const many = Array.from({ length: 40 }, (_, i) => said(`sentence number ${i}`));
+    expect(acceptClientStreakBonus(100, many, false)).toBe(20);
   });
 });

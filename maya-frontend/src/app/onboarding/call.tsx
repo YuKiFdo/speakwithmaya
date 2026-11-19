@@ -21,7 +21,7 @@ import {
   GrammarFeedbackModal,
 } from '@/components/call/grammar-feedback-modal';
 import { ConversationDisplay } from '@/components/call/conversation-display';
-import { useCallRewards, MilestoneOverlay, StreakChip, GoalRing, XpCounter } from '@/components/call/call-rewards';
+import { useCallRewards, MilestoneOverlay, GoalRing, XpCounter } from '@/components/call/call-rewards';
 import { ConfettiOverlay } from '@/components/ui/confetti';
 import { useConnectionMonitor } from '@/hooks/useConnectionMonitor';
 import { fontStyle } from '@/theme/fonts';
@@ -183,6 +183,11 @@ export default function CallScreen() {
   const displayUserRole = formatRoleTitle(resolvedUserRole);
 
   // Core Gemini Live Audio & Call Engine
+  // In-call streak bonus, sent with "finish" so the summary matches what the learner saw
+  const streakBonusXpRef = useRef(0);
+  // Maya's avatar (mobile / desktop header): the streak fire flies here and docks
+  const mobileAvatarRef = useRef<View>(null);
+  const desktopAvatarRef = useRef<View>(null);
   const liveCall = useLiveCall({
     topic: effectiveTopic,
     goal: storeConfig?.goal || params.goal || onboardingState.goal,
@@ -216,6 +221,7 @@ export default function CallScreen() {
     goalDescription: effectiveGoalDescription,
     targetSpeakingShare: effectiveTargetSpeakingShare,
     hintsUsedCount: () => hintsHistoryRef.current.length,
+    streakBonusXp: () => streakBonusXpRef.current,
   });
 
   const liveCallRef = useRef(liveCall);
@@ -877,6 +883,9 @@ export default function CallScreen() {
     suppressMicFor: liveCall.suppressMicFor,
     blocked: rewardsBlocked,
   });
+  useEffect(() => {
+    streakBonusXpRef.current = rewards.streakBonusXp;
+  }, [rewards.streakBonusXp, rewards.sessionXp]);
 
   const handleHangup = () => {
     if (isIntro) {
@@ -1084,6 +1093,7 @@ export default function CallScreen() {
                 </Pressable>
 
                 <View style={styles.mobileHeaderInfo}>
+                  <View ref={mobileAvatarRef} collapsable={false}>
                   <GoalRing size={52} progress={rewards.goalProgress}>
                     <View style={styles.avatarWrapperMobile}>
                       <Image
@@ -1094,6 +1104,7 @@ export default function CallScreen() {
                       />
                     </View>
                   </GoalRing>
+                  </View>
 
                   <View style={styles.headerTexts}>
                     <Text style={styles.mayaNameMobile}>Maya</Text>
@@ -1117,8 +1128,7 @@ export default function CallScreen() {
                       </Text>
                     </View>
                     <View style={styles.rewardHud}>
-                      <StreakChip streak={rewards.streak} />
-                      <XpCounter sessionXp={rewards.sessionXp} gain={rewards.gain} />
+                      <XpCounter sessionXp={rewards.sessionXp} gain={rewards.gain} busy={!!rewards.milestone} />
                     </View>
                     <Text
                       style={[
@@ -1166,6 +1176,7 @@ export default function CallScreen() {
               {/* On Desktop: Centered Avatar & Maya Status */}
               {isWebOrDesktop && (
                 <View style={styles.desktopAvatarCard}>
+                  <View ref={desktopAvatarRef} collapsable={false}>
                   <GoalRing size={88} progress={rewards.goalProgress}>
                     <View style={styles.avatarWrapperDesktop}>
                       <Image
@@ -1176,6 +1187,7 @@ export default function CallScreen() {
                       />
                     </View>
                   </GoalRing>
+                  </View>
 
                   <View style={styles.desktopInfoTexts}>
                     <Text style={styles.mayaNameDesktop}>Maya</Text>
@@ -1199,8 +1211,7 @@ export default function CallScreen() {
                       </Text>
                     </View>
                     <View style={styles.rewardHud}>
-                      <StreakChip streak={rewards.streak} />
-                      <XpCounter sessionXp={rewards.sessionXp} gain={rewards.gain} />
+                      <XpCounter sessionXp={rewards.sessionXp} gain={rewards.gain} busy={!!rewards.milestone} />
                     </View>
                     <Text
                       style={[
@@ -1443,7 +1454,7 @@ export default function CallScreen() {
       )}
 
       {/* Floating "+5 XP" / streak rewards and practice-point confetti (top layer, above everything) */}
-      <MilestoneOverlay milestone={rewards.milestone} />
+      <MilestoneOverlay milestone={rewards.milestone} targetRef={isWebOrDesktop ? desktopAvatarRef : mobileAvatarRef} />
       {rewards.milestone && <ConfettiOverlay key={rewards.milestone.id} count={40} duration={1800} />}
     </SafeAreaView>
   );

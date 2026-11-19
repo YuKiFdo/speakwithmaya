@@ -1,3 +1,4 @@
+import { readPage } from '../common/pagination.js';
 import {
   Controller,
   Post,
@@ -153,7 +154,26 @@ export class PayHereController {
    */
   @Get('admin/subscriptions')
   @UseGuards(AdminGuard)
-  async getAdminSubscriptions(@Query('include') include?: string) {
+  async getAdminSubscriptions(
+    @Query('include') include?: string,
+    @Query('list') list?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('tier') tier?: string,
+  ) {
+    // ?list=subscriptions|telco|renewals|topups returns stats + ONE server-paged list
+    // (default 10 rows). Without `list` the legacy full response is returned.
+    if (list) {
+      return this.payHereService.getAdminSubscriptionsPage({
+        list,
+        req: readPage(page, pageSize),
+        search,
+        status,
+        tier,
+      });
+    }
     return this.payHereService.getAdminSubscriptions(include);
   }
 
@@ -186,7 +206,11 @@ export class PayHereController {
   @Post('admin/subscriptions/:id/retry')
   @UseGuards(AdminGuard)
   async retrySubscription(@Param('id') subscriptionId: string) {
-    return this.payHereService.retrySubscription(subscriptionId);
+    try {
+      return await this.payHereService.retrySubscription(subscriptionId);
+    } finally {
+      this.payHereService.invalidateAdminSubscriptionsCache();
+    }
   }
 
   /**
@@ -195,7 +219,11 @@ export class PayHereController {
   @Post('admin/subscriptions/:id/cancel')
   @UseGuards(AdminGuard)
   async cancelAdminSubscription(@Param('id') subscriptionId: string) {
-    return this.payHereService.cancelSubscription(subscriptionId);
+    try {
+      return await this.payHereService.cancelSubscription(subscriptionId);
+    } finally {
+      this.payHereService.invalidateAdminSubscriptionsCache();
+    }
   }
 
   /**
@@ -204,7 +232,11 @@ export class PayHereController {
   @Post('admin/subscriptions/reconcile')
   @UseGuards(AdminGuard)
   async triggerReconciliation() {
-    return this.reconciliationService.reconcileSubscriptions();
+    try {
+      return await this.reconciliationService.reconcileSubscriptions();
+    } finally {
+      this.payHereService.invalidateAdminSubscriptionsCache();
+    }
   }
 
   /**
@@ -214,7 +246,11 @@ export class PayHereController {
   @Post('admin/subscriptions/telco-rate')
   @UseGuards(AdminGuard)
   async updateTelcoDailyRate(@Body() body: { dailyPriceLkr: number }) {
-    return this.payHereService.updateTelcoDailyPrice(Number(body?.dailyPriceLkr));
+    try {
+      return await this.payHereService.updateTelcoDailyPrice(Number(body?.dailyPriceLkr));
+    } finally {
+      this.payHereService.invalidateAdminSubscriptionsCache();
+    }
   }
 
   /**
@@ -241,6 +277,10 @@ export class PayHereController {
   @UseGuards(AdminGuard)
   async adminVerifyOrder(@Param('id') orderId: string) {
     const cleanOrderId = (orderId || '').toString().split(',')[0].trim().replace(/[^a-zA-Z0-9_-]/g, '');
-    return this.payHereService.reconcilePendingOrder(cleanOrderId);
+    try {
+      return await this.payHereService.reconcilePendingOrder(cleanOrderId);
+    } finally {
+      this.payHereService.invalidateAdminSubscriptionsCache();
+    }
   }
 }

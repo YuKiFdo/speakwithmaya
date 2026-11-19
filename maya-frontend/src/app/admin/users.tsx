@@ -22,6 +22,8 @@ import { AdminTopBar } from '@/components/admin/AdminTopBar';
 import { AdminTableSkeleton, Skeleton } from '@/components/ui/skeleton';
 import { AdminSessionTranscriptAndPlayer } from '@/components/admin/AdminSessionTranscriptAndPlayer';
 import { mayaAlert } from '@/components/ui/alert-modal';
+import { AdminPagination } from '@/components/admin/AdminPagination';
+import { useServerPaging } from '@/hooks/useServerPaging';
 import { authService } from '@/services/auth/auth-service';
 
 export interface TestAccountItem {
@@ -390,26 +392,38 @@ export default function AdminUsersScreen() {
   // Complaints & Feedback
   const [complaints, setComplaints] = useState<AdminComplaintItem[]>([]);
   const [complaintsStats, setComplaintsStats] = useState({ total: 0, open: 0, resolved: 0 });
-  const [isLoadingComplaints, setIsLoadingComplaints] = useState(false);
 
-  const fetchComplaints = async () => {
-    setIsLoadingComplaints(true);
-    try {
-      const baseUrl = getBackendBaseUrl();
-      const res = await fetch(`${baseUrl}/v1/admin/complaints`);
-      if (res.ok) {
+  const complaintsPaging = useServerPaging('');
+  // Loading is derived (requested key !== loaded key), so effects never set state synchronously
+  const [complaintsReload, setComplaintsReload] = useState(0);
+  const complaintsKey = `${complaintsPaging.page}|${complaintsPaging.pageSize}|${complaintsReload}`;
+  const [complaintsLoadedKey, setComplaintsLoadedKey] = useState('');
+  const isLoadingComplaints = complaintsLoadedKey !== complaintsKey;
+  const fetchComplaints = () => setComplaintsReload((n) => n + 1);
+  useEffect(() => {
+    let cancelled = false;
+    const qs = new URLSearchParams({
+      page: String(complaintsPaging.page),
+      pageSize: String(complaintsPaging.pageSize),
+    });
+    fetch(`${getBackendBaseUrl()}/v1/admin/complaints?${qs.toString()}`)
+      .then(async (res) => {
+        if (cancelled || !res.ok) return;
         const data = await res.json();
+        if (cancelled) return;
         setComplaints(Array.isArray(data.complaints) ? data.complaints : []);
-        if (data.stats) {
-          setComplaintsStats(data.stats);
-        }
-      }
-    } catch (err) {
-      console.warn('[AdminUsers] Failed to fetch complaints:', err);
-    } finally {
-      setIsLoadingComplaints(false);
-    }
-  };
+        complaintsPaging.applyMeta(data.pagination);
+        if (data.stats) setComplaintsStats(data.stats);
+      })
+      .catch((err) => console.warn('[AdminUsers] Failed to fetch complaints:', err))
+      .finally(() => {
+        if (!cancelled) setComplaintsLoadedKey(complaintsKey);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [complaintsKey]);
 
   const handleToggleComplaintStatus = async (item: AdminComplaintItem) => {
     const nextStatus = item.status === 'resolved' ? 'open' : 'resolved';
@@ -449,7 +463,7 @@ export default function AdminUsersScreen() {
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 12;
+  const [pageSize, setPageSize] = useState(10);
   // Server-side pagination: the backend returns one page at a time.
   const [serverTotal, setServerTotal] = useState(0);
   const [serverTotalPages, setServerTotalPages] = useState(1);
@@ -457,7 +471,6 @@ export default function AdminUsersScreen() {
   // Modal: Test Accounts (Zero OTP Bypass)
   const [testAccounts, setTestAccounts] = useState<TestAccountItem[]>([]);
   const [isTestAccountsModalOpen, setIsTestAccountsModalOpen] = useState(false);
-  const [isLoadingTestAccounts, setIsLoadingTestAccounts] = useState(false);
   const [newTestName, setNewTestName] = useState('');
   const [newTestPhone, setNewTestPhone] = useState('+94');
   const [newTestPlan, setNewTestPlan] = useState<'starter' | 'basic' | 'pro' | 'premium' | 'unlimited'>('unlimited');
@@ -465,21 +478,41 @@ export default function AdminUsersScreen() {
   const [isCreatingTestAccount, setIsCreatingTestAccount] = useState(false);
   const [deletingTestAccountId, setDeletingTestAccountId] = useState<string | null>(null);
 
-  const fetchTestAccounts = async () => {
-    setIsLoadingTestAccounts(true);
-    try {
-      const baseUrl = getBackendBaseUrl();
-      const res = await fetch(`${baseUrl}/v1/admin/test-accounts`);
-      if (res.ok) {
+  const testAccountsPaging = useServerPaging('');
+  const [testAccountsReload, setTestAccountsReload] = useState(0);
+  const testAccountsKey = `${testAccountsPaging.page}|${testAccountsPaging.pageSize}|${testAccountsReload}`;
+  const [testAccountsLoadedKey, setTestAccountsLoadedKey] = useState('');
+  const isLoadingTestAccounts = testAccountsLoadedKey !== testAccountsKey;
+  const fetchTestAccounts = () => setTestAccountsReload((n) => n + 1);
+  useEffect(() => {
+    let cancelled = false;
+    const qs = new URLSearchParams({
+      page: String(testAccountsPaging.page),
+      pageSize: String(testAccountsPaging.pageSize),
+    });
+    fetch(`${getBackendBaseUrl()}/v1/admin/test-accounts?${qs.toString()}`)
+      .then(async (res) => {
+        if (cancelled || !res.ok) return;
         const json = await res.json();
-        setTestAccounts(Array.isArray(json) ? json : []);
-      }
-    } catch (err: any) {
-      console.warn('Failed to load test accounts:', err);
-    } finally {
-      setIsLoadingTestAccounts(false);
-    }
-  };
+        if (cancelled) return;
+        // Paged response { items, pagination }; older backends return a plain array
+        if (Array.isArray(json)) {
+          setTestAccounts(json);
+          testAccountsPaging.applyMeta({ page: 1, pageSize: json.length || 10, total: json.length, totalPages: 1 });
+        } else {
+          setTestAccounts(Array.isArray(json.items) ? json.items : []);
+          testAccountsPaging.applyMeta(json.pagination);
+        }
+      })
+      .catch((err) => console.warn('Failed to load test accounts:', err))
+      .finally(() => {
+        if (!cancelled) setTestAccountsLoadedKey(testAccountsKey);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testAccountsKey]);
 
   const handleSelectTestPlan = (p: 'starter' | 'basic' | 'pro' | 'premium' | 'unlimited') => {
     setNewTestPlan(p);
@@ -537,6 +570,7 @@ export default function AdminUsersScreen() {
         setNewTestMinutes('9999');
         fetchTestAccounts();
         fetchUsers();
+        fetchStats();
       } else {
         const errJson = await res.json().catch(() => ({}));
         await mayaAlert.error(errJson.message || 'Failed to create test account.', 'Error');
@@ -568,6 +602,7 @@ export default function AdminUsersScreen() {
         await mayaAlert.success(`Test account "${account.name}" removed.`, 'Removed');
         fetchTestAccounts();
         fetchUsers();
+        fetchStats();
       } else {
         const errJson = await res.json().catch(() => ({}));
         await mayaAlert.error(errJson.message || 'Failed to remove test account.', 'Error');
@@ -660,6 +695,7 @@ export default function AdminUsersScreen() {
           closeUserDetail();
         }
         fetchUsers();
+        fetchStats();
         fetchTestAccounts();
         fetchComplaints();
       } else {
@@ -681,7 +717,7 @@ export default function AdminUsersScreen() {
         level: selectedLevel,
         status: selectedStatus,
         page: String(page),
-        limit: String(pageSize),
+        pageSize: String(pageSize),
       });
 
       const res = await fetch(`${baseUrl}/v1/admin/users?${params.toString()}`);
@@ -695,7 +731,8 @@ export default function AdminUsersScreen() {
             setCurrentPage(data.pagination.page);
           }
         }
-        if (data.stats) {
+        // KPI banner comes from /admin/users/stats; the list only reports filteredCount
+        if (data.stats && data.stats.totalUsers !== undefined) {
           setStats(data.stats);
           setStatsLoaded(true);
         }
@@ -707,10 +744,42 @@ export default function AdminUsersScreen() {
     }
   };
 
+  // KPI banner (one aggregate query on the server)
+  const fetchStats = async () => {
+    try {
+      const res = await fetch(`${getBackendBaseUrl()}/v1/admin/users/stats`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.stats) {
+          setStats((prev: any) => ({ ...prev, ...data.stats }));
+          setStatsLoaded(true);
+        }
+      }
+    } catch (err) {
+      console.warn('[AdminUsers] Error loading stats:', err);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${getBackendBaseUrl()}/v1/admin/users/stats`)
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled && data.stats) {
+          setStats((prev: any) => ({ ...prev, ...data.stats }));
+          setStatsLoaded(true);
+        }
+      })
+      .catch((err) => console.warn('[AdminUsers] Error loading stats:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+
   useEffect(() => {
     fetchUsers(1);
-    fetchTestAccounts();
-    fetchComplaints();
   }, [selectedTier, selectedLevel, selectedStatus]);
 
   // Fetch the requested page from the server when the page changes
@@ -721,7 +790,7 @@ export default function AdminUsersScreen() {
       return;
     }
     fetchUsers(currentPage);
-  }, [currentPage]);
+  }, [currentPage, pageSize]);
 
   // Debounced search trigger
   useEffect(() => {
@@ -828,11 +897,12 @@ export default function AdminUsersScreen() {
                   style={({ pressed }) => [styles.testAccountBtn, pressed && { opacity: 0.8 }]}
                 >
                   <Text style={{ fontSize: 13 }}>🧪</Text>
-                  <Text style={styles.testAccountBtnText}>Test Accounts ({testAccounts.length})</Text>
+                  <Text style={styles.testAccountBtnText}>Test Accounts ({testAccountsPaging.meta.total})</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {
                     fetchUsers();
+                    fetchStats();
                     fetchTestAccounts();
                     fetchComplaints();
                   }}
@@ -1380,30 +1450,20 @@ export default function AdminUsersScreen() {
                 </View>
               )}
 
-              {/* Pagination Controls */}
-              {totalPages > 1 && (
-                <View style={styles.paginationRow}>
-                  <Text style={styles.pageIndicatorText}>
-                    Page {currentPage} of {totalPages}
-                  </Text>
-                  <View style={styles.paginationBtns}>
-                    <Pressable
-                      disabled={currentPage <= 1}
-                      onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                      style={[styles.pageBtn, currentPage <= 1 && styles.pageBtnDisabled]}
-                    >
-                      <Feather name="chevron-left" size={16} color={currentPage <= 1 ? '#cbd5e1' : '#334155'} />
-                    </Pressable>
-                    <Pressable
-                      disabled={currentPage >= totalPages}
-                      onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                      style={[styles.pageBtn, currentPage >= totalPages && styles.pageBtnDisabled]}
-                    >
-                      <Feather name="chevron-right" size={16} color={currentPage >= totalPages ? '#cbd5e1' : '#334155'} />
-                    </Pressable>
-                  </View>
-                </View>
-              )}
+              {/* Pagination Controls (server-side) */}
+              <AdminPagination
+                page={currentPage}
+                pageSize={pageSize}
+                total={serverTotal}
+                totalPages={totalPages}
+                label="students"
+                disabled={isLoading}
+                onPageChange={setCurrentPage}
+                onPageSizeChange={(size) => {
+                  setPageSize(size);
+                  setCurrentPage(1);
+                }}
+              />
             </View>
 
             {/* Student Complaints & Feedback Table Card */}
@@ -1416,7 +1476,7 @@ export default function AdminUsersScreen() {
                   </Text>
                 </View>
                 <Pressable
-                  onPress={fetchComplaints}
+                  onPress={() => fetchComplaints()}
                   style={({ pressed }) => [styles.refreshBtn, pressed && { opacity: 0.8 }]}
                 >
                   <Feather name="refresh-cw" size={13} color="#0d9488" />
@@ -1568,6 +1628,16 @@ export default function AdminUsersScreen() {
                   })}
                 </View>
               )}
+              <AdminPagination
+                page={complaintsPaging.page}
+                pageSize={complaintsPaging.pageSize}
+                total={complaintsPaging.meta.total}
+                totalPages={complaintsPaging.meta.totalPages}
+                label="complaints"
+                disabled={isLoadingComplaints}
+                onPageChange={complaintsPaging.setPage}
+                onPageSizeChange={complaintsPaging.setPageSize}
+              />
             </View>
           </ScrollView>
         </View>
@@ -2534,7 +2604,7 @@ export default function AdminUsersScreen() {
               {/* List of Registered Test Accounts */}
               <View style={styles.sectionCard}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <Text style={styles.sectionTitle}>Registered Test Accounts ({testAccounts.length})</Text>
+                  <Text style={styles.sectionTitle}>Registered Test Accounts ({testAccountsPaging.meta.total})</Text>
                   {isLoadingTestAccounts && <ActivityIndicator size="small" color="#0d9488" />}
                 </View>
 
@@ -2605,6 +2675,16 @@ export default function AdminUsersScreen() {
                     ))}
                   </View>
                 )}
+                <AdminPagination
+                  page={testAccountsPaging.page}
+                  pageSize={testAccountsPaging.pageSize}
+                  total={testAccountsPaging.meta.total}
+                  totalPages={testAccountsPaging.meta.totalPages}
+                  label="test accounts"
+                  disabled={isLoadingTestAccounts}
+                  onPageChange={testAccountsPaging.setPage}
+                  onPageSizeChange={testAccountsPaging.setPageSize}
+                />
               </View>
             </ScrollView>
           </View>

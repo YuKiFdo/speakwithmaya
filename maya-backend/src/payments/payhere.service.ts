@@ -1,3 +1,4 @@
+import { paginateArray, type PageRequest } from '../common/pagination.js';
 import {
   Injectable,
   Logger,
@@ -2012,6 +2013,90 @@ export class PayHereService {
    * Admin: Queries all subscribers from database with profile metadata and calculates overview metrics,
    * including recurring renewal metrics, talk-time top-up telemetry, and Telco carrier-billed subscribers & revenue.
    */
+  /**
+   * Admin subscriptions dataset (stats + all four lists), built at most once per 60 s and
+   * shared by every page request, instead of 5 whole-table queries per click.
+   * Cleared after any admin subscription action.
+   */
+  private adminSubsCache: { at: number; promise: Promise<any> } | null = null;
+  private static readonly ADMIN_SUBS_TTL_MS = 60_000;
+
+  invalidateAdminSubscriptionsCache() {
+    this.adminSubsCache = null;
+  }
+
+  private getAdminSubscriptionsDataset(): Promise<any> {
+    const now = Date.now();
+    if (this.adminSubsCache && now - this.adminSubsCache.at < PayHereService.ADMIN_SUBS_TTL_MS) {
+      return this.adminSubsCache.promise;
+    }
+    const promise = this.getAdminSubscriptions();
+    this.adminSubsCache = { at: now, promise };
+    promise.catch(() => {
+      if (this.adminSubsCache?.promise === promise) this.adminSubsCache = null;
+    });
+    return promise;
+  }
+
+  /**
+   * Admin subscriptions, paged on the server: returns stats, tab counts and ONE list
+   * (subscriptions | telco | renewals | topups) filtered and sliced to the requested page.
+   */
+  async getAdminSubscriptionsPage(opts: {
+    list: string;
+    req: PageRequest;
+    search?: string;
+    status?: string;
+    tier?: string;
+  }) {
+    const ds = await this.getAdminSubscriptionsDataset();
+    const q = String(opts.search || '').toLowerCase().trim();
+    const has = (...vals: any[]) => !q || vals.some((v) => String(v || '').toLowerCase().includes(q));
+    const status = opts.status && opts.status !== 'ALL' ? opts.status : null;
+    const tier = opts.tier && opts.tier !== 'ALL' ? opts.tier : null;
+    const orders: any[] = ds.orders || [];
+
+    let list: 'subscriptions' | 'telco' | 'renewals' | 'topups' = 'subscriptions';
+    let items: any[];
+    if (opts.list === 'telco') {
+      list = 'telco';
+      items = (ds.telcoSubscriptions || []).filter(
+        (t: any) =>
+          (!status || t.status === status) &&
+          has(t.profile?.display_name, t.profile?.phone_number, t.operator_name, t.subscriber_id_masked),
+      );
+    } else if (opts.list === 'renewals') {
+      list = 'renewals';
+      items = orders.filter(
+        (o) =>
+          o.order_type === 'subscription_renewal' &&
+          has(o.profile?.display_name, o.profile?.phone_number, o.gateway_payment_id),
+      );
+    } else if (opts.list === 'topups') {
+      list = 'topups';
+      items = orders.filter(
+        (o) =>
+          o.order_type === 'add_on_topup' &&
+          has(o.profile?.display_name, o.profile?.phone_number, o.add_on_package_id),
+      );
+    } else {
+      items = (ds.subscriptions || []).filter(
+        (s: any) =>
+          (!status || s.status === status) &&
+          (!tier || s.plan_tier === tier) &&
+          has(s.profile?.display_name, s.profile?.phone_number, s.card_masked),
+      );
+    }
+    const paged = paginateArray(items, opts.req);
+    return {
+      stats: ds.stats,
+      counts: ds.counts,
+      list,
+      items: paged.items,
+      pagination: paged.pagination,
+    };
+  }
+
   async getAdminSubscriptions(includeParam?: string) {
     const include = includeParam
       ? new Set(
