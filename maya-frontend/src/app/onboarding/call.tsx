@@ -1068,17 +1068,7 @@ export default function CallScreen() {
       >
         <Pressable style={styles.fullScreenTouch}>
           <View style={[styles.container, isWebOrDesktop && styles.containerDesktop]}>
-            {/* Ambient Edge Aura for Speaking State */}
-            <AmbientGlow
-              type="blue-aura"
-              opacity={blueAuraAnim}
-              scale={blueScaleAnim}
-              // Real calls: the glow reads Maya's live playback loudness itself (voice-meter); this value is
-              // the guide demo level, or a fallback if the live meter is unavailable on this device
-              volume={guideStepIndex === 0 ? 0.65 : liveCall.status === 'speaking' ? shapeVoiceLevel(liveCall.modelVolume) : 0}
-              wakeKey={wakeKey}
-              isActive={guideStepIndex === 0 || (liveCall.status === 'speaking' && liveCall.modelVolume > 0.04)}
-            />
+            {/* Maya speaking is shown by the voice orb around her avatar only (no screen-edge glow) */}
 
             {/* Top Bar Header */}
             {isWebOrDesktop ? (

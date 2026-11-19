@@ -34,12 +34,12 @@ export const GUIDE_STEPS: GuideStep[] = [
     id: 'blue-glow',
     title: 'Maya කතා කරද්දි',
     description:
-      'Screen එක වටේ soft blue glow එකක් එනවා. Maya කතා කරලා ඉවර වෙනකම් අහගෙන ඉන්න.',
+      'Maya ගේ photo එක වටේ blue glow එකක් එනවා. Maya කතා කරලා ඉවර වෙනකම් අහගෙන ඉන්න.',
     icon: <Ionicons name="volume-high" size={18} color="#2563EB" />,
     badge: 'Tip 1 of 5',
     badgeColor: '#2563EB',
     badgeBg: '#EFF6FF',
-    targetPointer: 'Screen edges',
+    targetPointer: 'Maya avatar',
     position: 'top',
   },
   {
