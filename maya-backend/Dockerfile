@@ -25,6 +25,13 @@ ENV ONNXRUNTIME_NODE_INSTALL=skip
 COPY package*.json ./
 RUN npm ci --omit=dev --legacy-peer-deps
 
+# Runtime-only node_modules (~55 MB instead of ~1 GB): the app runs from the esbuild bundle,
+# so production needs only the packages bundle.mjs leaves external (native ONNX / Opus, ...)
+# and their own dependencies. onnxruntime-web (unused fallback) and non-linux-x64 ONNX
+# binaries are dropped. Cached until package*.json or these two scripts change.
+COPY scripts/bundle.mjs scripts/runtime-deps.mjs ./scripts/
+RUN node scripts/runtime-deps.mjs /runtime
+
 # -------------------------------------------------------------
 # Stage 2: build (needs devDependencies)
 # -------------------------------------------------------------
@@ -60,7 +67,7 @@ ENV MALLOC_ARENA_MAX=2
 
 # Stable layers first (reused by the VPS across deploys), dist/ last (changes every deploy)
 COPY --chown=node:node --from=deps /app/package*.json ./
-COPY --chown=node:node --from=deps /app/node_modules/ ./node_modules/
+COPY --chown=node:node --from=deps /runtime/node_modules/ ./node_modules/
 COPY --chown=node:node assets/ ./assets/
 COPY --chown=node:node --from=builder /app/dist/ ./dist/
 
