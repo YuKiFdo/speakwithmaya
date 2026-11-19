@@ -142,7 +142,13 @@ jobs:
 
             # Pull the new image BEFORE touching the running app, so a failed pull leaves it serving
             export LANDING_IMAGE=\"$IMAGE_TAG\"
-            docker compose pull --quiet maya-landing
+            # Retry the pull: GHCR downloads over the VPS IPv6 route sometimes get connection reset by peer
+            for attempt in 1 2 3 4; do
+              if docker compose pull --quiet maya-landing; then break; fi
+              if [ \"\$attempt\" = 4 ]; then echo \"Image pull failed after 4 attempts\"; exit 1; fi
+              echo \"Image pull failed (attempt \$attempt), retrying in \$((attempt * 10))s...\"
+              sleep \$((attempt * 10))
+            done
 
             # One-time migration: remove the legacy host PM2 process that holds port 3001
             if command -v pm2 >/dev/null 2>&1 && pm2 describe maya-landing >/dev/null 2>&1; then
