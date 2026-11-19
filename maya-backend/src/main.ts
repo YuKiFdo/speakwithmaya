@@ -68,6 +68,10 @@ async function bootstrap() {
   // profiling showed it among the top CPU costs. Returning nothing makes Nest skip it.
   app.useWebSocketAdapter(new WsAdapter(app, { messageParser: () => undefined }));
 
+  // Run onApplicationShutdown hooks on SIGTERM (Docker stop on deploy): the /events gateway
+  // closes sockets with 1012 so clients reconnect with jitter instead of all at once.
+  app.enableShutdownHooks();
+
   // Enable CORS for web clients (Expo web, admin.speakwithmaya.com, speakwithmaya.com)
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {

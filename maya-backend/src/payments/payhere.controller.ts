@@ -1,6 +1,7 @@
 import { readPage } from '../common/pagination.js';
 import {
   Controller,
+  Optional,
   Post,
   Get,
   Body,
@@ -28,6 +29,7 @@ import {
   ChargeSavedCardDto,
 } from './dto/payhere.dto.js';
 import type { PayHereWebhookPayload } from './payhere.types.js';
+import { EventsService } from '../realtime/events.service.js';
 
 @Controller('v1')
 export class PayHereController {
@@ -36,7 +38,8 @@ export class PayHereController {
   constructor(
     private readonly payHereService: PayHereService,
     private readonly reconciliationService: SubscriptionReconciliationService,
-    private readonly authService: AuthService
+    private readonly authService: AuthService,
+    @Optional() private readonly events?: EventsService,
   ) {}
 
   /**
@@ -103,6 +106,13 @@ export class PayHereController {
     this.logger.log(`[PayHereController] Payload keys received: [${Object.keys(payload || {}).join(', ')}]`);
 
     await this.payHereService.handlePaymentNotification(payload);
+    // The payer's open app (payment page / dashboard) updates at once: replaces waiting/polling.
+    // custom_1 carries the user id; the hint holds no payment data, the app re-fetches.
+    const payerId = typeof payload?.custom_1 === 'string' ? payload.custom_1 : null;
+    if (payerId && /^[0-9a-f-]{36}$/i.test(payerId)) {
+      this.events?.notifyUser(payerId, 'payment.updated', { orderId: String(payload.order_id || '') });
+      this.events?.notifyUser(payerId, 'stats.changed');
+    }
     return 'OK';
   }
 

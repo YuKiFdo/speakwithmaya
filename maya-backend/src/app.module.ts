@@ -12,6 +12,7 @@ import { RoadmapModule } from './roadmap/roadmap.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { PayHereModule } from './payments/payhere.module.js';
 import { StatsModule } from './stats/stats.module.js';
+import { EventsModule, RealtimeGatewayModule } from './realtime/realtime.module.js';
 
 // Telemetry requires credentials from the environment (no hardcoded fallback secret).
 const isObserveEnabled =
@@ -48,6 +49,8 @@ const observeImports = isObserveEnabled
     SessionsModule,
     LiveModule,
     RoadmapModule,
+    EventsModule,
+    RealtimeGatewayModule,
   ],
 
   controllers: [AppController],

@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Optional,
   Logger,
   BadRequestException,
   HttpException,
@@ -39,6 +40,7 @@ import type { UpdateAppConfigDto } from './dto/auth.dto.js';
 import { isMissingFunctionError } from '../common/supabase-rpc.js';
 import { paginateArray, pageWindow, readPage, type PageRequest } from '../common/pagination.js';
 import { computeXpByUser, levelForXp, practiceXp, XP_RULES } from '../common/xp-calculator.js';
+import { EventsService } from '../realtime/events.service.js';
 
 export interface UserProfileData {
   id: string;
@@ -227,6 +229,8 @@ export class AuthService {
     private readonly smsProvider: SmsApiLkProvider,
     private readonly ideamartProvider: IdeamartSmsProvider,
     private readonly telcoService: TelcoSubscriptionService,
+    /** Real-time change hints (/events). Optional so unit tests can construct the service. */
+    @Optional() private readonly events?: EventsService,
   ) {
     const supabaseUrl =
       this.configService.get<string>('SUPABASE_URL') ||
@@ -3726,6 +3730,8 @@ export class AuthService {
       throw new InternalServerErrorException('Failed to update user profile in database.');
     }
 
+    // The user's open app refreshes its minutes / plan / XP right away
+    this.events?.notifyUser(userId, 'stats.changed');
     return {
       success: true,
       message: 'User profile updated successfully.',
@@ -3902,6 +3908,8 @@ export class AuthService {
 
     this.appConfigCache = { value: newConfig, expiresAt: Date.now() + AuthService.APP_CONFIG_TTL_MS };
     this.logger.log(`[AppConfig] Updated successfully. Active SMS gateway: ${newConfig.smsGateway}`);
+    // Maintenance switched: every open app re-checks at once (replaces the 30 s polling)
+    if ((dto as any).maintenanceMode !== undefined) this.events?.broadcast('maintenance.changed');
     return {
       success: true,
       config: newConfig,
@@ -5884,6 +5892,23 @@ export class AuthService {
 
     this.logger.log(`[broadcastSms] Queued background SMS broadcast job ${jobId} for ${recipients.length} recipients (audience '${dto.audience}')...`);
 
+    // Live progress to admin dashboards over /events (counts only, no phone numbers), at most
+    // twice a second, plus a final update. Replaces the admin page polling the job every 1.5 s.
+    let lastProgressAt = 0;
+    const emitProgress = (final = false) => {
+      const now = Date.now();
+      if (!final && now - lastProgressAt < 500) return;
+      lastProgressAt = now;
+      this.events?.notifyAdmins('broadcast.progress', {
+        jobId,
+        status: job.status,
+        totalTargeted: recipients.length,
+        totalSent: job.totalSent,
+        totalFailed: job.totalFailed,
+        message: job.message,
+      });
+    };
+
     // Process sends in the background (fire-and-forget with chunking)
     (async () => {
       const CHUNK_SIZE = 5;
@@ -5910,6 +5935,7 @@ export class AuthService {
             }
           }),
         );
+        emitProgress();
         // Small pause between chunks (100ms)
         if (i + CHUNK_SIZE < recipients.length) {
           await new Promise((resolve) => setTimeout(resolve, 100));
@@ -5920,6 +5946,7 @@ export class AuthService {
       job.completedAt = new Date().toISOString();
       if (tracking) await tracking.finish(job.totalSent, job.totalFailed, job.failedNumbers);
       job.message = `Broadcast finished. Successfully sent to ${job.totalSent} recipient(s)${job.totalFailed > 0 ? `, ${job.totalFailed} failed` : ''}.`;
+      emitProgress(true);
       this.logger.log(`[broadcastSms] Job ${jobId} finished. Sent: ${job.totalSent}, Failed: ${job.totalFailed}`);
 
       // Auto-expire job from memory after 1 hour to prevent memory bloat
@@ -5930,6 +5957,7 @@ export class AuthService {
       job.status = 'failed';
       job.completedAt = new Date().toISOString();
       job.message = `Broadcast failed unexpectedly: ${err?.message || String(err)}`;
+      emitProgress(true);
       this.logger.error(`[broadcastSms] Job ${jobId} encountered fatal error: ${err?.message}`);
     });
 

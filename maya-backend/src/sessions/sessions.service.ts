@@ -35,6 +35,7 @@ export function toValidUuid(str?: string): string {
 export { encodePcmToWav, resamplePcm16Mono } from './audio-codec.js';
 import { AudioFinalizeClient } from './audio-finalize-client.js';
 import { encodePcmToWav, resamplePcm16Mono } from './audio-codec.js';
+import { EventsService } from '../realtime/events.service.js';
 
 export interface UsageRecord {
   id: string;
@@ -302,6 +303,8 @@ export class SessionsService {
 
   constructor(
     @Optional() private readonly roadmapService?: RoadmapService,
+    /** Real-time change hints (/events). */
+    @Optional() private readonly events?: EventsService,
   ) {
     this.geminiApiKey = process.env.GEMINI_API_KEY;
     this.liveModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
@@ -2778,6 +2781,9 @@ ${memoryPart}`;
     this.sessionHintUsage.set(validSessionId, hintUsage);
 
     const sessionCode = `SM-${validSessionId.slice(0, 5).toUpperCase()}`;
+
+    // XP / minutes changed: every open screen of this user (other tabs, devices) refreshes
+    if (resolvedUserId) this.events?.notifyUser(resolvedUserId, 'stats.changed');
 
     return {
       sessionId: validSessionId,
