@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, useWindowDimensions } from 'react-native';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
+import { useSmoothedVoiceLevel } from './voice-level';
 
 interface AmbientGlowProps {
   type: 'purple-bottom' | 'blue-aura';
@@ -10,6 +11,8 @@ interface AmbientGlowProps {
   volume?: number;
   /** Optional active flag to speed up fluid wave motion when voice is detected */
   isActive?: boolean;
+  /** Changes once when the call comes alive (web: edge sweep; native: ignored). */
+  wakeKey?: number;
 }
 
 type GradientStop = { offset: number; color: string; opacity: number };
@@ -103,7 +106,12 @@ export function AmbientGlow({
   isActive = false,
 }: AmbientGlowProps) {
   const clampedVol = Math.max(0, Math.min(1, volume));
-  const vol = useSmoothedVolume(clampedVol);
+  const smoothedVol = useSmoothedVolume(clampedVol);
+  // Maya's glow in real calls: her live playback loudness, word by word (voice-meter).
+  // The intro guide passes a fixed demo level instead, which then wins.
+  const liveMayaVol = useSmoothedVoiceLevel(0, false, 0, type === 'blue-aura');
+  // (Native: the live meter is our own playback schedule, so it is always available.)
+  const vol = type === 'blue-aura' && clampedVol !== 0.65 ? liveMayaVol : smoothedVol;
   const { width: screenW } = useWindowDimensions();
 
   /* Animation clocks (speed up when voice is active, same as web) */
@@ -301,9 +309,9 @@ export function AmbientGlow({
           ry="70%"
           stops={[
             { offset: 0.3, color: '#FFFFFF', opacity: 0 },
-            { offset: 0.65, color: '#BAE6FD', opacity: 0.35 },
-            { offset: 0.9, color: '#38BDF8', opacity: 0.52 },
-            { offset: 1, color: '#0EA5E9', opacity: 0.68 },
+            { offset: 0.62, color: '#93C5FD', opacity: 0.38 },
+            { offset: 0.88, color: '#3B82F6', opacity: 0.62 },
+            { offset: 1, color: '#1D4ED8', opacity: 0.8 },
           ]}
         />
       </Animated.View>
@@ -328,8 +336,8 @@ export function AmbientGlow({
           ry="58%"
           stops={[
             { offset: 0.45, color: '#FFFFFF', opacity: 0 },
-            { offset: 0.8, color: '#38BDF8', opacity: 0.28 },
-            { offset: 1, color: '#0284C7', opacity: 0.45 },
+            { offset: 0.8, color: '#60A5FA', opacity: 0.34 },
+            { offset: 1, color: '#1E40AF', opacity: 0.55 },
           ]}
         />
       </Animated.View>
@@ -357,9 +365,9 @@ export function AmbientGlow({
           ry="62%"
           stops={[
             { offset: 0.52, color: '#FFFFFF', opacity: 0 },
-            { offset: 0.75, color: '#BAE6FD', opacity: 0.25 },
-            { offset: 0.92, color: '#38BDF8', opacity: 0.45 },
-            { offset: 1, color: '#0EA5E9', opacity: 0.6 },
+            { offset: 0.75, color: '#BFDBFE', opacity: 0.3 },
+            { offset: 0.92, color: '#3B82F6', opacity: 0.55 },
+            { offset: 1, color: '#2563EB', opacity: 0.7 },
           ]}
         />
       </Animated.View>

@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Animated } from 'react-native';
+import { getMayaVoiceLevel, shapeOutputLevel } from '@/services/audio/voice-meter';
 
 interface AmbientGlowProps {
   type: 'purple-bottom' | 'blue-aura';
@@ -9,6 +10,8 @@ interface AmbientGlowProps {
   volume?: number;
   /** Optional active flag to speed up fluid wave motion when voice is detected */
   isActive?: boolean;
+  /** Changes once when the call comes alive: one bright sweep around the edge (blue-aura). */
+  wakeKey?: number;
 }
 
 export function AmbientGlow({
@@ -17,9 +20,92 @@ export function AmbientGlow({
   scale,
   volume = 0,
   isActive = false,
+  wakeKey,
 }: AmbientGlowProps) {
   // Clamp volume between 0 and 1 for safe CSS math
   const clampedVol = Math.max(0, Math.min(1, volume));
+
+  // Blue-aura driver: spring physics on Maya's LIVE playback loudness (services/audio/voice-meter),
+  // read every frame and written straight to CSS variables (no React re-render per frame).
+  //  - loudness follower: fast rise (~25 ms), quicker fall (~140 ms) so word gaps show
+  //  - syllable onsets (sudden rise) kick one or two edges outward
+  //  - each edge is an under-damped spring, so it bounces and settles like a physical thing
+  //  - the colour flow speed follows her voice (no fixed loop)
+  const softRef = useRef<HTMLDivElement | null>(null);
+  const lineRef = useRef<HTMLDivElement | null>(null);
+  const targetRef = useRef(0);
+  targetRef.current = clampedVol; // guide demo level, or the chunk-volume fallback (see below)
+  useEffect(() => {
+    if (type !== 'blue-aura') return;
+    const reduce =
+      typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const K = 190; // spring stiffness
+    const C = 13; // damping (under-damped: a little bounce)
+    const pos = [12, 12, 12, 12]; // l, t, r, b reach in px
+    const vel = [0, 0, 0, 0];
+    const names = ['--reach-l', '--reach-t', '--reach-r', '--reach-b'];
+    let level = 0;
+    let prevLive = 0;
+    let meterSilentFor = 0; // s the live meter has read ~0
+    let warned = false;
+    let angle = 0;
+    let t = 0;
+    let last = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      t += dt;
+      // Live playback meter (word-synced). If it reads ~0 while the fallback says Maya is
+      // speaking (meter unsupported on this browser), use the fallback so the glow never vanishes.
+      const metered = shapeOutputLevel(getMayaVoiceLevel());
+      meterSilentFor = metered < 0.02 ? meterSilentFor + dt : 0;
+      const fallback = targetRef.current;
+      const meterDead = meterSilentFor > 0.4 && fallback > 0.1;
+      if (meterDead && !warned) {
+        warned = true;
+        console.warn('[MayaGlow] Live voice meter reads 0 while Maya speaks: using chunk-volume fallback');
+      }
+      const live = meterDead ? fallback : Math.max(metered, fallback * 0.25);
+      level += (live - level) * (1 - Math.exp(-dt / (live > level ? 0.025 : 0.14)));
+
+      // Syllable onset: a sudden rise kicks one or two edges outward (stronger rise, bigger kick)
+      const rise = live - prevLive;
+      prevLive = live;
+      if (!reduce && rise > 0.1) {
+        const i = Math.floor(Math.random() * 4);
+        vel[i] += 260 * rise + 40;
+        if (rise > 0.22) vel[(i + 2) % 4] += 180 * rise;
+      }
+
+      const base = 12 + level * 40;
+      for (let i = 0; i < 4; i++) {
+        // tiny idle breathing so it never looks frozen, smaller than the voice motion
+        const idle = reduce ? 0 : 1.5 * Math.sin(t * (0.9 + i * 0.23) + i * 1.7);
+        const target = base + idle;
+        const acc = K * (target - pos[i]) - C * vel[i];
+        vel[i] += acc * dt;
+        pos[i] += vel[i] * dt;
+      }
+      angle = (angle + dt * (8 + level * 140)) % 360;
+
+      const soft = softRef.current;
+      if (soft) {
+        for (let i = 0; i < 4; i++) soft.style.setProperty(names[i], `${(24 + Math.max(3, pos[i])).toFixed(1)}px`);
+        soft.style.setProperty('--maya-edge-angle', `${angle.toFixed(1)}deg`);
+        soft.style.opacity = String(0.3 + level * 0.4);
+      }
+      const line = lineRef.current;
+      if (line) {
+        line.style.setProperty('--maya-edge-angle', `${angle.toFixed(1)}deg`);
+        line.style.opacity = String(0.5 + level * 0.4);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [type]);
+
 
   if (type === 'purple-bottom') {
     // Dynamic reactive metrics driven by live mic volume
@@ -155,12 +241,11 @@ export function AmbientGlow({
     );
   }
 
-  // Maya Signature Electric Blue Speaking Aura ('blue-aura')
-  const dynamicInsetOuter = Math.round(120 + clampedVol * 75);
-  const dynamicInsetMid = Math.round(50 + clampedVol * 45);
-  const dynamicInsetInner = Math.round(20 + clampedVol * 25);
-  const clearCenterStop = Math.max(22, Math.round(35 - clampedVol * 12));
-
+  // Maya speaking ('blue-aura'): a flowing gradient of blues (deep -> sky -> pale) around the screen edge
+  // (Maya's own palette). Thickness and brightness follow her voice, the colours slowly rotate,
+  // and `wakeKey` plays one bright sweep when the call comes alive. Only the edge band is drawn
+  // (CSS mask), so the content stays clean; everything animates on the compositor.
+  // Driven per frame below (no React re-render): smoothed voice + a wave on each edge.
   return (
     <Animated.View
       style={{
@@ -170,65 +255,67 @@ export function AmbientGlow({
         right: 0,
         bottom: 0,
         opacity,
-        transform: scale ? [{ scale }] : undefined,
         pointerEvents: 'none',
         zIndex: 1,
         overflow: 'hidden',
       }}
     >
       <style>{`
-        @keyframes mayaBlueBreathe {
-          0%, 100% {
-            opacity: 0.78;
-            transform: scale(1.0);
-          }
-          50% {
-            opacity: 1;
-            transform: scale(1.035);
-          }
+        @property --maya-edge-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+        @keyframes mayaEdgeSpin { to { --maya-edge-angle: 360deg; } }
+        @keyframes mayaEdgeWake {
+          0% { opacity: 0; --maya-edge-angle: 0deg; }
+          15% { opacity: 1; }
+          100% { opacity: 0; --maya-edge-angle: 300deg; }
         }
-        @keyframes mayaBlueWaveFlow {
-          0%, 100% {
-            transform: scale(1.0) rotate(0deg);
-          }
-          33% {
-            transform: scale(1.03, 0.98) rotate(0.6deg);
-          }
-          66% {
-            transform: scale(0.98, 1.03) rotate(-0.6deg);
-          }
+        .maya-edge-colors {
+          position: absolute; inset: 0;
+          background: conic-gradient(from var(--maya-edge-angle),
+            #1D4ED8, #3B82F6, #60A5FA, #93C5FD, #2563EB, #60A5FA, #1D4ED8);
+          animation: mayaEdgeSpin var(--maya-edge-speed, 7s) linear infinite;
+        }
+        /* Soft glow: four edge fades (no hard inner border), each reaching --reach px inward */
+        /* Soft glow: four eased edge fades, then a blur so the inner corners melt into a soft,
+           rounded shape (no rectangular box). The layer reaches 24px past the screen so the blur
+           keeps the outer edge solid; --reach-* already include those 24px. */
+        .maya-edge-soft {
+          inset: -24px;
+          filter: blur(14px);
+          -webkit-mask-image:
+            linear-gradient(to right, #000 24px, rgba(0,0,0,.55) calc(var(--reach-l) * .55), rgba(0,0,0,.18) calc(var(--reach-l) * .8), transparent var(--reach-l)),
+            linear-gradient(to left, #000 24px, rgba(0,0,0,.55) calc(var(--reach-r) * .55), rgba(0,0,0,.18) calc(var(--reach-r) * .8), transparent var(--reach-r)),
+            linear-gradient(to bottom, #000 24px, rgba(0,0,0,.55) calc(var(--reach-t) * .55), rgba(0,0,0,.18) calc(var(--reach-t) * .8), transparent var(--reach-t)),
+            linear-gradient(to top, #000 24px, rgba(0,0,0,.55) calc(var(--reach-b) * .55), rgba(0,0,0,.18) calc(var(--reach-b) * .8), transparent var(--reach-b));
+          mask-image:
+            linear-gradient(to right, #000 24px, rgba(0,0,0,.55) calc(var(--reach-l) * .55), rgba(0,0,0,.18) calc(var(--reach-l) * .8), transparent var(--reach-l)),
+            linear-gradient(to left, #000 24px, rgba(0,0,0,.55) calc(var(--reach-r) * .55), rgba(0,0,0,.18) calc(var(--reach-r) * .8), transparent var(--reach-r)),
+            linear-gradient(to bottom, #000 24px, rgba(0,0,0,.55) calc(var(--reach-t) * .55), rgba(0,0,0,.18) calc(var(--reach-t) * .8), transparent var(--reach-t)),
+            linear-gradient(to top, #000 24px, rgba(0,0,0,.55) calc(var(--reach-b) * .55), rgba(0,0,0,.18) calc(var(--reach-b) * .8), transparent var(--reach-b));
+        }
+        /* Crisp 2px line right at the screen edge */
+        .maya-edge-line {
+          padding: 2px;
+          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+        }
+        .maya-edge-wake { animation: mayaEdgeWake 1.1s cubic-bezier(.22,1,.36,1) forwards; }
+        @media (prefers-reduced-motion: reduce) {
+          .maya-edge-colors { animation: none; }
+          .maya-edge-wake { animation-duration: .4s; }
         }
       `}</style>
 
-      {/* Layer 1: Luminous Maya Blue Ambient Vignette with Voice-Reactive Edge Contraction */}
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          background: `radial-gradient(ellipse 85% 75% at 50% 50%, rgba(255, 255, 255, 0) ${clearCenterStop}%, rgba(186, 230, 253, 0.35) 65%, rgba(56, 189, 248, 0.52) 90%, rgba(14, 165, 233, 0.68) 100%)`,
-          animation: `mayaBlueBreathe ${isActive ? '1.9s' : '3.6s'} ease-in-out infinite`,
-          boxShadow: `inset 0 0 ${dynamicInsetOuter}px rgba(56, 189, 248, 0.5), inset 0 0 ${dynamicInsetMid}px rgba(14, 165, 233, 0.4), inset 0 0 ${dynamicInsetInner}px rgba(2, 132, 199, 0.3)`,
-          transition: 'box-shadow 90ms ease-out, background 90ms ease-out',
-        }}
-      />
-
-      {/* Layer 2: Organic Rippling Edge Shimmer (responds to Maya's syllables) */}
-      <div
-        style={{
-          position: 'absolute',
-          top: '-4%',
-          left: '-4%',
-          width: '108%',
-          height: '108%',
-          background:
-            'radial-gradient(ellipse 78% 68% at 50% 50%, rgba(255, 255, 255, 0) 52%, rgba(186, 230, 253, 0.25) 75%, rgba(56, 189, 248, 0.45) 92%, rgba(14, 165, 233, 0.6) 100%)',
-          filter: 'blur(18px)',
-          opacity: 0.45 + clampedVol * 0.55,
-          animation: 'mayaBlueWaveFlow 4.2s ease-in-out infinite',
-          transition: 'opacity 85ms ease-out',
-          pointerEvents: 'none',
-        }}
-      />
+      <div ref={softRef} className="maya-edge-colors maya-edge-soft" style={{ ['--reach-l' as any]: '36px', ['--reach-r' as any]: '36px', ['--reach-t' as any]: '36px', ['--reach-b' as any]: '36px', opacity: 0.3, animation: 'none' }} />
+      <div ref={lineRef} className="maya-edge-colors maya-edge-line" style={{ opacity: 0.3, animation: 'none' }} />
+      {/* One-time wake-up sweep */}
+      {wakeKey ? (
+        <div
+          key={wakeKey}
+          className="maya-edge-colors maya-edge-soft maya-edge-wake"
+          style={{ ['--reach-l' as any]: '94px', ['--reach-r' as any]: '94px', ['--reach-t' as any]: '94px', ['--reach-b' as any]: '94px' }}
+        />
+      ) : null}
     </Animated.View>
   );
 }

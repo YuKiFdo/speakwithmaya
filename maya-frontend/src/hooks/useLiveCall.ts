@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { notifyStatsChanged } from '@/services/stats-events';
+import { setMayaVoiceLevelSource } from '@/services/audio/voice-meter';
+import { publishCallXpResult, resetCallXpResult } from '@/services/call-xp-result';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { createAudioCapture } from '@/services/audio/AudioCapture';
@@ -125,6 +127,8 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
    * of 2-4 s of silence after "Connected".
    */
   const [greetingReady, setGreetingReady] = useState<boolean>(false);
+  /** The learner finished a turn and Maya's reply has not started yet (drives the "thinking" orb). */
+  const [isAwaitingReply, setIsAwaitingReply] = useState<boolean>(false);
   const greetingBufferedMsRef = useRef(0);
   const markGreetingBuffered = (ms: number) => {
     if (greetingBufferedMsRef.current >= GREETING_READY_MS) return;
@@ -428,6 +432,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
         evaluationResultRef.current = null;
 
         // Fresh session: gate microphone and initial greeting audio until Maya finishes speaking her opening turn greeting
+        resetCallXpResult();
         isFirstGreetingPendingRef.current = true;
         isInitialGreetingHeldRef.current = true;
         isInitialGreetingTurnCompleteRef.current = false;
@@ -449,6 +454,9 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           }
         }, 7000);
       }
+
+      // Voice-synced visuals (glow, orb) read Maya's live playback loudness every frame
+      setMayaVoiceLevelSource(() => playerRef.current?.getOutputLevel?.() ?? 0);
 
       // 1. Initialize Audio Player
       await playerRef.current.init({
@@ -573,6 +581,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
 
             // Start round-trip timer for turn response: if no response in 5s, show "thinking" indicator
             turnStartTimeRef.current = Date.now();
+            setIsAwaitingReply(true);
             if (responseTimeoutRef.current) clearTimeout(responseTimeoutRef.current);
             responseTimeoutRef.current = setTimeout(() => {
               console.warn('[useLiveCall] ⚠️ Response delay > 5s - Maya is still thinking');
@@ -781,6 +790,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               turnStartTimeRef.current = null;
             }
             setIsSlowResponse(false);
+            setIsAwaitingReply(false);
 
             // 24kHz Float32 mono = 24,000 samples per second
             mayaSpeakingSecondsRef.current += (samples.length / 24000);
@@ -840,6 +850,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
               turnStartTimeRef.current = null;
             }
             setIsSlowResponse(false);
+            setIsAwaitingReply(false);
 
             // 24kHz PCM 16-bit mono = 48,000 bytes per second
             const byteLen = Math.floor((base64.length * 3) / 4);
@@ -1574,7 +1585,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     const isGeneral = !options.roadmapLevelId;
     const practiceMins = Math.max(1, Math.floor(secs / 60));
     // Same rule as the server (sessions.service finishSession): >= 30s -> max(1, floor(min)) x 5 XP
-    const generalPracticeXp = secs >= 30 ? Math.max(5, practiceMins * 5) : 0;
+    const generalPracticeXp = secs >= 30 ? practiceMins * 5 : 0;
     const xpEarned = isRoadmap
       ? (passed ? 100 : (!isVeryShortSession ? 25 : 0))
       : generalPracticeXp;
@@ -1698,20 +1709,23 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           if (!options.isIntroCall && finishData && typeof finishData.remainingMinutes === 'number') {
             OnboardingStore.updateMinutesBalance(finishData.remainingMinutes);
           }
-          // Server-authoritative streak bonus (hint-free turns) joins the report's XP
+          // Server-authoritative XP: what the call actually added to the learner's total
+          // (practice / level pass / failed attempt / replay) + the streak bonus. The report and the
+          // complete screen switch to this exact number, so they always match the dashboard.
           const bonus = Number(finishData?.streakBonusXp) || 0;
-          if (bonus > 0) {
-            setMissionReport((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    streakBonusXp: bonus,
-                    longestStreak: Number(finishData?.longestStreak) || 0,
-                    xpEarned: (prev.xpEarned || 0) + bonus,
-                  }
-                : prev,
-            );
-          }
+          const serverBase = typeof finishData?.xpEarned === 'number' ? finishData.xpEarned : null;
+          setMissionReport((prev) => {
+            if (!prev) return prev;
+            const base = serverBase ?? (prev.xpEarned || 0) - (prev.streakBonusXp || 0);
+            const total = base + bonus;
+            publishCallXpResult(total, bonus);
+            return {
+              ...prev,
+              streakBonusXp: bonus,
+              longestStreak: Number(finishData?.longestStreak) || 0,
+              xpEarned: total,
+            };
+          });
         }
       } catch (err) {
         console.warn('[useLiveCall] Error calling finish endpoint:', err);
@@ -1799,6 +1813,16 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
   }, []);
 
   // Release buffered greeting audio and transcript once connected chime or intro guide finishes
+  // "Thinking" ends whenever Maya speaks, the call drops or ends (and never sticks > 15 s)
+  useEffect(() => {
+    if (status !== 'listening') setIsAwaitingReply(false);
+  }, [status]);
+  useEffect(() => {
+    if (!isAwaitingReply) return;
+    const t = setTimeout(() => setIsAwaitingReply(false), 15000);
+    return () => clearTimeout(t);
+  }, [isAwaitingReply]);
+
   const releaseGreeting = useCallback(() => {
     if (!isInitialGreetingHeldRef.current) return;
     console.log(
@@ -1944,6 +1968,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     isConnected,
     releaseGreeting,
     greetingReady,
+    isAwaitingReply,
     suppressMicFor,
     speechSync: speechSyncRef.current,
     lastUserUtterance,

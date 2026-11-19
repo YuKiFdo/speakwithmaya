@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Polygon, Stop } from 'react-native-svg';
 import { Image as ExpoImage } from 'expo-image';
 
 // Google Noto animated emoji (animated WebP; expo-image plays it on web, Android and iOS)
@@ -10,6 +10,7 @@ const STAR_ANIMATED = require('@/assets/images/star-animated-small.webp');
 import { fontStyle } from '@/theme/fonts';
 import { triggerHaptic } from '@/utils/haptics-audio';
 import { playRewardSound } from '@/services/sound/sound-service';
+import { levelProgress } from '@/utils/levels';
 
 /** Short reward "pop" + haptic. Pops are brief so they don't leak into the mic as speech. */
 function rewardFeedback(kind: 'xp' | 'streak' | 'milestone' | 'charge', haptic: 'light' | 'medium') {
@@ -24,6 +25,7 @@ function rewardFeedback(kind: 'xp' | 'streak' | 'milestone' | 'charge', haptic: 
 /* -------------------------------------------------------------------------- */
 
 const XP_PER_MINUTE = 5;
+const PRACTICE_MIN_SECONDS = 30;
 const STREAK_MIN = 3;
 const STREAK_XP = 2;
 const STREAK_CAP = 20;
@@ -52,12 +54,32 @@ export interface Milestone {
   title: string;
   /** Short count shown next to the fire once it docks at Maya's avatar (streaks). */
   badge?: string;
+  /** Level up: the hexagon flips from `fromLevel` to `toLevel`. */
+  fromLevel?: number;
+  toLevel?: number;
 }
 
+// react-native-web: Animated passes `collapsable` to the wrapped component, and the SVG Circle
+// writes it to the DOM ("Received false for a non-boolean attribute collapsable"). Strip it on web.
+const WebSafeCircle =
+  Platform.OS === 'web'
+    ? React.forwardRef<any, any>(({ collapsable: _c, ...props }, ref) => <Circle ref={ref} {...props} />)
+    : Circle;
+if (Platform.OS === 'web') (WebSafeCircle as any).displayName = 'WebSafeCircle';
+const AnimatedCircle = Animated.createAnimatedComponent(WebSafeCircle as any) as any;
+
 const isFireMilestone = (m: Milestone | null) => m?.emoji === '\u{1F525}';
-/** How long a milestone stays active (fire milestones also fly to Maya and dock there). */
+const isLevelMilestone = (m: Milestone | null) => Boolean(m && m.toLevel);
+/** Fire and level-up moments shrink and fly to Maya's avatar, then dock there for a while. */
+const docksToAvatar = (m: Milestone | null) => isFireMilestone(m) || isLevelMilestone(m);
+/** Level up: the number flips this long after the hexagon lands. */
+const LEVEL_FLIP_DELAY_MS = 650;
+/** How long a milestone stays active (docking milestones also fly to Maya and dock there). */
 const milestoneDuration = (m: Milestone) =>
-  isFireMilestone(m) ? MILESTONE_MS + FIRE_FLY_MS + FIRE_DOCK_MS + FIRE_FADE_MS : MILESTONE_MS;
+  docksToAvatar(m)
+    ? MILESTONE_MS + (isLevelMilestone(m) ? 500 : 0) + FIRE_FLY_MS + FIRE_DOCK_MS + FIRE_FADE_MS
+    : MILESTONE_MS;
+const levelOf = (xp: number) => levelProgress(xp).level;
 
 interface UseCallRewardsArgs {
   secondsElapsed: number;
@@ -74,6 +96,8 @@ interface UseCallRewardsArgs {
   suppressMicFor?: (ms: number) => void;
   /** A popup/modal is open (feedback card, hint limit, end call, guide...): hold milestones. */
   blocked?: boolean;
+  /** The learner's total XP before this call (null until known): detects a level up in the call. */
+  startTotalXp?: number | null;
 }
 
 export function useCallRewards(a: UseCallRewardsArgs) {
@@ -91,22 +115,48 @@ export function useCallRewards(a: UseCallRewardsArgs) {
     setSessionXp((x) => x + amount);
     setGain({ id: idRef.current, amount });
   };
-  const queueMilestone = (emoji: string, title: string, badge?: string) => {
+  const queueMilestone = (emoji: string, title: string, badge?: string, extra?: Partial<Milestone>) => {
     idRef.current += 1;
-    queueRef.current.push({ id: idRef.current, emoji, title, badge });
+    queueRef.current.push({ id: idRef.current, emoji, title, badge, ...extra });
     setQueueTick((t) => t + 1);
   };
 
-  // +5 XP at every full practice minute (general sessions)
-  const minutes = Math.floor(a.secondsElapsed / 60);
-  const minutesRef = useRef(0);
+  // Level up during the call: total before the call + XP earned now crosses a 500 boundary
+  const startXpRef = useRef<number | null>(null);
+  if (startXpRef.current === null && typeof a.startTotalXp === 'number' && sessionXp === 0) {
+    startXpRef.current = a.startTotalXp;
+  }
+  const lastLevelRef = useRef<number | null>(null);
   useEffect(() => {
-    if (a.earnsMinuteXp && !a.paused && minutes > minutesRef.current && minutes >= 1) {
-      addXp(XP_PER_MINUTE);
-      rewardFeedback('xp', 'light');
+    const start = startXpRef.current;
+    if (start === null) return;
+    const level = levelOf(start + sessionXp);
+    if (lastLevelRef.current === null) {
+      lastLevelRef.current = level;
+      return;
     }
-    minutesRef.current = minutes;
-  }, [minutes, a.earnsMinuteXp, a.paused]);
+    if (level > lastLevelRef.current) {
+      queueMilestone('\u2B22', 'Level up!', `Lv ${level}`, { fromLevel: lastLevelRef.current, toLevel: level });
+      lastLevelRef.current = level;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionXp, a.startTotalXp]);
+
+  // Practice XP, exactly the server rule (common/xp-calculator.ts practiceXp):
+  // >= 30 s -> max(1, floor(min)) x 5. So +5 at 0:30, then +5 at 2:00, 3:00, ...
+  // Keeps counting during the goodbye (the server counts the whole call).
+  const practiceTarget =
+    a.secondsElapsed >= PRACTICE_MIN_SECONDS ? Math.max(1, Math.floor(a.secondsElapsed / 60)) * XP_PER_MINUTE : 0;
+  const practiceAwardedRef = useRef(0);
+  useEffect(() => {
+    if (!a.earnsMinuteXp) return;
+    const delta = practiceTarget - practiceAwardedRef.current;
+    if (delta > 0) {
+      practiceAwardedRef.current = practiceTarget;
+      addXp(delta);
+      if (!a.paused) rewardFeedback('xp', 'light');
+    }
+  }, [practiceTarget, a.earnsMinuteXp, a.paused]);
 
   // Hint-free streak (same rule as the server)
   const lastUtteranceId = useRef<number | null>(null);
@@ -308,41 +358,37 @@ export function XpCounter({ sessionXp, gain, busy = false }: { sessionXp: number
   useEffect(() => () => timersRef.current.forEach(clearTimeout), []);
 
   if (!visible) return null;
+  // Docked on the top-right of Maya's avatar (same spot as the streak fire): a star that pops in
+  // with a small wiggle and a "+N" badge, then fades out until the next gain.
   return (
-    <View style={styles.hudRow}>
+    <View pointerEvents="none" style={styles.xpDock} accessibilityLiveRegion="polite" accessibilityLabel={`Plus ${flyLabel ? flyLabel.slice(1) : ''} XP, ${shownXp} XP this call`}>
       <Animated.View
-        style={[
-          styles.xpPill,
-          {
-            opacity: show,
-            transform: [
-              { scale: show.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 1 : 0.6, 1] }) },
-              { translateY: show.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 0 : 6, 0] }) },
-            ],
-          },
-        ]}
-        accessibilityLiveRegion="polite"
-        accessibilityLabel={`${shownXp} XP this call`}
-      >
-        <View style={styles.chipRow}>
-          <ExpoImage source={STAR_ANIMATED} style={styles.chipIcon} contentFit="contain" autoplay />
-          <Text style={styles.xpText}>{shownXp} XP</Text>
-        </View>
-      </Animated.View>
-      {flyLabel && (
-        <Animated.Text
-          pointerEvents="none"
-          style={[
-            styles.flyText,
+        style={{
+          opacity: show,
+          transform: [
+            { translateY: show.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 0 : 10, 0] }) },
+            { scale: show.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 1 : 0.3, 1] }) },
             {
-              opacity: fly.interpolate({ inputRange: [0, 0.15, 0.7, 1], outputRange: [0, 1, 1, 0] }),
-              transform: [{ translateY: fly.interpolate({ inputRange: [0, 1], outputRange: [6, reduceMotion ? 6 : -16] }) }],
+              rotate: fly.interpolate({
+                inputRange: [0, 0.15, 0.3, 0.45, 1],
+                outputRange: reduceMotion ? ['0deg', '0deg', '0deg', '0deg', '0deg'] : ['0deg', '-14deg', '10deg', '-4deg', '0deg'],
+              }),
             },
-          ]}
-        >
-          {flyLabel}
-        </Animated.Text>
-      )}
+          ],
+        }}
+      >
+        <ExpoImage source={STAR_ANIMATED} style={styles.xpDockStar} contentFit="contain" autoplay />
+        {flyLabel ? (
+          <Animated.View
+            style={[
+              styles.xpDockBadge,
+              { transform: [{ scale: fly.interpolate({ inputRange: [0, 0.2, 0.35, 1], outputRange: [0.4, 1.25, 1, 1] }) }] },
+            ]}
+          >
+            <Text style={styles.xpDockBadgeText}>{flyLabel}</Text>
+          </Animated.View>
+        ) : null}
+      </Animated.View>
     </View>
   );
 }
@@ -449,7 +495,7 @@ export function MilestoneOverlay({
         Animated.spring(scale, { toValue: 1, tension: 140, friction: 6, useNativeDriver: false }),
       ]).start();
 
-      if (isFireMilestone(milestone)) {
+      if (docksToAvatar(milestone)) {
         // Phase 3: everything but the fire fades; the fire flies to Maya and docks there
         flyTimerRef.current = setTimeout(async () => {
           const [root, fire, target] = await Promise.all([
@@ -485,10 +531,10 @@ export function MilestoneOverlay({
               Animated.spring(dock, { toValue: 1, tension: 160, friction: 7, useNativeDriver: false }),
             ]),
           ]).start();
-        }, reduceMotion ? 900 : MILESTONE_MS);
+        }, reduceMotion ? 900 : MILESTONE_MS + (isLevelMilestone(milestone) ? 500 : 0));
       }
     } else if (shown) {
-      Animated.timing(layer, { toValue: 0, duration: isFireMilestone(shown) ? FIRE_FADE_MS : 280, useNativeDriver: useNative }).start(
+      Animated.timing(layer, { toValue: 0, duration: docksToAvatar(shown) ? FIRE_FADE_MS : 280, useNativeDriver: useNative }).start(
         () => setShown(null),
       );
     }
@@ -504,41 +550,48 @@ export function MilestoneOverlay({
   const topOpacity = fill.interpolate({ inputRange: [0, 0.85, 1], outputRange: [0, 0, 1] });
   const bottomOpacity = fill.interpolate({ inputRange: [0, 0.15], outputRange: [0, 1], extrapolate: 'clamp' });
   const isFire = isFireMilestone(shown);
+  const isLevel = isLevelMilestone(shown);
+  const docks = isFire || isLevel;
 
   return (
     <Animated.View ref={rootRef} pointerEvents="none" style={[styles.milestoneLayer, { opacity: layer }]}>
       {/* Fiery edges: bottom lights first, sides climb, top lights when full */}
       <Animated.View style={[StyleSheet.absoluteFill, { opacity: chrome }]}>
-        <Animated.View style={[styles.flameEdge, styles.flameBottom, { opacity: bottomOpacity }]} />
-        <Animated.View style={[styles.flameEdge, styles.flameLeft, { height: sideHeight }]} />
-        <Animated.View style={[styles.flameEdge, styles.flameRight, { height: sideHeight }]} />
-        <Animated.View style={[styles.flameEdge, styles.flameTop, { opacity: topOpacity }]} />
+        <Animated.View style={[styles.flameEdge, isLevel && styles.levelEdge, styles.flameBottom, { opacity: bottomOpacity }]} />
+        <Animated.View style={[styles.flameEdge, isLevel && styles.levelEdge, styles.flameLeft, { height: sideHeight }]} />
+        <Animated.View style={[styles.flameEdge, isLevel && styles.levelEdge, styles.flameRight, { height: sideHeight }]} />
+        <Animated.View style={[styles.flameEdge, isLevel && styles.levelEdge, styles.flameTop, { opacity: topOpacity }]} />
       </Animated.View>
 
       <Animated.View style={[styles.milestoneCardWrap, { opacity: scale, transform: [{ scale }] }]}>
         {/* Card background + title fade separately so the fire can leave on its own */}
-        <Animated.View style={[styles.milestoneCardBg, { opacity: chrome }]} />
-        {isFire ? (
+        <Animated.View style={[styles.milestoneGlow, isLevel ? styles.milestoneGlowLevel : styles.milestoneGlowFire, { opacity: chrome }]} />
+        {docks ? (
           <Animated.View
             ref={fireRef}
             style={{ transform: [{ translateX: flyX }, { translateY: flyY }, { scale: flyScale }] }}
           >
-            <ExpoImage source={FIRE_ANIMATED_CARD} style={styles.fireImage} contentFit="contain" autoplay />
+            {isLevel ? (
+              <LevelUpHexagon key={shown.id} from={shown.fromLevel || 1} to={shown.toLevel || 2} reduceMotion={reduceMotion} />
+            ) : (
+              <ExpoImage source={FIRE_ANIMATED_CARD} style={styles.fireImage} contentFit="contain" autoplay />
+            )}
           </Animated.View>
         ) : (
           <Text style={styles.milestoneEmoji}>{shown.emoji}</Text>
         )}
-        <Animated.Text style={[styles.milestoneTitle, { opacity: chrome }]}>{shown.title}</Animated.Text>
+        <Animated.Text style={[styles.milestoneTitle, isLevel && styles.milestoneTitleLevel, { opacity: chrome }]}>{shown.title}</Animated.Text>
       </Animated.View>
 
       {/* Streak count next to the docked fire */}
-      {isFire && dockPos && shown.badge ? (
+      {docks && dockPos && shown.badge ? (
         <Animated.View
           style={[
             styles.dockBadge,
+            isLevel && styles.dockBadgeLevel,
             { left: dockPos.left, top: dockPos.top, opacity: dock, transform: [{ scale: dock }] },
           ]}
-          accessibilityLabel={`${shown.badge} in a row`}
+          accessibilityLabel={isLevel ? `Level ${shown.toLevel}` : `${shown.badge} in a row`}
         >
           <Text style={styles.dockBadgeText}>{shown.badge}</Text>
         </Animated.View>
@@ -548,10 +601,161 @@ export function MilestoneOverlay({
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Level up: blue hexagon (same as the level popup), ring fills, 1 -> 2 flip  */
+/* -------------------------------------------------------------------------- */
+
+const HEX = 112;
+const RING_R = 64;
+const RING_C = 2 * Math.PI * RING_R;
+const AnimatedRingCircle = AnimatedCircle;
+
+function LevelUpHexagon({ from, to, reduceMotion }: { from: number; to: number; reduceMotion: boolean }) {
+  const ring = useRef(new Animated.Value(0)).current; // 0 -> 1: ring fills around the badge
+  const flip = useRef(new Animated.Value(0)).current; // 0 -> 1: old number out, new number in
+  const burst = useRef(new Animated.Value(0)).current;
+  const spinIn = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current; // entrance twist
+  const coin = useRef(new Animated.Value(0)).current; // 0 -> 1: coin flip (number swaps edge-on)
+  const sway = useRef(new Animated.Value(0)).current; // gentle idle sway
+
+  useEffect(() => {
+    if (!reduceMotion) {
+      Animated.spring(spinIn, { toValue: 1, tension: 60, friction: 7, useNativeDriver: false }).start();
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(sway, { toValue: 1, duration: 1400, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+          Animated.timing(sway, { toValue: -1, duration: 1400, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+        ]),
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(ring, {
+        toValue: 1,
+        duration: reduceMotion ? 0 : LEVEL_FLIP_DELAY_MS,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: false,
+      }),
+      Animated.parallel([
+        Animated.spring(flip, { toValue: 1, tension: 120, friction: 7, useNativeDriver: false }),
+        Animated.timing(coin, {
+          toValue: 1,
+          duration: reduceMotion ? 0 : 620,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: false,
+        }),
+        Animated.timing(burst, { toValue: 1, duration: 700, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+      ]),
+    ]).start();
+  }, [ring, flip, burst, coin, reduceMotion]);
+
+  // Coin flip: 0 -> 90deg (edge-on, number swaps unseen) -> -90deg -> small overshoot -> 0
+  const rotateY = coin.interpolate({
+    inputRange: [0, 0.5, 0.5001, 0.85, 1],
+    outputRange: ['0deg', '90deg', '-90deg', '12deg', '0deg'],
+  });
+  const rotateZ = Animated.add(
+    spinIn.interpolate({ inputRange: [0, 1], outputRange: [-140, 0] }),
+    sway.interpolate({ inputRange: [-1, 1], outputRange: [-4, 4] }),
+  ).interpolate({ inputRange: [-360, 360], outputRange: ['-360deg', '360deg'] });
+  const enterScale = spinIn.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
+
+  const box = RING_R * 2 + 16;
+  return (
+    <View style={{ width: box, height: box, alignItems: 'center', justifyContent: 'center' }}>
+      {/* Light burst when the number flips */}
+      <Animated.View
+        style={[
+          styles.levelBurst,
+          {
+            opacity: burst.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 0.9, 0] }),
+            transform: [{ scale: burst.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.6] }) }],
+          },
+        ]}
+      />
+      {/* Progress ring filling up to the next level */}
+      <Svg width={box} height={box} style={StyleSheet.absoluteFill}>
+        <Circle cx={box / 2} cy={box / 2} r={RING_R} stroke="#DBEAFE" strokeWidth={5} fill="none" />
+        <AnimatedRingCircle
+          cx={box / 2}
+          cy={box / 2}
+          r={RING_R}
+          stroke="#3B82F6"
+          strokeWidth={5}
+          strokeLinecap="round"
+          fill="none"
+          strokeDasharray={`${RING_C} ${RING_C}`}
+          strokeDashoffset={ring.interpolate({ inputRange: [0, 1], outputRange: [RING_C, 0] }) as any}
+          transform={`rotate(-90 ${box / 2} ${box / 2})`}
+        />
+      </Svg>
+      {/* The hexagon face: spins in, sways, and coin-flips when the level changes */}
+      <Animated.View
+        style={{
+          width: HEX,
+          height: HEX,
+          alignItems: 'center',
+          justifyContent: 'center',
+          transform: [{ perspective: 600 }, { rotateY }, { rotate: rotateZ }, { scale: enterScale }],
+        }}
+      >
+      {/* The hexagon (same shape and colours as the level-up popup badge) */}
+      <Svg width={HEX} height={HEX} viewBox="0 0 120 120" fill="none">
+        <Defs>
+          <SvgLinearGradient id="luHex" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+            <Stop offset="0%" stopColor="#3B82F6" />
+            <Stop offset="50%" stopColor="#2563EB" />
+            <Stop offset="100%" stopColor="#1D4ED8" />
+          </SvgLinearGradient>
+          <SvgLinearGradient id="luBorder" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+            <Stop offset="0%" stopColor="#93C5FD" />
+            <Stop offset="100%" stopColor="#3B82F6" />
+          </SvgLinearGradient>
+        </Defs>
+        <Polygon points="60,6 108,33 108,87 60,114 12,87 12,33" fill="url(#luHex)" stroke="url(#luBorder)" strokeWidth="3.5" strokeLinejoin="round" />
+        <Polygon points="60,14 100,37 100,83 60,106 20,83 20,37" fill="none" stroke="#60A5FA" strokeWidth="1.2" strokeOpacity="0.5" strokeLinejoin="round" />
+      </Svg>
+      {/* "Level" + flipping number */}
+      <View style={styles.levelTextWrap} pointerEvents="none">
+        <Text style={styles.levelWord}>Level</Text>
+        <View style={styles.levelNumberWindow}>
+          <Animated.Text
+            style={[
+              styles.levelNumber,
+              {
+                opacity: coin.interpolate({ inputRange: [0, 0.499, 0.5], outputRange: [1, 1, 0], extrapolate: 'clamp' }),
+              },
+            ]}
+          >
+            {from}
+          </Animated.Text>
+          <Animated.Text
+            style={[
+              styles.levelNumber,
+              styles.levelNumberNext,
+              {
+                opacity: coin.interpolate({ inputRange: [0, 0.5, 0.5001], outputRange: [0, 0, 1], extrapolate: 'clamp' }),
+                transform: [{ scale: flip.interpolate({ inputRange: [0, 0.8, 1], outputRange: [0.85, 1.12, 1] }) }],
+              },
+            ]}
+          >
+            {to}
+          </Animated.Text>
+        </View>
+      </View>
+      </Animated.View>
+    </View>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Goal ring around Maya's avatar (roadmap practice points)                  */
 /* -------------------------------------------------------------------------- */
 
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export function GoalRing({ size, progress, children }: { size: number; progress: number | null; children: React.ReactNode }) {
   const anim = useRef(new Animated.Value(progress ?? 0)).current;
@@ -592,8 +796,9 @@ export function GoalRing({ size, progress, children }: { size: number; progress:
 /*  Session progress bar: XP toward the next level (500 XP per level)         */
 /* -------------------------------------------------------------------------- */
 
-export function LevelProgressBar({ levelXp, sessionXp, perLevel = 500 }: { levelXp: number; sessionXp: number; perLevel?: number }) {
-  const value = Math.min(1, ((levelXp + sessionXp) % perLevel) / perLevel);
+export function LevelProgressBar({ totalXp, sessionXp }: { totalXp: number; sessionXp: number }) {
+  // Shared level curve (180 XP for level 1, +60 per level, max 600)
+  const value = levelProgress(totalXp + sessionXp).progress;
   const anim = useRef(new Animated.Value(value)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: value, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
@@ -644,6 +849,26 @@ const styles = StyleSheet.create({
       default: { shadowColor: '#F97316', shadowOpacity: 0.9, shadowRadius: 18, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
     }),
   },
+  levelEdge: {
+    backgroundColor: 'rgba(59, 130, 246, 0.5)',
+    ...Platform.select({
+      web: { boxShadow: '0 0 28px 14px rgba(96, 165, 250, 0.7)' } as any,
+      default: { shadowColor: '#3B82F6' },
+    }),
+  },
+  levelBurst: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(147, 197, 253, 0.6)',
+  },
+  levelTextWrap: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  levelWord: { ...fontStyle('outfit', 'medium'), fontSize: 13, color: 'rgba(255, 255, 255, 0.85)', letterSpacing: 0.5, marginBottom: -2 },
+  levelNumberWindow: { height: 50, minWidth: 60, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  levelNumber: { ...fontStyle('outfit', 'bold'), fontSize: 42, lineHeight: 50, color: '#FFFFFF' },
+  levelNumberNext: { position: 'absolute' },
+  dockBadgeLevel: { backgroundColor: '#2563EB' },
   flameBottom: { left: 0, right: 0, bottom: 0, height: 12 },
   flameLeft: { left: 0, bottom: 0, width: 12 },
   flameRight: { right: 0, bottom: 0, width: 12 },
@@ -654,6 +879,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 34,
     paddingVertical: 20,
   },
+  xpDock: { position: 'absolute', top: -14, right: -10, zIndex: 40, elevation: 40 },
+  xpDockStar: { width: 32, height: 32 },
+  xpDockBadge: {
+    position: 'absolute',
+    bottom: -5,
+    right: -12,
+    minWidth: 26,
+    height: 19,
+    paddingHorizontal: 5,
+    borderRadius: 10,
+    backgroundColor: '#EA580C',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  xpDockBadgeText: { ...fontStyle('inter', 'bold'), fontSize: 11.5, color: '#FFFFFF', lineHeight: 14 },
   dockBadge: {
     position: 'absolute',
     minWidth: 18,
@@ -667,17 +909,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   dockBadgeText: { ...fontStyle('inter', 'bold'), fontSize: 10.5, color: '#FFFFFF', lineHeight: 13 },
-  milestoneCardBg: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-    borderRadius: 28,
+  // No card: a soft blurred glow behind the badge (blue = level up, orange = streak)
+  milestoneGlow: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    alignSelf: 'center',
+    top: -30,
+  },
+  milestoneGlowFire: {
+    backgroundColor: 'rgba(251, 146, 60, 0.32)',
     ...Platform.select({
-      web: { boxShadow: '0 20px 50px -10px rgba(249, 115, 22, 0.45)' } as any,
-      default: { shadowColor: '#F97316', shadowOpacity: 0.35, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 },
+      web: { filter: 'blur(28px)' } as any,
+      default: { shadowColor: '#F97316', shadowOpacity: 0.6, shadowRadius: 40, shadowOffset: { width: 0, height: 0 } },
+    }),
+  },
+  milestoneGlowLevel: {
+    backgroundColor: 'rgba(96, 165, 250, 0.32)',
+    ...Platform.select({
+      web: { filter: 'blur(28px)' } as any,
+      default: { shadowColor: '#3B82F6', shadowOpacity: 0.6, shadowRadius: 40, shadowOffset: { width: 0, height: 0 } },
     }),
   },
   milestoneEmoji: { fontSize: 72, lineHeight: 84 },
-  milestoneTitle: { ...fontStyle('outfit', 'bold'), fontSize: 26, color: '#C2410C', marginTop: 4 },
+  milestoneTitle: {
+    ...fontStyle('outfit', 'bold'),
+    fontSize: 26,
+    color: '#C2410C',
+    marginTop: 4,
+    textShadowColor: 'rgba(255, 255, 255, 0.95)',
+    textShadowRadius: 10,
+    textShadowOffset: { width: 0, height: 0 },
+  },
+  milestoneTitleLevel: { color: '#1D4ED8' },
   levelTrack: { height: 4, width: '100%', backgroundColor: '#E2E8F0', overflow: 'hidden' },
   levelFill: { height: 4, backgroundColor: '#F59E0B', borderRadius: 2 },
 });

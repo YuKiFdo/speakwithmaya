@@ -3,6 +3,7 @@ import {
   setAudioModeAsync,
   type AudioPlaylist,
 } from 'expo-audio';
+import { PlaybackEnvelope } from './voice-meter';
 import { IAudioPlayer, AudioPlayerCallbacks } from './AudioPlayer';
 
 function writeString(view: DataView, offset: number, string: string) {
@@ -60,6 +61,8 @@ export class NativeAudioPlayer implements IAudioPlayer {
   private readonly initialBatchSize: number = 6; // ~300ms initial buffer so ExoPlayer never starves
   private readonly chunkBatchSize: number = 8; // ~400ms per batch for smooth, gapless playback
   private idleDebounceTimer: any = null;
+  /** Loudness slices scheduled at the moment they will be heard (voice-synced glow). */
+  private envelope = new PlaybackEnvelope(300);
 
   async init(callbacks?: AudioPlayerCallbacks): Promise<void> {
     this.callbacks = callbacks;
@@ -184,6 +187,7 @@ export class NativeAudioPlayer implements IAudioPlayer {
       const rms = Math.sqrt(sumSquares / int16View.length);
       const volume = Math.min(1, Math.max(0, rms * 5.0));
       this.callbacks?.onVolumeChange?.(volume);
+      this.envelope.push(int16View, 1 / 32768);
     } catch {}
 
     this.queue.push(base64Pcm);
@@ -258,8 +262,13 @@ export class NativeAudioPlayer implements IAudioPlayer {
     }
   }
 
+  getOutputLevel(): number {
+    return this.envelope.levelNow();
+  }
+
   clear(): void {
     // Instant barge-in interruption (< 300ms)
+    this.envelope.clear();
     this.queue = [];
     this.isPlayingAudio = false;
 

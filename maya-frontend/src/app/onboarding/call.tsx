@@ -29,6 +29,8 @@ import { fontStyle } from '@/theme/fonts';
 import { useLiveCall } from '@/hooks/useLiveCall';
 import { startConnectingTone } from '@/services/sound/sound-service';
 import { ConnectingView } from '@/components/call/connecting-view';
+import { VoiceOrb, type VoiceOrbMode } from '@/components/call/voice-orb';
+import { shapeVoiceLevel } from '@/components/call/voice-level';
 import { ContextualCallGuide } from '@/components/call/contextual-call-guide';
 import { BeaconRing } from '@/components/call/beacon-ring';
 import { MicrophonePermissionPopup } from '@/components/call/microphone-permission-popup';
@@ -688,6 +690,8 @@ export default function CallScreen() {
   // Keep user on the "Connecting to Maya..." screen long enough to read tips
   const mountTimeRef = useRef(Date.now());
   const [isVisualConnected, setIsVisualConnected] = useState(false);
+  // Bumped once when the call screen opens: the voice orb + edge glow play a wake-up burst
+  const [wakeKey, setWakeKey] = useState(0);
 
   // Soft connecting tone while the "Connecting to Maya..." screen is up
   const stopConnectingToneRef = useRef<((fadeMs?: number) => void) | null>(null);
@@ -746,6 +750,7 @@ export default function CallScreen() {
 
         // Right after showing "Connected!" (brief 400ms flash), open the curtain into the call
         const handoffTimer = setTimeout(() => {
+          setWakeKey((k) => k + 1);
           if (!isIntro) {
             console.log('[call.tsx] 🎙️ Releasing Maya greeting audio as CallScreen transitions into view');
             liveCallRef.current.releaseGreeting?.();
@@ -897,6 +902,23 @@ export default function CallScreen() {
 
   // In-call rewards (mirror the server XP rules: per-minute practice XP, hint-free streak bonus).
   // Milestones never cover a popup: they wait until every modal on this screen is closed.
+  // Voice orb around Maya: who is speaking decides the colour; their voice drives the motion.
+  // The intro guide's glow demo steps (0: Maya speaking, 1: you speaking) show the same states.
+  const orbMode: VoiceOrbMode =
+    guideStepIndex === 0
+      ? 'maya'
+      : guideStepIndex === 1
+      ? 'user'
+      : liveCall.status === 'speaking'
+      ? 'maya'
+      : liveCall.status === 'listening' && liveCall.isAwaitingReply
+      ? 'thinking'
+      : liveCall.status === 'listening' && liveCall.userVolume > 0.02
+      ? 'user'
+      : 'idle';
+  const orbLevel =
+    guideStepIndex === 0 ? 0.12 : guideStepIndex === 1 ? 0.12 : orbMode === 'maya' ? liveCall.modelVolume : liveCall.userVolume;
+
   const rewardsBlocked =
     liveCall.feedbackVisible ||
     liveCall.isPermissionModalVisible ||
@@ -906,7 +928,8 @@ export default function CallScreen() {
   const passedPracticePoints = Array.from(liveCall.testScores.values()).filter((s) => s.passed).length;
   const rewards = useCallRewards({
     secondsElapsed: liveCall.secondsElapsed,
-    earnsMinuteXp: !isIntro && !effectiveRoadmapLevelId,
+    // Practice XP for every non-roadmap call, the intro call included (the server counts it too)
+    earnsMinuteXp: !effectiveRoadmapLevelId,
     streakEnabled: !isIntro,
     lastUserUtterance: liveCall.lastUserUtterance,
     hintsUsedCount: hintsUsedCountRef.current,
@@ -916,6 +939,8 @@ export default function CallScreen() {
     isMayaSpeaking: liveCall.status === 'speaking',
     suppressMicFor: liveCall.suppressMicFor,
     blocked: rewardsBlocked,
+    // Total XP before this call: crossing the next 500 during the call plays the level-up moment
+    startTotalXp: userStats.totalXp,
   });
   useEffect(() => {
     streakBonusXpRef.current = rewards.streakBonusXp;
@@ -1048,7 +1073,10 @@ export default function CallScreen() {
               type="blue-aura"
               opacity={blueAuraAnim}
               scale={blueScaleAnim}
-              volume={guideStepIndex === 0 ? 0.65 : liveCall.modelVolume}
+              // Real calls: the glow reads Maya's live playback loudness itself (voice-meter); this value is
+              // the guide demo level, or a fallback if the live meter is unavailable on this device
+              volume={guideStepIndex === 0 ? 0.65 : liveCall.status === 'speaking' ? shapeVoiceLevel(liveCall.modelVolume) : 0}
+              wakeKey={wakeKey}
               isActive={guideStepIndex === 0 || (liveCall.status === 'speaking' && liveCall.modelVolume > 0.04)}
             />
 
@@ -1127,7 +1155,8 @@ export default function CallScreen() {
                 </Pressable>
 
                 <View style={styles.mobileHeaderInfo}>
-                  <View ref={mobileAvatarRef} collapsable={false}>
+                  <View ref={mobileAvatarRef} collapsable={false} style={styles.avatarDockLayer}>
+                  <VoiceOrb size={52} mode={orbMode} level={orbLevel} wakeKey={wakeKey} liveMaya={orbMode === 'maya' && guideStepIndex === null}>
                   <GoalRing size={52} progress={rewards.goalProgress}>
                     <View style={styles.avatarWrapperMobile}>
                       <Image
@@ -1138,6 +1167,8 @@ export default function CallScreen() {
                       />
                     </View>
                   </GoalRing>
+                  </VoiceOrb>
+                  <XpCounter sessionXp={rewards.sessionXp} gain={rewards.gain} busy={!!rewards.milestone} />
                   </View>
 
                   <View style={styles.headerTexts}>
@@ -1160,9 +1191,6 @@ export default function CallScreen() {
                         {formatTime(displayedElapsed)}{' '}
                         <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
                       </Text>
-                    </View>
-                    <View style={styles.rewardHud}>
-                      <XpCounter sessionXp={rewards.sessionXp} gain={rewards.gain} busy={!!rewards.milestone} />
                     </View>
                     <Text
                       style={[
@@ -1210,7 +1238,8 @@ export default function CallScreen() {
               {/* On Desktop: Centered Avatar & Maya Status */}
               {isWebOrDesktop && (
                 <View style={styles.desktopAvatarCard}>
-                  <View ref={desktopAvatarRef} collapsable={false}>
+                  <View ref={desktopAvatarRef} collapsable={false} style={styles.avatarDockLayer}>
+                  <VoiceOrb size={88} mode={orbMode} level={orbLevel} wakeKey={wakeKey} liveMaya={orbMode === 'maya' && guideStepIndex === null}>
                   <GoalRing size={88} progress={rewards.goalProgress}>
                     <View style={styles.avatarWrapperDesktop}>
                       <Image
@@ -1221,6 +1250,8 @@ export default function CallScreen() {
                       />
                     </View>
                   </GoalRing>
+                  </VoiceOrb>
+                  <XpCounter sessionXp={rewards.sessionXp} gain={rewards.gain} busy={!!rewards.milestone} />
                   </View>
 
                   <View style={styles.desktopInfoTexts}>
@@ -1243,9 +1274,6 @@ export default function CallScreen() {
                         {formatTime(displayedElapsed)}{' '}
                         <Text style={styles.timerMax}>/ {formatTime(targetDuration)}</Text>
                       </Text>
-                    </View>
-                    <View style={styles.rewardHud}>
-                      <XpCounter sessionXp={rewards.sessionXp} gain={rewards.gain} busy={!!rewards.milestone} />
                     </View>
                     <Text
                       style={[
@@ -1384,7 +1412,7 @@ export default function CallScreen() {
               type="purple-bottom"
               opacity={purpleGlowAnim}
               scale={purpleScaleAnim}
-              volume={guideStepIndex === 1 ? 0.75 : liveCall.userVolume}
+              volume={guideStepIndex === 1 ? 0.75 : shapeVoiceLevel(liveCall.userVolume)}
               isActive={guideStepIndex === 1 || (liveCall.status === 'listening' && liveCall.userVolume > 0.02)}
             />
           </View>
@@ -1495,6 +1523,8 @@ export default function CallScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Avatar + its docked ⭐ / 🔥 paint above the name and timer next to it
+  avatarDockLayer: { zIndex: 30, elevation: 30, position: 'relative' },
   safeArea: {
     flex: 1,
     backgroundColor: '#ffffff',

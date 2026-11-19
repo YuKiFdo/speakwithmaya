@@ -9,6 +9,8 @@ export interface AmbientGlowProps {
   volume?: number;
   /** Optional active flag to speed up fluid wave motion when voice is detected */
   isActive?: boolean;
+  /** Changes once when the call comes alive (web: edge sweep; native: ignored). */
+  wakeKey?: number;
 }
 
 export { AmbientGlow } from './ambient-glow.native';

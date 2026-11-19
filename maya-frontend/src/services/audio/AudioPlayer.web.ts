@@ -1,10 +1,14 @@
 import { IAudioPlayer, AudioPlayerCallbacks } from './AudioPlayer';
+import { analyserLevel } from './voice-meter';
 
 export class WebAudioPlayer implements IAudioPlayer {
   private audioCtx: AudioContext | null = null;
   private playerNode: AudioWorkletNode | null = null;
   private callbacks?: AudioPlayerCallbacks;
   private playing: boolean = false;
+  /** Measures what the speaker is playing right now (voice-synced glow). */
+  private analyser: AnalyserNode | null = null;
+  private analyserBuf: Float32Array | null = null;
 
   async init(callbacks?: AudioPlayerCallbacks): Promise<void> {
     this.callbacks = callbacks;
@@ -61,6 +65,22 @@ export class WebAudioPlayer implements IAudioPlayer {
     };
 
     this.playerNode.connect(this.audioCtx.destination);
+
+    // Parallel tap for visuals only (not connected to the speakers, adds no latency)
+    try {
+      this.analyser = this.audioCtx.createAnalyser();
+      this.analyser.fftSize = 512; // ~21 ms window at 24 kHz
+      this.analyser.smoothingTimeConstant = 0;
+      this.analyserBuf = new Float32Array(this.analyser.fftSize);
+      this.playerNode.connect(this.analyser);
+    } catch {
+      this.analyser = null;
+    }
+  }
+
+  getOutputLevel(): number {
+    if (!this.analyser || !this.analyserBuf || !this.playing) return 0;
+    return analyserLevel(this.analyser, this.analyserBuf);
   }
 
   async resume(): Promise<void> {

@@ -18,6 +18,8 @@ export interface IAudioPlayer {
   clear(): void; // Barge-in instant interruption
   stop(): Promise<void>;
   isPlaying(): boolean;
+  /** Maya's loudness at this exact moment of playback (RMS), for voice-synced visuals. */
+  getOutputLevel?(): number;
 }
 
 export const createAudioPlayer = (): IAudioPlayer => {
