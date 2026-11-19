@@ -142,9 +142,10 @@ export class ServerLiveTransport implements ILiveTransport {
         if (this.pingInterval) clearInterval(this.pingInterval);
         this.pingInterval = setInterval(() => {
           if (this.isOpen && this.ws?.readyState === WebSocket.OPEN) {
-            // If no pong or message received for > 15000ms (5 ping cycles), socket is dead (e.g. Wi-Fi turned off)
+            // If no pong or message received for > 9000ms (3 ping cycles), socket is dead (e.g. Wi-Fi turned off).
+            // Was 15s: on flaky mobile data that left the learner talking into a dead socket for too long.
             const timeSinceLastPong = Date.now() - this.lastPongAt;
-            if (timeSinceLastPong > 15000) {
+            if (timeSinceLastPong > 9000) {
               console.warn(
                 `[${getLogTimestamp()}] ⚠️ [ServerLiveTransport:${this.clientSessionId}] Heartbeat timeout (${timeSinceLastPong}ms without response) -> forcing reconnect`,
               );

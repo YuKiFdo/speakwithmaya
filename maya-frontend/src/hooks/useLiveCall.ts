@@ -368,7 +368,7 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
     try {
       if (isReconnect) {
         setStatus('reconnecting');
-        transportRef.current.close();
+        transportRef.current.close('client_reconnecting');
         if (turnsRef.current.length === 0) {
           isFirstGreetingPendingRef.current = true;
           isInitialGreetingTurnCompleteRef.current = false;
