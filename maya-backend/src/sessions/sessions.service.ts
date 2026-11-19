@@ -2291,6 +2291,63 @@ ${memoryPart}`;
 
         if (existingLedger) {
           this.logger.warn(`Session ${validSessionId} is already finalized in usage_ledger. Returning existing finalized record without double-deducting minutes.`);
+          // A session can be finalized early (e.g. on a socket drop) and then continue after a reconnect.
+          // If this later finalize covers more time/tokens, upgrade the record and bill only the extra minutes.
+          const prevDuration = Number(existingLedger.duration_seconds) || 0;
+          if (durationSeconds > prevDuration + 5 || totalTokens > (Number(existingLedger.total_tokens) || 0)) {
+            const newDuration = Math.max(prevDuration, durationSeconds);
+            const newTokens = Math.max(Number(existingLedger.total_tokens) || 0, totalTokens);
+            const useNewCost = totalTokens >= (Number(existingLedger.total_tokens) || 0);
+            await this.supabase
+              .from('usage_ledger')
+              .update({
+                duration_seconds: newDuration,
+                total_tokens: newTokens,
+                ...(useNewCost
+                  ? {
+                      audio_in_tokens: audioInTokens,
+                      audio_out_tokens: audioOutTokens,
+                      text_in_tokens: textInTokens,
+                      text_out_tokens: textOutTokens + thoughtsTokens,
+                      cost_usd: costUsd,
+                      cost_lkr: costLkr,
+                    }
+                  : {}),
+              })
+              .eq('id', existingLedger.id);
+            await this.supabase
+              .from('sessions')
+              .update({
+                duration_seconds: newDuration,
+                start_time: new Date(Date.now() - newDuration * 1000).toISOString(),
+                end_time: new Date().toISOString(),
+              })
+              .eq('id', validSessionId);
+            if (resolvedUserId && !dto.isIntroCall) {
+              const extraMinutes =
+                Math.max(1, Math.ceil(newDuration / 60)) - Math.max(1, Math.ceil(prevDuration / 60));
+              if (extraMinutes > 0) {
+                const { data: p } = await this.supabase
+                  .from('profiles')
+                  .select('minutes_balance')
+                  .eq('id', resolvedUserId)
+                  .maybeSingle();
+                if (typeof p?.minutes_balance === 'number') {
+                  await this.supabase
+                    .from('profiles')
+                    .update({ minutes_balance: Math.max(0, p.minutes_balance - extraMinutes), updated_at: new Date().toISOString() })
+                    .eq('id', resolvedUserId);
+                }
+              }
+            }
+            this.logger.log(`[SessionsService] 🔁 Upgraded early-finalized session ${validSessionId}: ${prevDuration}s → ${newDuration}s, tokens → ${newTokens}`);
+            existingLedger.duration_seconds = newDuration;
+            existingLedger.total_tokens = newTokens;
+            if (useNewCost) {
+              existingLedger.cost_usd = costUsd;
+              existingLedger.cost_lkr = costLkr;
+            }
+          }
           // If client provided explicit scores or grammarCorrections after server auto-finalize, enrich them cleanly
           if (scores?.overall && scores.overall > 0) {
             await this.supabase

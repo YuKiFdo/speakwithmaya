@@ -152,6 +152,9 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Previously entries were never removed, so every session's raw PCM stayed in memory
   // until PM2 restarted the process at max_memory_restart.
   private readonly sessionEvictionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Deferred auto-finalize timers per sessionId; cancelled when the client reconnects to the same session,
+  // otherwise a brief network blip would finalize (and bill) only the first socket segment.
+  private readonly pendingFinalizeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private static readonly SESSION_STATE_TTL_MS = 2 * 60 * 1000;
   private readonly ai: GoogleGenAI;
   private readonly liveModel: string;
@@ -477,6 +480,17 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           snapshotTokens.thoughtsTokens;
 
         const runAutoFinalize = () => {
+          this.pendingFinalizeTimers.delete(snapshotSessionId);
+          const resumedElsewhere = Array.from(this.clients.entries()).some(
+            ([otherClient, otherState]) =>
+              otherClient !== client &&
+              otherState.sessionId === snapshotSessionId &&
+              otherClient.readyState === WebSocket.OPEN,
+          );
+          if (resumedElsewhere) {
+            this.logger.log(`[${snapshotSessionId}] ↪️ Skipping auto-finalize: session resumed on a reconnected socket`);
+            return;
+          }
           this.logger.log(
             `[${snapshotSessionId}] 🛡️ Auto-finalizing session on disconnect (abrupt=${isAbruptDisconnect}, activeDuration=${activeDurationSec}s, turns=${snapshotTurns.length}, tokens=${totalTok})`,
           );
@@ -513,14 +527,14 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             });
         };
 
-        if (isAbruptDisconnect) {
-          // Device/connection is dead; finalize immediately
-          runAutoFinalize();
-        } else {
-          // Normal disconnect: give client 3 seconds to send HTTP POST /v1/sessions/:id/finish first,
-          // then auto-finalize if client closed tab/app before HTTP request completed.
-          setTimeout(runAutoFinalize, 3000);
-        }
+        // Defer finalization so a reconnect to the same session can cancel it. Abrupt drops (heartbeat
+        // timeout / socket error) are exactly the case where the client usually reconnects, so they wait
+        // longer; normal closes give the client 3s to POST /v1/sessions/:id/finish first.
+        const prevTimer = this.pendingFinalizeTimers.get(snapshotSessionId);
+        if (prevTimer) clearTimeout(prevTimer);
+        const finalizeTimer = setTimeout(runAutoFinalize, isAbruptDisconnect ? 20000 : 3000);
+        finalizeTimer.unref?.();
+        this.pendingFinalizeTimers.set(snapshotSessionId, finalizeTimer);
       }
 
       if (state.geminiSession) {
@@ -595,6 +609,13 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           otherClient.close(1000, 'Superseded by reconnected session');
         } catch {}
       }
+    }
+
+    const pendingFinalize = this.pendingFinalizeTimers.get(sid);
+    if (pendingFinalize) {
+      clearTimeout(pendingFinalize);
+      this.pendingFinalizeTimers.delete(sid);
+      this.logger.log(`[${sid}] ↪️ Reconnected before auto-finalize; continuing the same session`);
     }
 
     const pendingEviction = this.sessionEvictionTimers.get(sid);
