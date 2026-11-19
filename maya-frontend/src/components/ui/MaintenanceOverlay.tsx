@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  AppState,
   Modal,
   View,
   Text,
@@ -13,6 +14,7 @@ import { usePathname } from 'expo-router';
 import { fontStyle } from '@/theme/fonts';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { getBackendBaseUrl } from '@/utils/backend-url';
+import { userEvents } from '@/services/realtime/app-events';
 
 export const MaintenanceOverlay: React.FC = () => {
   const pathname = usePathname();
@@ -46,10 +48,26 @@ export const MaintenanceOverlay: React.FC = () => {
   };
 
   useEffect(() => {
+    // No polling: check once now, again when the app comes back to the foreground / tab
+    // becomes visible, and instantly when the server announces a maintenance switch
+    // (or after the events connection reconnects).
     checkStatus();
-    // Poll every 30s to automatically clear when maintenance finishes
-    const timer = setInterval(checkStatus, 30000);
-    return () => clearInterval(timer);
+    const off = userEvents.on((e) => {
+      if (e.type === 'maintenance.changed' || e.type === 'resync') checkStatus();
+    });
+    let removeVisibility = () => {};
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const onVisible = () => document.visibilityState === 'visible' && checkStatus();
+      document.addEventListener('visibilitychange', onVisible);
+      removeVisibility = () => document.removeEventListener('visibilitychange', onVisible);
+    } else {
+      const sub = AppState.addEventListener('change', (st) => st === 'active' && checkStatus());
+      removeVisibility = () => sub.remove();
+    }
+    return () => {
+      off();
+      removeVisibility();
+    };
   }, []);
 
   // Do NOT block admin routes — admins must be able to log in and toggle maintenance off!

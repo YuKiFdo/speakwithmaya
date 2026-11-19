@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { adminEvents, useAdminEvents } from '@/services/realtime/app-events';
 import {
   View,
   Text,
@@ -75,7 +76,52 @@ const SMS_PRESETS = [
   },
 ];
 
+/**
+ * Waits for an SMS broadcast job using /events WebSocket progress pushes (no polling).
+ * One status read right after subscribing (a 1-recipient job can finish before that), one on
+ * reconnect, and one at the timeout as a final answer.
+ */
+function waitForBroadcastJob(
+  jobId: string,
+  getAuthHeaders: () => Record<string, string>,
+  onProgress: (s: any) => void,
+  timeoutMs: number,
+): Promise<any | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const fetchOnce = async () => {
+      try {
+        const res = await fetch(`${getBackendBaseUrl()}/v1/admin/broadcast-sms/${jobId}`, { headers: getAuthHeaders() });
+        return res.ok ? await res.json() : null;
+      } catch {
+        return null;
+      }
+    };
+    const finish = (s: any | null) => {
+      if (done) return;
+      done = true;
+      off();
+      clearTimeout(timer);
+      resolve(s);
+    };
+    const handle = (s: any | null) => {
+      if (!s) return;
+      onProgress(s);
+      if (s.status === 'completed' || s.status === 'failed') finish(s);
+    };
+    const off = adminEvents.on((e) => {
+      if (e.type === 'broadcast.progress' && e.jobId === jobId) handle(e);
+      else if (e.type === 'resync') fetchOnce().then(handle);
+    });
+    adminEvents.start();
+    const timer = setTimeout(() => fetchOnce().then((s) => finish(s)), timeoutMs);
+    fetchOnce().then(handle);
+  });
+}
+
 export default function AdminMaintenanceScreen() {
+  // Admin events connection (broadcast progress) while this page is open and visible
+  useAdminEvents(() => undefined);
   const { isPhone } = useBreakpoint();
   const [sidebarOpen, setSidebarOpen] = useState(!isPhone);
   const [activeTab, setActiveTab] = useState<MainSectionTab>('maintenance');
@@ -391,23 +437,12 @@ export default function AdminMaintenanceScreen() {
       }
 
       if (data.jobId) {
-        // Poll for completion (test SMS has 1 recipient, finishes quickly)
-        for (let i = 0; i < 20; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          const pollRes = await fetch(`${getBackendBaseUrl()}/v1/admin/broadcast-sms/${data.jobId}`, {
-            headers: getAuthHeaders(),
-          });
-          if (pollRes.ok) {
-            const jobStatus = await pollRes.json();
-            if (jobStatus.status === 'completed') {
-              if (jobStatus.totalFailed > 0) {
-                throw new Error('SMS Gateway rejected or failed to deliver the test SMS.');
-              }
-              break;
-            } else if (jobStatus.status === 'failed') {
-              throw new Error(jobStatus.message || 'Failed to send test SMS');
-            }
-          }
+        // Wait for the job over the /events WebSocket (no polling); 1 recipient = a few seconds
+        const jobStatus = await waitForBroadcastJob(data.jobId, getAuthHeaders, () => undefined, 30_000);
+        if (jobStatus?.status === 'completed' && jobStatus.totalFailed > 0) {
+          throw new Error('SMS Gateway rejected or failed to deliver the test SMS.');
+        } else if (jobStatus?.status === 'failed') {
+          throw new Error(jobStatus.message || 'Failed to send test SMS');
         }
       }
 
@@ -483,41 +518,26 @@ export default function AdminMaintenanceScreen() {
       }
 
       if (data.jobId) {
-        // Poll background job for live progress
-        let isDone = false;
-        const startTime = Date.now();
-        while (!isDone && Date.now() - startTime < 15 * 60 * 1000) {
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-          try {
-            const pollRes = await fetch(`${getBackendBaseUrl()}/v1/admin/broadcast-sms/${data.jobId}`, {
-              headers: getAuthHeaders(),
-            });
-            if (pollRes.ok) {
-              const jobStatus = await pollRes.json();
-              setLastBroadcastResult({
-                totalTargeted: jobStatus.totalTargeted || data.totalTargeted || 0,
-                totalSent: jobStatus.totalSent || 0,
-                totalFailed: jobStatus.totalFailed || 0,
-                date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              });
-
-              if (jobStatus.status === 'completed' || jobStatus.status === 'failed') {
-                isDone = true;
-                setReportRefreshKey((k) => k + 1); // show the new campaign in the click report
-                if (jobStatus.status === 'completed') {
-                  await mayaAlert.success(
-                    `Broadcast completed!\n\n• Successfully Sent: ${jobStatus.totalSent}\n• Failed: ${jobStatus.totalFailed}\n• Total Targeted: ${jobStatus.totalTargeted}`,
-                    'Broadcast Complete'
-                  );
-                } else {
-                  await mayaAlert.error(jobStatus.message || 'Broadcast job failed', 'Broadcast Failed');
-                }
-                break;
-              }
-            }
-          } catch (pollErr: any) {
-            console.warn('[Broadcast Poll Warning]', pollErr);
-          }
+        // Live progress pushed over the /events WebSocket (no polling)
+        const showProgress = (jobStatus: any) =>
+          setLastBroadcastResult({
+            totalTargeted: jobStatus.totalTargeted || data.totalTargeted || 0,
+            totalSent: jobStatus.totalSent || 0,
+            totalFailed: jobStatus.totalFailed || 0,
+            date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          });
+        const jobStatus = await waitForBroadcastJob(data.jobId, getAuthHeaders, showProgress, 15 * 60 * 1000);
+        if (jobStatus) showProgress(jobStatus);
+        setReportRefreshKey((k) => k + 1); // show the new campaign in the click report
+        if (jobStatus?.status === 'completed') {
+          await mayaAlert.success(
+            `Broadcast completed!\n\n• Successfully Sent: ${jobStatus.totalSent}\n• Failed: ${jobStatus.totalFailed}\n• Total Targeted: ${jobStatus.totalTargeted}`,
+            'Broadcast Complete'
+          );
+        } else if (jobStatus?.status === 'failed') {
+          await mayaAlert.error(jobStatus.message || 'Broadcast job failed', 'Broadcast Failed');
+        } else {
+          await mayaAlert.error('Broadcast is still running. Check the click report later.', 'Broadcast In Progress');
         }
       } else {
         setLastBroadcastResult({

@@ -32,6 +32,7 @@ import { DesktopLoadingScreen } from '@/components/ui/desktop-loading-screen';
 import { NativeAnimatedSplash } from '@/components/ui/native-animated-splash';
 import { AlertHost } from '@/components/ui/alert-modal';
 import { MaintenanceOverlay } from '@/components/ui/MaintenanceOverlay';
+import { useAppEvents } from '@/services/realtime/app-events';
 import { Ionicons, Feather, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouteGuard } from '@/hooks/useRouteGuard';
 import { OnboardingStore } from '@/services/store/onboarding-store';
@@ -85,6 +86,10 @@ function WebDocumentTitle() {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
+  // Real-time change hints (/events WebSocket) instead of polling; open only while signed in
+  // and visible, closed when hidden / backgrounded / signed out.
+  useAppEvents();
 
   // Tracked SMS link (?r=<token>): report the click once, then strip it from the URL
   useEffect(() => {

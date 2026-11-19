@@ -421,17 +421,12 @@ export function useUserStats(): UserStats {
       window.addEventListener('focus', handleFocus);
       document.addEventListener('visibilitychange', handleVisibilityChange);
 
-      // Periodic background sync every 60 seconds to ensure session matches DB
-      const intervalId = setInterval(() => {
-        if (!window.location.pathname.startsWith('/admin')) {
-          refreshStats();
-        }
-      }, 60000);
+      // No periodic polling: stats refresh on focus / visibility (above), right after a call
+      // finishes, and when the server pushes a change over the /events WebSocket.
 
       return () => {
         window.removeEventListener('focus', handleFocus);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
-        clearInterval(intervalId);
       };
     }
   }, [refreshStats]);
