@@ -2,6 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { Image as ExpoImage } from 'expo-image';
+
+// Google Noto animated emoji (animated WebP; expo-image plays it on web, Android and iOS)
+const FIRE_ANIMATED = require('@/assets/images/fire-animated-small.webp');
+const FIRE_ANIMATED_CARD = require('@/assets/images/fire-animated-card.webp');
+const STAR_ANIMATED = require('@/assets/images/star-animated-small.webp');
 import { fontStyle } from '@/theme/fonts';
 import { triggerHaptic } from '@/utils/haptics-audio';
 import { playRewardSound } from '@/services/sound/sound-service';
@@ -232,7 +237,10 @@ export function XpCounter({ sessionXp, gain }: { sessionXp: number; gain: XpGain
   return (
     <View style={styles.hudRow}>
       <Animated.View style={[styles.xpPill, { transform: [{ scale: bounce }] }]} accessibilityLabel={`${sessionXp} XP this call`}>
-        <Text style={styles.xpText}>{'\u2B50'} {sessionXp} XP</Text>
+        <View style={styles.chipRow}>
+          <ExpoImage source={STAR_ANIMATED} style={styles.chipIcon} contentFit="contain" autoplay />
+          <Text style={styles.xpText}>{sessionXp} XP</Text>
+        </View>
       </Animated.View>
       {flyLabel && (
         <Animated.Text
@@ -272,7 +280,10 @@ export function StreakChip({ streak }: { streak: number }) {
       accessibilityLabel={`${streak} answers in a row without hints`}
       style={[styles.streakChip, { transform: [{ scale: pop }] }]}
     >
-      <Text style={styles.streakText}>{'\u{1F525}'} {streak}</Text>
+      <View style={styles.chipRow}>
+        <ExpoImage source={FIRE_ANIMATED} style={styles.chipIcon} contentFit="contain" autoplay />
+        <Text style={styles.streakText}>{streak}</Text>
+      </View>
     </Animated.View>
   );
 }
@@ -280,8 +291,6 @@ export function StreakChip({ streak }: { streak: number }) {
 /* -------------------------------------------------------------------------- */
 /*  Milestone moment: orange edge glow + big emoji, ~1.3s, full screen        */
 /* -------------------------------------------------------------------------- */
-
-const FIRE_ANIMATED = require('@/assets/images/fire-animated.webp');
 
 export function MilestoneOverlay({ milestone }: { milestone: Milestone | null }) {
   const useNative = Platform.OS !== 'web';
@@ -330,7 +339,7 @@ export function MilestoneOverlay({ milestone }: { milestone: Milestone | null })
 
       <Animated.View style={[styles.milestoneCard, { opacity: scale, transform: [{ scale }] }]}>
         {isFire ? (
-          <ExpoImage source={FIRE_ANIMATED} style={styles.fireImage} contentFit="contain" autoplay />
+          <ExpoImage source={FIRE_ANIMATED_CARD} style={styles.fireImage} contentFit="contain" autoplay />
         ) : (
           <Text style={styles.milestoneEmoji}>{shown.emoji}</Text>
         )}
@@ -400,6 +409,8 @@ export function LevelProgressBar({ levelXp, sessionXp, perLevel = 500 }: { level
 
 const styles = StyleSheet.create({
   hudRow: { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
+  chipRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  chipIcon: { width: 16, height: 16 },
   xpPill: {
     backgroundColor: '#FEFCE8',
     borderColor: '#FDE68A',
