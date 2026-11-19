@@ -61,6 +61,63 @@ export class SubscriptionReconciliationService {
   }
 
   /**
+   * Campaign Pro Pass expiry (hourly):
+   * A Pro Pass trial is stored as plan_tier='pro', plan_status='trialing', minutes_reset_at = trial end.
+   * When it ends without an upgrade, the learner goes back to Starter (5 daily minutes + any add-on minutes),
+   * matching what AuthService does on profile load. Without this, the daily quota reset treated the trial
+   * as a monthly paid plan and left the learner on "Pro" with 5 minutes for 30 days.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async handleExpiredTrials(): Promise<number> {
+    try {
+      return await this.expireEndedTrials();
+    } catch (err: any) {
+      this.logger.error(`Trial expiry sweep failed: ${err.message}`, err.stack);
+      return 0;
+    }
+  }
+
+  private async expireEndedTrials(): Promise<number> {
+    const now = new Date();
+    const { data: ended, error } = await this.supabase
+      .from('profiles')
+      .select('id, add_on_minutes_balance')
+      .eq('plan_status', 'trialing')
+      .lte('minutes_reset_at', now.toISOString())
+      .limit(500);
+
+    if (error) {
+      this.logger.error(`Failed to fetch ended trials: ${error.message}`);
+      return 0;
+    }
+    if (!ended || ended.length === 0) return 0;
+
+    let expired = 0;
+    for (const p of ended) {
+      const { error: updErr } = await this.supabase
+        .from('profiles')
+        .update({
+          plan_tier: 'starter',
+          plan_status: 'expired',
+          billing_cycle: 'daily',
+          monthly_minutes_allowance: 5,
+          minutes_balance: 5 + (p.add_on_minutes_balance || 0),
+          minutes_reset_at: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+          updated_at: now.toISOString(),
+        })
+        .eq('id', p.id)
+        .eq('plan_status', 'trialing'); // skip if they upgraded meanwhile
+      if (updErr) {
+        this.logger.warn(`Failed to expire trial for ${p.id}: ${updErr.message}`);
+      } else {
+        expired++;
+      }
+    }
+    this.logger.log(`[TrialExpiry] Moved ${expired} learner(s) from ended Pro Pass back to Starter`);
+    return expired;
+  }
+
+  /**
    * Pending Orders Recovery Sweeper:
    * Executes every 10 minutes.
    * 1. Marks abandoned pending orders older than 60 minutes as 'expired' so they are not polled indefinitely.
@@ -231,11 +288,15 @@ export class SubscriptionReconciliationService {
       }
     }
 
+    // 2a. Ended campaign trials go back to Starter first, so the generic reset below never treats them as paid
+    await this.expireEndedTrials();
+
     // 2. Proactive quota refresh for users who reached their reset date
     const { data: expiredProfiles, error: profileErr } = await this.supabase
       .from('profiles')
       .select('id, plan_tier, plan_status, billing_cycle, monthly_minutes_allowance, add_on_minutes_balance, minutes_reset_at')
       .lte('minutes_reset_at', now.toISOString())
+      .neq('plan_status', 'trialing')
       .limit(200);
 
     if (profileErr) {
