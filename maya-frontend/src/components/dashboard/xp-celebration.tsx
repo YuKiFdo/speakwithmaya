@@ -7,9 +7,13 @@ import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { markXpSeenLocally, type XpSnapshot } from '@/hooks/useUserStats';
 import { playRewardSound } from '@/services/sound/sound-service';
 import { triggerHaptic } from '@/utils/haptics-audio';
+import { levelProgress } from '@/utils/levels';
 
-const XP_PER_LEVEL = 500;
-const FILL_MS = 1600;
+/** Each XP point gets its own visible step (100, 101, ... 105), within these bounds. */
+const MS_PER_POINT = 170;
+const FILL_MIN_MS = 700;
+const FILL_MAX_MS = 2600;
+const fillMs = (gain: number) => Math.min(FILL_MAX_MS, Math.max(FILL_MIN_MS, gain * MS_PER_POINT));
 
 /** Saves "this XP total has been celebrated" on the server: one celebration across all devices. */
 function postXpSeen(xp: number) {
@@ -22,7 +26,7 @@ function postXpSeen(xp: number) {
   }).catch(() => {});
 }
 
-const levelOf = (xp: number) => Math.floor(xp / XP_PER_LEVEL) + 1;
+const levelOf = (xp: number) => levelProgress(xp).level;
 
 export interface XpCelebration {
   /** Animated overrides for the top bar while celebrating (undefined = use live stats). */
@@ -88,15 +92,18 @@ export function useXpCelebration(
     triggerHaptic(levelUpTo ? 'medium' : 'light');
 
     const start = Date.now();
+    const duration = fillMs(to - from);
     let frame: ReturnType<typeof setTimeout> | null = null;
     const tick = () => {
-      const p = Math.min(1, (Date.now() - start) / FILL_MS);
-      const eased = 1 - Math.pow(1 - p, 3);
-      const xp = Math.round(from + (to - from) * eased);
-      const inLevel = xp % XP_PER_LEVEL;
+      const p = Math.min(1, (Date.now() - start) / duration);
+      // Linear steps so every number shows (100, 101, 102 ...); big gains still finish in time
+      const xp = p >= 1 ? to : Math.floor(from + (to - from) * p);
+      // Shared level curve: the bar restarts from 0 when a level boundary is crossed mid-fill
+      const lp = levelProgress(xp);
+      const inLevel = lp.intoLevel;
       setState({
-        progress: p >= 1 ? undefined : inLevel / XP_PER_LEVEL,
-        xpLabel: p >= 1 ? undefined : `${inLevel} / ${XP_PER_LEVEL} XP`,
+        progress: p >= 1 ? undefined : lp.progress,
+        xpLabel: p >= 1 ? undefined : `${inLevel} / ${lp.needed} XP`,
         gain: to - from,
         levelUpTo,
         runId,
@@ -135,7 +142,7 @@ export function XpGainBurst({ celebration }: { celebration: XpCelebration }) {
     anim.setValue(0);
     Animated.sequence([
       Animated.spring(anim, { toValue: 1, tension: 120, friction: 7, useNativeDriver: useNative }),
-      Animated.delay(FILL_MS + 400),
+      Animated.delay(FILL_MAX_MS + 400),
       Animated.timing(anim, { toValue: 0, duration: 400, useNativeDriver: useNative }),
     ]).start(({ finished }) => finished && setVisible(false));
   }, [celebration.runId, anim, useNative]);
@@ -181,3 +188,9 @@ const styles = StyleSheet.create({
   gain: { ...fontStyle('inter', 'bold'), fontSize: 17, color: '#B45309' },
   level: { ...fontStyle('outfit', 'bold'), fontSize: 14, color: '#C2410C', marginTop: 2 },
 });
+
+/** The ⭐ "+N" dock signal for the top bar while the XP number counts up. */
+export function xpDockSignal(c: XpCelebration): { amount: number; runId: number; holdMs: number } | null {
+  if (!c.runId || c.gain <= 0) return null;
+  return { amount: c.gain, runId: c.runId, holdMs: fillMs(c.gain) + 1400 };
+}

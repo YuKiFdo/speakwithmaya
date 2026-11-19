@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -41,7 +41,7 @@ import { paymentApi } from '@/services/payment/payment-api';
 import { mayaAlert } from '@/components/ui/alert-modal';
 import { OutageApologyBanner } from '@/components/ui/OutageApologyBanner';
 import { ProPassExpiredModal } from '@/components/modals/ProPassExpiredModal';
-import { useXpCelebration, XpGainBurst } from '@/components/dashboard/xp-celebration';
+import { useXpCelebration, xpDockSignal } from '@/components/dashboard/xp-celebration';
 import { promotionsApi } from '@/services/promotions/promotions-api';
 import { AppStorage } from '@/services/storage/storage-adapter';
 
@@ -272,6 +272,7 @@ export default function DashboardScreen() {
   const stats = useUserStats();
   const isFocused = useIsFocused();
   const xpCelebration = useXpCelebration(stats.xpSnapshot, stats.refreshStats, isFocused);
+  const xpGainSignal = useMemo(() => xpDockSignal(xpCelebration), [xpCelebration.runId, xpCelebration.gain]);
   const user = store.user;
   const displayName = stats.displayName || params.name || '';
   const minutesBalance = stats.minutesBalance;
@@ -673,6 +674,7 @@ export default function DashboardScreen() {
             onLevelPress={() => setActivePopup('level-up')}
             xpLabel={xpCelebration.xpLabel ?? stats.xpLabel}
             progress={xpCelebration.progress ?? stats.progress}
+            xpGain={xpGainSignal}
           />
 
           {/* DESKTOP FIXED TOP BAR (PINNED) */}
@@ -682,6 +684,7 @@ export default function DashboardScreen() {
             levelLabel={stats.levelLabel}
             xpLabel={xpCelebration.xpLabel ?? stats.xpLabel}
             progress={xpCelebration.progress ?? stats.progress}
+            xpGain={xpGainSignal}
             isPro={isPro}
             isTrialing={stats.isTrialing}
             planTier={stats.planTier}
@@ -1177,8 +1180,7 @@ export default function DashboardScreen() {
         />
       </View>
 
-      {/* New XP since last visit: the top bar fills up and "+N XP" glows once (all devices) */}
-      <XpGainBurst celebration={xpCelebration} />
+      {/* New XP since last visit: the top bar counts up and a ⭐ "+N" docks on the avatar (all devices) */}
     </SafeAreaView>
   );
 }

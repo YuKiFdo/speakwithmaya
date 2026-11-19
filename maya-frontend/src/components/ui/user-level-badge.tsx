@@ -6,6 +6,7 @@ import { CrownSolidIcon } from '@/components/icons/nav-icons';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
 
 import { Ionicons } from '@expo/vector-icons';
+import { XpStarDock, type XpGainSignal } from '@/components/ui/xp-star-dock';
 
 export interface UserLevelBadgeProps {
   /** e.g. "Level 4" */
@@ -28,6 +29,8 @@ export interface UserLevelBadgeProps {
   onPress?: PressableProps['onPress'];
   /** Accessibility label */
   accessibilityLabel?: string;
+  /** New XP: a ⭐ "+N" docks on the avatar while the XP number counts up. */
+  xpGain?: XpGainSignal | null;
 }
 
 /**
@@ -38,7 +41,7 @@ export interface UserLevelBadgeProps {
  */
 export function UserLevelBadge({
   levelLabel = 'Level 1',
-  xpLabel = '0 / 500 XP',
+  xpLabel = '0 / 180 XP',
   progress = 0,
   isPro = false,
   isTrialing = false,
@@ -47,6 +50,7 @@ export function UserLevelBadge({
   avatarSource,
   onPress,
   accessibilityLabel = 'View level progress',
+  xpGain = null,
 }: UserLevelBadgeProps) {
   const progressWidth = `${Math.round(Math.min(1, Math.max(0, progress)) * 100)}%` as DimensionValue;
 
@@ -133,6 +137,7 @@ export function UserLevelBadge({
           <View style={[styles.miniProgressFill, { width: progressWidth }]} />
         </View>
       </View>
+      <View>
       {uploadedPhotoUri ? (
         <View style={[styles.userAvatarWrapper, isInactive && styles.userAvatarWrapperInactive]}>
           <Image
@@ -151,6 +156,8 @@ export function UserLevelBadge({
           <Text style={styles.userAvatarFallbackLetter}>{fallbackFirstLetter}</Text>
         </View>
       )}
+      <XpStarDock gain={xpGain} top={-12} right={-10} />
+      </View>
     </Pressable>
   );
 }

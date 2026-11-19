@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { fontStyle } from '@/theme/fonts';
 import { useUserStats } from '@/hooks/useUserStats';
+import type { XpGainSignal } from '@/components/ui/xp-star-dock';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CommonPopup } from '@/components/ui/common-popup';
 
@@ -48,6 +49,8 @@ export interface DesktopTopBarProps {
 
   /** Override xp label (e.g. "300 / 500 XP"). Defaults to live stats.xpLabel. */
   xpLabel?: string;
+  /** New XP: ⭐ "+N" docked on the avatar (dashboard XP fill). */
+  xpGain?: XpGainSignal | null;
 
   /** Override progress (0 - 1). Defaults to live stats.progress. */
   progress?: number;
@@ -104,6 +107,7 @@ export function DesktopTopBar({
   onLevelPress,
   levelLabel,
   xpLabel,
+  xpGain,
   progress,
   isPro,
   isTrialing,
@@ -193,6 +197,7 @@ export function DesktopTopBar({
             <UserLevelBadge
               levelLabel={resolvedLevelLabel}
               xpLabel={resolvedXpLabel}
+          xpGain={xpGain}
               progress={resolvedProgress}
               isPro={resolvedIsPro}
               isTrialing={resolvedIsTrialing}

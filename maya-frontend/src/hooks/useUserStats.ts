@@ -4,6 +4,7 @@ import { useOnboardingStore, OnboardingStore } from '@/services/store/onboarding
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
 import { fetchPracticeSessionSummaries } from '@/services/supabase';
 import { authService } from '@/services/auth/auth-service';
+import { levelProgress } from '@/utils/levels';
 import { onStatsChanged } from '@/services/stats-events';
 
 export interface UserStats {
@@ -435,13 +436,13 @@ export function useUserStats(): UserStats {
     }
   }, [refreshStats]);
 
-  // Dynamic Level & XP calculations (500 XP per level, starting at Level 1)
-  const XP_PER_LEVEL = 500;
+  // Level & XP from the shared level curve (180 XP for level 1, +60 per level, max 600)
   const totalXp = statsState.earnedXp;
-  const currentLevelNumber = Math.max(1, Math.floor(totalXp / XP_PER_LEVEL) + 1);
-  const levelXp = totalXp % XP_PER_LEVEL;
-  const targetLevelXp = XP_PER_LEVEL;
-  const progress = Math.min(1, Math.max(0, levelXp / targetLevelXp));
+  const lp = levelProgress(totalXp);
+  const currentLevelNumber = lp.level;
+  const levelXp = lp.intoLevel;
+  const targetLevelXp = lp.needed;
+  const progress = lp.progress;
   const levelLabel = `Level ${currentLevelNumber}`;
   const xpLabel = `${levelXp} / ${targetLevelXp} XP`;
 

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { getCallXpResult, onCallXpResult } from '@/services/call-xp-result';
 import {
   View,
   Text,
@@ -280,6 +281,8 @@ export default function SessionCompleteScreen() {
   ]);
 
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
+  const [serverXp, setServerXp] = useState<number | null>(() => getCallXpResult()?.xp ?? null);
+  useEffect(() => onCallXpResult((r) => setServerXp(r.xp)), []);
 
   const isIntro = (params as any).isIntro === 'true' || (report?.callParams as any)?.isIntroCall === true;
   const isPassed = report ? report.passed : true;
@@ -296,9 +299,11 @@ export default function SessionCompleteScreen() {
 
   // XP & Sentences: 5 XP per 1 minute practiced for general/practice sessions (Math.max(5, mins * 5))
   const calculatedGeneralXp = isPassed && totalSecs >= 30 ? Math.max(5, Math.max(1, Math.floor(totalSecs / 60)) * 5) : 0;
-  const xpEarned = report?.xpEarned && report.xpEarned > 0
+  const estimatedXp = report?.xpEarned && report.xpEarned > 0
     ? report.xpEarned
     : (isGeneral ? calculatedGeneralXp : (isPassed ? 100 : 25));
+  // Switch to the server-confirmed XP as soon as it arrives (exactly what the dashboard adds)
+  const xpEarned = serverXp ?? estimatedXp;
   const sentencesCount = report?.userSentencesCount ?? 0;
   const hintsCount = report?.hintsUsedCount ?? (report?.activeHints?.length || (params.hintsUsedCount ? parseInt(params.hintsUsedCount, 10) : 0));
   const rawScore = report?.overallScore ?? (isGeneral ? 85 : 75);

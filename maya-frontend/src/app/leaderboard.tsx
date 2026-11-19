@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { levelForXp } from '@/utils/levels';
 import {
   View,
   Text,
@@ -147,7 +148,7 @@ export default function LeaderboardScreen() {
               );
               const lessonXp = completedCount * 100;
               const xp = lessonXp;
-              const levelNumber = Math.max(1, Math.floor(lessonXp / 500) + 1);
+              const levelNumber = levelForXp(lessonXp);
               const rawName = (u.displayName || '').trim();
               const cleanName =
                 rawName && rawName !== 'Anonymous Student'
