@@ -999,8 +999,15 @@ export default function CallScreen() {
     if (liveCall.missionReport) {
       const activeSessionId = liveCall.sessionId || (liveCall.missionReport as any)?.id || '';
       const resolvedScenarioTitle = storeConfig?.scenarioTitle || params.scenarioTitle || '';
+      // Include the client-side streak bonus so the stored report's xpEarned matches
+      // what the route params carry (and what the complete screen should initially show).
+      // The server-confirmed XP (via publishCallXpResult) overrides this later.
+      const resolvedStreakBonus = liveCall.missionReport.streakBonusXp ?? rewards.streakBonusXp;
+      const clientStreakBonus = liveCall.missionReport.streakBonusXp ? 0 : rewards.streakBonusXp;
       setLatestSessionReport({
         ...liveCall.missionReport,
+        xpEarned: (liveCall.missionReport.xpEarned || 0) + clientStreakBonus,
+        streakBonusXp: resolvedStreakBonus,
         id: activeSessionId,
         scenarioId: effectiveScenarioId,
         scenarioTitle: resolvedScenarioTitle,
@@ -1039,6 +1046,7 @@ export default function CallScreen() {
           feedbackEnglish: liveCall.missionReport.feedbackEnglish || '',
           userSentencesCount: String(liveCall.missionReport.userSentencesCount || ''),
           hintsUsedCount: String(liveCall.missionReport.hintsUsedCount ?? hintsHistoryRef.current.length),
+          streakBonusXp: String(resolvedStreakBonus || 0),
           // The server's finish reply (with the streak bonus) usually arrives after we navigate,
           // so add the in-call streak bonus here unless the report already includes it.
           xpEarned: String(

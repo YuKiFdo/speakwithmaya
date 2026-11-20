@@ -199,6 +199,7 @@ export default function SessionCompleteScreen() {
     userSentencesCount?: string;
     hintsUsedCount?: string;
     xpEarned?: string;
+    streakBonusXp?: string;
     isGeneralChat?: string;
     callParams?: string;
   }>();
@@ -236,9 +237,10 @@ export default function SessionCompleteScreen() {
 
     const practiceMinutes = Math.max(1, Math.floor(durationSecs / 60));
     const computedGeneralXp = isPassedVal && durationSecs >= 30 ? Math.max(5, practiceMinutes * 5) : 0;
+    const streakBonusVal = params.streakBonusXp ? parseInt(params.streakBonusXp, 10) : 0;
     const xpVal = params.xpEarned && parseInt(params.xpEarned, 10) > 0
       ? parseInt(params.xpEarned, 10)
-      : (isGeneralVal ? computedGeneralXp : (isPassedVal ? 100 : 25));
+      : (isGeneralVal ? computedGeneralXp + streakBonusVal : (isPassedVal ? 100 + streakBonusVal : 25));
 
     return {
       roadmapLevelId: params.roadmapLevelId || '',
@@ -254,6 +256,7 @@ export default function SessionCompleteScreen() {
       feedbackEnglish: params.feedbackEnglish,
       userSentencesCount: sentencesVal,
       xpEarned: xpVal,
+      streakBonusXp: streakBonusVal,
       isGeneralChat: isGeneralVal,
       objectives: [],
       corrections: [],
@@ -276,13 +279,18 @@ export default function SessionCompleteScreen() {
     params.userSentencesCount,
     params.hintsUsedCount,
     params.xpEarned,
+    params.streakBonusXp,
     params.isGeneralChat,
     params.callParams,
   ]);
 
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [serverXp, setServerXp] = useState<number | null>(() => getCallXpResult()?.xp ?? null);
-  useEffect(() => onCallXpResult((r) => setServerXp(r.xp)), []);
+  const [serverBonus, setServerBonus] = useState<number | null>(() => getCallXpResult()?.streakBonusXp ?? null);
+  useEffect(() => onCallXpResult((r) => {
+    setServerXp(r.xp);
+    setServerBonus(r.streakBonusXp);
+  }), []);
 
   const isIntro = (params as any).isIntro === 'true' || (report?.callParams as any)?.isIntroCall === true;
   const isPassed = report ? report.passed : true;
@@ -304,6 +312,7 @@ export default function SessionCompleteScreen() {
     : (isGeneral ? calculatedGeneralXp : (isPassed ? 100 : 25));
   // Switch to the server-confirmed XP as soon as it arrives (exactly what the dashboard adds)
   const xpEarned = serverXp ?? estimatedXp;
+  const streakBonus = serverBonus ?? report?.streakBonusXp ?? 0;
   const sentencesCount = report?.userSentencesCount ?? 0;
   const hintsCount = report?.hintsUsedCount ?? (report?.activeHints?.length || (params.hintsUsedCount ? parseInt(params.hintsUsedCount, 10) : 0));
   const rawScore = report?.overallScore ?? (isGeneral ? 85 : 75);
@@ -594,7 +603,9 @@ export default function SessionCompleteScreen() {
                   </View>
                   <View style={styles.statTexts}>
                     <Text style={styles.statValueBold}>+{xpEarned} XP</Text>
-                    <Text style={styles.statLabelMuted}>Earned today</Text>
+                    <Text style={styles.statLabelMuted} numberOfLines={1}>
+                      {streakBonus > 0 ? `🔥 +${streakBonus} streak` : 'Earned today'}
+                    </Text>
                   </View>
                 </View>
               </View>

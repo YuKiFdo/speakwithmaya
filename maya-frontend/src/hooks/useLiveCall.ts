@@ -1714,11 +1714,18 @@ export function useLiveCall(options: UseLiveCallOptions = {}) {
           // complete screen switch to this exact number, so they always match the dashboard.
           const bonus = Number(finishData?.streakBonusXp) || 0;
           const serverBase = typeof finishData?.xpEarned === 'number' ? finishData.xpEarned : null;
+          // Compute the total XP outside the state updater: if the call screen unmounts
+          // before the server replies, React may skip the updater body, which previously
+          // caused publishCallXpResult to never fire (complete screen stuck on the
+          // estimate, dashboard showed the real number).
+          const fallbackBase = xpEarned; // captured from the same endCall scope
+          const base = serverBase ?? fallbackBase;
+          const total = base + bonus;
+          // Publish BEFORE the state setter so the complete screen (which may already be
+          // mounted) receives the authoritative XP even if the setter is a no-op.
+          publishCallXpResult(total, bonus);
           setMissionReport((prev) => {
             if (!prev) return prev;
-            const base = serverBase ?? (prev.xpEarned || 0) - (prev.streakBonusXp || 0);
-            const total = base + bonus;
-            publishCallXpResult(total, bonus);
             return {
               ...prev,
               streakBonusXp: bonus,
