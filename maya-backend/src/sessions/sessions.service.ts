@@ -14,10 +14,16 @@ import { BoundedMap } from '../common/bounded-map.js';
 import { acceptClientStreakBonus, computeStreakBonus, STREAK_RULES } from './xp-rules.js';
 import { practiceXp, XP_RULES } from '../common/xp-calculator.js';
 import { PiperWorkerClient, PiperSegment } from './piper-worker-client.js';
+import { TtsClipStore, EMPTY_CLIP, type StoredClip, type TtsClip } from './tts-clip-store.js';
+import { loadOpusEncoderFactory, loadOpusDecoderFactory } from './opus-loader.js';
+import { splitSpeechSentences } from './speech-sentences.js';
 
 const execFileAsync = promisify(execFile);
 const ESPEAK_VOICE_RE = /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i;
 export const MAX_TTS_TEXT_LENGTH = 1000;
+/** Piper models tried in order when PIPER_MODEL is unset (files in assets/piper). */
+// int8-quantized and "low" models were measured on the VPS (2026-11-21) and were not faster.
+export const PIPER_MODEL_PREFERENCE = ['en_US-hfc_female-medium', 'en_US-amy-medium'];
 import { GoogleGenAI, Type } from '@google/genai';
 import { isMissingFunctionError } from '../common/supabase-rpc.js';
 
@@ -292,13 +298,16 @@ export class SessionsService {
   private readonly inFlightHintPromises = new Map<string, Promise<{ hintEnglish: string; hintSinhala: string; costUsd: number; costLkr: number; tokens?: { promptTokens: number; outputTokens: number; totalTokens: number } }>>();
   /** Builds recording files off the main thread when sessions end. */
   private readonly audioFinalize = new AudioFinalizeClient();
-  private readonly ttsAudioCache = new BoundedMap<string, { audioBase64: string; mimeType: string }>(150);
+  /** Encoded clips by text (WebM/Opus is ~10x smaller than the WAV this used to hold). */
+  private readonly ttsAudioCache = new BoundedMap<string, StoredClip>(500);
+  /** Opus/WAV encoder for Piper output; created when Piper initializes. */
+  private ttsStore: TtsClipStore | null = null;
   private piperSession: any = null;
   private piperConfig: any = null;
   private piperG2p: any = null;
   private piperInitPromise: Promise<boolean> | null = null;
   private piperWorker: PiperWorkerClient | null = null;
-  private readonly inFlightTts = new Map<string, Promise<{ audioBase64: string; mimeType: string }>>();
+  private readonly inFlightTts = new Map<string, Promise<StoredClip | null>>();
   private genAiClient: GoogleGenAI | null = null;
 
   constructor(
@@ -4693,29 +4702,6 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
     return hintGenerationPromise;
   }
 
-  private pcmToWavBase64(pcmBuffer: Buffer, sampleRate: number = 24000, numChannels: number = 1): string {
-    const byteRate = sampleRate * numChannels * 2;
-    const blockAlign = numChannels * 2;
-    const wavHeader = Buffer.alloc(44);
-
-    wavHeader.write('RIFF', 0);
-    wavHeader.writeUInt32LE(36 + pcmBuffer.length, 4);
-    wavHeader.write('WAVE', 8);
-    wavHeader.write('fmt ', 12);
-    wavHeader.writeUInt32LE(16, 16);
-    wavHeader.writeUInt16LE(1, 20); // 1 = PCM
-    wavHeader.writeUInt16LE(numChannels, 22);
-    wavHeader.writeUInt32LE(sampleRate, 24);
-    wavHeader.writeUInt32LE(byteRate, 28);
-    wavHeader.writeUInt16LE(blockAlign, 32);
-    wavHeader.writeUInt16LE(16, 34); // 16 bits per sample
-    wavHeader.write('data', 36);
-    wavHeader.writeUInt32LE(pcmBuffer.length, 40);
-
-    const wavData = Buffer.concat([wavHeader, pcmBuffer]);
-    return wavData.toString('base64');
-  }
-
   private float32ToPcm16Buffer(samples: Float32Array): Buffer {
     const out = new Int16Array(samples.length);
     for (let i = 0; i < samples.length; i++) {
@@ -4754,8 +4740,10 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
         const path = await import('path');
         const fs = await import('fs');
 
-        // Prefer hfc_female, fall back to Amy if hfc_female not found
-        const modelNames = ['en_US-hfc_female-medium', 'en_US-amy-medium'];
+        // PIPER_MODEL picks a model by file name (without .onnx); otherwise the first one found.
+        const modelNames = [process.env.PIPER_MODEL?.trim(), ...PIPER_MODEL_PREFERENCE].filter(
+          (m): m is string => !!m && /^[\w.-]+$/.test(m),
+        );
         const candidateDirs = [
           path.resolve(process.cwd(), 'assets/piper'),
           path.resolve(process.cwd(), '../assets/piper'),
@@ -4785,6 +4773,8 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
         const configPath = path.join(foundDir, `${foundModel}.onnx.json`);
 
         this.piperConfig = JSON.parse(await readFile(configPath, 'utf8'));
+        this.ttsStore = new TtsClipStore(loadOpusEncoderFactory(), loadOpusDecoderFactory());
+        this.logger.log(`[PiperTTS] Using model ${foundModel}`);
 
         // Run ONNX inference in a worker thread so it never blocks the main event loop.
         if (PiperWorkerClient.isAvailable()) {
@@ -4969,17 +4959,36 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
   }
 
   private static readonly FEEDBACK_TTS_VOICE = 'Amy';
+  /**
+   * Phrases every feedback session plays (card intros, "You said", lead-ins). Cached in
+   * memory at boot, so they are never synthesized while a user waits.
+   */
+  static readonly FIXED_FEEDBACK_PHRASES = [
+    'You said',
+    'A better way to say this is:',
+    'A more natural way to say this is:',
+    // Fixed card titles/subtitles from the analysis prompt (each sentence is its own clip).
+    'Let’s make this more correct.',
+    'Here’s a sentence from your conversation and how you can improve it.',
+    'Here’s one way to sound more fluent.',
+    'Let’s try a more natural way to say it.',
+    'Let’s pronounce this better.',
+    'Here’s a word from your conversation and how to say it more clearly.',
+  ] as const;
   /** Must match maya-frontend/src/utils/feedback-narration.ts BETTER_WAY_LEAD_INS. */
   static readonly BETTER_WAY_LEAD_INS = ['A better way to say this is:', 'A more natural way to say this is:'] as const;
 
   /**
    * Background, one-at-a-time synthesis of every clip the feedback screen will play, in the
    * order it plays them. Sequential on purpose: Piper is CPU-bound and live calls share the
-   * 2 vCPUs. Results only live in the in-memory TTS cache (not persisted).
+   * 2 vCPUs. Results only live in the in-memory TTS cache.
    */
   prewarmFeedbackTts(items: Array<Parameters<typeof SessionsService.feedbackNarrationTexts>[0]>): void {
     if (process.env.TTS_PREWARM === '0' || !items?.length) return;
-    const texts = [...new Set(items.flatMap((it) => SessionsService.feedbackNarrationTexts(it)))];
+    // Same sentence split the app uses, so every prewarmed clip is one it will request.
+    const texts = [
+      ...new Set(items.flatMap((it) => SessionsService.feedbackNarrationTexts(it)).flatMap((t) => splitSpeechSentences(t))),
+    ];
     void (async () => {
       const started = Date.now();
       let done = 0;
@@ -5010,7 +5019,7 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
         try {
           const ready = await this.initPiper();
           if (!ready) return;
-          for (const text of ['You said', ...SessionsService.BETTER_WAY_LEAD_INS]) {
+          for (const text of [...SessionsService.FIXED_FEEDBACK_PHRASES]) {
             await this.generateTtsAudio(
               { text, voice: SessionsService.FEEDBACK_TTS_VOICE } as SessionTtsDto,
               { priority: 'low' },
@@ -5028,42 +5037,53 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
   async generateTtsAudio(
     dto: SessionTtsDto,
     opts: { priority?: 'high' | 'low' } = {},
-  ): Promise<{ audioBase64: string; mimeType: string }> {
+  ): Promise<TtsClip> {
     const priority = opts.priority || 'high';
     const text = (dto.text || '').trim().slice(0, MAX_TTS_TEXT_LENGTH);
-    if (!text) {
-      return { audioBase64: '', mimeType: 'audio/wav' };
+    if (!text) return EMPTY_CLIP;
+    // Old clients send no format and can only play WAV.
+    const format = dto.format === 'webm' ? 'webm' : 'wav';
+    const clip = await this.getStoredClip(text, priority);
+    if (!clip || !this.ttsStore) return EMPTY_CLIP;
+    try {
+      return this.ttsStore.toClip(clip, format);
+    } catch (err: any) {
+      this.logger.warn(`[PiperTTS] Clip conversion to ${format} failed: ${err?.message}`);
+      return EMPTY_CLIP;
     }
-    const voice = dto.voice || 'Maya';
-    const cacheKey = `${voice}:${text}`;
-    const cachedAudio = this.ttsAudioCache.get(cacheKey);
-    if (cachedAudio) {
-      return cachedAudio;
-    }
+  }
+
+  /** Memory cache -> synthesis (deduplicated across concurrent callers). */
+  private async getStoredClip(text: string, priority: 'high' | 'low'): Promise<StoredClip | null> {
+    const cached = this.ttsAudioCache.get(text);
+    if (cached) return cached;
 
     // Collapse concurrent identical requests into a single synthesis.
-    const inFlight = this.inFlightTts.get(cacheKey);
+    const inFlight = this.inFlightTts.get(text);
     if (inFlight) {
       // A user is now waiting for a clip that background prewarm queued: move it ahead.
-      if (priority === 'high') this.piperWorker?.promote(cacheKey);
+      if (priority === 'high') this.piperWorker?.promote(text);
       return inFlight;
     }
 
-    const task = this.synthesizePiper(text, cacheKey, priority).finally(() => {
-      this.inFlightTts.delete(cacheKey);
+    const task = (async () => {
+      if (!(await this.initPiper())) return null;
+      const pcm = await this.synthesizePiper(text, priority);
+      if (!pcm || !this.ttsStore) return null;
+      const clip = this.ttsStore.encode(pcm, this.piperConfig?.audio?.sample_rate || 22050);
+      this.ttsAudioCache.set(text, clip);
+      return clip;
+    })().finally(() => {
+      this.inFlightTts.delete(text);
     });
-    this.inFlightTts.set(cacheKey, task);
+    this.inFlightTts.set(text, task);
     return task;
   }
 
-  private async synthesizePiper(
-    text: string,
-    cacheKey: string,
-    priority: 'high' | 'low' = 'high',
-  ): Promise<{ audioBase64: string; mimeType: string }> {
+  /** Returns 16-bit mono PCM for `text`, or null when Piper is unavailable or fails. */
+  private async synthesizePiper(text: string, priority: 'high' | 'low' = 'high'): Promise<Buffer | null> {
     try {
-      const ready = await this.initPiper();
-      if (ready && (this.piperWorker || this.piperSession) && this.piperConfig) {
+      if ((this.piperWorker || this.piperSession) && this.piperConfig) {
         const sampleRate = this.piperConfig.audio?.sample_rate || 22050;
         const segments = this.splitSpeechIntoSegments(text);
         const espeakVoice = this.piperConfig.espeak?.voice || 'en-us';
@@ -5088,28 +5108,17 @@ CRITICAL SCRIPT & LANGUAGE RULES for hintSinhala:
           pauseSamples: i < segments.length - 1 && seg.pauseMs > 0 ? Math.round((sampleRate * seg.pauseMs) / 1000) : 0,
         }));
 
-        if (!piperSegments.some((s) => s.ids.length > 0)) {
-          return { audioBase64: '', mimeType: 'audio/wav' };
-        }
+        if (!piperSegments.some((s) => s.ids.length > 0)) return null;
 
         const pcmBuffer = this.piperWorker
-          ? await this.piperWorker.synthesize(piperSegments, { priority, key: cacheKey })
+          ? await this.piperWorker.synthesize(piperSegments, { priority, key: text })
           : await this.runPiperInProcess(piperSegments);
-
-        if (pcmBuffer.length > 0) {
-          const resObj = {
-            audioBase64: this.pcmToWavBase64(pcmBuffer, sampleRate, 1),
-            mimeType: 'audio/wav',
-          };
-          this.ttsAudioCache.set(cacheKey, resObj);
-          return resObj;
-        }
+        return pcmBuffer.length > 0 ? pcmBuffer : null;
       }
     } catch (piperErr: any) {
       this.logger.warn(`[PiperTTS] Synthesis failed for "${text.slice(0, 80)}": ${piperErr?.message}`);
     }
-
-    return { audioBase64: '', mimeType: 'audio/wav' };
+    return null;
   }
 
   /** Fallback when the worker thread is unavailable (e.g. running TS sources under vitest). */

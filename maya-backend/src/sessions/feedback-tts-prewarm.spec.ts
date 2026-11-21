@@ -40,3 +40,17 @@ describe('SessionsService.feedbackNarrationTexts', () => {
     expect(texts).toEqual(['T. S', 'You said', 'A better way to say this is:', 'beach']);
   });
 });
+
+describe('SessionsService.FIXED_FEEDBACK_PHRASES', () => {
+  it('covers every fixed sentence of a grammar and pronunciation card after sentence splitting', async () => {
+    const { splitSpeechSentences } = await import('./speech-sentences.js');
+    const fixed = new Set<string>(SessionsService.FIXED_FEEDBACK_PHRASES);
+    for (const item of [
+      { type: 'grammar', title: 'Let’s make this more correct.', subtitle: 'Here’s a sentence from your conversation and how you can improve it.' },
+      { type: 'pronunciation', title: 'Let’s pronounce this better.', subtitle: 'Here’s a word from your conversation and how to say it more clearly.' },
+    ]) {
+      const [intro, youSaid, leadIn] = SessionsService.feedbackNarrationTexts({ ...item, betterWay: 'x', whyExplanation: 'y' });
+      for (const s of [...splitSpeechSentences(intro), youSaid, leadIn]) expect(fixed.has(s)).toBe(true);
+    }
+  });
+});

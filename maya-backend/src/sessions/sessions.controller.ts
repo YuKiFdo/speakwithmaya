@@ -76,7 +76,7 @@ export class SessionsController {
       return res.status(500).send('Synthesis failed');
     }
     const buf = Buffer.from(audioObj.audioBase64, 'base64');
-    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Content-Type', audioObj.mimeType || 'audio/wav');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.send(buf);
   }

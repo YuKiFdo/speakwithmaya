@@ -934,26 +934,17 @@ export default function UpgradeScreen() {
 
                     {/* Right Column: Prominent Special Offer CTA Button */}
                     <View style={styles.specialOfferCtaCol}>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.specialOfferButton,
-                          pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
-                          loadingPlanId === '3-months-pro' && { opacity: 0.7 },
-                        ]}
+                      <MayaPrimaryButton
+                        label="Get This Offer"
                         onPress={() => handleSelectPlan('3-months-pro')}
-                        disabled={loadingPlanId !== null}
-                        accessibilityRole="button"
+                        showArrow
+                        loading={loadingPlanId === '3-months-pro'}
+                        disabled={loadingPlanId !== null && loadingPlanId !== '3-months-pro'}
+                        height={56}
+                        borderRadius={28}
+                        style={{ minWidth: 220 }}
                         accessibilityLabel="Get This Offer"
-                      >
-                        {loadingPlanId === '3-months-pro' ? (
-                          <ActivityIndicator size="small" color="#FFFFFF" />
-                        ) : (
-                          <View style={styles.specialOfferButtonContent}>
-                            <Text style={styles.specialOfferButtonText}>Get This Offer</Text>
-                            <Feather name="arrow-right" size={17} color="#FFFFFF" style={{ marginLeft: 8 }} />
-                          </View>
-                        )}
-                      </Pressable>
+                      />
                     </View>
                   </View>
                 ) : (
@@ -980,26 +971,17 @@ export default function UpgradeScreen() {
                     </View>
 
                     <View style={{ marginTop: 14, width: '100%' }}>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.specialOfferButtonMobile,
-                          pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
-                          loadingPlanId === '3-months-pro' && { opacity: 0.7 },
-                        ]}
+                      <MayaPrimaryButton
+                        label="Get This Offer"
                         onPress={() => handleSelectPlan('3-months-pro')}
-                        disabled={loadingPlanId !== null}
-                        accessibilityRole="button"
+                        showArrow
+                        loading={loadingPlanId === '3-months-pro'}
+                        disabled={loadingPlanId !== null && loadingPlanId !== '3-months-pro'}
+                        height={56}
+                        borderRadius={28}
+                        style={{ width: '100%' }}
                         accessibilityLabel="Get This Offer"
-                      >
-                        {loadingPlanId === '3-months-pro' ? (
-                          <ActivityIndicator size="small" color="#FFFFFF" />
-                        ) : (
-                          <View style={styles.specialOfferButtonContent}>
-                            <Text style={styles.specialOfferButtonText}>Get This Offer</Text>
-                            <Feather name="arrow-right" size={17} color="#FFFFFF" style={{ marginLeft: 8 }} />
-                          </View>
-                        )}
-                      </Pressable>
+                      />
                     </View>
                   </View>
                 )}

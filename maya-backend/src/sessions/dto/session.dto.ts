@@ -1,4 +1,4 @@
-import { IsString, IsBoolean, IsOptional, IsNumber, IsArray, ValidateNested, Matches } from 'class-validator';
+import { IsString, IsBoolean, IsOptional, IsNumber, IsArray, ValidateNested, Matches, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateSessionTokenDto {
@@ -448,6 +448,11 @@ export class SessionTtsDto {
   @IsOptional()
   @IsString()
   voice?: string;
+
+  /** 'webm' (Opus, ~10x smaller) when the client can play it; WAV otherwise (default). */
+  @IsOptional()
+  @IsIn(['webm', 'wav'])
+  format?: 'webm' | 'wav';
 }
 
 export class SessionReviewDto {

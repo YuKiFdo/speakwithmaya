@@ -1,24 +1,33 @@
 /**
  * Maya Voice Synthesis (Backend Piper Neural TTS Engine)
  *
- * Exclusively uses the self-hosted Piper TTS (Amy voice) running on the NestJS backend.
- * Provides identical, consistent, high-fidelity neural voice across all platforms
- * (Android, iOS, Windows, macOS, Linux) with zero browser speech synthesis fallbacks.
+ * Uses the self-hosted Piper TTS running on the NestJS backend, so every platform hears
+ * the same voice (no browser speech synthesis).
  *
- * Features:
- * - 100% Backend Piper neural audio.
- * - In-memory audio Blob URL cache for instant 0ms replays.
- * - Standard HTMLAudioElement playback with play/pause/ended lifecycle hooks.
- * - Zero external Google/Gemini API rate limits or quota consumption.
+ * - Text is split into sentences; each sentence is its own clip, so the first one plays
+ *   while the next is still being generated, with a natural pause at each full stop.
+ * - Clips come as WebM/Opus (~10x smaller than WAV) when the browser can play it, WAV
+ *   otherwise (iOS Safari < 17.4).
+ * - In-memory blob URL cache for instant replays; concurrent requests are shared.
  */
 
 import { getBackendBaseUrl } from '@/hooks/useLiveCall';
+import { splitSpeechSentences, pauseAfterSentenceMs } from '@/utils/speech-sentences';
+
+type SpeakOptions = {
+  rate?: number;
+  pitch?: number;
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (err: any) => void;
+};
 
 let activeAudioElement: HTMLAudioElement | null = null;
-let activeAbortController: AbortController | null = null;
 let activeOnEndCallback: (() => void) | null = null;
+let activePauseTimer: ReturnType<typeof setTimeout> | null = null;
 let currentSpeechRequestId = 0;
 const audioBlobCache = new Map<string, string>();
+const inFlightVoice = new Map<string, Promise<string>>();
 
 /**
  * Kept as a no-op for compatibility with onboarding screen pre-warming hooks.
@@ -29,157 +38,29 @@ export function getBestCallirrhoeVoice(): null {
   return null;
 }
 
-/**
- * Play an audio Blob URL via HTMLAudioElement.
- */
-function playAudioBlob(
-  blobUrl: string,
-  requestId: number,
-  options?: {
-    rate?: number;
-    onStart?: () => void;
-    onEnd?: () => void;
-    onError?: (err: any) => void;
-  },
-): boolean {
-  if (requestId !== currentSpeechRequestId) {
-    options?.onEnd?.();
-    return false;
-  }
+let cachedFormat: 'webm' | 'wav' | null = null;
 
+/** WebM/Opus when this browser can play it, else WAV. */
+function preferredAudioFormat(): 'webm' | 'wav' {
+  if (cachedFormat) return cachedFormat;
+  let format: 'webm' | 'wav' = 'wav';
   try {
-    if (activeAudioElement) {
-      try {
-        activeAudioElement.onplay = null;
-        activeAudioElement.onended = null;
-        activeAudioElement.onerror = null;
-        activeAudioElement.pause();
-        activeAudioElement.currentTime = 0;
-      } catch {}
-      activeAudioElement = null;
+    if (typeof document !== 'undefined') {
+      const probe = document.createElement('audio');
+      if (probe.canPlayType?.('audio/webm; codecs="opus"')) format = 'webm';
     }
-
-    const audio = new Audio(blobUrl);
-    activeAudioElement = audio;
-    activeOnEndCallback = options?.onEnd || null;
-
-    if (options?.rate && options.rate > 0) {
-      audio.playbackRate = options.rate;
-    }
-
-    audio.onplay = () => {
-      if (requestId !== currentSpeechRequestId) {
-        try {
-          audio.pause();
-        } catch {}
-        return;
-      }
-      options?.onStart?.();
-    };
-
-    audio.onended = () => {
-      if (activeAudioElement === audio) {
-        activeAudioElement = null;
-        activeOnEndCallback = null;
-      }
-      options?.onEnd?.();
-    };
-
-    audio.onerror = (e) => {
-      if (activeAudioElement === audio) {
-        activeAudioElement = null;
-        activeOnEndCallback = null;
-      }
-      console.warn('[MayaVoice] Audio playback error:', e);
-      options?.onError?.(e);
-    };
-
-    const playPromise = audio.play();
-    if (playPromise !== undefined) {
-      playPromise.catch((err) => {
-        if (activeAudioElement === audio) {
-          activeAudioElement = null;
-          activeOnEndCallback = null;
-        }
-        if (requestId === currentSpeechRequestId) {
-          console.warn('[MayaVoice] audio.play() promise rejected:', err);
-        }
-        options?.onError?.(err);
-      });
-    }
-
-    return true;
-  } catch (err) {
-    console.warn('[MayaVoice] playAudioBlob exception:', err);
-    options?.onError?.(err);
-    return false;
+  } catch {
+    /* keep WAV */
   }
+  cachedFormat = format;
+  return format;
 }
 
 /**
- * Main entrance: Always synthesizes speech using the self-hosted Backend Piper TTS,
- * with instant in-memory Blob caching.
+ * Fetches (or reuses) the backend Piper clip for one sentence and returns a blob: URL.
+ * Concurrent callers share one request, so a prefetch started on the analyzing screen is
+ * picked up by the feedback screen. Never aborted: a stopped clip is still cached.
  */
-export function speakAsCallirrhoe(
-  text: string,
-  options?: {
-    rate?: number;
-    pitch?: number;
-    onStart?: () => void;
-    onEnd?: () => void;
-    onError?: (err: any) => void;
-  },
-): boolean {
-  // Cancel any previous playback or in-flight TTS fetch first
-  stopMayaVoiceFallback();
-
-  const cleanText = (text || '').trim();
-  if (!cleanText) {
-    options?.onEnd?.();
-    return true;
-  }
-
-  const requestId = ++currentSpeechRequestId;
-
-  // 1. Check in-memory audio blob cache for instant 0ms playback
-  const cachedUrl = audioBlobCache.get(cleanText);
-  if (cachedUrl) {
-    return playAudioBlob(cachedUrl, requestId, options);
-  }
-
-  // 2. Synthesize via self-hosted Backend Piper TTS (shares an in-flight prefetch if any)
-  if (typeof window !== 'undefined') {
-    activeOnEndCallback = options?.onEnd || null;
-
-    fetchMayaVoiceUrl(cleanText)
-      .then((blobUrl) => {
-        // Do NOT play if this speech request was stopped or superseded while fetching
-        if (requestId !== currentSpeechRequestId) return;
-        playAudioBlob(blobUrl, requestId, options);
-      })
-      .catch((err) => {
-        if (requestId !== currentSpeechRequestId) return;
-        if (activeOnEndCallback === options?.onEnd) {
-          activeOnEndCallback = null;
-        }
-        console.warn('[MayaVoice] Backend TTS request failed:', err);
-        options?.onError?.(err);
-      });
-
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * Fetches (or reuses) the backend Piper clip for `text` and returns a blob: URL.
- * Concurrent callers for the same text share one request, so a prefetch started on the
- * analyzing screen is picked up by the feedback screen instead of being requested twice.
- * The request is never aborted by stopMayaVoiceFallback(): a stopped clip is still cached.
- */
-const inFlightVoice = new Map<string, Promise<string>>();
-
 function fetchMayaVoiceUrl(text: string): Promise<string> {
   const cached = audioBlobCache.get(text);
   if (cached) return Promise.resolve(cached);
@@ -190,7 +71,7 @@ function fetchMayaVoiceUrl(text: string): Promise<string> {
     const res = await fetch(`${getBackendBaseUrl()}/v1/sessions/tts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voice: 'Amy' }),
+      body: JSON.stringify({ text, voice: 'Amy', format: preferredAudioFormat() }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -201,7 +82,7 @@ function fetchMayaVoiceUrl(text: string): Promise<string> {
     for (let i = 0; i < byteCharacters.length; i++) {
       byteArray[i] = byteCharacters.charCodeAt(i);
     }
-    const blobUrl = URL.createObjectURL(new Blob([byteArray], { type: 'audio/wav' }));
+    const blobUrl = URL.createObjectURL(new Blob([byteArray], { type: data.mimeType || 'audio/wav' }));
     audioBlobCache.set(text, blobUrl);
     return blobUrl;
   })().finally(() => {
@@ -212,44 +93,151 @@ function fetchMayaVoiceUrl(text: string): Promise<string> {
   return task;
 }
 
-/** True when `text` can play immediately (already synthesized and downloaded). */
-export function isMayaVoiceCached(text: string): boolean {
-  return audioBlobCache.has((text || '').trim());
+function detachActiveAudio() {
+  if (!activeAudioElement) return;
+  try {
+    activeAudioElement.onplay = null;
+    activeAudioElement.onended = null;
+    activeAudioElement.onerror = null;
+    activeAudioElement.pause();
+    activeAudioElement.currentTime = 0;
+  } catch {}
+  activeAudioElement = null;
+}
+
+/** Plays one clip; resolves when it ends, rejects on a playback error. */
+function playClip(blobUrl: string, requestId: number, rate: number | undefined, onPlay?: () => void): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (requestId !== currentSpeechRequestId) return resolve();
+    detachActiveAudio();
+    const audio = new Audio(blobUrl);
+    activeAudioElement = audio;
+    if (rate && rate > 0) audio.playbackRate = rate;
+    audio.onplay = () => {
+      if (requestId !== currentSpeechRequestId) {
+        try {
+          audio.pause();
+        } catch {}
+        return resolve();
+      }
+      onPlay?.();
+    };
+    audio.onended = () => {
+      if (activeAudioElement === audio) activeAudioElement = null;
+      resolve();
+    };
+    audio.onerror = (e) => {
+      if (activeAudioElement === audio) activeAudioElement = null;
+      reject(e);
+    };
+    const p = audio.play();
+    if (p !== undefined) {
+      p.catch((err) => {
+        if (activeAudioElement === audio) activeAudioElement = null;
+        reject(err);
+      });
+    }
+  });
+}
+
+function wait(ms: number, requestId: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (ms <= 0 || requestId !== currentSpeechRequestId) return resolve();
+    activePauseTimer = setTimeout(() => {
+      activePauseTimer = null;
+      resolve();
+    }, ms);
+  });
 }
 
 /**
- * Downloads clips ahead of time so they play instantly later. Resolves when all are cached
- * or `timeoutMs` elapses, whichever comes first (never rejects). Requests keep running in
- * the background after a timeout and still land in the cache.
+ * Main entrance: speaks `text` with the backend Piper voice, sentence by sentence.
+ * onStart fires when the first sentence starts, onEnd after the last one (or when stopped).
+ */
+export function speakAsCallirrhoe(text: string, options?: SpeakOptions): boolean {
+  // Cancel any previous playback first
+  stopMayaVoiceFallback();
+
+  const sentences = splitSpeechSentences(text);
+  if (sentences.length === 0) {
+    options?.onEnd?.();
+    return true;
+  }
+  if (typeof window === 'undefined') return false;
+
+  const requestId = ++currentSpeechRequestId;
+  const onEnd = options?.onEnd;
+  activeOnEndCallback = onEnd || null;
+
+  // Request every sentence now, in order: the server generates them in arrival order,
+  // so sentence 2 is being made while sentence 1 plays.
+  const urls = sentences.map((s) => fetchMayaVoiceUrl(s));
+  urls.forEach((u) => u.catch(() => undefined));
+
+  void (async () => {
+    let started = false;
+    try {
+      for (let i = 0; i < sentences.length; i++) {
+        const url = await urls[i];
+        if (requestId !== currentSpeechRequestId) return;
+        await playClip(url, requestId, options?.rate, () => {
+          if (!started) {
+            started = true;
+            options?.onStart?.();
+          }
+        });
+        if (requestId !== currentSpeechRequestId) return;
+        if (i < sentences.length - 1) await wait(pauseAfterSentenceMs(sentences[i]), requestId);
+      }
+      if (requestId !== currentSpeechRequestId) return;
+      if (activeOnEndCallback === onEnd) activeOnEndCallback = null;
+      onEnd?.();
+    } catch (err) {
+      if (requestId !== currentSpeechRequestId) return;
+      if (activeOnEndCallback === onEnd) activeOnEndCallback = null;
+      console.warn('[MayaVoice] Backend TTS playback failed:', err);
+      options?.onError?.(err);
+    }
+  })();
+
+  return true;
+}
+
+/** True when `text` can play immediately (every sentence already downloaded). */
+export function isMayaVoiceCached(text: string): boolean {
+  const sentences = splitSpeechSentences(text);
+  return sentences.length > 0 && sentences.every((s) => audioBlobCache.has(s));
+}
+
+/**
+ * Downloads clips ahead of time so they play instantly later. Sentences are requested in
+ * play order, at most two at a time, so the server (which generates one clip at a time)
+ * finishes the first one first instead of being flooded. Resolves when all are cached or
+ * `timeoutMs` elapses (never rejects); requests keep running after a timeout.
  */
 export function prefetchMayaVoice(texts: string[], timeoutMs = 20000): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
-  const unique = [...new Set(texts.map((t) => (t || '').trim()).filter(Boolean))];
-  if (unique.length === 0) return Promise.resolve();
-  const all = Promise.allSettled(unique.map((t) => fetchMayaVoiceUrl(t))).then(() => undefined);
+  const queue = [...new Set(texts.flatMap((t) => splitSpeechSentences(t)))].filter((s) => !audioBlobCache.has(s));
+  if (queue.length === 0) return Promise.resolve();
+  let next = 0;
+  const lane = async () => {
+    while (next < queue.length) {
+      const s = queue[next++];
+      await fetchMayaVoiceUrl(s).catch(() => undefined);
+    }
+  };
+  const all = Promise.all([lane(), lane()]).then(() => undefined);
   return Promise.race([all, new Promise<void>((r) => setTimeout(r, timeoutMs))]);
 }
 
 export function stopMayaVoiceFallback(): void {
   currentSpeechRequestId++;
 
-  if (activeAbortController) {
-    try {
-      activeAbortController.abort();
-    } catch {}
-    activeAbortController = null;
+  if (activePauseTimer) {
+    clearTimeout(activePauseTimer);
+    activePauseTimer = null;
   }
-
-  if (activeAudioElement) {
-    try {
-      activeAudioElement.onplay = null;
-      activeAudioElement.onended = null;
-      activeAudioElement.onerror = null;
-      activeAudioElement.pause();
-      activeAudioElement.currentTime = 0;
-    } catch {}
-    activeAudioElement = null;
-  }
+  detachActiveAudio();
 
   if (activeOnEndCallback) {
     const cb = activeOnEndCallback;
