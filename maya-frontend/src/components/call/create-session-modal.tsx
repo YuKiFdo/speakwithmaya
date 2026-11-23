@@ -15,6 +15,9 @@ import { Ionicons, Feather } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { fontStyle } from '@/theme/fonts';
 import { useOnboardingStore } from '@/services/store/onboarding-store';
+import { TourHost, useFirstVisitTour, useTourTarget } from '@/components/tour/tour-provider';
+import { resolveTourLanguage } from '@/components/tour/tour-language';
+import { CREATE_SESSION_TOUR } from '@/tours/create-session';
 
 export type SessionDurationMinutes = 3 | 5 | 10 | 15 | 30;
 export type LanguageHelpMode = 'sinhala' | 'english';
@@ -177,6 +180,15 @@ export function CreateSessionModal({
   const [languageHelp, setLanguageHelp] = useState<LanguageHelpOption>(userDefaultLanguageHelp);
   const [aiCorrections, setAiCorrections] = useState<AICorrectionOption>(userDefaultCorrection);
   const [pickerModal, setPickerModal] = useState<'language' | 'corrections' | null>(null);
+
+  // First-open guided tour explaining each setting (drawn by the <TourHost> inside this Modal)
+  const timeTourRef = useTourTarget('session.time');
+  const languageTourRef = useTourTarget('session.language');
+  const correctionsTourRef = useTourTarget('session.corrections');
+  const startTourRef = useTourTarget('session.start');
+  useFirstVisitTour(CREATE_SESSION_TOUR, visible && pickerModal === null, {
+    lang: resolveTourLanguage(store.user?.nativeLanguage ?? store.nativeLanguage),
+  });
 
   // Smooth Entry / Exit Animations
   const modalAnim = useRef(new Animated.Value(0)).current;
@@ -400,7 +412,7 @@ export function CreateSessionModal({
             {/* Content Container (No Scrollbar) */}
             <View style={[styles.scrollContent, !isDesktop && styles.scrollContentMobile]}>
               {/* SECTION 1: Practice Time */}
-              <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
+              <View ref={timeTourRef} collapsable={false} style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
                 <View style={styles.sectionHeader}>
                   <View style={[styles.sectionIconBadge, { backgroundColor: '#E0EDFF' }]}>
                     <Ionicons name="time-outline" size={20} color="#2B5BFF" />
@@ -521,7 +533,7 @@ export function CreateSessionModal({
               </View>
 
               {/* SECTION 2: Language Help */}
-              <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
+              <View ref={languageTourRef} collapsable={false} style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
                 <View style={styles.sectionHeader}>
                   <View style={[styles.sectionIconBadge, { backgroundColor: '#E6F9F0' }]}>
                     <Ionicons name="language-outline" size={20} color="#059669" />
@@ -613,7 +625,7 @@ export function CreateSessionModal({
               </View>
 
               {/* SECTION 3: AI corrections */}
-              <View style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
+              <View ref={correctionsTourRef} collapsable={false} style={[styles.sectionContainer, !isDesktop && styles.sectionContainerMobile]}>
                 <View style={styles.sectionHeader}>
                   <View style={[styles.sectionIconBadge, { backgroundColor: '#FDE8EE' }]}>
                     <Ionicons name="chatbubbles-outline" size={20} color="#E11D48" />
@@ -715,6 +727,7 @@ export function CreateSessionModal({
               </Pressable>
 
               <Pressable
+                ref={startTourRef}
                 style={({ pressed }) => [styles.startBtn, pressed && styles.startBtnPressed]}
                 onPress={handleStart}
                 accessibilityRole="button"
@@ -906,6 +919,9 @@ export function CreateSessionModal({
             )}
           </Animated.View>
         </View>
+
+        {/* Guided tour overlay for this modal (a Modal draws above the app-level tour layer) */}
+        <TourHost name="create-session" />
       </View>
     </Modal>
   );

@@ -14,6 +14,7 @@ import { useUserStats } from '@/hooks/useUserStats';
 import type { XpGainSignal } from '@/components/ui/xp-star-dock';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CommonPopup } from '@/components/ui/common-popup';
+import { useTourTarget } from '@/components/tour/tour-provider';
 
 export interface DesktopTopBarProps {
   /**
@@ -122,6 +123,7 @@ export function DesktopTopBar({
 }: DesktopTopBarProps) {
   const { isPhone } = useBreakpoint();
   const stats = useUserStats();
+  const levelTourRef = useTourTarget('nav.level');
   const [internalPopupOpen, setInternalPopupOpen] = useState(false);
 
   // Responsive guard: hide on mobile screens when desktopOnly is true
@@ -194,6 +196,7 @@ export function DesktopTopBar({
           {rightContent !== undefined ? (
             rightContent
           ) : (
+            <View ref={levelTourRef} collapsable={false}>
             <UserLevelBadge
               levelLabel={resolvedLevelLabel}
               xpLabel={resolvedXpLabel}
@@ -205,6 +208,7 @@ export function DesktopTopBar({
               isInactive={resolvedIsInactive}
               onPress={handleLevelBadgePress}
             />
+            </View>
           )}
         </View>
       </View>

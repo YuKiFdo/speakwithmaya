@@ -48,6 +48,7 @@ import {
   UpdatePromotionCampaignDto,
   UpdateCampaignStatusDto,
   BroadcastSmsDto,
+  MarkTourSeenDto,
 } from './dto/auth.dto.js';
 
 @Controller('v1')
@@ -120,6 +121,20 @@ export class AuthController {
     // profile write (previously 6-9 s under load because it queued behind other requests).
     runInBackground('updateStep', this.authService.updateStep(userId, dto));
     return { success: true, queued: true, step: dto.step };
+  }
+
+  // Guided in-app tours: which ones this learner has already seen (shown once across devices)
+  @Get('users/tours')
+  @UseGuards(AuthGuard)
+  async getToursSeen(@GetUser('id') userId: string) {
+    return { toursSeen: await this.authService.getToursSeen(userId) };
+  }
+
+  @Post('users/tours/seen')
+  @UseGuards(AuthGuard)
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async markTourSeen(@Body() dto: MarkTourSeenDto, @GetUser('id') userId: string) {
+    return { toursSeen: await this.authService.markTourSeen(userId, dto.tourId) };
   }
 
   @Post('users/event')

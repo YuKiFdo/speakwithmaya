@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, useWindowDimensions, Platform, Dimen
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { Radii } from '@/theme/tokens';
 import { Fonts, fontStyle } from '@/theme/fonts';
+import { useTourTarget } from '@/components/tour/tour-provider';
 import {
   HomeNavIcon,
   RoadmapNavIcon,
@@ -37,6 +38,8 @@ interface SidebarNavItemProps {
   onPress: () => void;
   badge?: React.ReactNode;
   isUpgrade?: boolean;
+  /** Guided-tour target id (see src/tours/). */
+  tourId?: string;
 }
 
 function SidebarNavItem({
@@ -47,11 +50,14 @@ function SidebarNavItem({
   onPress,
   badge,
   isUpgrade,
+  tourId,
 }: SidebarNavItemProps) {
   const [isHovered, setIsHovered] = useState(false);
+  const tourRef = useTourTarget(tourId ?? 'nav.unknown', { enabled: Boolean(tourId) });
 
   return (
     <Pressable
+      ref={tourRef}
       style={({ pressed }) => [
         styles.navItem,
         isUpgrade && styles.upgradeNavItem,
@@ -104,6 +110,7 @@ export function DesktopSidebar({
   const { height: windowHeight } = useWindowDimensions();
   const isCompact = windowHeight < 900;
   const isVeryCompact = windowHeight < 740;
+  const talkTimeTourRef = useTourTarget('dashboard.talkTime');
 
   const resolvedTier = (planTier || (isPro ? 'pro' : 'starter')).toLowerCase();
   const isPaid = resolvedTier !== 'starter';
@@ -179,6 +186,7 @@ export function DesktopSidebar({
             isActive={activeTab === 'home'}
             isCompact={isCompact}
             onPress={() => onSelectTab('home')}
+            tourId="nav.home"
           />
 
           {/* Roleplays */}
@@ -188,6 +196,7 @@ export function DesktopSidebar({
             isActive={activeTab === 'roadmap'}
             isCompact={isCompact}
             onPress={() => onSelectTab('roadmap')}
+            tourId="nav.roadmap"
           />
 
           {/* History */}
@@ -197,6 +206,7 @@ export function DesktopSidebar({
             isActive={activeTab === 'history'}
             isCompact={isCompact}
             onPress={() => onSelectTab('history')}
+            tourId="nav.history"
           />
 
           {/* Account */}
@@ -206,6 +216,7 @@ export function DesktopSidebar({
             isActive={activeTab === 'account'}
             isCompact={isCompact}
             onPress={() => onSelectTab('account')}
+            tourId="nav.account"
           />
 
           {/* Upgrade button (hidden when user is on Premium) */}
@@ -241,7 +252,7 @@ export function DesktopSidebar({
       </View>
 
       {/* Talk Time Card at bottom */}
-      <View style={[
+      <View ref={talkTimeTourRef} collapsable={false} style={[
         styles.talkTimeCard,
         isInactive && styles.talkTimeCardInactive,
         isNearLimit && styles.talkTimeCardNearLimit,

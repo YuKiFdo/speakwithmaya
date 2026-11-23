@@ -41,6 +41,7 @@ import { isMissingFunctionError } from '../common/supabase-rpc.js';
 import { paginateArray, pageWindow, readPage, type PageRequest } from '../common/pagination.js';
 import { computeXpByUser, levelForXp, practiceXp, XP_RULES } from '../common/xp-calculator.js';
 import { EventsService } from '../realtime/events.service.js';
+import { addTourSeen, normalizeToursSeen } from './tours-seen.js';
 
 export interface UserProfileData {
   id: string;
@@ -1739,6 +1740,31 @@ export class AuthService {
 
   private hasActivePaidSubscription(userId: string): Promise<boolean> {
     return hasActivePaidSubscription(this.supabase, userId);
+  }
+
+  /** Guided tours this learner has seen; [] if none or the column is missing (before migration 030). */
+  async getToursSeen(userId: string): Promise<string[]> {
+    if (!this.supabase) return [];
+    try {
+      const { data, error } = await this.supabase.from('profiles').select('tours_seen').eq('id', userId).maybeSingle();
+      if (error || !data) return [];
+      return normalizeToursSeen((data as any).tours_seen);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Records a tour as seen (idempotent). Returns the stored list. */
+  async markTourSeen(userId: string, tourId: string): Promise<string[]> {
+    const current = await this.getToursSeen(userId);
+    const next = addTourSeen(current, tourId);
+    if (!next) return current;
+    const { error } = await this.supabase.from('profiles').update({ tours_seen: next }).eq('id', userId);
+    if (error) {
+      this.logger.warn(`[Tours] markTourSeen failed for ${userId}: ${error.message}`);
+      return current;
+    }
+    return next;
   }
 
   async isTestAccount(profile: UserProfileData): Promise<boolean> {

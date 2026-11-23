@@ -31,6 +31,7 @@ import {
 import { DesktopLoadingScreen } from '@/components/ui/desktop-loading-screen';
 import { NativeAnimatedSplash } from '@/components/ui/native-animated-splash';
 import { AlertHost } from '@/components/ui/alert-modal';
+import { TourProvider } from '@/components/tour/tour-provider';
 import { MaintenanceOverlay } from '@/components/ui/MaintenanceOverlay';
 import { useAppEvents } from '@/services/realtime/app-events';
 import { Ionicons, Feather, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -228,6 +229,7 @@ export default function RootLayout() {
         <RouteGuard />
         <WebDocumentTitle />
         <StatusBar style="dark" />
+        <TourProvider>
         <Stack
         screenOptions={{
           headerShown: false,
@@ -367,6 +369,7 @@ export default function RootLayout() {
           options={{ animation: 'fade', animationDuration: 200 }}
         />
       </Stack>
+        </TourProvider>
       <MaintenanceOverlay />
       <AlertHost />
       </NativeAnimatedSplash>

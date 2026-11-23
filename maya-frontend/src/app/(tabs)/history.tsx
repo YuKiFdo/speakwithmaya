@@ -14,7 +14,11 @@ import {
   BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useIsFocused, useLocalSearchParams } from 'expo-router';
+import { useFirstVisitTour, useTourTarget } from '@/components/tour/tour-provider';
+import { resolveTourLanguage } from '@/components/tour/tour-language';
+import { HISTORY_DETAIL_TOUR, HISTORY_TOUR } from '@/tours/history';
+import { useOnboardingStore } from '@/services/store/onboarding-store';
 import { Ionicons } from '@expo/vector-icons';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { Radii } from '@/theme/tokens';
@@ -1348,7 +1352,20 @@ export default function HistoryScreen() {
     { id: 'travel', label: 'Travel English' },
   ];
 
-
+  // First-visit guided tours (list + review on desktop; list now and review on first open on phone)
+  const isFocused = useIsFocused();
+  const tourStore = useOnboardingStore();
+  const tourLang = resolveTourLanguage(tourStore.user?.nativeLanguage ?? tourStore.nativeLanguage);
+  const searchTourRef = useTourTarget('history.search');
+  const sessionTourRef = useTourTarget('history.session');
+  const recordingTourRef = useTourTarget('history.recording');
+  const transcriptTourRef = useTourTarget('history.transcript');
+  const reviewReady = Boolean(activeSession) && activeSession?.detailsLoaded !== false && !isTransitioningDetail;
+  const historyTourBase = isFocused && !isLoading && allSessions.length > 0 && activePopup === null && !isFilterModalOpen;
+  useFirstVisitTour(HISTORY_TOUR, historyTourBase && (isDesktop ? reviewReady : !selectedSessionId), { lang: tourLang });
+  useFirstVisitTour(HISTORY_DETAIL_TOUR, historyTourBase && !isDesktop && Boolean(selectedSessionId) && reviewReady, {
+    lang: tourLang,
+  });
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1408,15 +1425,17 @@ export default function HistoryScreen() {
                 {/* ── LEFT COLUMN: SEARCH & SESSION LIST ── */}
                 <View style={styles.desktopListColumn}>
                   {/* Search bar */}
-                  <AnimatedSearchBar
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                    placeholder="Search conversations..."
-                    containerStyle={styles.searchBarContainer}
-                    inputStyle={styles.searchInput}
-                    leading={<SearchIcon color="#94A3B8" size={18} />}
-                    clearIcon={<CloseCrossIcon size={14} color="#94A3B8" />}
-                  />
+                  <View ref={searchTourRef} collapsable={false}>
+                    <AnimatedSearchBar
+                      value={searchQuery}
+                      onChangeText={setSearchQuery}
+                      placeholder="Search conversations..."
+                      containerStyle={styles.searchBarContainer}
+                      inputStyle={styles.searchInput}
+                      leading={<SearchIcon color="#94A3B8" size={18} />}
+                      clearIcon={<CloseCrossIcon size={14} color="#94A3B8" />}
+                    />
+                  </View>
 
                   {/* Grouped Sessions Scroll */}
                   <ScrollView
@@ -1445,11 +1464,12 @@ export default function HistoryScreen() {
                         </Text>
                       </Reveal>
                     ) : (
-                      Object.entries(groupedSessions).map(([groupTitle, sessions]) => (
+                      Object.entries(groupedSessions).map(([groupTitle, sessions], groupIdx) => (
                         <View key={groupTitle} style={styles.groupContainer}>
                           <Text style={styles.groupHeaderTitle}>{groupTitle}</Text>
                           {sessions.map((item, i) => (
                             <Reveal key={item.id} index={i}>
+                              <View ref={groupIdx === 0 && i === 0 ? sessionTourRef : undefined} collapsable={false}>
                               <DesktopSessionCard
                                 item={item}
                                 isSelected={item.id === (selectedSessionId || activeSession?.id)}
@@ -1462,6 +1482,7 @@ export default function HistoryScreen() {
                                   (item.modelAudioUrl && unreachableAudioUrls.has(item.modelAudioUrl))
                                 )}
                               />
+                              </View>
                             </Reveal>
                           ))}
                         </View>
@@ -1531,7 +1552,7 @@ export default function HistoryScreen() {
                         {/* ── VOICE RECORDING SECTION ── */}
                         <View style={styles.sectionContainer}>
                           <Text style={styles.sectionHeaderTitle}>Voice Recording</Text>
-                          <View style={styles.voiceRecordingCard}>
+                          <View ref={recordingTourRef} collapsable={false} style={styles.voiceRecordingCard}>
                             {hasActiveRecording ? (
                               <View style={styles.voicePlayerRow}>
                                 {/* Play/Pause Button */}
@@ -1605,7 +1626,7 @@ export default function HistoryScreen() {
 
                         {/* ── SESSION TRANSCRIPT SECTION ── */}
                         <View style={styles.sectionContainer}>
-                          <View style={styles.transcriptSectionHeader}>
+                          <View ref={transcriptTourRef} collapsable={false} style={styles.transcriptSectionHeader}>
                             <Text style={styles.sectionHeaderTitle}>Session Transcript</Text>
                             {Boolean(activeSession.correctionsCount > 0 || (activeSession.transcript && activeSession.transcript.some((t) => Boolean(t.correction)))) && (
                               <Pressable
@@ -1809,7 +1830,7 @@ export default function HistoryScreen() {
                 </View>
 
                 {/* Filters Row: Search input + All Modes Button */}
-                <View style={styles.mobileFiltersRow}>
+                <View ref={searchTourRef} collapsable={false} style={styles.mobileFiltersRow}>
                   <AnimatedSearchBar
                     value={searchQuery}
                     onChangeText={setSearchQuery}
@@ -1854,11 +1875,12 @@ export default function HistoryScreen() {
                     </Text>
                   </Reveal>
                 ) : (
-                  Object.entries(groupedSessions).map(([groupTitle, sessions]) => (
+                  Object.entries(groupedSessions).map(([groupTitle, sessions], groupIdx) => (
                     <View key={groupTitle} style={styles.groupContainer}>
                       <Text style={styles.groupHeaderTitle}>{groupTitle}</Text>
                       {sessions.map((item, i) => (
                         <Reveal key={item.id} index={i}>
+                          <View ref={groupIdx === 0 && i === 0 ? sessionTourRef : undefined} collapsable={false}>
                           <MobileSessionCard
                             item={item}
                             isSelected={item.id === selectedSessionId}
@@ -1871,6 +1893,7 @@ export default function HistoryScreen() {
                               (item.modelAudioUrl && unreachableAudioUrls.has(item.modelAudioUrl))
                             )}
                           />
+                          </View>
                         </Reveal>
                       ))}
                     </View>
@@ -1953,7 +1976,7 @@ export default function HistoryScreen() {
                     {/* Voice Recording */}
                     <View style={styles.sectionContainer}>
                       <Text style={styles.sectionHeaderTitle}>Voice Recording</Text>
-                      <View style={styles.voiceRecordingCard}>
+                      <View ref={recordingTourRef} collapsable={false} style={styles.voiceRecordingCard}>
                         {hasActiveRecording ? (
                           <View style={styles.voicePlayerRow}>
                             <PlayToggle playing={isPlaying} size={42} onPress={() => togglePlay()} />
@@ -2023,7 +2046,7 @@ export default function HistoryScreen() {
 
                     {/* Session Transcript */}
                     <View style={styles.sectionContainer}>
-                      <View style={styles.transcriptSectionHeader}>
+                      <View ref={transcriptTourRef} collapsable={false} style={styles.transcriptSectionHeader}>
                         <Text style={styles.sectionHeaderTitle}>Session Transcript</Text>
                         {Boolean(activeSession.correctionsCount > 0 || (activeSession.transcript && activeSession.transcript.some((t) => Boolean(t.correction)))) && (
                           <Pressable

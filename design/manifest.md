@@ -28,6 +28,7 @@ Central ledger tracking every screen in the AI English Speaking Coach applicatio
 | `23-post-session-more-natural` | `onboarding` | 22 | Feedback: More Natural Phrasing | `design/inbox/23-post-session-feedback-more-natural-mobile.png` | Derived (Centered Modal Layout) | `approved` | `POST /v1/sessions/analyze`, `POST /v1/sessions/tts` | 5-segment pill progress indicator, Callirrhoe voice narration, user actual microphone audio clip replay, and natural phrasing guidance. |
 | `24-post-session-pronunciation` | `onboarding` | 23 | Feedback: Pronunciation Correction | `design/inbox/24-post-session-feedback-pronunciation-mobile.png` | Derived (Centered Modal Layout) | `approved` | `POST /v1/sessions/analyze`, `POST /v1/sessions/tts` | Target word analysis, phonetic sounding guide, IPA transcription, and Callirrhoe pronunciation playback. |
 | `25-post-session-grammar` | `onboarding` | 24 | Feedback: Grammar Correction | `design/inbox/25-post-session-feedback-grammar-mobile.png` | Derived (Centered Modal Layout) | `approved` | `POST /v1/sessions/analyze`, `POST /v1/sessions/tts` | Highlighted error tag, highlighted correction tag, rule explanation, and audio playback. |
+| `26-dashboard-tour` | `home` | 25 | First-visit Dashboard Guided Tour | Derived (approved interactive mockup, 2026-11-22) | Derived (approved interactive mockup, 2026-11-22) | `approved` | `GET /v1/users/tours`, `POST /v1/users/tours/seen` | Sinhala / Tamil copy pending native-speaker review. See `docs/screens/tour.md`. |
 
 
 

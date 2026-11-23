@@ -14,6 +14,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { TOUR_ID_PATTERN } from '../tours-seen.js';
 
 export class SendOtpDto {
   @IsString()
@@ -205,6 +206,12 @@ export class UpdateStepDto {
   @IsOptional()
   @IsBoolean()
   markCompleted?: boolean;
+}
+
+export class MarkTourSeenDto {
+  @IsString()
+  @Matches(TOUR_ID_PATTERN, { message: 'Invalid tour id.' })
+  tourId!: string;
 }
 
 export class LogOnboardingEventDto {

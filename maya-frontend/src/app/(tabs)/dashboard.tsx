@@ -42,6 +42,9 @@ import { mayaAlert } from '@/components/ui/alert-modal';
 import { OutageApologyBanner } from '@/components/ui/OutageApologyBanner';
 import { ProPassExpiredModal } from '@/components/modals/ProPassExpiredModal';
 import { useXpCelebration, xpDockSignal } from '@/components/dashboard/xp-celebration';
+import { useFirstVisitTour, useTourScrollContainer, useTourTarget } from '@/components/tour/tour-provider';
+import { resolveTourLanguage } from '@/components/tour/tour-language';
+import { DASHBOARD_WELCOME_TOUR } from '@/tours/dashboard-welcome';
 import { promotionsApi } from '@/services/promotions/promotions-api';
 import { AppStorage } from '@/services/storage/storage-adapter';
 
@@ -627,6 +630,26 @@ export default function DashboardScreen() {
     [handleOpenCreateSession],
   );
 
+  // First-visit guided tour: waits until the hero has loaded and no popup / XP fill is showing
+  const { attach: attachTourScroll, onScroll: onTourScroll } = useTourScrollContainer('dashboard');
+  const startTourRef = useTourTarget('dashboard.start', { scrollKey: 'dashboard' });
+  const scenariosTourRef = useTourTarget('dashboard.scenarios', { scrollKey: 'dashboard' });
+  const talkTimeTourRef = useTourTarget('dashboard.talkTime', { scrollKey: 'dashboard', enabled: !isDesktop });
+  const tourReady =
+    isFocused &&
+    resumeChecked &&
+    Boolean(user) &&
+    activePopup === null &&
+    !createSessionVisible &&
+    !showProPassExpired &&
+    !isResumingSession &&
+    xpCelebration.progress === undefined;
+  useFirstVisitTour(DASHBOARD_WELCOME_TOUR, tourReady, {
+    lang: resolveTourLanguage(user?.nativeLanguage ?? store.nativeLanguage),
+    vars: { name: displayName },
+    onFinishPrimary: () => handleStartTalking(),
+  });
+
   // Pull to refresh (phones): re-sync minutes, plan and profile without leaving the screen
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -696,6 +719,9 @@ export default function DashboardScreen() {
           {/* MAIN SCROLLABLE CONTENT */}
           {/* ==================================================================== */}
           <ScrollView
+            ref={attachTourScroll}
+            onScroll={onTourScroll}
+            scrollEventThrottle={32}
             style={[styles.mainScroll, isDesktop && styles.mainScrollDesktop]}
             contentContainerStyle={[
               styles.mainScrollContent,
@@ -785,6 +811,7 @@ export default function DashboardScreen() {
 
                       <View style={styles.resumeButtonRow}>
                         <Pressable
+                          ref={startTourRef}
                           style={({ pressed }) => [
                             styles.startTalkingButton,
                             styles.resumeActionButton,
@@ -838,6 +865,7 @@ export default function DashboardScreen() {
                       </Text>
 
                       <Pressable
+                        ref={startTourRef}
                         style={({ pressed }) => [
                           styles.startTalkingButton,
                           isDesktop && styles.startTalkingButtonDesktop,
@@ -880,7 +908,7 @@ export default function DashboardScreen() {
             {/* LOWER SECTION: Scenarios + Bottom Banner grouped together on desktop */}
             <View style={isDesktop ? styles.desktopLowerGroup : undefined}>
               {/* SECTION: "Maya can help you with" */}
-              <View style={styles.scenariosSection}>
+              <View ref={scenariosTourRef} collapsable={false} style={styles.scenariosSection}>
                 <Text style={styles.sectionHeading}>
                   Maya can help you with
                 </Text>
@@ -914,6 +942,8 @@ export default function DashboardScreen() {
                 const isInactiveMobile = Boolean(stats.isSubscriptionLocked || stats.isTelcoUnsubscribed);
                 return (
                   <View
+                    ref={talkTimeTourRef}
+                    collapsable={false}
                     style={[
                       styles.talkTimeCardMobile,
                       isInactiveMobile && styles.talkTimeCardMobileInactive,

@@ -16,6 +16,15 @@ import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { fontStyle } from '@/theme/fonts';
+import { useTourTarget } from '@/components/tour/tour-provider';
+
+/** Guided-tour target ids for each tab (see src/tours/). */
+const TOUR_TARGET_IDS: Record<string, string> = {
+  dashboard: 'nav.home',
+  roadmap: 'nav.roadmap',
+  history: 'nav.history',
+  account: 'nav.account',
+};
 
 export type MobileBottomTabsProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
 
@@ -72,6 +81,8 @@ const TabItem = React.memo(function TabItem({
   onTabPress,
   onTabLongPress,
 }: TabItemProps) {
+  const tourId = TOUR_TARGET_IDS[route.name];
+  const tourRef = useTourTarget(tourId ?? 'nav.unknown', { enabled: Boolean(tourId) });
   const active = useSharedValue(isFocused ? 1 : 0);
   const iconScale = useSharedValue(1);
   const iconLift = useSharedValue(0);
@@ -130,6 +141,7 @@ const TabItem = React.memo(function TabItem({
   return (
     <Animated.View style={[styles.tabItem, itemStyle]}>
       <Pressable
+        ref={tourRef}
         style={styles.tabPressable}
         onPress={() => onTabPress(route, isFocused)}
         onLongPress={() => onTabLongPress(route)}

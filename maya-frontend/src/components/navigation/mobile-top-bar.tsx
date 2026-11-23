@@ -28,6 +28,7 @@ import { useUserStats } from '@/hooks/useUserStats';
 import type { XpGainSignal } from '@/components/ui/xp-star-dock';
 import { UserLevelBadge } from '@/components/ui/user-level-badge';
 import { CommonPopup } from '@/components/ui/common-popup';
+import { useTourTarget } from '@/components/tour/tour-provider';
 
 export interface MobileTopBarProps {
   /**
@@ -240,6 +241,7 @@ export function MobileTopBar({
 }: MobileTopBarProps) {
   const { isPhone } = useBreakpoint();
   const stats = useUserStats();
+  const levelTourRef = useTourTarget('nav.level');
   const [internalPopupOpen, setInternalPopupOpen] = useState(false);
 
   const reduceMotion = useReducedMotion();
@@ -346,6 +348,7 @@ export function MobileTopBar({
       </View>
 
       {/* User Level Badge */}
+      <View ref={levelTourRef} collapsable={false}>
       <Animated.View style={badgeScaleAnimatedStyle}>
         <UserLevelBadge
           levelLabel={resolvedLevelLabel}
@@ -360,6 +363,7 @@ export function MobileTopBar({
           onPress={handleLevelBadgePress}
         />
       </Animated.View>
+      </View>
 
       {/* Fallback Internal Level Progress Popup (used when onLevelPress is omitted) */}
       {!onLevelPress && (
