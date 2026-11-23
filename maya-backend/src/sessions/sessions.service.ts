@@ -6,7 +6,8 @@ import { attachAzureStorageIfConfigured } from '../storage/azure-blob-storage.js
 import { CreateSessionTokenDto, FinishSessionDto, QueryUsageDto, TranslateDto, GenerateHintDto, AnalyzeSessionDto, SessionTtsDto, SessionReviewDto } from './dto/session.dto.js';
 import { RoadmapService } from '../roadmap/roadmap.service.js';
 import { parseCanonicalLessonContent, formatCanonicalLessonContent } from '../roadmap/dto/roadmap.dto.js';
-import { randomUUID, createHash, createHmac } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { hasValidTokenSignature } from '../common/token-signature.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
@@ -209,7 +210,10 @@ export class SessionsService {
   private lastOrphanReconcileTime = 0;
   private readonly authoritativeTurnsMap = new BoundedMap<string, Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>(2000);
   private readonly saveTurnsLocks = new Map<string, Promise<void>>();
-  private readonly finalizingSessionIds = new Set<string>();
+  /** Per-session finalize queue: the promise that resolves when the latest queued finalize is done. */
+  private readonly finalizeLocks = new Map<string, Promise<void>>();
+  /** Set by LiveGateway: true while a session still has an open socket or a pending auto-finalize. */
+  private liveSessionChecker: ((sessionId: string) => boolean) | null = null;
   private lastOrphanReconcileAt = 0;
   private lastSavedSessionId: string | null = null;
   private isReconcilingOrphans = false;
@@ -275,6 +279,14 @@ export class SessionsService {
         this.logger.debug(`Could not pre-insert active session ${validId}: ${err?.message}`);
       }
     }
+  }
+
+  /** Longest a session row can legitimately stay 'active' with no turns: 30 min call + 90 s wrap-up + finalize delays. */
+  private static readonly MAX_LIVE_CALL_AGE_MS = 45 * 60 * 1000;
+
+  /** LiveGateway registers this so the orphan cron never touches a call that is still running. */
+  setLiveSessionChecker(checker: (sessionId: string) => boolean) {
+    this.liveSessionChecker = checker;
   }
 
   setAuthoritativeTurns(sessionId: string, turns: Array<{ role: 'user' | 'model'; text: string; timestamp: string }>) {
@@ -1800,12 +1812,7 @@ ${memoryPart}`;
     const parts = clean.split('.');
     if (parts.length === 3) {
       const [header, payload, signature] = parts;
-      const secret = process.env.SUPABASE_SECRET_KEY || 'maya-secure-jwt-secret';
-      const expectedSig = createHmac('sha256', secret)
-        .update(`${header}.${payload}`)
-        .digest('base64url');
-
-      if (expectedSig === signature) {
+      if (hasValidTokenSignature(header, payload, signature)) {
         try {
           const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
           if (decoded.sub && (!decoded.exp || Math.floor(Date.now() / 1000) <= decoded.exp)) {
@@ -2292,12 +2299,19 @@ ${memoryPart}`;
     const modelAudioUrl = rec?.modelAudioUrl || this.recordingEndpointUrl(validSessionId, 'model');
 
     if (this.supabase) {
-      // Guard against concurrent finalization (e.g. WebSocket disconnect + HTTP /finish arriving together)
-      if (this.finalizingSessionIds.has(validSessionId)) {
-        this.logger.log(`[SessionsService] ⏳ Session ${validSessionId} finalization already in progress; waiting...`);
-        await new Promise((r) => setTimeout(r, 1200));
+      // Serialize finalization per session (e.g. WebSocket disconnect + HTTP /finish + orphan cron
+      // arriving together). Each caller waits for the previous one to fully finish, so it then sees
+      // the ledger row and only tops up. The old guard slept 1.2 s and then ran anyway, so a slow
+      // first finalize let a second one double-deduct minutes and double-award XP.
+      const previousFinalize = this.finalizeLocks.get(validSessionId);
+      let releaseFinalize!: () => void;
+      const ownFinalize = new Promise<void>((resolve) => (releaseFinalize = resolve));
+      const finalizeTail = (previousFinalize || Promise.resolve()).then(() => ownFinalize);
+      this.finalizeLocks.set(validSessionId, finalizeTail);
+      if (previousFinalize) {
+        this.logger.log(`[SessionsService] ⏳ Session ${validSessionId} finalization already in progress; waiting for it...`);
+        await previousFinalize;
       }
-      this.finalizingSessionIds.add(validSessionId);
 
       try {
         // Prevent duplicate ledger entry and double counting if session was already finalized
@@ -2694,7 +2708,8 @@ ${memoryPart}`;
       } catch (e: unknown) {
         this.logger.error(`Error saving final session records to Supabase: ${e instanceof Error ? e.message : String(e)}`);
       } finally {
-        this.finalizingSessionIds.delete(validSessionId);
+        releaseFinalize();
+        if (this.finalizeLocks.get(validSessionId) === finalizeTail) this.finalizeLocks.delete(validSessionId);
       }
     }
 
@@ -3032,6 +3047,9 @@ ${memoryPart}`;
 
       for (const sess of candidateSessions) {
         const sid = sess.id;
+        // A call in progress is still 'active' with no turns or diagnostics in the DB (both are only
+        // written on disconnect), so it looks exactly like an orphan. Leave it to the gateway.
+        if (this.liveSessionChecker?.(sid)) continue;
         const existingLedger = ledgerMap.get(sid);
         const turns = turnsBySession.get(sid) || [];
         const diag = diagBySession.get(sid);
@@ -3053,10 +3071,13 @@ ${memoryPart}`;
           continue;
         }
 
-        // If session has 0 turns and is older than 10 minutes, it was an empty connection drop -> clean up
+        // 0 turns and older than the longest possible call -> it was an empty connection drop, clean up.
+        // This was 10 minutes, which deleted the row of any call still running past minute 10
+        // (calls last up to 30 min + 90 s wrap-up). The age check also covers a call held by another
+        // process, which the in-memory live check above cannot see.
         if (turns.length === 0 && (!diag || (diag.turns_count || 0) === 0)) {
           const ageMs = now - new Date(sess.created_at || sess.start_time || now).getTime();
-          if (ageMs > 10 * 60 * 1000 && sess.status === 'active') {
+          if (ageMs > SessionsService.MAX_LIVE_CALL_AGE_MS && sess.status === 'active') {
             await this.supabase.from('sessions').delete().eq('id', sid);
           }
           continue;

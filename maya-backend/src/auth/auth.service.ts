@@ -38,6 +38,7 @@ import { IdeamartSmsProvider } from './sms/ideamart-sms.provider.js';
 import { TelcoSubscriptionService } from './sms/telco-subscription.service.js';
 import type { UpdateAppConfigDto } from './dto/auth.dto.js';
 import { isMissingFunctionError } from '../common/supabase-rpc.js';
+import { hasValidTokenSignature, signTokenParts } from '../common/token-signature.js';
 import { paginateArray, pageWindow, readPage, type PageRequest } from '../common/pagination.js';
 import { computeXpByUser, levelForXp, practiceXp, XP_RULES } from '../common/xp-calculator.js';
 import { EventsService } from '../realtime/events.service.js';
@@ -1111,14 +1112,9 @@ export class AuthService {
       }),
     ).toString('base64url');
 
-    const secret = process.env.JWT_SECRET || process.env.SUPABASE_SECRET_KEY || 'maya-secure-jwt-secret';
-    const signature = crypto
-      .createHmac('sha256', secret)
-      .update(`${header}.${payload}`)
-      .digest('base64url');
-
-    return `${header}.${payload}.${signature}`;
+    return `${header}.${payload}.${signTokenParts(header, payload)}`;
   }
+
 
   private readonly revokedTokens = new Map<string, number>();
 
@@ -1166,30 +1162,17 @@ export class AuthService {
     const parts = clean.split('.');
     if (parts.length === 3) {
       const [header, payload, signature] = parts;
-      const secrets = [
-        process.env.JWT_SECRET,
-        process.env.SUPABASE_SECRET_KEY,
-        'maya-secure-jwt-secret',
-      ].filter(Boolean) as string[];
-
-      for (const secret of secrets) {
-        const expectedSig = crypto
-          .createHmac('sha256', secret)
-          .update(`${header}.${payload}`)
-          .digest('base64url');
-
-        if (expectedSig === signature) {
-          let decoded: any;
-          try {
-            decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
-          } catch {
-            throw new UnauthorizedException('Malformed token payload');
-          }
-          if (decoded.exp && Math.floor(Date.now() / 1000) > decoded.exp) {
-            throw new UnauthorizedException('Authentication token has expired');
-          }
-          if (decoded.sub) return decoded.sub;
+      if (hasValidTokenSignature(header, payload, signature)) {
+        let decoded: any;
+        try {
+          decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+        } catch {
+          throw new UnauthorizedException('Malformed token payload');
         }
+        if (decoded.exp && Math.floor(Date.now() / 1000) > decoded.exp) {
+          throw new UnauthorizedException('Authentication token has expired');
+        }
+        if (decoded.sub) return decoded.sub;
       }
     }
 
@@ -1276,15 +1259,9 @@ export class AuthService {
       }),
     ).toString('base64url');
 
-    const secret = process.env.JWT_SECRET || process.env.SUPABASE_SECRET_KEY || 'maya-secure-jwt-secret';
-    const signature = crypto
-      .createHmac('sha256', secret)
-      .update(`${header}.${payload}`)
-      .digest('base64url');
-
     return {
       success: true,
-      token: `${header}.${payload}.${signature}`,
+      token: `${header}.${payload}.${signTokenParts(header, payload)}`,
       username: normalizedUser,
     };
   }
@@ -1311,29 +1288,17 @@ export class AuthService {
     const parts = clean.split('.');
     if (parts.length === 3) {
       const [header, payload, signature] = parts;
-      const secrets = [
-        process.env.JWT_SECRET,
-        process.env.SUPABASE_SECRET_KEY,
-        'maya-secure-jwt-secret',
-      ].filter(Boolean) as string[];
-
-      for (const secret of secrets) {
-        const expectedSig = crypto
-          .createHmac('sha256', secret)
-          .update(`${header}.${payload}`)
-          .digest('base64url');
-        if (expectedSig === signature) {
-          try {
-            const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
-            if (decoded.exp && Math.floor(Date.now() / 1000) > decoded.exp) {
-              return false;
-            }
-            if (decoded.role === 'admin') {
-              return true;
-            }
-          } catch {
+      if (hasValidTokenSignature(header, payload, signature)) {
+        try {
+          const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+          if (decoded.exp && Math.floor(Date.now() / 1000) > decoded.exp) {
             return false;
           }
+          if (decoded.role === 'admin') {
+            return true;
+          }
+        } catch {
+          return false;
         }
       }
     }

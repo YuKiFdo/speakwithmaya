@@ -27,7 +27,7 @@ const CLOSE = {
 };
 
 /** Same origins as the HTTP CORS allowlist (main.ts). Native apps send no Origin header. */
-function isAllowedOrigin(origin: string | undefined): boolean {
+export function isAllowedOrigin(origin: string | undefined): boolean {
   if (!origin) return true;
   return (
     [

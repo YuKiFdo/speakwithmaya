@@ -12,6 +12,8 @@ import { AuthService } from '../auth/auth.service.js';
 import { CreateSessionTokenDto } from '../sessions/dto/session.dto.js';
 import { randomUUID } from 'node:crypto';
 import { isFakeLiveUpstreamEnabled, connectFakeLiveSession } from './fake-live-upstream.js';
+import { isAllowedOrigin } from '../realtime/events.gateway.js';
+import type { IncomingMessage } from 'http';
 
 let OpusEncoderClass: any = null;
 import('@discordjs/opus')
@@ -37,11 +39,16 @@ interface ClientSessionState {
   /** Decodes client mic Opus (16kHz mono) back to PCM; set when the client advertised supportsUplinkOpus. */
   uplinkOpusDecoder?: any;
   opusPcmBuffer: Buffer;
-  userAudioChunks: Buffer[];
+  /**
+   * Whether any mic audio arrived. The whole-call user/model PCM used to be kept here as well
+   * (a second copy of every per-turn buffer) and concatenated on disconnect, but the recording
+   * code ignores it, so only this flag is kept.
+   */
+  receivedUserAudio: boolean;
   currentUserTurnAudioChunks: Buffer[];
   userTurnAudioMap: Map<number, Buffer>;
   userTurnCount: number;
-  modelAudioChunks: Buffer[];
+  receivedModelAudio: boolean;
   currentModelTurnAudioChunks: Buffer[];
   modelTurnAudioMap: Map<number, Buffer>;
   modelTurnCount: number;
@@ -79,6 +86,8 @@ interface ClientSessionState {
   // Heartbeat
   heartbeatInterval: ReturnType<typeof setInterval> | null;
   maxDurationTimer?: ReturnType<typeof setTimeout> | null;
+  /** Closes the socket if start_session never arrives. */
+  startDeadlineTimer?: ReturnType<typeof setTimeout> | null;
   lastPongAt: number;
 
   // Backpressure tracking
@@ -115,11 +124,11 @@ interface ClientSessionState {
 }
 
 interface PersistentSessionAudioState {
-  userAudioChunks: Buffer[];
+  receivedUserAudio: boolean;
   userTurnAudioMap: Map<number, Buffer>;
   userTurnTranscriptMap: Map<number, string>;
   userTurnCount: number;
-  modelAudioChunks: Buffer[];
+  receivedModelAudio: boolean;
   modelTurnAudioMap: Map<number, Buffer>;
   modelTurnCount: number;
   chronologicalAudioTurns: Array<{ speaker: 'user' | 'model'; turnIdx: number; pcm: Buffer; sampleRate: number }>;
@@ -142,9 +151,19 @@ const HEARTBEAT_INTERVAL_MS = 10_000;
 const HEARTBEAT_TIMEOUT_MS = 30_000;
 /** Opt-in verbose per-packet logging during the greeting phase (off in production). */
 const LIVE_PACKET_TRACE = process.env.LIVE_PACKET_TRACE === '1';
+/**
+ * Largest accepted frame. Mic frames are a few KB and start_session JSON is well under this;
+ * without it `ws` accepted 100 MB frames, so one message could spike memory.
+ */
+const LIVE_MAX_PAYLOAD_BYTES = 1024 * 1024;
+/** Sockets that have not sent start_session by then are closed. */
+const LIVE_START_DEADLINE_MS = 15_000;
+/** Process-wide cap on open live sockets: far above what one server can serve, so it only stops floods. */
+const LIVE_MAX_CONNECTIONS = Number(process.env.LIVE_MAX_CONNECTIONS) || 300;
 
 @WebSocketGateway({
   path: '/live-session',
+  maxPayload: LIVE_MAX_PAYLOAD_BYTES,
 })
 export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(LiveGateway.name);
@@ -168,9 +187,38 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const apiKey = process.env.GEMINI_API_KEY || '';
     this.ai = new GoogleGenAI({ apiKey });
     this.liveModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
+
+    // Lets the orphan-session cron skip calls that are still running on this process.
+    this.sessionsService.setLiveSessionChecker((sessionId) => {
+      const sid = sessionId.toLowerCase();
+      for (const pendingSid of this.pendingFinalizeTimers.keys()) {
+        if (pendingSid.toLowerCase() === sid) return true;
+      }
+      for (const s of this.clients.values()) {
+        if (s.dto && s.sessionId.toLowerCase() === sid && s.ws.readyState === WebSocket.OPEN) return true;
+      }
+      return false;
+    });
   }
 
-  handleConnection(client: WebSocket) {
+  /** True once the socket is closed or cleaned up, so async start-up work must stop. */
+  private isSocketGone(client: WebSocket): boolean {
+    return !this.clients.has(client) || client.readyState !== WebSocket.OPEN;
+  }
+
+  handleConnection(client: WebSocket, req?: IncomingMessage) {
+    const origin = req?.headers?.origin as string | undefined;
+    if (!isAllowedOrigin(origin)) {
+      this.logger.warn(`Rejected live socket from disallowed origin: ${origin}`);
+      client.close(4401, 'origin');
+      return;
+    }
+    if (this.clients.size >= LIVE_MAX_CONNECTIONS) {
+      this.logger.warn(`Rejected live socket: ${this.clients.size} open (cap ${LIVE_MAX_CONNECTIONS})`);
+      client.close(4429, 'busy');
+      return;
+    }
+
     const sessionId = randomUUID();
     this.logger.log(`[${sessionId}] Client connected over WebSocket`);
 
@@ -183,11 +231,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       opusBatch: [],
       opusEncoder: null,
       opusPcmBuffer: Buffer.alloc(0),
-      userAudioChunks: [],
+      receivedUserAudio: false,
       currentUserTurnAudioChunks: [],
       userTurnAudioMap: new Map(),
       userTurnCount: 0,
-      modelAudioChunks: [],
+      receivedModelAudio: false,
       currentModelTurnAudioChunks: [],
       modelTurnAudioMap: new Map(),
       modelTurnCount: 0,
@@ -236,6 +284,19 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Start ping/pong heartbeat with client
     this.startHeartbeat(client, state);
+
+    // Any message refreshes the heartbeat, and the max-duration timer only starts with the
+    // session, so a socket that never sends start_session would otherwise live forever.
+    state.startDeadlineTimer = setTimeout(() => {
+      state.startDeadlineTimer = null;
+      if (state.dto) return;
+      this.logger.warn(`[${state.sessionId}] No start_session within ${LIVE_START_DEADLINE_MS / 1000}s; closing socket`);
+      state.disconnectReason = 'start_session_timeout';
+      try {
+        client.close(4408, 'start_session timeout');
+      } catch {}
+    }, LIVE_START_DEADLINE_MS);
+    state.startDeadlineTimer.unref?.();
 
     client.on('message', async (data: RawData, isBinary: boolean) => {
       try {
@@ -315,6 +376,10 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         clearTimeout(state.maxDurationTimer);
         state.maxDurationTimer = null;
       }
+      if (state.startDeadlineTimer) {
+        clearTimeout(state.startDeadlineTimer);
+        state.startDeadlineTimer = null;
+      }
 
       // Print session diagnostics summary
       this.printSessionSummary(state);
@@ -385,21 +450,16 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Save user, model, per-turn audio recordings, and chronological conversation to Supabase Storage
       if (
         !isSupersededReconnect &&
-        (state.userAudioChunks.length > 0 ||
-          state.modelAudioChunks.length > 0 ||
-          state.userTurnAudioMap.size > 0 ||
-          state.modelTurnAudioMap.size > 0)
+        (state.userTurnAudioMap.size > 0 || state.modelTurnAudioMap.size > 0)
       ) {
-        const userPcm = state.userAudioChunks.length > 0 ? Buffer.concat(state.userAudioChunks) : undefined;
-        const modelPcm = state.modelAudioChunks.length > 0 ? Buffer.concat(state.modelAudioChunks) : undefined;
         this.logger.log(
           `[${sid}] 💾 Finalizing and saving session audio recordings to Supabase (${state.userTurnAudioMap.size} user turns, ${state.modelTurnAudioMap.size} model turns, ${state.chronologicalAudioTurns.length} chronological turns)...`,
         );
         this.sessionsService
           .saveSessionAudioRecordings(
             state.sessionId,
-            userPcm,
-            modelPcm,
+            undefined,
+            undefined,
             state.userTurnAudioMap,
             state.modelTurnAudioMap,
             state.chronologicalAudioTurns,
@@ -411,7 +471,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // If authoritative turns were empty due to experimental ASR drops, but real audio was exchanged, synthesize verified turns
       if (!state.authoritativeTurns || state.authoritativeTurns.length === 0) {
-        if (state.modelAudioChunks.length > 0 || state.modelTurnAudioMap.size > 0 || state.modelTurnCount > 0) {
+        if (state.receivedModelAudio || state.modelTurnAudioMap.size > 0 || state.modelTurnCount > 0) {
           const fallbackGreeting = state.greetingTranscriptReceived.trim() || '(audio greeting)';
           state.authoritativeTurns.push({
             role: 'model',
@@ -419,7 +479,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
             timestamp: new Date().toISOString(),
           });
         }
-        if (state.userAudioChunks.length > 0 || state.userTurnAudioMap.size > 0 || state.userTurnCount > 0) {
+        if (state.receivedUserAudio || state.userTurnAudioMap.size > 0 || state.userTurnCount > 0) {
           state.authoritativeTurns.push({
             role: 'user',
             text: '(spoken audio)',
@@ -570,8 +630,6 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const persistent = this.sessionStateById.get(sessionId);
       if (persistent) {
         // Drop buffer references so the PCM memory is released immediately.
-        persistent.userAudioChunks.length = 0;
-        persistent.modelAudioChunks.length = 0;
         persistent.chronologicalAudioTurns.length = 0;
         persistent.userTurnAudioMap.clear();
         persistent.modelTurnAudioMap.clear();
@@ -630,11 +688,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     let persistent = this.sessionStateById.get(sid);
     if (!persistent) {
       persistent = {
-        userAudioChunks: state.userAudioChunks,
+        receivedUserAudio: state.receivedUserAudio,
         userTurnAudioMap: state.userTurnAudioMap,
         userTurnTranscriptMap: new Map<number, string>(),
         userTurnCount: state.userTurnCount,
-        modelAudioChunks: state.modelAudioChunks,
+        receivedModelAudio: state.receivedModelAudio,
         modelTurnAudioMap: state.modelTurnAudioMap,
         modelTurnCount: state.modelTurnCount,
         chronologicalAudioTurns: state.chronologicalAudioTurns,
@@ -650,14 +708,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
       this.sessionStateById.set(sid, persistent);
     } else {
-      // Merge any early audio chunks captured before start_session arrived into the persistent buffers
-      if (state.userAudioChunks.length > 0 && state.userAudioChunks !== persistent.userAudioChunks) {
-        persistent.userAudioChunks.push(...state.userAudioChunks);
-      }
-      state.userAudioChunks = persistent.userAudioChunks;
+      persistent.receivedUserAudio = persistent.receivedUserAudio || state.receivedUserAudio;
+      state.receivedUserAudio = persistent.receivedUserAudio;
       state.userTurnAudioMap = persistent.userTurnAudioMap;
       state.userTurnCount = persistent.userTurnCount;
-      state.modelAudioChunks = persistent.modelAudioChunks;
+      state.receivedModelAudio = persistent.receivedModelAudio;
       state.modelTurnAudioMap = persistent.modelTurnAudioMap;
       state.modelTurnCount = persistent.modelTurnCount;
       state.chronologicalAudioTurns = persistent.chronologicalAudioTurns;
@@ -688,6 +743,8 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     persistent.totalTextOutTokens = Math.max(persistent.totalTextOutTokens, state.totalTextOutTokens);
     persistent.totalThoughtsTokens = Math.max(persistent.totalThoughtsTokens, state.totalThoughtsTokens);
     persistent.hasDispatchedGreeting = persistent.hasDispatchedGreeting || state.hasDispatchedGreeting;
+    persistent.receivedUserAudio = persistent.receivedUserAudio || state.receivedUserAudio;
+    persistent.receivedModelAudio = persistent.receivedModelAudio || state.receivedModelAudio;
   }
 
   // ─── HEARTBEAT ───────────────────────────────────────────────────────────────
@@ -828,21 +885,44 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         break;
       }
       case 'start_session': {
+        // The client sends this once per socket (reconnects open a new socket). A second one used
+        // to open a second Gemini session and overwrite the first without closing it (still billed).
+        if (state.dto) {
+          this.logger.warn(`[${state.sessionId}] Ignoring duplicate start_session on the same socket`);
+          return;
+        }
         const dto: CreateSessionTokenDto = message.options || {};
         const rawSessionId = message.options?.sessionId || message.sessionId;
         if (rawSessionId) {
           state.sessionId = toValidUuid(rawSessionId);
         }
         state.dto = dto;
+        if (state.startDeadlineTimer) {
+          clearTimeout(state.startDeadlineTimer);
+          state.startDeadlineTimer = null;
+        }
         this.bindAndRestorePersistentSessionState(client, state);
 
         // Verify user token & quota balance if token is provided
         let resolvedUserId: string | undefined;
         if (message.accessToken) {
+          let userId: string;
           try {
-            const userId = this.authService.validateAuthToken(message.accessToken);
-            resolvedUserId = userId;
-            state.userId = userId;
+            userId = this.authService.validateAuthToken(message.accessToken);
+          } catch (authErr: any) {
+            // Previously only logged, so a forged or expired token still got a (billed) Gemini session.
+            this.logger.warn(`[${state.sessionId}] ⛔ Rejecting live session: invalid token (${authErr?.message})`);
+            state.disconnectReason = 'invalid_token';
+            this.safeSendToClient(
+              state,
+              JSON.stringify({ type: 'error', message: 'Your session has expired. Please sign in again.' }),
+            );
+            client.close(1008, 'Invalid session token');
+            return;
+          }
+          resolvedUserId = userId;
+          state.userId = userId;
+          try {
             const profile = await this.authService.getProfile(userId);
             if (profile?.display_name) {
               state.userName = profile.display_name;
@@ -862,9 +942,11 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
               client.close(1008, 'Insufficient practice minutes');
               return;
             }
-          } catch (authErr: any) {
-            this.logger.warn(`[${state.sessionId}] Token check note in start_session: ${authErr?.message}`);
+          } catch (profileErr: any) {
+            // Token is valid; only the profile read failed (DB hiccup), so the call goes ahead.
+            this.logger.warn(`[${state.sessionId}] Profile check note in start_session: ${profileErr?.message}`);
           }
+          if (this.isSocketGone(client)) return;
         }
 
         // Register active session in SessionsService so user_id, topic, and metadata are tracked on server
@@ -880,6 +962,13 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           isIntroCall: dto.isIntroCall,
           isReconnect: dto.isReconnect,
         });
+
+        // The socket may have closed during the awaits above. handleDisconnect has then already run,
+        // so a timer or Gemini session created from here on would never be cleaned up.
+        if (this.isSocketGone(client)) {
+          this.logger.log(`[${state.sessionId}] Socket closed during start_session; not opening Gemini`);
+          return;
+        }
 
         // Enforce server-side max session duration timer (+90s grace for intro guide & farewell wrap-up, max 30 min)
         if (state.maxDurationTimer) {
@@ -944,6 +1033,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
 
         this.addSessionLog(state, 'start_session', `topic=${dto.topic || 'General'} lang=${dto.languageMode || 'english'}`);
+        if (this.isSocketGone(client)) return;
         await this.initGeminiLiveSession(client, state, dto);
         break;
       }
@@ -1123,8 +1213,12 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!buffer) return;
     }
 
+    // Before start_session nothing reads this audio, and storing it let a socket that never
+    // started a session grow memory without limit (the max-duration timer starts with the session).
+    if (!state.dto) return;
+
     if (buffer && buffer.length > 0) {
-      state.userAudioChunks.push(buffer);
+      state.receivedUserAudio = true;
       state.currentUserTurnAudioChunks.push(buffer);
     }
 
@@ -1256,6 +1350,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       // Ensure roadmap curriculum details are fully loaded
       await this.sessionsService.enrichRoadmapDto(dto);
+      if (this.isSocketGone(client)) return;
 
       const isSinhala = this.sessionsService.isSinhalaSession(dto);
       const isScenarioRoleplay = Boolean(dto.scenarioPrompt && dto.scenarioPrompt.trim().length > 0);
@@ -1347,6 +1442,16 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           },
         },
       });
+
+      // The client can leave while the Gemini handshake is in flight. handleDisconnect has then
+      // already run and found no session to close, so close this one here or it stays open (and billed).
+      if (this.isSocketGone(client)) {
+        this.logger.log(`[${state.sessionId}] Client left during Gemini connect; closing the new Gemini session`);
+        try {
+          await session?.close?.();
+        } catch {}
+        return;
+      }
 
       state.geminiSession = session;
       state.isConnectedToGemini = true;
@@ -1617,7 +1722,7 @@ export class LiveGateway implements OnGatewayConnection, OnGatewayDisconnect {
           state.hasModelSpokenThisTurn = true;
           const chunkBuffer = Buffer.from(part.inlineData.data, 'base64');
           if (chunkBuffer.length > 0) {
-            state.modelAudioChunks.push(chunkBuffer);
+            state.receivedModelAudio = true;
             state.currentModelTurnAudioChunks.push(chunkBuffer);
           }
 
