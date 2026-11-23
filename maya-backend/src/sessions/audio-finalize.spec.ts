@@ -40,3 +40,66 @@ describe('AudioFinalizeClient', () => {
     expect(files.userTurns).toHaveLength(1); // WebM if the native Opus module loads, else WAV
   });
 });
+
+describe('AudioFinalizeClient job queue', () => {
+  /** Replaces the real build with one the test finishes by hand, recording the start order. */
+  function controlledClient() {
+    const c = new AudioFinalizeClient(new URL('file:///nonexistent/audio-finalize.worker.js'));
+    const started: string[] = [];
+    const finish = new Map<string, () => void>();
+    (c as any).buildNow = (input: any) =>
+      new Promise((resolve) => {
+        const name = input.name as string;
+        started.push(name);
+        finish.set(name, () => resolve({ mime: 'audio/wav', ext: 'wav', userTurns: [], modelTurns: [] }));
+      });
+    return { c, started, finish };
+  }
+  const tick = () => new Promise((r) => setImmediate(r));
+
+  it('runs one job at a time, so calls ending together do not all pack their audio at once', async () => {
+    const { c, started, finish } = controlledClient();
+    const jobs = ['a', 'b', 'c'].map((name) => c.build({ name } as any, { priority: 'low' }));
+    await tick();
+    expect(started).toEqual(['a']);
+    expect(c.queuedJobs).toBe(2);
+    finish.get('a')!();
+    await tick();
+    expect(started).toEqual(['a', 'b']);
+    finish.get('b')!();
+    await tick();
+    finish.get('c')!();
+    await Promise.all(jobs);
+    expect(started).toEqual(['a', 'b', 'c']);
+    expect(c.queuedJobs).toBe(0);
+  });
+
+  it('lets turn clips (high) go ahead of queued full-conversation builds (low)', async () => {
+    const { c, started, finish } = controlledClient();
+    const jobs = [
+      c.build({ name: 'full-1' } as any, { priority: 'low' }),
+      c.build({ name: 'full-2' } as any, { priority: 'low' }),
+      c.build({ name: 'turn' } as any),
+    ];
+    await tick();
+    finish.get('full-1')!();
+    await tick();
+    expect(started).toEqual(['full-1', 'turn']);
+    finish.get('turn')!();
+    await tick();
+    finish.get('full-2')!();
+    await Promise.all(jobs);
+    expect(started).toEqual(['full-1', 'turn', 'full-2']);
+  });
+
+  it('frees the slot when a job fails', async () => {
+    const c = new AudioFinalizeClient(new URL('file:///nonexistent/audio-finalize.worker.js'));
+    let calls = 0;
+    (c as any).buildNow = async () => {
+      if (calls++ === 0) throw new Error('boom');
+      return { mime: 'audio/wav', ext: 'wav', userTurns: [], modelTurns: [] };
+    };
+    await expect(c.build({ userTurns: [] })).rejects.toThrow('boom');
+    await expect(c.build({ userTurns: [] })).resolves.toMatchObject({ ext: 'wav' });
+  });
+});

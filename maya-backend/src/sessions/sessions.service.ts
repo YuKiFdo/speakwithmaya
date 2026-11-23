@@ -206,6 +206,8 @@ export class SessionsService {
   private readonly sessionRecordingsMap = new BoundedMap<string, { userAudioUrl?: string; modelAudioUrl?: string; fullConversationAudioUrl?: string }>(2000);
   private readonly sessionTurnAudioMap = new BoundedMap<string, Map<number, string>>(2000);
   private readonly sessionTurnTranscriptMap = new BoundedMap<string, Map<number, string>>(2000);
+  /** Turn clips already in storage, as `user:3` / `model:3`, so hang-up does not re-encode them. */
+  private readonly uploadedTurnClips = new BoundedMap<string, Set<string>>(2000);
   private readonly usageCache = new BoundedMap<string, { timestamp: number; data: any }>(30, 60_000);
   private lastOrphanReconcileTime = 0;
   private readonly authoritativeTurnsMap = new BoundedMap<string, Array<{ role: 'user' | 'model'; text: string; timestamp: string }>>(2000);
@@ -436,11 +438,17 @@ export class SessionsService {
 
       // 1) Per-turn clips FIRST: the feedback screen's "You said" needs them right after the
       //    call, while the long full-conversation file can follow.
+      //    Turns uploaded during the call (uploadSingleTurnAudio) are skipped: re-encoding every
+      //    turn of every call at hang-up was most of the end-of-call CPU, all of it redundant.
+      const alreadyUploaded = this.uploadedTurnClips.get(validSessionId);
+      const notUploaded = (speaker: 'user' | 'model') => ([idx]: [number, Buffer]) =>
+        !alreadyUploaded?.has(`${speaker}:${idx}`);
       const turnFiles = await this.audioFinalize.build({
-        userTurns: userTurnAudioMap ? Array.from(userTurnAudioMap.entries()) : [],
-        modelTurns: modelTurnAudioMap ? Array.from(modelTurnAudioMap.entries()) : [],
+        userTurns: userTurnAudioMap ? Array.from(userTurnAudioMap.entries()).filter(notUploaded('user')) : [],
+        modelTurns: modelTurnAudioMap ? Array.from(modelTurnAudioMap.entries()).filter(notUploaded('model')) : [],
       });
-      const turnUrls = new Map<number, string>();
+      // Keep the URLs of the turns uploaded during the call; only the re-built ones are added.
+      const turnUrls = new Map<number, string>(this.sessionTurnAudioMap.get(validSessionId) || []);
       await Promise.all([
         ...turnFiles.userTurns.map(async ([turnIdx, body]) => {
           const path = `${validSessionId}/turns/user_turn_${turnIdx}.${turnFiles.ext}`;
@@ -455,9 +463,10 @@ export class SessionsService {
       if (sessionId !== validSessionId) this.sessionTurnAudioMap.set(sessionId, turnUrls);
 
       // 2) Chronological full conversation (history playback)
-      const fullFiles = await this.audioFinalize.build({
-        chronologicalTurns: (chronologicalTurns || []).map((t) => ({ pcm: t.pcm, sampleRate: t.sampleRate })),
-      });
+      const fullFiles = await this.audioFinalize.build(
+        { chronologicalTurns: (chronologicalTurns || []).map((t) => ({ pcm: t.pcm, sampleRate: t.sampleRate })) },
+        { priority: 'low' }, // nobody waits on it; turn clips for the feedback screen go first
+      );
       if (fullFiles.full) {
         const path = `${validSessionId}/full_conversation.${fullFiles.ext}`;
         const err = await put(path, fullFiles.full, fullFiles.mime);
@@ -665,6 +674,12 @@ export class SessionsService {
       this.recordingFolderCache.delete(`${validSessionId}/turns`);
 
       if (!error) {
+        let uploaded = this.uploadedTurnClips.get(validSessionId);
+        if (!uploaded) {
+          uploaded = new Set<string>();
+          this.uploadedTurnClips.set(validSessionId, uploaded);
+        }
+        uploaded.add(`${speaker}:${turnIdx}`);
         const { data: turnPub } = this.supabase.storage
           .from('session-recordings')
           .getPublicUrl(turnFilePath);

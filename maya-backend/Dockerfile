@@ -64,6 +64,13 @@ ENV PORT=3000
 # (load test: JS heap 57 MiB but RSS ~660 MiB after all sessions closed). Two arenas makes
 # freed memory get reused instead of piling up.
 ENV MALLOC_ARENA_MAX=2
+# glibc raises its mmap threshold after the first large free, so later audio buffers came from
+# arenas that rarely shrink: after a load test RSS stayed ~1.3 GB although the JS heap and
+# buffers were back near idle (measured: not a leak, a high-water mark). Pinning the threshold
+# makes buffers >= 128 KB (turn audio, recordings) use mmap, which is returned to the OS on
+# free. A/B on the HandyHost VPS, 2 rounds of 20 calls: settled RSS 346 MB vs 491 MB.
+ENV MALLOC_MMAP_THRESHOLD_=131072
+ENV MALLOC_TRIM_THRESHOLD_=131072
 
 # Stable layers first (reused by the VPS across deploys), dist/ last (changes every deploy)
 COPY --chown=node:node --from=deps /app/package*.json ./

@@ -30,6 +30,9 @@ const HOLD_S = Number(args.hold || 180);
 const RAMP_MS = Number(args.ramp || 15000); // spread new connections over this window
 const GUARD = args.guard || ''; // production health URL; abort if it degrades
 const OUT = args.out || 'loadtest-result.json';
+// Requested call length. The server closes a call at min(this + 90, 1800) s, so with the old fixed
+// 600 the first users were cut off at 11.5 min, mid-test, and counted as "dropped".
+const CALL_S = Number(args.duration || 1800);
 
 const FRAME_MS = 100;
 const FRAME_BYTES = (16000 * FRAME_MS) / 1000 * 2; // 3200 bytes of PCM16 @16 kHz
@@ -69,7 +72,7 @@ class SimUser {
         sessionId: this.sessionId,
         supportsOpus: true,
         supportsOpusBatch: true,
-        options: { sessionId: this.sessionId, topic: 'Load test', level: 'B1', mode: 'casual', durationSeconds: 600, languageMode: 'english' },
+        options: { sessionId: this.sessionId, topic: 'Load test', level: 'B1', mode: 'casual', durationSeconds: CALL_S, languageMode: 'english' },
       }));
       this.pingTimer = setInterval(() => this.safeSend(JSON.stringify({ type: 'client_ping', ts: Date.now() })), 10000);
     });
