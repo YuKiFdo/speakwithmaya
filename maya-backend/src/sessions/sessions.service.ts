@@ -28,6 +28,20 @@ export const PIPER_MODEL_PREFERENCE = ['en_US-hfc_female-medium', 'en_US-amy-med
 import { GoogleGenAI, Type } from '@google/genai';
 import { isMissingFunctionError } from '../common/supabase-rpc.js';
 
+/** Runs `fn` over `items` with at most `limit` calls in flight. */
+export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, worker));
+  return results;
+}
+
 export function toValidUuid(str?: string): string {
   if (!str) return randomUUID();
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str)) {
@@ -548,6 +562,57 @@ export class SessionsService {
   /** True when the listed folder contains `<base>.webm` or `<base>.wav`. */
   static hasRecordingFile(files: Set<string> | null | undefined, base: string): boolean {
     return !!files && (files.has(`${base}.webm`) || files.has(`${base}.wav`));
+  }
+
+  /** Storage listings run at most this many at once (a cold history load used to fire up to 50). */
+  private static readonly STORAGE_LIST_CONCURRENCY = 5;
+
+  private cachedSessionFiles(sessionId: string): Set<string> | undefined {
+    return this.completedSessionFilesCache.get(toValidUuid(sessionId)) || this.completedSessionFilesCache.get(sessionId);
+  }
+
+  /**
+   * Lists a session's recording folder and caches the result when it is final. Returns null when
+   * the listing failed, so the caller treats the files as unknown, not as "no audio".
+   */
+  private listSessionRecordingFiles(sess: { id: string; created_at?: string; start_time?: string }): Promise<Set<string> | null> {
+    const key = toValidUuid(sess.id);
+    let pending = this.recordingListingsInFlight.get(key);
+    if (!pending) {
+      pending = this.listSessionRecordingFilesNow(sess).finally(() => this.recordingListingsInFlight.delete(key));
+      this.recordingListingsInFlight.set(key, pending);
+    }
+    return pending;
+  }
+
+  /** One storage listing per session at a time (list loads can overlap, e.g. two tabs). */
+  private readonly recordingListingsInFlight = new Map<string, Promise<Set<string> | null>>();
+
+  private async listSessionRecordingFilesNow(sess: {
+    id: string;
+    created_at?: string;
+    start_time?: string;
+  }): Promise<Set<string> | null> {
+    if (!this.supabase) return null;
+    const validSessionId = toValidUuid(sess.id);
+    try {
+      const { data: files, error } = await this.supabase.storage.from('session-recordings').list(validSessionId);
+      // A failed listing used to count as "no files" and, for sessions over an hour old, was
+      // cached permanently: one storage hiccup made a session show "No audio" until a restart.
+      if (error) return null;
+      const fSet = new Set((files || []).map((f) => f.name));
+      // Cache permanently once final, so later loads make no storage call. Recordings are encoded
+      // and uploaded in the background after the call, so a listing right after a call can be
+      // empty; cache it only once the full recording is there or the session is over an hour old.
+      const ageMs = Date.now() - new Date(sess.created_at || sess.start_time || 0).getTime();
+      if (SessionsService.hasRecordingFile(fSet, 'full_conversation') || ageMs > 60 * 60 * 1000) {
+        this.completedSessionFilesCache.set(validSessionId, fSet);
+        if (sess.id !== validSessionId) this.completedSessionFilesCache.set(sess.id, fSet);
+      }
+      return fSet;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -4100,46 +4165,34 @@ ${memoryPart}`;
         }
       }
 
-      // Inspect storage files with BoundedMap cache to eliminate repetitive storage.list() calls
+      // Recording files per session: from the cache, else from a storage listing.
       const sessionFilesMap = new Map<string, Set<string>>();
-      const sbClient = this.supabase;
-      if (!light && sbClient && sessions && sessions.length > 0) {
-        const uncachedSessions = sessions.filter((sess: any) => {
-          const validId = toValidUuid(sess.id);
-          const cached = this.completedSessionFilesCache.get(validId) || this.completedSessionFilesCache.get(sess.id);
-          if (cached) {
-            sessionFilesMap.set(validId, cached);
-            sessionFilesMap.set(sess.id, cached);
-            return false;
-          }
-          return true;
-        });
-
-        if (uncachedSessions.length > 0) {
-          await Promise.all(
-            uncachedSessions.map(async (sess: any) => {
-              const validSessionId = toValidUuid(sess.id);
-              try {
-                const { data: files } = await sbClient.storage.from('session-recordings').list(validSessionId);
-                const fSet = files && files.length > 0 ? new Set(files.map((f) => f.name)) : new Set<string>();
-                sessionFilesMap.set(validSessionId, fSet);
-                sessionFilesMap.set(sess.id, fSet);
-                // Cache permanently for completed sessions to prevent future storage.list roundtrips.
-                // Also cache sessions older than 1 hour whatever their status: dropped / never-finished
-                // sessions were re-listed on EVERY history load (up to 50 Storage API calls each time).
-                // Only once the recording is actually there: recordings are encoded and uploaded
-                // in the background after the call, so a listing taken right after a call can be
-                // empty. Caching that permanently made the history list show "no audio" while the
-                // detail view (which lists fresh) had it.
-                const ageMs = Date.now() - new Date(sess.created_at || sess.start_time || 0).getTime();
-                const recordingComplete = SessionsService.hasRecordingFile(fSet, 'full_conversation');
-                if (recordingComplete || ageMs > 60 * 60 * 1000) {
-                  this.completedSessionFilesCache.set(validSessionId, fSet);
-                  this.completedSessionFilesCache.set(sess.id, fSet);
-                }
-              } catch {}
-            }),
-          );
+      const uncachedSessions: any[] = [];
+      for (const sess of sessions as any[]) {
+        const cached = this.cachedSessionFiles(sess.id);
+        if (cached) {
+          sessionFilesMap.set(toValidUuid(sess.id), cached);
+          sessionFilesMap.set(sess.id, cached);
+        } else {
+          uncachedSessions.push(sess);
+        }
+      }
+      if (uncachedSessions.length > 0 && this.supabase) {
+        if (!light) {
+          await mapWithConcurrency(uncachedSessions, SessionsService.STORAGE_LIST_CONCURRENCY, async (sess) => {
+            const fSet = await this.listSessionRecordingFiles(sess);
+            if (fSet) {
+              sessionFilesMap.set(toValidUuid(sess.id), fSet);
+              sessionFilesMap.set(sess.id, fSet);
+            }
+          });
+        } else {
+          // The list view does not wait on storage (that is what light mode is for). Fill the
+          // cache in the background so the next list load is exact; until then the records
+          // below fall back to an optimistic recording link (see optimisticAudio).
+          void mapWithConcurrency(uncachedSessions, SessionsService.STORAGE_LIST_CONCURRENCY, (sess) =>
+            this.listSessionRecordingFiles(sess),
+          ).catch(() => undefined);
         }
       }
 
@@ -4157,7 +4210,16 @@ ${memoryPart}`;
         const rec = this.sessionRecordingsMap.get(validSessionId) || this.sessionRecordingsMap.get(sess.id);
 
         const filesSet = sessionFilesMap.get(validSessionId) || sessionFilesMap.get(sess.id);
-        const hasFullAudio = filesSet ? SessionsService.hasRecordingFile(filesSet, 'full_conversation') : Boolean(rec?.fullConversationAudioUrl);
+        // Files unknown (light list, not cached yet, e.g. after a restart): before, this relied on
+        // an in-memory map that only knows sessions finished since the process started, so after
+        // every deploy all older cards said "No audio" although the recording was in storage.
+        // Now a finished session with talk time gets the recording link; the app plays it through
+        // the same endpoint and marks the card "No audio" itself if the file really is missing.
+        const optimisticAudio =
+          !filesSet && (sess.status || 'completed') === 'completed' && Number(sess.duration_seconds) > 0;
+        const hasFullAudio = filesSet
+          ? SessionsService.hasRecordingFile(filesSet, 'full_conversation')
+          : Boolean(rec?.fullConversationAudioUrl) || optimisticAudio;
         const hasUserAudio = filesSet ? SessionsService.hasRecordingFile(filesSet, 'user_recording') : Boolean(rec?.userAudioUrl);
         const hasModelAudio = filesSet ? SessionsService.hasRecordingFile(filesSet, 'model_recording') : Boolean(rec?.modelAudioUrl);
         const hasTurnsFolder = filesSet ? filesSet.has('turns') : false;
