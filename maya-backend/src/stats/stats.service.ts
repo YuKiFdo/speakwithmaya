@@ -25,8 +25,8 @@ export class StatsService {
   private readonly logger = new Logger(StatsService.name);
   private readonly supabase: SupabaseClient;
 
-  // In-memory cache of resolved telco subscription dates
-  private cachedTelcoDates: string[] | null = null;
+  // In-memory cache of telco subscriber counts per Colombo day
+  private cachedTelcoCounts: Record<string, number> | null = null;
   private cacheExpiresAt = 0;
 
   constructor(private readonly config: ConfigService) {
@@ -113,41 +113,22 @@ export class StatsService {
   }
 
   /**
-   * Loads all Telco subscribers strictly excluding test accounts, returning their
-   * subscription dates formatted as YYYY-MM-DD in Asia/Colombo.
+   * Telco subscribers per Asia/Colombo day ({ 'YYYY-MM-DD': count }), test accounts excluded.
+   * Preferred: telco_stats_daily_counts() (migration 031) counts in Postgres and returns a few KB.
+   * Fallback (function not installed yet): page through the tables and count in Node.
    */
-  private async getTelcoSubscriptionDates(): Promise<string[]> {
+  private telcoCountsRpcMissing = false;
+  private async getTelcoDailyCounts(): Promise<Record<string, number>> {
     const now = Date.now();
-    if (this.cachedTelcoDates && now < this.cacheExpiresAt) {
-      return this.cachedTelcoDates;
+    if (this.cachedTelcoCounts && now < this.cacheExpiresAt) {
+      return this.cachedTelcoCounts;
     }
 
-    const [
-      { data: profiles, error: profErr },
-      { data: telcoVerifs, error: verifErr },
-      { data: appSettingsRow },
-      { data: subs },
-    ] = await Promise.all([
-      this.supabase
-        .from('profiles')
-        .select('id, phone_number, plan_tier, plan_status, billing_cycle, monthly_minutes_allowance, telco_subscriber_id, telco_provider, created_at'),
-      this.supabase
-        .from('phone_verifications')
-        .select('phone_number, otp_hash, is_verified, created_at, verified_at')
-        .eq('is_verified', true)
-        .like('otp_hash', 'TELCO:%'),
-      this.supabase
-        .from('roadmap_levels')
-        .select('canonical_content')
-        .eq('id', 'sys_app_settings')
-        .maybeSingle(),
-      this.supabase.from('subscriptions').select('user_id, status'),
-    ]);
-
-    if (profErr) {
-      this.logger.error(`Failed to fetch profiles for stats: ${profErr.message}`);
-      throw new Error(`Database error: ${profErr.message}`);
-    }
+    const { data: appSettingsRow } = await this.supabase
+      .from('roadmap_levels')
+      .select('canonical_content')
+      .eq('id', 'sys_app_settings')
+      .maybeSingle();
 
     let appConfig: Record<string, any> = {};
     if (appSettingsRow?.canonical_content) {
@@ -156,43 +137,92 @@ export class StatsService {
       } catch {}
     }
 
-    const testPhoneDigitsSet = new Set<string>(
-      (Array.isArray(appConfig.testAccounts) ? appConfig.testAccounts : [])
-        .map((t: any) => String(t?.phoneNumber || '').replace(/\D/g, ''))
-        .filter(Boolean),
-    );
+    const testDigits = [
+      ...new Set<string>(
+        (Array.isArray(appConfig.testAccounts) ? appConfig.testAccounts : [])
+          .map((t: any) => String(t?.phoneNumber || '').replace(/\D/g, ''))
+          .filter(Boolean),
+      ),
+    ];
+    const gatewayActive = appConfig.smsGateway === 'ideamart' || appConfig.smsGateway === 'mspace';
 
-    const cardSubByUser = new Map<string, any>();
-    for (const s of subs || []) {
-      if (!cardSubByUser.has(s.user_id) || s.status === 'ACTIVE') {
-        cardSubByUser.set(s.user_id, s);
+    let counts: Record<string, number> | null = null;
+    if (!this.telcoCountsRpcMissing) {
+      const { data, error } = await this.supabase.rpc('telco_stats_daily_counts', {
+        test_digits: testDigits,
+        gateway_active: gatewayActive,
+      });
+      if (!error && data && typeof data === 'object') {
+        counts = data as Record<string, number>;
+      } else if (error) {
+        // PGRST202 / 42883 = function not found: remember it and stop retrying until restart.
+        if (error.code === 'PGRST202' || error.code === '42883') this.telcoCountsRpcMissing = true;
+        this.logger.warn(`telco_stats_daily_counts unavailable (${error.code}): ${error.message} -> fallback`);
       }
     }
+    if (!counts) {
+      counts = await this.getTelcoDailyCountsFallback(new Set(testDigits), gatewayActive);
+    }
 
-    const telcoVerifByDigits = new Map<
-      string,
-      { provider: 'ideamart' | 'mspace'; verifiedAt: string; referenceNo: string }
-    >();
+    // Cache results for 60 seconds (matches IDEACIPHER dashboard refresh cycle)
+    this.cachedTelcoCounts = counts;
+    this.cacheExpiresAt = Date.now() + 60 * 1000;
+    return counts;
+  }
+
+  /** Same rules as telco_stats_daily_counts(), computed in Node from paged table reads. */
+  private async getTelcoDailyCountsFallback(
+    testPhoneDigitsSet: Set<string>,
+    isTelcoGatewayActive: boolean,
+  ): Promise<Record<string, number>> {
+    // PostgREST caps every response at 1000 rows, so page through each table.
+    const fetchAll = async (build: () => any): Promise<{ data: any[]; error: any }> => {
+      const PAGE = 1000;
+      const rows: any[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await build()
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) return { data: rows, error };
+        rows.push(...(data || []));
+        if (!data || data.length < PAGE) return { data: rows, error: null };
+      }
+    };
+
+    const [{ data: profiles, error: profErr }, { data: telcoVerifs }, { data: subs }] = await Promise.all([
+      fetchAll(() =>
+        this.supabase
+          .from('profiles')
+          .select('id, phone_number, plan_tier, billing_cycle, monthly_minutes_allowance, telco_subscriber_id, telco_provider, created_at'),
+      ),
+      fetchAll(() =>
+        this.supabase
+          .from('phone_verifications')
+          .select('phone_number, created_at, verified_at')
+          .eq('is_verified', true)
+          .like('otp_hash', 'TELCO:%'),
+      ),
+      fetchAll(() => this.supabase.from('subscriptions').select('id, user_id, created_at')),
+    ]);
+
+    if (profErr) {
+      this.logger.error(`Failed to fetch profiles for stats: ${profErr.message}`);
+      throw new Error(`Database error: ${profErr.message}`);
+    }
+
+    const cardSubUsers = new Set<string>((subs || []).map((s: any) => s.user_id));
+
+    // Earliest verification per phone (rows arrive in created_at order).
+    const verifiedAtByDigits = new Map<string, string>();
     for (const v of telcoVerifs || []) {
       const digits = String(v.phone_number || '').replace(/\D/g, '');
-      if (!digits) continue;
-      const parts = String(v.otp_hash || '').split(':');
-      const prov = (parts[1] === 'mspace' ? 'mspace' : 'ideamart') as 'ideamart' | 'mspace';
-      const refNo = parts.slice(2).join(':');
-      if (!telcoVerifByDigits.has(digits)) {
-        telcoVerifByDigits.set(digits, {
-          provider: prov,
-          verifiedAt: v.verified_at || v.created_at,
-          referenceNo: refNo,
-        });
+      if (digits && !verifiedAtByDigits.has(digits)) {
+        verifiedAtByDigits.set(digits, v.verified_at || v.created_at);
       }
     }
 
-    const isTelcoGatewayActive =
-      appConfig.smsGateway === 'ideamart' || appConfig.smsGateway === 'mspace';
-
-    const telcoSubDates: string[] = [];
-
+    const counts: Record<string, number> = {};
     for (const prof of profiles || []) {
       const digits = String(prof.phone_number || '').replace(/\D/g, '');
 
@@ -201,31 +231,23 @@ export class StatsService {
         continue;
       }
 
-      const verif = digits ? telcoVerifByDigits.get(digits) : undefined;
-      const hasExplicitTelco = Boolean(
-        prof.telco_subscriber_id || prof.telco_provider || verif,
-      );
+      const verifiedAt = digits ? verifiedAtByDigits.get(digits) : undefined;
+      const hasExplicitTelco = Boolean(prof.telco_subscriber_id || prof.telco_provider || verifiedAt);
       const isImplicitTelcoDailyStarter =
         isTelcoGatewayActive &&
         (prof.billing_cycle === 'daily' || prof.plan_tier === 'starter') &&
-        !cardSubByUser.has(prof.id);
+        !cardSubUsers.has(prof.id);
 
       if (!hasExplicitTelco && !isImplicitTelcoDailyStarter) {
         continue;
       }
 
-      const subscribedAt = verif?.verifiedAt || prof.created_at;
-      const colomboDate = this.toColomboDateStr(subscribedAt);
+      const colomboDate = this.toColomboDateStr(verifiedAt || prof.created_at);
       if (colomboDate) {
-        telcoSubDates.push(colomboDate);
+        counts[colomboDate] = (counts[colomboDate] || 0) + 1;
       }
     }
-
-    // Cache results for 60 seconds (matches IDEACIPHER dashboard refresh cycle)
-    this.cachedTelcoDates = telcoSubDates;
-    this.cacheExpiresAt = Date.now() + 60 * 1000;
-
-    return telcoSubDates;
+    return counts;
   }
 
   /**
@@ -261,8 +283,9 @@ export class StatsService {
     const fromStr = this.ymd(from);
     const toStr = this.ymd(to);
 
-    const telcoDates = await this.getTelcoSubscriptionDates();
+    const telcoCounts = await this.getTelcoDailyCounts();
 
+    let total = 0;
     let todayCount = 0;
     let yesterdayCount = 0;
     let thisMonthCount = 0;
@@ -271,22 +294,24 @@ export class StatsService {
     const monthly: Record<string, number> = {};
     const daily: Record<string, number> = {};
 
-    for (const d of telcoDates) {
-      if (d === todayStr) todayCount++;
-      if (d === yesterdayStr) yesterdayCount++;
-      if (d >= monthStartStr && d < tomorrowStr) thisMonthCount++;
-      if (d >= lastMonthStr && d < monthStartStr) lastMonthCount++;
-      if (d >= lastMonthStr && d < lastMtdEndStr) lastMtdCount++;
+    for (const [d, raw] of Object.entries(telcoCounts)) {
+      const n = Number(raw) || 0;
+      total += n;
+      if (d === todayStr) todayCount += n;
+      if (d === yesterdayStr) yesterdayCount += n;
+      if (d >= monthStartStr && d < tomorrowStr) thisMonthCount += n;
+      if (d >= lastMonthStr && d < monthStartStr) lastMonthCount += n;
+      if (d >= lastMonthStr && d < lastMtdEndStr) lastMtdCount += n;
 
       // Last 12 months trend
       if (d >= trendStartStr && d < tomorrowStr) {
         const ym = d.slice(0, 7);
-        monthly[ym] = (monthly[ym] || 0) + 1;
+        monthly[ym] = (monthly[ym] || 0) + n;
       }
 
       // Daily breakdown for requested range [from, to]
       if (d >= fromStr && d <= toStr) {
-        daily[d] = (daily[d] || 0) + 1;
+        daily[d] = (daily[d] || 0) + n;
       }
     }
 
@@ -306,7 +331,7 @@ export class StatsService {
       ok: true,
       generated: new Date().toISOString(),
       range: { from: fromStr, to: toStr },
-      total: telcoDates.length,
+      total,
       today: todayCount,
       yesterday: yesterdayCount,
       this_month: thisMonthCount,

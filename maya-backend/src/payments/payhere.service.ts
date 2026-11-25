@@ -2097,6 +2097,22 @@ export class PayHereService {
     };
   }
 
+  /**
+   * PostgREST caps every response at 1000 rows (max-rows), so an unpaged select silently
+   * drops the rest. Reads a query 1000 rows at a time until it is exhausted. The query must
+   * have a stable order (end it with a unique column such as id).
+   */
+  private async fetchAllRows(build: () => any): Promise<{ data: any[]; error: any }> {
+    const PAGE = 1000;
+    const rows: any[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await build().range(from, from + PAGE - 1);
+      if (error) return { data: rows, error };
+      rows.push(...(data || []));
+      if (!data || data.length < PAGE) return { data: rows, error: null };
+    }
+  }
+
   async getAdminSubscriptions(includeParam?: string) {
     const include = includeParam
       ? new Set(
@@ -2113,32 +2129,44 @@ export class PayHereService {
       { data: telcoVerifs },
       { data: appSettingsRow },
     ] = await Promise.all([
-      this.supabase
-        .from('subscriptions')
-        .select(`
+      this.fetchAllRows(() =>
+        this.supabase
+          .from('subscriptions')
+          .select(`
           *,
           profile:profiles(id, display_name, phone_number, minutes_balance, level)
         `)
-        .order('created_at', { ascending: false }),
-      this.supabase
-        .from('orders')
-        .select(`
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: true }),
+      ),
+      this.fetchAllRows(() =>
+        this.supabase
+          .from('orders')
+          .select(`
           *,
           profile:profiles(id, display_name, phone_number, level)
         `)
-        .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: true }),
+      ),
       // Only the columns used to build the telco subscriber list (select('*') also pulled
       // the large onboarding_flow JSON for every user on each admin page load)
-      this.supabase
-        .from('profiles')
-        .select('id, created_at, updated_at, display_name, phone_number, level, plan_tier, plan_status, billing_cycle, minutes_balance, monthly_minutes_allowance, minutes_reset_at, telco_subscriber_id, telco_provider')
-        .order('created_at', { ascending: false }),
-      this.supabase
-        .from('phone_verifications')
-        .select('phone_number, otp_hash, is_verified, created_at, verified_at')
-        .eq('is_verified', true)
-        .like('otp_hash', 'TELCO:%')
-        .order('created_at', { ascending: true }),
+      this.fetchAllRows(() =>
+        this.supabase
+          .from('profiles')
+          .select('id, created_at, updated_at, display_name, phone_number, level, plan_tier, plan_status, billing_cycle, minutes_balance, monthly_minutes_allowance, minutes_reset_at, telco_subscriber_id, telco_provider')
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: true }),
+      ),
+      this.fetchAllRows(() =>
+        this.supabase
+          .from('phone_verifications')
+          .select('phone_number, otp_hash, is_verified, created_at, verified_at')
+          .eq('is_verified', true)
+          .like('otp_hash', 'TELCO:%')
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true }),
+      ),
       this.supabase
         .from('roadmap_levels')
         .select('canonical_content')
