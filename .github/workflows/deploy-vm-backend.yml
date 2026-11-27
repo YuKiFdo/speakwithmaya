@@ -73,8 +73,8 @@ jobs:
         target:
           - id: azure
             name: Azure Primary
-          - id: ovh
-            name: OVH Backup
+          - id: leaseweb
+            name: Leaseweb Production
 
     steps:
       - name: Checkout code
@@ -85,10 +85,10 @@ jobs:
         if: matrix.target.id != 'azure' || vars.ENABLE_AZURE_DEPLOY == 'true'
         env:
           TARGET_ID: ${{ matrix.target.id }}
-          VM_IP: ${{ matrix.target.id == 'azure' && (secrets.VM_IP || '20.198.240.185') || (secrets.BACKUP_VM_IP || '139.99.192.179') }}
-          VM_USER: ${{ matrix.target.id == 'azure' && (secrets.VM_USER || 'speakwithmaya') || (secrets.BACKUP_VM_USER || 'ubuntu') }}
+          VM_IP: ${{ matrix.target.id == 'azure' && (secrets.VM_IP || '20.198.240.185') || (secrets.BACKUP_VM_IP || '172.255.209.238') }}
+          VM_USER: ${{ matrix.target.id == 'azure' && (secrets.VM_USER || 'speakwithmaya') || (secrets.BACKUP_VM_USER || 'speakwithmaya') }}
           SSH_KEY: ${{ matrix.target.id == 'azure' && secrets.VM_SSH_KEY || (secrets.BACKUP_VM_SSH_KEY || '') }}
-          VM_PASSWORD: ${{ matrix.target.id == 'ovh' && secrets.BACKUP_VM_PASSWORD || '' }}
+          VM_PASSWORD: ${{ matrix.target.id == 'leaseweb' && secrets.BACKUP_VM_PASSWORD || '' }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
           REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
           REGISTRY_USER: ${{ github.actor }}

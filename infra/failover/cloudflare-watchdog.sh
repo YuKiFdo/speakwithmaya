@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Maya AI - Automated Cloudflare Failover Watchdog Daemon
-# Runs on OVHcloud Backup Server (139.99.192.179)
+# Runs on Leaseweb Server (172.255.209.238)
 #
 # Continuously monitors Azure Primary (20.198.240.185) health.
 # If Azure fails 3 consecutive checks (45s), automatically steers Cloudflare
-# DNS records to OVHcloud Backup.
+# DNS records to Leaseweb.
 # ==============================================================================
 
 set -euo pipefail
@@ -32,7 +32,7 @@ CURRENT_ACTIVE_TARGET="primary"
 echo "========================================================"
 echo "👀 Maya AI Automated Cloudflare Watchdog Daemon Started"
 echo "Target Primary: $PRIMARY_HEALTH_URL"
-echo "Failover Target: $BACKUP_IP (OVHcloud)"
+echo "Failover Target: $BACKUP_IP (Leaseweb)"
 echo "Check Interval: ${CHECK_INTERVAL}s | Threshold: ${FAIL_THRESHOLD} checks"
 echo "========================================================"
 
@@ -75,12 +75,12 @@ while true; do
     if [ "$CONSECUTIVE_FAILURES" -ge "$FAIL_THRESHOLD" ] && [ "$CURRENT_ACTIVE_TARGET" != "backup" ]; then
       echo "========================================================"
       echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🚨 CRITICAL: Azure is DOWN ($CONSECUTIVE_FAILURES failures)."
-      echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🚀 INITIATING AUTOMATIC FAILOVER TO OVHCLOUD ($BACKUP_IP)..."
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🚀 INITIATING AUTOMATIC FAILOVER TO LEASEWEB ($BACKUP_IP)..."
       echo "========================================================"
       
-      bash "${SCRIPT_DIR}/switch-to-ovh.sh" || true
+      bash "${SCRIPT_DIR}/switch-to-leaseweb.sh" || true
       CURRENT_ACTIVE_TARGET="backup"
-      echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Failover completed. All traffic is now handled by OVHcloud."
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Failover completed. All traffic is now handled by Leaseweb."
     fi
   fi
 

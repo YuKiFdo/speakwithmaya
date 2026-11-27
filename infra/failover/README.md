@@ -1,14 +1,14 @@
-# Maya AI - OVHcloud Backup Server & Cloudflare Failover Setup
+# Maya AI - Leaseweb Production Server & Cloudflare Setup
 
-This guide provides step-by-step instructions for bringing up the **OVHcloud Backup Server (`139.99.192.179`)** and configuring automated zero-cost Cloudflare failover.
+This guide provides step-by-step instructions for bringing up the **Leaseweb Server (`172.255.209.238`)** and configuring Cloudflare DNS.
 
 ---
 
-## 1. Quick Setup on OVH Server (`139.99.192.179`)
+## 1. Quick Setup on Leaseweb Server (`172.255.209.238`)
 
-SSH into your OVH server as `root` (or sudo user):
+SSH into your Leaseweb server as `root` (or sudo user):
 ```bash
-ssh root@139.99.192.179
+ssh root@172.255.209.238
 ```
 
 ### Step 1: Clone / Copy Setup Scripts
@@ -82,9 +82,9 @@ tail -f /home/speakwithmaya/failover-watchdog/watchdog.log
 ## 3. Manual Failover / Failback Commands
 
 You can manually switch traffic at any time with 1 command:
-- **Route traffic to OVH Backup:**
+- **Route traffic to Leaseweb:**
   ```bash
-  bash /home/speakwithmaya/failover-watchdog/switch-to-ovh.sh
+  bash /home/speakwithmaya/failover-watchdog/switch-to-leaseweb.sh
   ```
 - **Restore traffic to Azure Primary:**
   ```bash
@@ -96,7 +96,7 @@ You can manually switch traffic at any time with 1 command:
 ## 4. GitHub Actions Dual Deployment
 
 Add the following secrets to your GitHub repository (**Settings -> Secrets and variables -> Actions**):
-- `BACKUP_VM_IP`: `139.99.192.179`
+- `BACKUP_VM_IP`: `172.255.209.238`
 - `BACKUP_VM_USER`: `speakwithmaya`
 - `BACKUP_VM_SSH_KEY`: *(Optional if using SSH key, or paste your public key in `/home/speakwithmaya/.ssh/authorized_keys`)*
 - `BACKUP_VM_PASSWORD`: *(If using password authentication instead of SSH key)*

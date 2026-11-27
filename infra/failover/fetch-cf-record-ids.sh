@@ -64,7 +64,7 @@ RECORD_ID_API="${API_ID}"
 RECORD_ID_ADMIN="${ADMIN_ID}"
 
 PRIMARY_IP="20.198.240.185"
-BACKUP_IP="139.99.192.179"
+BACKUP_IP="172.255.209.238"
 PRIMARY_HEALTH_URL="http://20.198.240.185:3000/v1/health"
 
 # Failover threshold: 3 consecutive failed health probes (15s interval = 45s detection)

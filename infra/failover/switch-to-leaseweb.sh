@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Maya AI - 1-Click Failover to OVHcloud Backup Server (139.99.192.179)
+# Maya AI - 1-Click Switch to Leaseweb Server (172.255.209.238)
 # Usage:
-#   bash switch-to-ovh.sh
+#   bash switch-to-leaseweb.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -15,10 +15,10 @@ fi
 
 source "$ENV_FILE"
 
-TARGET_IP="${BACKUP_IP:-139.99.192.179}"
+TARGET_IP="${BACKUP_IP:-172.255.209.238}"
 
 echo "========================================================"
-echo "🚨 ROUTING ALL TRAFFIC TO OVHCLOUD BACKUP ($TARGET_IP)..."
+echo "🚀 ROUTING ALL TRAFFIC TO LEASEWEB ($TARGET_IP)..."
 echo "========================================================"
 
 update_record() {
@@ -53,7 +53,6 @@ update_record "${RECORD_ID_API:-}" "api.speakwithmaya.com"
 update_record "${RECORD_ID_ADMIN:-}" "admin.speakwithmaya.com"
 
 echo "========================================================"
-echo "🎉 Traffic successfully steered to OVHcloud Backup ($TARGET_IP)!"
+echo "🎉 Traffic successfully steered to Leaseweb ($TARGET_IP)!"
 echo "Cloudflare edge nodes will cut over within 5–10 seconds."
 echo "========================================================"
-
